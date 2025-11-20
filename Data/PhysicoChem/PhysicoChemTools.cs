@@ -98,6 +98,13 @@ public class PhysicoChemTools : IDatasetTools
 
     // Cell selection state
     private string _selectedCellID = null;
+    private List<string> _selectedCellIDs = new();
+
+    // Mesh editing state
+    private Vector3 _translationOffset = Vector3.Zero;
+    private Vector3 _scaleFactors = Vector3.One;
+    private Vector3 _rotationAngles = Vector3.Zero;
+    private bool _showMeshEditingTools = false;
 
     // Voronoi meshing state
     private int _selectedBoreholeIndex = 0;
@@ -146,6 +153,14 @@ public class PhysicoChemTools : IDatasetTools
         if (ImGui.CollapsingHeader("Domains", ImGuiTreeNodeFlags.DefaultOpen))
         {
             DrawDomainManagement(pcDataset);
+        }
+
+        ImGui.Spacing();
+
+        // Mesh Editing Tools
+        if (ImGui.CollapsingHeader("Mesh Editing & Deformation"))
+        {
+            DrawMeshEditingTools(pcDataset);
         }
 
         ImGui.Spacing();
@@ -361,6 +376,433 @@ public class PhysicoChemTools : IDatasetTools
         }
     }
 
+
+    private void DrawMeshEditingTools(PhysicoChemDataset dataset)
+    {
+        if (dataset.Mesh.Cells.Count == 0)
+        {
+            ImGui.TextDisabled("No cells in mesh. Create a mesh first.");
+            return;
+        }
+
+        ImGui.Text("Cell Selection & Transformation");
+        ImGui.Separator();
+
+        // Multi-cell selection
+        ImGui.BeginChild("cell_selection_list", new Vector2(200, 150), ImGuiChildFlags.Border);
+
+        bool selectAll = _selectedCellIDs.Count == dataset.Mesh.Cells.Count && dataset.Mesh.Cells.Count > 0;
+        if (ImGui.Checkbox("Select All", ref selectAll))
+        {
+            if (selectAll)
+                _selectedCellIDs = dataset.Mesh.Cells.Keys.ToList();
+            else
+                _selectedCellIDs.Clear();
+        }
+
+        ImGui.Separator();
+
+        foreach (var cell in dataset.Mesh.Cells.Values)
+        {
+            bool isSelected = _selectedCellIDs.Contains(cell.ID);
+            if (ImGui.Checkbox($"##sel_{cell.ID}", ref isSelected))
+            {
+                if (isSelected && !_selectedCellIDs.Contains(cell.ID))
+                    _selectedCellIDs.Add(cell.ID);
+                else if (!isSelected)
+                    _selectedCellIDs.Remove(cell.ID);
+            }
+            ImGui.SameLine();
+            ImGui.Text(cell.ID);
+        }
+        ImGui.EndChild();
+
+        ImGui.SameLine();
+
+        // Selection info
+        ImGui.BeginChild("selection_info", new Vector2(0, 150), ImGuiChildFlags.Border);
+        ImGui.Text($"Selected: {_selectedCellIDs.Count} cells");
+
+        if (_selectedCellIDs.Count > 0)
+        {
+            if (ImGui.Button("Clear Selection", new Vector2(-1, 0)))
+                _selectedCellIDs.Clear();
+
+            ImGui.Spacing();
+
+            // Calculate selection bounds
+            var selectedCells = _selectedCellIDs.Select(id => dataset.Mesh.Cells[id]).ToList();
+            var centerX = selectedCells.Average(c => c.Center.X);
+            var centerY = selectedCells.Average(c => c.Center.Y);
+            var centerZ = selectedCells.Average(c => c.Center.Z);
+
+            ImGui.Text($"Selection Center:");
+            ImGui.Text($"  ({centerX:F2}, {centerY:F2}, {centerZ:F2})");
+        }
+        else
+        {
+            ImGui.TextDisabled("No cells selected");
+        }
+        ImGui.EndChild();
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Transformation tools
+        if (_selectedCellIDs.Count > 0)
+        {
+            ImGui.Text("Transformation Tools:");
+            ImGui.Separator();
+
+            // Translation
+            if (ImGui.CollapsingHeader("Translate", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.Indent();
+                ImGui.DragFloat3("Offset (X, Y, Z)", ref _translationOffset, 0.1f);
+
+                if (ImGui.Button("Apply Translation", new Vector2(-1, 0)))
+                {
+                    TranslateCells(dataset, _selectedCellIDs, _translationOffset);
+                    _translationOffset = Vector3.Zero;
+                }
+
+                if (ImGui.Button("Reset Offset", new Vector2(-1, 0)))
+                    _translationOffset = Vector3.Zero;
+
+                ImGui.Unindent();
+            }
+
+            // Scaling
+            if (ImGui.CollapsingHeader("Scale"))
+            {
+                ImGui.Indent();
+                ImGui.DragFloat3("Scale (X, Y, Z)", ref _scaleFactors, 0.01f, 0.01f, 10.0f);
+
+                if (ImGui.Button("Apply Scale", new Vector2(-1, 0)))
+                {
+                    ScaleCells(dataset, _selectedCellIDs, _scaleFactors);
+                    _scaleFactors = Vector3.One;
+                }
+
+                if (ImGui.Button("Reset Scale", new Vector2(-1, 0)))
+                    _scaleFactors = Vector3.One;
+
+                ImGui.Unindent();
+            }
+
+            // Rotation (simplified - around center)
+            if (ImGui.CollapsingHeader("Rotate"))
+            {
+                ImGui.Indent();
+                ImGui.DragFloat3("Rotation (X, Y, Z°)", ref _rotationAngles, 1.0f, -180f, 180f);
+
+                if (ImGui.Button("Apply Rotation", new Vector2(-1, 0)))
+                {
+                    RotateCells(dataset, _selectedCellIDs, _rotationAngles);
+                    _rotationAngles = Vector3.Zero;
+                }
+
+                if (ImGui.Button("Reset Rotation", new Vector2(-1, 0)))
+                    _rotationAngles = Vector3.Zero;
+
+                ImGui.Unindent();
+            }
+
+            ImGui.Spacing();
+            ImGui.Separator();
+
+            // Cell operations
+            ImGui.Text("Cell Operations:");
+            ImGui.Separator();
+
+            if (ImGui.Button("Delete Selected Cells", new Vector2(-1, 0)))
+            {
+                foreach (var cellID in _selectedCellIDs.ToList())
+                {
+                    dataset.Mesh.Cells.Remove(cellID);
+                }
+                Logger.Log($"Deleted {_selectedCellIDs.Count} cells from mesh.");
+                _selectedCellIDs.Clear();
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+            }
+
+            if (ImGui.Button("Duplicate Selected Cells", new Vector2(-1, 0)))
+            {
+                DuplicateCells(dataset, _selectedCellIDs);
+            }
+
+            if (ImGui.Button("Merge Selected Cells", new Vector2(-1, 0)))
+            {
+                MergeCells(dataset, _selectedCellIDs);
+            }
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Mesh deformation tools
+        ImGui.Text("Mesh Deformation:");
+        ImGui.Separator();
+
+        if (ImGui.Button("Mirror Mesh (X-axis)", new Vector2(-1, 0)))
+            MirrorMesh(dataset, 0);
+
+        if (ImGui.Button("Mirror Mesh (Y-axis)", new Vector2(-1, 0)))
+            MirrorMesh(dataset, 1);
+
+        if (ImGui.Button("Mirror Mesh (Z-axis)", new Vector2(-1, 0)))
+            MirrorMesh(dataset, 2);
+
+        ImGui.Spacing();
+
+        if (ImGui.Button("Center Mesh at Origin", new Vector2(-1, 0)))
+            CenterMeshAtOrigin(dataset);
+
+        if (ImGui.Button("Normalize Mesh Size", new Vector2(-1, 0)))
+            NormalizeMeshSize(dataset);
+    }
+
+    private void TranslateCells(PhysicoChemDataset dataset, List<string> cellIDs, Vector3 offset)
+    {
+        foreach (var cellID in cellIDs)
+        {
+            if (dataset.Mesh.Cells.TryGetValue(cellID, out var cell))
+            {
+                cell.Center = (cell.Center.X + offset.X,
+                              cell.Center.Y + offset.Y,
+                              cell.Center.Z + offset.Z);
+            }
+        }
+        Logger.Log($"Translated {cellIDs.Count} cells by ({offset.X:F2}, {offset.Y:F2}, {offset.Z:F2})");
+        ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+    }
+
+    private void ScaleCells(PhysicoChemDataset dataset, List<string> cellIDs, Vector3 scale)
+    {
+        // Calculate center of selection
+        var selectedCells = cellIDs.Select(id => dataset.Mesh.Cells[id]).ToList();
+        var centerX = selectedCells.Average(c => c.Center.X);
+        var centerY = selectedCells.Average(c => c.Center.Y);
+        var centerZ = selectedCells.Average(c => c.Center.Z);
+
+        foreach (var cellID in cellIDs)
+        {
+            if (dataset.Mesh.Cells.TryGetValue(cellID, out var cell))
+            {
+                // Scale position relative to center
+                var relX = cell.Center.X - centerX;
+                var relY = cell.Center.Y - centerY;
+                var relZ = cell.Center.Z - centerZ;
+
+                cell.Center = (centerX + relX * scale.X,
+                              centerY + relY * scale.Y,
+                              centerZ + relZ * scale.Z);
+
+                // Scale volume
+                cell.Volume *= scale.X * scale.Y * scale.Z;
+            }
+        }
+        Logger.Log($"Scaled {cellIDs.Count} cells by ({scale.X:F2}, {scale.Y:F2}, {scale.Z:F2})");
+        ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+    }
+
+    private void RotateCells(PhysicoChemDataset dataset, List<string> cellIDs, Vector3 angles)
+    {
+        // Calculate center of selection
+        var selectedCells = cellIDs.Select(id => dataset.Mesh.Cells[id]).ToList();
+        var centerX = selectedCells.Average(c => c.Center.X);
+        var centerY = selectedCells.Average(c => c.Center.Y);
+        var centerZ = selectedCells.Average(c => c.Center.Z);
+
+        // Convert angles to radians
+        var angleX = angles.X * (float)Math.PI / 180f;
+        var angleY = angles.Y * (float)Math.PI / 180f;
+        var angleZ = angles.Z * (float)Math.PI / 180f;
+
+        foreach (var cellID in cellIDs)
+        {
+            if (dataset.Mesh.Cells.TryGetValue(cellID, out var cell))
+            {
+                // Get position relative to center
+                var x = cell.Center.X - centerX;
+                var y = cell.Center.Y - centerY;
+                var z = cell.Center.Z - centerZ;
+
+                // Rotate around X axis
+                var y1 = y * Math.Cos(angleX) - z * Math.Sin(angleX);
+                var z1 = y * Math.Sin(angleX) + z * Math.Cos(angleX);
+
+                // Rotate around Y axis
+                var x2 = x * Math.Cos(angleY) + z1 * Math.Sin(angleY);
+                var z2 = -x * Math.Sin(angleY) + z1 * Math.Cos(angleY);
+
+                // Rotate around Z axis
+                var x3 = x2 * Math.Cos(angleZ) - y1 * Math.Sin(angleZ);
+                var y3 = x2 * Math.Sin(angleZ) + y1 * Math.Cos(angleZ);
+
+                cell.Center = (centerX + x3, centerY + y3, centerZ + z2);
+            }
+        }
+        Logger.Log($"Rotated {cellIDs.Count} cells by ({angles.X:F1}°, {angles.Y:F1}°, {angles.Z:F1}°)");
+        ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+    }
+
+    private void DuplicateCells(PhysicoChemDataset dataset, List<string> cellIDs)
+    {
+        int duplicateCount = 0;
+        foreach (var cellID in cellIDs)
+        {
+            if (dataset.Mesh.Cells.TryGetValue(cellID, out var cell))
+            {
+                var newID = $"{cellID}_copy_{duplicateCount}";
+                var newCell = new Cell
+                {
+                    ID = newID,
+                    MaterialID = cell.MaterialID,
+                    IsActive = cell.IsActive,
+                    InitialConditions = cell.InitialConditions,
+                    Center = (cell.Center.X + 0.1, cell.Center.Y + 0.1, cell.Center.Z), // Slight offset
+                    Volume = cell.Volume
+                };
+                dataset.Mesh.Cells[newID] = newCell;
+                duplicateCount++;
+            }
+        }
+        Logger.Log($"Duplicated {duplicateCount} cells");
+        ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+    }
+
+    private void MergeCells(PhysicoChemDataset dataset, List<string> cellIDs)
+    {
+        if (cellIDs.Count < 2)
+        {
+            Logger.LogWarning("Need at least 2 cells to merge");
+            return;
+        }
+
+        var selectedCells = cellIDs.Select(id => dataset.Mesh.Cells[id]).ToList();
+
+        // Calculate merged properties
+        var totalVolume = selectedCells.Sum(c => c.Volume);
+        var centerX = selectedCells.Sum(c => c.Center.X * c.Volume) / totalVolume;
+        var centerY = selectedCells.Sum(c => c.Center.Y * c.Volume) / totalVolume;
+        var centerZ = selectedCells.Sum(c => c.Center.Z * c.Volume) / totalVolume;
+
+        // Create merged cell
+        var mergedID = $"Merged_{cellIDs.Count}";
+        var mergedCell = new Cell
+        {
+            ID = mergedID,
+            MaterialID = selectedCells[0].MaterialID,
+            IsActive = selectedCells.All(c => c.IsActive),
+            InitialConditions = selectedCells[0].InitialConditions,
+            Center = (centerX, centerY, centerZ),
+            Volume = totalVolume
+        };
+
+        // Remove old cells and add merged cell
+        foreach (var cellID in cellIDs)
+            dataset.Mesh.Cells.Remove(cellID);
+
+        dataset.Mesh.Cells[mergedID] = mergedCell;
+
+        _selectedCellIDs.Clear();
+        _selectedCellIDs.Add(mergedID);
+
+        Logger.Log($"Merged {cellIDs.Count} cells into {mergedID}");
+        ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+    }
+
+    private void MirrorMesh(PhysicoChemDataset dataset, int axis)
+    {
+        // axis: 0=X, 1=Y, 2=Z
+        var newCells = new Dictionary<string, Cell>();
+
+        foreach (var cell in dataset.Mesh.Cells.Values)
+        {
+            // Keep original cell
+            newCells[cell.ID] = cell;
+
+            // Create mirrored cell
+            var mirroredID = $"{cell.ID}_mirror";
+            var mirroredCenter = cell.Center;
+
+            if (axis == 0)
+                mirroredCenter = (-cell.Center.X, cell.Center.Y, cell.Center.Z);
+            else if (axis == 1)
+                mirroredCenter = (cell.Center.X, -cell.Center.Y, cell.Center.Z);
+            else
+                mirroredCenter = (cell.Center.X, cell.Center.Y, -cell.Center.Z);
+
+            newCells[mirroredID] = new Cell
+            {
+                ID = mirroredID,
+                MaterialID = cell.MaterialID,
+                IsActive = cell.IsActive,
+                InitialConditions = cell.InitialConditions,
+                Center = mirroredCenter,
+                Volume = cell.Volume
+            };
+        }
+
+        dataset.Mesh.Cells = newCells;
+
+        string[] axisNames = { "X", "Y", "Z" };
+        Logger.Log($"Mirrored mesh along {axisNames[axis]}-axis");
+        ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+    }
+
+    private void CenterMeshAtOrigin(PhysicoChemDataset dataset)
+    {
+        if (dataset.Mesh.Cells.Count == 0) return;
+
+        var centerX = dataset.Mesh.Cells.Values.Average(c => c.Center.X);
+        var centerY = dataset.Mesh.Cells.Values.Average(c => c.Center.Y);
+        var centerZ = dataset.Mesh.Cells.Values.Average(c => c.Center.Z);
+
+        foreach (var cell in dataset.Mesh.Cells.Values)
+        {
+            cell.Center = (cell.Center.X - centerX,
+                          cell.Center.Y - centerY,
+                          cell.Center.Z - centerZ);
+        }
+
+        Logger.Log("Centered mesh at origin");
+        ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+    }
+
+    private void NormalizeMeshSize(PhysicoChemDataset dataset)
+    {
+        if (dataset.Mesh.Cells.Count == 0) return;
+
+        // Find bounding box
+        var minX = dataset.Mesh.Cells.Values.Min(c => c.Center.X);
+        var maxX = dataset.Mesh.Cells.Values.Max(c => c.Center.X);
+        var minY = dataset.Mesh.Cells.Values.Min(c => c.Center.Y);
+        var maxY = dataset.Mesh.Cells.Values.Max(c => c.Center.Y);
+        var minZ = dataset.Mesh.Cells.Values.Min(c => c.Center.Z);
+        var maxZ = dataset.Mesh.Cells.Values.Max(c => c.Center.Z);
+
+        var sizeX = maxX - minX;
+        var sizeY = maxY - minY;
+        var sizeZ = maxZ - minZ;
+        var maxSize = Math.Max(Math.Max(sizeX, sizeY), sizeZ);
+
+        if (maxSize <= 0) return;
+
+        var scale = 1.0 / maxSize;
+
+        foreach (var cell in dataset.Mesh.Cells.Values)
+        {
+            cell.Center = (cell.Center.X * scale,
+                          cell.Center.Y * scale,
+                          cell.Center.Z * scale);
+            cell.Volume *= scale * scale * scale;
+        }
+
+        Logger.Log($"Normalized mesh to unit size (scale: {scale:F4})");
+        ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+    }
 
     private void DrawBoundaryConditions(PhysicoChemDataset dataset)
     {
