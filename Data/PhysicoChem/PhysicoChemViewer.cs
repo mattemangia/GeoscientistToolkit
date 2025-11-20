@@ -262,7 +262,14 @@ public class PhysicoChemViewer : IDatasetViewer
         // Use ImGuiButtonFlags.MouseButtonLeft | Right | Middle to capture all mouse buttons
         ImGui.InvisibleButton("PhysicoChemViewArea", availableSize,
             ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
-        var isHovered = ImGui.IsItemHovered();
+
+        // Check if mouse is over the view area (manually check bounds)
+        var io = ImGui.GetIO();
+        var mousePos = io.MousePos;
+        var isMouseInBounds = mousePos.X >= cursorPos.X && mousePos.X <= cursorPos.X + availableSize.X &&
+                              mousePos.Y >= cursorPos.Y && mousePos.Y <= cursorPos.Y + availableSize.Y;
+
+        var isHovered = ImGui.IsItemHovered() || isMouseInBounds;
         var isActive = ImGui.IsItemActive();
         var isClicked = ImGui.IsMouseClicked(ImGuiMouseButton.Left) && isHovered;
         var isMouseDragging = ImGui.IsMouseDragging(ImGuiMouseButton.Left);
@@ -270,7 +277,6 @@ public class PhysicoChemViewer : IDatasetViewer
         // Handle builder interactions first
         if (_builderMode)
         {
-            var io = ImGui.GetIO();
             bool handledByBuilder = _builder.HandleMouseInteraction(
                 io.MousePos, cursorPos, availableSize,
                 isClicked, isMouseDragging,
