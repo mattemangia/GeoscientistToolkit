@@ -48,36 +48,32 @@ public class CreateReactorCommand : IGeoScriptCommand
             Description = $"Reactor created via GeoScript: {width}×{height}×{depth} m"
         };
 
-        // Add a default box domain
-        var geometry = new ReactorGeometry
-        {
-            Type = GeometryType.Box,
-            Center = (0, 0, 0),
-            Dimensions = (width, height, depth)
-        };
-
+        // Create a default material
         var material = new MaterialProperties
         {
+            MaterialID = "Default",
             Porosity = 0.3,
             Permeability = 1e-12,
             ThermalConductivity = 2.0,
             SpecificHeat = 1000.0,
             Density = 2500.0
         };
+        dataset.Materials.Add(material);
 
-        var initialConditions = new InitialConditions
+        // Create a simple mesh with one cell
+        var cell = new Cell
         {
-            Temperature = 298.15,
-            Pressure = 101325.0
+            ID = "C1",
+            MaterialID = "Default",
+            Center = (0, 0, 0),
+            Volume = width * height * depth,
+            InitialConditions = new InitialConditions
+            {
+                Temperature = 298.15,
+                Pressure = 101325.0
+            }
         };
-
-        var domain = new ReactorDomain("MainDomain", geometry)
-        {
-            Material = material,
-            InitialConditions = initialConditions
-        };
-
-        dataset.AddDomain(domain);
+        dataset.Mesh.Cells["C1"] = cell;
 
         Logger.Log($"[CREATE_REACTOR] Created reactor '{reactorName}' with dimensions {width}×{height}×{depth} m");
 
@@ -85,179 +81,6 @@ public class CreateReactorCommand : IGeoScriptCommand
     }
 }
 
-/// <summary>
-/// ADD_DOMAIN: Adds a domain to the current PhysicoChem reactor
-/// Usage: ADD_DOMAIN [name] [type] [x] [y] [z] [size_params...]
-/// </summary>
-public class AddDomainCommand : IGeoScriptCommand
-{
-    public string Name => "ADD_DOMAIN";
-    public string HelpText => "Adds a domain to the current PhysicoChem reactor";
-    public string Usage => "ADD_DOMAIN [name] [Box|Sphere|Cylinder] [x] [y] [z] [size_params...]";
-
-    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
-    {
-        if (context.InputDataset is not PhysicoChemDataset dataset)
-            throw new NotSupportedException("ADD_DOMAIN only works on PhysicoChem datasets");
-
-        var cmd = (CommandNode)node;
-
-        // Parse: ADD_DOMAIN name type x y z [params...]
-        // Example: ADD_DOMAIN myDomain Box 0 0 0 1 1 1
-        var parts = cmd.FullText.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 6)
-            throw new ArgumentException("ADD_DOMAIN requires at least 5 arguments: name, type, x, y, z");
-
-        string domainName = parts[1];
-        string geomTypeStr = parts[2];
-        double x = double.Parse(parts[3], CultureInfo.InvariantCulture);
-        double y = double.Parse(parts[4], CultureInfo.InvariantCulture);
-        double z = double.Parse(parts[5], CultureInfo.InvariantCulture);
-
-        if (!Enum.TryParse<GeometryType>(geomTypeStr, true, out var geomType))
-            throw new ArgumentException($"Invalid geometry type: {geomTypeStr}. Use Box, Sphere, or Cylinder");
-
-        ReactorGeometry geometry;
-        switch (geomType)
-        {
-            case GeometryType.Box:
-                if (parts.Length < 9)
-                    throw new ArgumentException("Box requires width, height, depth parameters");
-                geometry = new ReactorGeometry
-                {
-                    Type = GeometryType.Box,
-                    Center = (x, y, z),
-                    Dimensions = (double.Parse(parts[6], CultureInfo.InvariantCulture),
-                                  double.Parse(parts[7], CultureInfo.InvariantCulture),
-                                  double.Parse(parts[8], CultureInfo.InvariantCulture))
-                };
-                break;
-
-            case GeometryType.Sphere:
-                if (parts.Length < 7)
-                    throw new ArgumentException("Sphere requires radius parameter");
-                geometry = new ReactorGeometry
-                {
-                    Type = GeometryType.Sphere,
-                    Center = (x, y, z),
-                    Radius = double.Parse(parts[6], CultureInfo.InvariantCulture)
-                };
-                break;
-
-            case GeometryType.Cylinder:
-                if (parts.Length < 8)
-                    throw new ArgumentException("Cylinder requires radius and height parameters");
-                geometry = new ReactorGeometry
-                {
-                    Type = GeometryType.Cylinder,
-                    Center = (x, y, z),
-                    Radius = double.Parse(parts[6], CultureInfo.InvariantCulture),
-                    Height = double.Parse(parts[7], CultureInfo.InvariantCulture)
-                };
-                break;
-
-            default:
-                throw new NotSupportedException($"Geometry type {geomType} not supported in GeoScript");
-        }
-
-        var material = new MaterialProperties
-        {
-            Porosity = 0.3,
-            Permeability = 1e-12,
-            ThermalConductivity = 2.0,
-            SpecificHeat = 1000.0,
-            Density = 2500.0
-        };
-
-        var initialConditions = new InitialConditions
-        {
-            Temperature = 298.15,
-            Pressure = 101325.0
-        };
-
-        var domain = new ReactorDomain(domainName, geometry)
-        {
-            Material = material,
-            InitialConditions = initialConditions
-        };
-
-        dataset.AddDomain(domain);
-        Logger.Log($"[ADD_DOMAIN] Added {geomType} domain '{domainName}' at ({x}, {y}, {z})");
-
-        return Task.FromResult<Dataset>(dataset);
-    }
-}
-
-/// <summary>
-/// SET_MINERALS: Sets mineral composition for the last added domain
-/// Usage: SET_MINERALS [mineral1] [fraction1] [mineral2] [fraction2] ...
-/// </summary>
-public class SetMineralsCommand : IGeoScriptCommand
-{
-    public string Name => "SET_MINERALS";
-    public string HelpText => "Sets mineral composition for the last added domain";
-    public string Usage => "SET_MINERALS [mineral1] [fraction1] [mineral2] [fraction2] ...";
-
-    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
-    {
-        if (context.InputDataset is not PhysicoChemDataset dataset)
-            throw new NotSupportedException("SET_MINERALS only works on PhysicoChem datasets");
-
-        if (dataset.Domains.Count == 0)
-            throw new InvalidOperationException("No domains found. Add a domain first.");
-
-        var cmd = (CommandNode)node;
-
-        // Parse: SET_MINERALS mineral1 fraction1 mineral2 fraction2 ...
-        var parts = cmd.FullText.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-        if ((parts.Length - 1) % 2 != 0)
-            throw new ArgumentException("SET_MINERALS requires pairs of mineral name and fraction");
-
-        var mineralFractions = new Dictionary<string, double>();
-        var mineralNames = new List<string>();
-
-        for (int i = 1; i < parts.Length; i += 2)
-        {
-            string mineralName = parts[i];
-            double fraction = double.Parse(parts[i + 1], CultureInfo.InvariantCulture);
-
-            // Verify mineral exists in library
-            var compound = CompoundLibrary.Instance.Compounds
-                .FirstOrDefault(c => c.Name.Equals(mineralName, StringComparison.OrdinalIgnoreCase) &&
-                                     c.Phase == CompoundPhase.Solid);
-
-            if (compound == null)
-            {
-                Logger.LogWarning($"[SET_MINERALS] Mineral '{mineralName}' not found in library, adding anyway");
-            }
-
-            mineralFractions[mineralName] = fraction;
-            mineralNames.Add(mineralName);
-        }
-
-        // Normalize fractions
-        double total = mineralFractions.Values.Sum();
-        if (Math.Abs(total - 1.0) > 0.001)
-        {
-            Logger.LogWarning($"[SET_MINERALS] Fractions sum to {total:F3}, normalizing to 1.0");
-            foreach (var key in mineralFractions.Keys.ToList())
-            {
-                mineralFractions[key] /= total;
-            }
-        }
-
-        var lastDomain = dataset.Domains[dataset.Domains.Count - 1];
-        if (lastDomain.Material == null)
-            lastDomain.Material = new MaterialProperties();
-
-        lastDomain.Material.MineralComposition = string.Join(", ", mineralNames);
-        lastDomain.Material.MineralFractions = mineralFractions;
-
-        Logger.Log($"[SET_MINERALS] Set mineral composition: {lastDomain.Material.MineralComposition}");
-
-        return Task.FromResult<Dataset>(dataset);
-    }
-}
 
 /// <summary>
 /// RUN_SIMULATION: Runs the PhysicoChem simulation

@@ -20,9 +20,9 @@
     -->
     <ItemGroup>
         <!-- Exclude NodeEndpoint to prevent duplicate assembly attributes -->
-        <Compile Remove="NodeEndpoint\**"/>
-        <EmbeddedResource Remove="NodeEndpoint\**"/>
-        <None Remove="NodeEndpoint\**"/>
+        <Compile Remove="NodeEndpoint\**" />
+        <EmbeddedResource Remove="NodeEndpoint\**" />
+        <None Remove="NodeEndpoint\**" />
         <Compile Remove="InstallerPackager\**" />
         <EmbeddedResource Remove="InstallerPackager\**" />
         <None Remove="InstallerPackager\**" />
@@ -34,52 +34,53 @@
 
     <!-- Main PackageReference items -->
     <ItemGroup>
-        <PackageReference Include="ClosedXML" Version="0.105.0"/>
-        <PackageReference Include="GDAL" Version="3.11.3"/>
-        <PackageReference Include="GDAL.Native" Version="3.11.3"/>
-        <PackageReference Include="ImGui.NET" Version="1.90.8.1"/>
-        <PackageReference Include="ImGui.NET.Branches.Docking" Version="1.88.0"/>
-        <PackageReference Include="MathNet.Numerics" Version="6.0.0-beta2"/>
-        <PackageReference Include="MaxRev.Gdal.MacosRuntime.Minimal" Version="3.11.4.376"/>
+        <PackageReference Include="ClosedXML" Version="0.105.0" />
+        <PackageReference Include="GDAL" Version="3.11.3" />
+        <PackageReference Include="GDAL.Native" Version="3.11.3" />
+        <PackageReference Include="ImGui.NET" Version="1.90.8.1" />
+        <PackageReference Include="ImGui.NET.Branches.Docking" Version="1.88.0" />
+        <PackageReference Include="MathNet.Numerics" Version="6.0.0-beta2" />
+        <PackageReference Include="MaxRev.Gdal.MacosRuntime.Minimal" Version="3.11.4.376" />
         <PackageReference Include="MetadataExtractor" Version="2.9.0" />
-        <PackageReference Include="NCalc" Version="1.3.8"/>
-        <PackageReference Include="NetTopologySuite" Version="2.6.0"/>
-        <PackageReference Include="NetTopologySuite.Features" Version="2.2.0"/>
-        <PackageReference Include="NetTopologySuite.IO.Esri.Shapefile" Version="1.2.0"/>
-        <PackageReference Include="NetTopologySuite.IO.GeoJSON" Version="4.0.0"/>
-        <PackageReference Include="NetTopologySuite.IO.ShapeFile" Version="2.1.0"/>
-        <PackageReference Include="OxyPlot.Core" Version="2.2.0"/>
-        <PackageReference Include="ProjNET" Version="2.0.0"/>
-        <PackageReference Include="sdl2" Version="2.0.5"/>
-        <PackageReference Include="Silk.NET.OpenCL" Version="2.21.0"/>
-        <PackageReference Include="StbImageSharp" Version="2.30.15"/>
-        <PackageReference Include="StbImageWriteSharp" Version="1.16.7"/>
-        <PackageReference Include="System.Drawing.Primitives" Version="4.3.0"/>
-        <PackageReference Include="System.Management" Version="8.0.0"/>
-        <PackageReference Include="TinyDialogsNet" Version="1.0.2"/>
-        <PackageReference Include="Veldrid" Version="4.9.0"/>
-        <PackageReference Include="Veldrid.ImGui" Version="5.72.0"/>
-        <PackageReference Include="Veldrid.MetalBindings" Version="4.9.0"/>
-        <PackageReference Include="Veldrid.SDL2" Version="4.9.0"/>
-        <PackageReference Include="Veldrid.SPIRV" Version="1.0.15"/>
-        <PackageReference Include="Veldrid.StartupUtilities" Version="4.9.0"/>
-        <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.649"/>
-        <PackageReference Include="SkiaSharp" Version="2.88.8"/>
-        <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="2.88.8"/>
-        <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="2.88.8"/>
-        <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.8"/>
-        <PackageReference Include="SkiaSharp.HarfBuzz" Version="2.88.8"/>
+        <PackageReference Include="NCalc" Version="1.3.8" />
+        <PackageReference Include="NetTopologySuite" Version="2.6.0" />
+        <PackageReference Include="NetTopologySuite.Features" Version="2.2.0" />
+        <PackageReference Include="NetTopologySuite.IO.Esri.Shapefile" Version="1.2.0" />
+        <PackageReference Include="NetTopologySuite.IO.GeoJSON" Version="4.0.0" />
+        <PackageReference Include="NetTopologySuite.IO.ShapeFile" Version="2.1.0" />
+        <PackageReference Include="OxyPlot.Core" Version="2.2.0" />
+        <PackageReference Include="ProjNET" Version="2.0.0" />
+        <PackageReference Include="sdl2" Version="2.0.5" />
+        <PackageReference Include="SharpVoronoiLib" Version="1.1.0" />
+        <PackageReference Include="Silk.NET.OpenCL" Version="2.21.0" />
+        <PackageReference Include="StbImageSharp" Version="2.30.15" />
+        <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
+        <PackageReference Include="System.Drawing.Primitives" Version="4.3.0" />
+        <PackageReference Include="System.Management" Version="8.0.0" />
+        <PackageReference Include="TinyDialogsNet" Version="1.0.2" />
+        <PackageReference Include="Veldrid" Version="4.9.0" />
+        <PackageReference Include="Veldrid.ImGui" Version="5.72.0" />
+        <PackageReference Include="Veldrid.MetalBindings" Version="4.9.0" />
+        <PackageReference Include="Veldrid.SDL2" Version="4.9.0" />
+        <PackageReference Include="Veldrid.SPIRV" Version="1.0.15" />
+        <PackageReference Include="Veldrid.StartupUtilities" Version="4.9.0" />
+        <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.649" />
+        <PackageReference Include="SkiaSharp" Version="2.88.8" />
+        <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="2.88.8" />
+        <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="2.88.8" />
+        <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.8" />
+        <PackageReference Include="SkiaSharp.HarfBuzz" Version="2.88.8" />
 
         <!-- Photogrammetry Dependencies (non-ONNX) -->
          <!-- Note: For Linux and macOS, use system-installed OpenCV libraries -->
         <!-- OpenCV can be installed via: -->
         <!-- Ubuntu/Debian: sudo apt-get install libopencv-dev -->
         <!-- macOS: brew install opencv -->
-        <PackageReference Include="Newtonsoft.Json" Version="13.0.3"/>
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
         <!-- Media handling for audio/video datasets -->
-        <PackageReference Include="NAudio" Version="2.2.1"/>
-        <PackageReference Include="NAudio.Vorbis" Version="1.5.0"/>
-        <PackageReference Include="FFMpegCore" Version="5.1.0"/>
+        <PackageReference Include="NAudio" Version="2.2.1" />
+        <PackageReference Include="NAudio.Vorbis" Version="1.5.0" />
+        <PackageReference Include="FFMpegCore" Version="5.1.0" />
     </ItemGroup>
 
     <!-- OpenCvSharp4 - Core package for all platforms -->
@@ -116,24 +117,24 @@
     <!-- ONNX Runtime - Platform-specific to avoid ARM64 issues -->
     <!-- GPU version for x64 platforms only (CUDA support) -->
     <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' or '$(RuntimeIdentifier)' == 'linux-x64'">
-        <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.19.2"/>
+        <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.19.2" />
     </ItemGroup>
 
     <!-- CPU version for ARM64 and macOS platforms (no CUDA support) -->
     <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-arm64' or '$(RuntimeIdentifier)' == 'osx-x64' or '$(RuntimeIdentifier)' == 'osx-arm64'">
-        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.19.2"/>
+        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.19.2" />
     </ItemGroup>
 
     <!-- Fallback for development/debugging when no RID is specified -->
     <ItemGroup Condition="'$(RuntimeIdentifier)' == ''">
-        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.19.2"/>
+        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.19.2" />
     </ItemGroup>
 
     <!-- The ProjectReference to the extractor tool, correctly in its own ItemGroup -->
 
     <!-- In Release mode, we must EXCLUDE the add-in source from the main compile. -->
     <ItemGroup Condition="'$(Configuration)' == 'Release'">
-        <Compile Remove="AddIns\Development\**\*.cs"/>
+        <Compile Remove="AddIns\Development\**\*.cs" />
     </ItemGroup>
 
     <ItemGroup>

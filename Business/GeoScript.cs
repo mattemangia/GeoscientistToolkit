@@ -196,9 +196,9 @@ public static class CommandRegistry
 
             // PhysicoChem Reactor Commands
             new CreateReactorCommand(),
-            new AddDomainCommand(),
-            new SetMineralsCommand(),
             new RunSimulationCommand(),
+            new AddCellCommand(),
+            new SetCellMaterialCommand(),
 
             // PNM Reactive Transport Commands
             new RunPNMReactiveTransportCommand(),
@@ -896,6 +896,74 @@ public class CleanCommand : IGeoScriptCommand
 #endregion
 
 #region --- GIS Raster Command Implementations ---
+
+public class AddCellCommand : IGeoScriptCommand
+{
+    public string Name => "ADD_CELL";
+    public string HelpText => "Adds a new cell to a PhysicoChem mesh.";
+    public string Usage => "ADD_CELL ID 'cell_id' CENTER (x, y, z) VOLUME volume";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not Data.PhysicoChem.PhysicoChemDataset physicoChemDs)
+            throw new NotSupportedException("ADD_CELL only works on PhysicoChem Datasets.");
+
+        var cmd = (CommandNode)node;
+        var idMatch = Regex.Match(cmd.FullText, @"ID\s+'([^']+)'", RegexOptions.IgnoreCase);
+        var centerMatch = Regex.Match(cmd.FullText, @"CENTER\s+\(([^)]+)\)", RegexOptions.IgnoreCase);
+        var volumeMatch = Regex.Match(cmd.FullText, @"VOLUME\s+([\d\.]+)", RegexOptions.IgnoreCase);
+
+        if (!idMatch.Success || !centerMatch.Success || !volumeMatch.Success)
+            throw new ArgumentException("Invalid ADD_CELL syntax.");
+
+        var id = idMatch.Groups[1].Value;
+        var centerCoords = centerMatch.Groups[1].Value.Split(',').Select(double.Parse).ToArray();
+        var volume = double.Parse(volumeMatch.Groups[1].Value);
+
+        physicoChemDs.Mesh.Cells[id] = new Data.PhysicoChem.Cell
+        {
+            ID = id,
+            Center = (centerCoords[0], centerCoords[1], centerCoords[2]),
+            Volume = volume
+        };
+
+        return Task.FromResult<Dataset>(physicoChemDs);
+    }
+}
+
+public class SetCellMaterialCommand : IGeoScriptCommand
+{
+    public string Name => "SET_CELL_MATERIAL";
+    public string HelpText => "Assigns a material to a cell in a PhysicoChem mesh.";
+    public string Usage => "SET_CELL_MATERIAL ID 'cell_id' MATERIAL 'material_id'";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not Data.PhysicoChem.PhysicoChemDataset physicoChemDs)
+            throw new NotSupportedException("SET_CELL_MATERIAL only works on PhysicoChem Datasets.");
+
+        var cmd = (CommandNode)node;
+        var idMatch = Regex.Match(cmd.FullText, @"ID\s+'([^']+)'", RegexOptions.IgnoreCase);
+        var materialMatch = Regex.Match(cmd.FullText, @"MATERIAL\s+'([^']+)'", RegexOptions.IgnoreCase);
+
+        if (!idMatch.Success || !materialMatch.Success)
+            throw new ArgumentException("Invalid SET_CELL_MATERIAL syntax.");
+
+        var id = idMatch.Groups[1].Value;
+        var materialId = materialMatch.Groups[1].Value;
+
+        if (physicoChemDs.Mesh.Cells.TryGetValue(id, out var cell))
+        {
+            cell.MaterialID = materialId;
+        }
+        else
+        {
+            throw new ArgumentException($"Cell with ID '{id}' not found.");
+        }
+
+        return Task.FromResult<Dataset>(physicoChemDs);
+    }
+}
 
 public class ReclassifyCommand : IGeoScriptCommand
 {

@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using Newtonsoft.Json;
 
 namespace GeoscientistToolkit.Data.PhysicoChem;
@@ -55,6 +56,9 @@ public class ReactorDomain
 public class MaterialProperties
 {
     [JsonProperty]
+    public string MaterialID { get; set; }
+
+    [JsonProperty]
     public double Porosity { get; set; } = 0.3;
 
     [JsonProperty]
@@ -74,6 +78,9 @@ public class MaterialProperties
 
     [JsonProperty]
     public Dictionary<string, double> MineralFractions { get; set; } = new();
+
+    [JsonProperty]
+    public Vector4 Color { get; set; } = new Vector4(0.8f, 0.8f, 0.8f, 1.0f);
 }
 
 /// <summary>

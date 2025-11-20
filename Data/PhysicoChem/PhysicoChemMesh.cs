@@ -1,0 +1,236 @@
+// GeoscientistToolkit/Data/PhysicoChem/PhysicoChemMesh.cs
+
+using System.Collections.Generic;
+using System.Linq;
+using GeoscientistToolkit.Data.Borehole;
+using GeoscientistToolkit.Data.Mesh3D;
+using Newtonsoft.Json;
+using SharpVoronoiLib;
+using SharpVoronoiLib.Exceptions;
+
+namespace GeoscientistToolkit.Data.PhysicoChem
+{
+    /// <summary>
+    ///     Represents a single cell in a PhysicoChem mesh.
+    /// </summary>
+    public class Cell
+    {
+        /// <summary>
+        ///     Unique identifier for the cell.
+        /// </summary>
+        [JsonProperty]
+        public string ID { get; set; }
+
+        /// <summary>
+        ///     ID of the material assigned to this cell.
+        /// </summary>
+        [JsonProperty]
+        public string MaterialID { get; set; }
+
+        /// <summary>
+        ///     Whether the cell is active in the simulation.
+        /// </summary>
+        [JsonProperty]
+        public bool IsActive { get; set; } = true;
+
+        /// <summary>
+        ///     Initial conditions for this cell.
+        /// </summary>
+        [JsonProperty]
+        public InitialConditions InitialConditions { get; set; }
+
+        /// <summary>
+        ///     The spatial coordinates of the cell's center.
+        /// </summary>
+        [JsonProperty]
+        public (double X, double Y, double Z) Center { get; set; }
+
+        /// <summary>
+        ///     The volume of the cell.
+        /// </summary>
+        [JsonProperty]
+        public double Volume { get; set; }
+    }
+
+    /// <summary>
+    ///     Represents the simulation mesh for a PhysicoChem dataset.
+    /// </summary>
+    public class PhysicoChemMesh
+    {
+        /// <summary>
+        ///     A collection of all cells in the mesh.
+        /// </summary>
+        [JsonProperty]
+        public Dictionary<string, Cell> Cells { get; set; } = new Dictionary<string, Cell>();
+
+        /// <summary>
+        ///     A list of connections between cells.
+        /// </summary>
+        [JsonProperty]
+        public List<(string Cell1_ID, string Cell2_ID)> Connections { get; set; } = new List<(string, string)>();
+
+        /// <summary>
+        ///     Splits the mesh into a structured grid of cells.
+        /// </summary>
+        /// <param name="x_divisions">The number of divisions in the x-dimension.</param>
+        /// <param name="y_divisions">The number of divisions in the y-dimension.</param>
+        /// <param name="z_divisions">The number of divisions in the z-dimension.</param>
+        public void SplitIntoGrid(int x_divisions, int y_divisions, int z_divisions)
+        {
+            if (Cells.Count == 0) return;
+
+            // Calculate the bounding box of the existing cells
+            var minX = Cells.Values.Min(c => c.Center.X - Math.Pow(c.Volume, 1.0 / 3.0) / 2.0);
+            var maxX = Cells.Values.Max(c => c.Center.X + Math.Pow(c.Volume, 1.0 / 3.0) / 2.0);
+            var minY = Cells.Values.Min(c => c.Center.Y - Math.Pow(c.Volume, 1.0 / 3.0) / 2.0);
+            var maxY = Cells.Values.Max(c => c.Center.Y + Math.Pow(c.Volume, 1.0 / 3.0) / 2.0);
+            var minZ = Cells.Values.Min(c => c.Center.Z - Math.Pow(c.Volume, 1.0 / 3.0) / 2.0);
+            var maxZ = Cells.Values.Max(c => c.Center.Z + Math.Pow(c.Volume, 1.0 / 3.0) / 2.0);
+
+            var newCells = new Dictionary<string, Cell>();
+            var cellWidth = (maxX - minX) / x_divisions;
+            var cellHeight = (maxY - minY) / y_divisions;
+            var cellDepth = (maxZ - minZ) / z_divisions;
+
+            for (int i = 0; i < x_divisions; i++)
+            for (int j = 0; j < y_divisions; j++)
+            for (int k = 0; k < z_divisions; k++)
+            {
+                var id = $"C_{i}_{j}_{k}";
+                var center = (minX + (i + 0.5) * cellWidth, minY + (j + 0.5) * cellHeight, minZ + (k + 0.5) * cellDepth);
+                var volume = cellWidth * cellHeight * cellDepth;
+
+                // Find the original cell that contains the new cell's center
+                var originalCell = Cells.Values.FirstOrDefault(c =>
+                    c.Center.X - Math.Pow(c.Volume, 1.0 / 3.0) / 2.0 <= center.Item1 && center.Item1 < c.Center.X + Math.Pow(c.Volume, 1.0 / 3.0) / 2.0 &&
+                    c.Center.Y - Math.Pow(c.Volume, 1.0 / 3.0) / 2.0 <= center.Item2 && center.Item2 < c.Center.Y + Math.Pow(c.Volume, 1.0 / 3.0) / 2.0 &&
+                    c.Center.Z - Math.Pow(c.Volume, 1.0 / 3.0) / 2.0 <= center.Item3 && center.Item3 < c.Center.Z + Math.Pow(c.Volume, 1.0 / 3.0) / 2.0
+                );
+
+                newCells[id] = new Cell
+                {
+                    ID = id,
+                    MaterialID = originalCell?.MaterialID ?? "Default",
+                    IsActive = originalCell?.IsActive ?? true,
+                    InitialConditions = originalCell?.InitialConditions,
+                    Center = center,
+                    Volume = volume
+                };
+            }
+
+            Cells = newCells;
+            Connections.Clear(); // Connections are invalidated by the split
+        }
+
+        public void GenerateVoronoiMesh(BoreholeDataset borehole, int layers, double radius, double height)
+        {
+            var sites = new List<VoronoiSite>();
+
+            // Add the well location as the center point
+            sites.Add(new VoronoiSite((double)borehole.SurfaceCoordinates.X, (double)borehole.SurfaceCoordinates.Y));
+
+            // Generate points in concentric circles around the well
+            for (int i = 1; i <= layers; i++)
+            {
+                var layerRadius = (radius / layers) * i;
+                var numPointsInLayer = i * 6; // Increase the number of points in each layer
+                for (int j = 0; j < numPointsInLayer; j++)
+                {
+                    var angle = 2 * Math.PI / numPointsInLayer * j;
+                    var x = (double)borehole.SurfaceCoordinates.X + layerRadius * Math.Cos(angle);
+                    var y = (double)borehole.SurfaceCoordinates.Y + layerRadius * Math.Sin(angle);
+                    sites.Add(new VoronoiSite(x, y));
+                }
+            }
+
+            // Generate the Voronoi diagram
+            var edges = VoronoiPlane.TessellateOnce(sites, 0, 0, 1, 1);
+
+            // Create cells from the Voronoi diagram
+            var newCells = new Dictionary<string, Cell>();
+            for (int i = 0; i < sites.Count; i++)
+            {
+                var site = sites[i];
+                var id = $"V_{i}";
+                var center = (site.X, site.Y, (double)borehole.Elevation); // Use the borehole elevation for the z-coordinate
+
+                // Estimate cell area and volume
+                var area = CalculatePolygonArea(site.ClockwisePoints.ToList());
+                var volume = area * height;
+
+                newCells[id] = new Cell
+                {
+                    ID = id,
+                    MaterialID = "Default",
+                    IsActive = true,
+                    InitialConditions = new InitialConditions(),
+                    Center = center,
+                    Volume = volume
+                };
+            }
+
+            Cells = newCells;
+            Connections.Clear(); // Connections will be calculated later
+        }
+
+        public void FromMesh3DDataset(Mesh3DDataset mesh3D, double height)
+        {
+            Cells.Clear();
+            Connections.Clear();
+
+            if (mesh3D.Faces.Count == 0) return;
+
+            for (int i = 0; i < mesh3D.Faces.Count; i++)
+            {
+                var face = mesh3D.Faces[i];
+                var id = $"F_{i}";
+
+                var v1 = mesh3D.Vertices[face[0]];
+                var v2 = mesh3D.Vertices[face[1]];
+                var v3 = mesh3D.Vertices[face[2]];
+
+                var center = ((double)(v1.X + v2.X + v3.X) / 3.0,
+                              (double)(v1.Y + v2.Y + v3.Y) / 3.0,
+                              (double)(v1.Z + v2.Z + v3.Z) / 3.0);
+
+                var area = 0.5 * System.Numerics.Vector3.Cross(v2 - v1, v3 - v1).Length();
+                var volume = area * height;
+
+                Cells[id] = new Cell
+                {
+                    ID = id,
+                    MaterialID = "Default",
+                    IsActive = true,
+                    InitialConditions = new InitialConditions(),
+                    Center = center,
+                    Volume = volume
+                };
+            }
+        }
+
+        private double CalculateTetrahedronVolume(System.Numerics.Vector3 v1, System.Numerics.Vector3 v2, System.Numerics.Vector3 v3, System.Numerics.Vector3 v4)
+        {
+            var a = v2 - v1;
+            var b = v3 - v1;
+            var c = v4 - v1;
+
+            return Math.Abs(System.Numerics.Vector3.Dot(a, System.Numerics.Vector3.Cross(b, c))) / 6.0;
+        }
+
+        private double CalculatePolygonArea(List<VoronoiPoint> points)
+        {
+            if (points == null || points.Count < 3)
+                return 0;
+
+            var area = 0.0;
+            for (int i = 0; i < points.Count; i++)
+            {
+                var p1 = points[i];
+                var p2 = points[(i + 1) % points.Count];
+                area += (p1.X * p2.Y - p2.X * p1.Y);
+            }
+
+            return Math.Abs(area) / 2.0;
+        }
+    }
+}

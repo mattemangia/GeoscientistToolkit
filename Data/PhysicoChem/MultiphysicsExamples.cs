@@ -20,24 +20,25 @@ public static class MultiphysicsExamples
     {
         var dataset = new PhysicoChemDataset("Wave Tank", "Simulation of wave propagation in a tank");
 
-        // Create water domain
-        var waterDomain = new ReactorDomain
+        // Create a material for the water
+        var waterMaterial = new MaterialProperties
         {
-            Name = "Water",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Box,
-                Center = (width / 2, depth / 2, height / 4),
-                Dimensions = (width, depth, height / 2)
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1000.0,      // kg/m³
-                Porosity = 1.0,         // Pure water
-                Permeability = 1e-10,
-                ThermalConductivity = 0.6,
-                SpecificHeat = 4186.0
-            },
+            MaterialID = "Water",
+            Density = 1000.0,      // kg/m³
+            Porosity = 1.0,         // Pure water
+            Permeability = 1e-10,
+            ThermalConductivity = 0.6,
+            SpecificHeat = 4186.0
+        };
+        dataset.Materials.Add(waterMaterial);
+
+        // Create a mesh with a single cell representing the water
+        var waterCell = new Cell
+        {
+            ID = "WaterCell",
+            MaterialID = "Water",
+            Center = (width / 2, depth / 2, height / 4),
+            Volume = width * depth * (height / 2),
             InitialConditions = new InitialConditions
             {
                 Temperature = 298.15,
@@ -46,8 +47,7 @@ public static class MultiphysicsExamples
                 FluidType = "Water"
             }
         };
-
-        dataset.AddDomain(waterDomain);
+        dataset.Mesh.Cells["WaterCell"] = waterCell;
 
         // Add progressive wave force
         var waveForce = new ForceField
@@ -98,25 +98,25 @@ public static class MultiphysicsExamples
         var dataset = new PhysicoChemDataset("Evaporating Reactor",
             "Reactor with water inlet, outlet, and surface evaporation");
 
-        // Create cylindrical reactor
-        var reactor = new ReactorDomain
+        // Create a material for the reactor contents
+        var reactorMaterial = new MaterialProperties
         {
-            Name = "Reactor",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Cylinder,
-                Center = (0, 0, height / 2),
-                Radius = radius,
-                Height = height
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1000.0,
-                Porosity = 1.0,
-                Permeability = 1e-10,
-                ThermalConductivity = 0.6,
-                SpecificHeat = 4186.0
-            },
+            MaterialID = "ReactorMaterial",
+            Density = 1000.0,
+            Porosity = 1.0,
+            Permeability = 1e-10,
+            ThermalConductivity = 0.6,
+            SpecificHeat = 4186.0
+        };
+        dataset.Materials.Add(reactorMaterial);
+
+        // Create a mesh with a single cell representing the reactor
+        var reactorCell = new Cell
+        {
+            ID = "ReactorCell",
+            MaterialID = "ReactorMaterial",
+            Center = (0, 0, height / 2),
+            Volume = Math.PI * radius * radius * height,
             InitialConditions = new InitialConditions
             {
                 Temperature = 298.15,
@@ -128,8 +128,7 @@ public static class MultiphysicsExamples
                 }
             }
         };
-
-        dataset.AddDomain(reactor);
+        dataset.Mesh.Cells["ReactorCell"] = reactorCell;
 
         // Water inlet at bottom
         var inlet = new BoundaryCondition
@@ -219,24 +218,25 @@ public static class MultiphysicsExamples
         var dataset = new PhysicoChemDataset("Underwater Reactor",
             "Subsurface reactor with ocean currents and thermal gradients");
 
-        // Create reactor volume
-        var reactor = new ReactorDomain
+        // Create a material for the seawater
+        var seawaterMaterial = new MaterialProperties
         {
-            Name = "Underwater Volume",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Box,
-                Center = (width / 2, depth / 2, -height / 2),  // Below sea level
-                Dimensions = (width, depth, height)
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1025.0,       // Seawater density
-                Porosity = 1.0,
-                Permeability = 1e-10,
-                ThermalConductivity = 0.6,
-                SpecificHeat = 3985.0   // Seawater specific heat
-            },
+            MaterialID = "Seawater",
+            Density = 1025.0,       // Seawater density
+            Porosity = 1.0,
+            Permeability = 1e-10,
+            ThermalConductivity = 0.6,
+            SpecificHeat = 3985.0   // Seawater specific heat
+        };
+        dataset.Materials.Add(seawaterMaterial);
+
+        // Create a mesh with a single cell representing the underwater volume
+        var underwaterCell = new Cell
+        {
+            ID = "UnderwaterCell",
+            MaterialID = "Seawater",
+            Center = (width / 2, depth / 2, -height / 2),  // Below sea level
+            Volume = width * depth * height,
             InitialConditions = new InitialConditions
             {
                 Temperature = 283.15,   // 10°C
@@ -249,8 +249,7 @@ public static class MultiphysicsExamples
                 }
             }
         };
-
-        dataset.AddDomain(reactor);
+        dataset.Mesh.Cells["UnderwaterCell"] = underwaterCell;
 
         // Underwater current
         var current = new ForceField
@@ -321,22 +320,24 @@ public static class MultiphysicsExamples
 
         double waterDepth = 0.5;  // 50 cm water depth
 
-        var pond = new ReactorDomain
+        // Create a material for the brine
+        var brineMaterial = new MaterialProperties
         {
-            Name = "Brine Pool",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Box,
-                Center = (length / 2, width / 2, waterDepth / 2),
-                Dimensions = (length, width, waterDepth)
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1200.0,       // Dense brine
-                Porosity = 1.0,
-                ThermalConductivity = 0.6,
-                SpecificHeat = 3500.0
-            },
+            MaterialID = "Brine",
+            Density = 1200.0,       // Dense brine
+            Porosity = 1.0,
+            ThermalConductivity = 0.6,
+            SpecificHeat = 3500.0
+        };
+        dataset.Materials.Add(brineMaterial);
+
+        // Create a mesh with a single cell representing the pond
+        var pondCell = new Cell
+        {
+            ID = "PondCell",
+            MaterialID = "Brine",
+            Center = (length / 2, width / 2, waterDepth / 2),
+            Volume = length * width * waterDepth,
             InitialConditions = new InitialConditions
             {
                 Temperature = 308.15,   // 35°C
@@ -350,8 +351,7 @@ public static class MultiphysicsExamples
                 }
             }
         };
-
-        dataset.AddDomain(pond);
+        dataset.Mesh.Cells["PondCell"] = pondCell;
 
         // Wind across the pond
         var wind = new ForceField
@@ -432,22 +432,24 @@ public static class MultiphysicsExamples
 
         double waterHeight = 5.0;  // 5 m water depth
 
-        var ocean = new ReactorDomain
+        // Create a material for the coastal water
+        var coastalWaterMaterial = new MaterialProperties
         {
-            Name = "Coastal Water",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Box,
-                Center = (width / 2, depth / 2, waterHeight / 2),
-                Dimensions = (width, depth, waterHeight)
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1025.0,
-                Porosity = 1.0,
-                ThermalConductivity = 0.6,
-                SpecificHeat = 3985.0
-            },
+            MaterialID = "CoastalWater",
+            Density = 1025.0,
+            Porosity = 1.0,
+            ThermalConductivity = 0.6,
+            SpecificHeat = 3985.0
+        };
+        dataset.Materials.Add(coastalWaterMaterial);
+
+        // Create a mesh with a single cell representing the coastal water
+        var coastalCell = new Cell
+        {
+            ID = "CoastalCell",
+            MaterialID = "CoastalWater",
+            Center = (width / 2, depth / 2, waterHeight / 2),
+            Volume = width * depth * waterHeight,
             InitialConditions = new InitialConditions
             {
                 Temperature = 290.15,
@@ -460,8 +462,7 @@ public static class MultiphysicsExamples
                 }
             }
         };
-
-        dataset.AddDomain(ocean);
+        dataset.Mesh.Cells["CoastalCell"] = coastalCell;
 
         // Ocean waves
         var waves = new ForceField
@@ -544,23 +545,24 @@ public static class MultiphysicsExamples
 
         double waterDepth = 100.0;  // 100 m depth
 
-        // Ocean water volume
-        var ocean = new ReactorDomain
+        // Create a material for the ocean water
+        var oceanWaterMaterial = new MaterialProperties
         {
-            Name = "Ocean Water",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Box,
-                Center = (width / 2, depth / 2, -waterDepth / 2),
-                Dimensions = (width, depth, waterDepth)
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1025.0,       // Seawater
-                Porosity = 1.0,
-                ThermalConductivity = 0.6,
-                SpecificHeat = 3985.0
-            },
+            MaterialID = "OceanWater",
+            Density = 1025.0,       // Seawater
+            Porosity = 1.0,
+            ThermalConductivity = 0.6,
+            SpecificHeat = 3985.0
+        };
+        dataset.Materials.Add(oceanWaterMaterial);
+
+        // Create a mesh with a single cell representing the ocean water volume
+        var oceanCell = new Cell
+        {
+            ID = "OceanCell",
+            MaterialID = "OceanWater",
+            Center = (width / 2, depth / 2, -waterDepth / 2),
+            Volume = width * depth * waterDepth,
             InitialConditions = new InitialConditions
             {
                 Temperature = 283.15,   // 10°C
@@ -573,8 +575,7 @@ public static class MultiphysicsExamples
                 }
             }
         };
-
-        dataset.AddDomain(ocean);
+        dataset.Mesh.Cells["OceanCell"] = oceanCell;
 
         // Active sonar - pulsed plane wave
         var sonarPing = new ForceField
@@ -657,23 +658,24 @@ public static class MultiphysicsExamples
         var dataset = new PhysicoChemDataset("Acoustic Tweezers",
             "Ultrasonic standing wave for particle manipulation and separation");
 
-        // Microfluidic channel
-        var channel = new ReactorDomain
+        // Create a material for the fluid in the channel
+        var fluidMaterial = new MaterialProperties
         {
-            Name = "Microfluidic Channel",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Box,
-                Center = (channelLength / 2, channelWidth / 2, channelHeight / 2),
-                Dimensions = (channelLength, channelWidth, channelHeight)
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1000.0,
-                Porosity = 1.0,
-                ThermalConductivity = 0.6,
-                SpecificHeat = 4186.0
-            },
+            MaterialID = "Fluid",
+            Density = 1000.0,
+            Porosity = 1.0,
+            ThermalConductivity = 0.6,
+            SpecificHeat = 4186.0
+        };
+        dataset.Materials.Add(fluidMaterial);
+
+        // Create a mesh with a single cell representing the channel
+        var channelCell = new Cell
+        {
+            ID = "ChannelCell",
+            MaterialID = "Fluid",
+            Center = (channelLength / 2, channelWidth / 2, channelHeight / 2),
+            Volume = channelLength * channelWidth * channelHeight,
             InitialConditions = new InitialConditions
             {
                 Temperature = 298.15,
@@ -686,8 +688,7 @@ public static class MultiphysicsExamples
                 }
             }
         };
-
-        dataset.AddDomain(channel);
+        dataset.Mesh.Cells["ChannelCell"] = channelCell;
 
         // Standing wave acoustic field
         var standingWave = new ForceField
@@ -759,22 +760,24 @@ public static class MultiphysicsExamples
         var dataset = new PhysicoChemDataset("Electrokinetic Microfluidics",
             "Lab-on-chip device with electroosmotic and electrophoretic separation");
 
-        var microchannel = new ReactorDomain
+        // Create a material for the fluid in the microchannel
+        var fluidMaterial = new MaterialProperties
         {
-            Name = "Separation Channel",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Box,
-                Center = (length / 2, width / 2, height / 2),
-                Dimensions = (length, width, height)
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1000.0,
-                Porosity = 1.0,
-                ThermalConductivity = 0.6,
-                SpecificHeat = 4186.0
-            },
+            MaterialID = "Fluid",
+            Density = 1000.0,
+            Porosity = 1.0,
+            ThermalConductivity = 0.6,
+            SpecificHeat = 4186.0
+        };
+        dataset.Materials.Add(fluidMaterial);
+
+        // Create a mesh with a single cell representing the microchannel
+        var microchannelCell = new Cell
+        {
+            ID = "MicrochannelCell",
+            MaterialID = "Fluid",
+            Center = (length / 2, width / 2, height / 2),
+            Volume = length * width * height,
             InitialConditions = new InitialConditions
             {
                 Temperature = 298.15,
@@ -788,8 +791,7 @@ public static class MultiphysicsExamples
                 }
             }
         };
-
-        dataset.AddDomain(microchannel);
+        dataset.Mesh.Cells["MicrochannelCell"] = microchannelCell;
 
         // Electroosmotic flow
         var electroosmosis = new ForceField
@@ -832,23 +834,24 @@ public static class MultiphysicsExamples
         var dataset = new PhysicoChemDataset("Bioreactor",
             "Bacterial fermentation with biofilm formation and substrate consumption");
 
-        var reactor = new ReactorDomain
+        // Create a material for the bioreactor contents
+        var reactorMaterial = new MaterialProperties
         {
-            Name = "Fermentation Vessel",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Cylinder,
-                Center = (0, 0, height / 2),
-                Radius = radius,
-                Height = height
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1000.0,
-                Porosity = 1.0,
-                ThermalConductivity = 0.6,
-                SpecificHeat = 4186.0
-            },
+            MaterialID = "FermentationBroth",
+            Density = 1000.0,
+            Porosity = 1.0,
+            ThermalConductivity = 0.6,
+            SpecificHeat = 4186.0
+        };
+        dataset.Materials.Add(reactorMaterial);
+
+        // Create a mesh with a single cell representing the bioreactor
+        var reactorCell = new Cell
+        {
+            ID = "ReactorCell",
+            MaterialID = "FermentationBroth",
+            Center = (0, 0, height / 2),
+            Volume = Math.PI * radius * radius * height,
             InitialConditions = new InitialConditions
             {
                 Temperature = 310.15,   // 37°C
@@ -863,8 +866,7 @@ public static class MultiphysicsExamples
                 }
             }
         };
-
-        dataset.AddDomain(reactor);
+        dataset.Mesh.Cells["ReactorCell"] = reactorCell;
 
         // Bacterial growth
         var bioprocess = new ForceField
@@ -960,22 +962,24 @@ public static class MultiphysicsExamples
         var dataset = new PhysicoChemDataset("River Sediment Transport",
             "Sediment erosion, transport, and deposition in river flow");
 
-        var river = new ReactorDomain
+        // Create a material for the river water
+        var riverWaterMaterial = new MaterialProperties
         {
-            Name = "River Channel",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Box,
-                Center = (length / 2, width / 2, depth / 2),
-                Dimensions = (length, width, depth)
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1000.0,
-                Porosity = 1.0,
-                ThermalConductivity = 0.6,
-                SpecificHeat = 4186.0
-            },
+            MaterialID = "RiverWater",
+            Density = 1000.0,
+            Porosity = 1.0,
+            ThermalConductivity = 0.6,
+            SpecificHeat = 4186.0
+        };
+        dataset.Materials.Add(riverWaterMaterial);
+
+        // Create a mesh with a single cell representing the river channel
+        var riverCell = new Cell
+        {
+            ID = "RiverCell",
+            MaterialID = "RiverWater",
+            Center = (length / 2, width / 2, depth / 2),
+            Volume = length * width * depth,
             InitialConditions = new InitialConditions
             {
                 Temperature = 288.15,
@@ -990,8 +994,7 @@ public static class MultiphysicsExamples
                 }
             }
         };
-
-        dataset.AddDomain(river);
+        dataset.Mesh.Cells["RiverCell"] = riverCell;
 
         // River flow
         var flow = new BoundaryCondition
@@ -1079,22 +1082,24 @@ public static class MultiphysicsExamples
         var dataset = new PhysicoChemDataset("Ice Formation",
             "Phase change simulation with freezing and melting (Stefan problem)");
 
-        var waterBody = new ReactorDomain
+        // Create a material for the water
+        var waterMaterial = new MaterialProperties
         {
-            Name = "Water Volume",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Box,
-                Center = (width / 2, depth / 2, height / 2),
-                Dimensions = (width, depth, height)
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1000.0,
-                Porosity = 1.0,
-                ThermalConductivity = 0.6,
-                SpecificHeat = 4186.0
-            },
+            MaterialID = "Water",
+            Density = 1000.0,
+            Porosity = 1.0,
+            ThermalConductivity = 0.6,
+            SpecificHeat = 4186.0
+        };
+        dataset.Materials.Add(waterMaterial);
+
+        // Create a mesh with a single cell representing the water body
+        var waterCell = new Cell
+        {
+            ID = "WaterCell",
+            MaterialID = "Water",
+            Center = (width / 2, depth / 2, height / 2),
+            Volume = width * depth * height,
             InitialConditions = new InitialConditions
             {
                 Temperature = 273.15,   // 0°C - at freezing point
@@ -1102,8 +1107,7 @@ public static class MultiphysicsExamples
                 LiquidSaturation = 1.0
             }
         };
-
-        dataset.AddDomain(waterBody);
+        dataset.Mesh.Cells["WaterCell"] = waterCell;
 
         // Freezing from top
         var freezing = new ForceField
@@ -1168,23 +1172,24 @@ public static class MultiphysicsExamples
         var dataset = new PhysicoChemDataset("Exothermic Chemical Reactor",
             "Chemical reaction with heat generation and temperature control");
 
-        var reactor = new ReactorDomain
+        // Create a material for the reactor contents
+        var reactorMaterial = new MaterialProperties
         {
-            Name = "Batch Reactor",
-            Geometry = new ReactorGeometry
-            {
-                Type = GeometryType.Cylinder,
-                Center = (0, 0, height / 2),
-                Radius = radius,
-                Height = height
-            },
-            Material = new MaterialProperties
-            {
-                Density = 1200.0,
-                Porosity = 1.0,
-                ThermalConductivity = 0.5,
-                SpecificHeat = 3500.0
-            },
+            MaterialID = "ReactorContents",
+            Density = 1200.0,
+            Porosity = 1.0,
+            ThermalConductivity = 0.5,
+            SpecificHeat = 3500.0
+        };
+        dataset.Materials.Add(reactorMaterial);
+
+        // Create a mesh with a single cell representing the reactor
+        var reactorCell = new Cell
+        {
+            ID = "ReactorCell",
+            MaterialID = "ReactorContents",
+            Center = (0, 0, height / 2),
+            Volume = Math.PI * radius * radius * height,
             InitialConditions = new InitialConditions
             {
                 Temperature = 298.15,
@@ -1199,8 +1204,7 @@ public static class MultiphysicsExamples
                 }
             }
         };
-
-        dataset.AddDomain(reactor);
+        dataset.Mesh.Cells["ReactorCell"] = reactorCell;
 
         // Exothermic reaction: A + B → Product (with catalyst)
         var reaction = new ForceField

@@ -191,15 +191,14 @@ public class AddGasPhaseCommand : IGeoScriptCommand
         double saturation = double.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture);
         double partialPressure = double.Parse(match.Groups[4].Value, CultureInfo.InvariantCulture);
 
-        var domain = dataset.Domains.FirstOrDefault(d => d.Name.Equals(domainName, StringComparison.OrdinalIgnoreCase));
-        if (domain == null)
-            throw new ArgumentException($"Domain '{domainName}' not found");
+        if (!dataset.Mesh.Cells.TryGetValue(domainName, out var cell))
+            throw new ArgumentException($"Cell '{domainName}' not found");
 
-        if (domain.InitialConditions == null)
-            domain.InitialConditions = new InitialConditions();
+        if (cell.InitialConditions == null)
+            cell.InitialConditions = new InitialConditions();
 
         // Set gas saturation (adjust liquid saturation accordingly)
-        domain.InitialConditions.LiquidSaturation = Math.Max(0, 1.0 - saturation);
+        cell.InitialConditions.LiquidSaturation = Math.Max(0, 1.0 - saturation);
 
         // Add dissolved gas concentration based on gas type and partial pressure
         string dissolvedGasSpecies = gasType.ToUpper() switch
@@ -226,9 +225,9 @@ public class AddGasPhaseCommand : IGeoScriptCommand
 
         double dissolvedConc = H * partialPressure; // mol/L
 
-        domain.InitialConditions.Concentrations[dissolvedGasSpecies] = dissolvedConc;
+        cell.InitialConditions.Concentrations[dissolvedGasSpecies] = dissolvedConc;
 
-        Logger.Log($"[ADD_GAS_PHASE] Added {gasType} gas phase to domain '{domainName}'");
+        Logger.Log($"[ADD_GAS_PHASE] Added {gasType} gas phase to cell '{domainName}'");
         Logger.Log($"[ADD_GAS_PHASE]   Gas saturation: {saturation}");
         Logger.Log($"[ADD_GAS_PHASE]   Partial pressure: {partialPressure:E3} Pa");
         Logger.Log($"[ADD_GAS_PHASE]   Dissolved {dissolvedGasSpecies}: {dissolvedConc:E3} mol/L");
@@ -263,29 +262,28 @@ public class SetTwoPhaseConditionsCommand : IGeoScriptCommand
         double temperature_K = double.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
         double quality = double.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture);
 
-        var domain = dataset.Domains.FirstOrDefault(d => d.Name.Equals(domainName, StringComparison.OrdinalIgnoreCase));
-        if (domain == null)
-            throw new ArgumentException($"Domain '{domainName}' not found");
+        if (!dataset.Mesh.Cells.TryGetValue(domainName, out var cell))
+            throw new ArgumentException($"Cell '{domainName}' not found");
 
-        if (domain.InitialConditions == null)
-            domain.InitialConditions = new InitialConditions();
+        if (cell.InitialConditions == null)
+            cell.InitialConditions = new InitialConditions();
 
         // Set temperature
-        domain.InitialConditions.Temperature = temperature_K;
+        cell.InitialConditions.Temperature = temperature_K;
 
         // Get saturation pressure at this temperature
         double P_sat = PhaseTransitionHandler.GetSaturationPressure(temperature_K) * 1e6; // MPa to Pa
-        domain.InitialConditions.Pressure = P_sat; // Set to saturation pressure
+        cell.InitialConditions.Pressure = P_sat; // Set to saturation pressure
 
         // Calculate vapor saturation from quality
         // For simplicity, assume S_v ≈ quality (more accurate would use densities)
-        domain.InitialConditions.LiquidSaturation = 1.0 - quality;
+        cell.InitialConditions.LiquidSaturation = 1.0 - quality;
 
-        Logger.Log($"[SET_TWO_PHASE_CONDITIONS] Set two-phase conditions for domain '{domainName}'");
+        Logger.Log($"[SET_TWO_PHASE_CONDITIONS] Set two-phase conditions for cell '{domainName}'");
         Logger.Log($"[SET_TWO_PHASE_CONDITIONS]   Temperature: {temperature_K} K");
         Logger.Log($"[SET_TWO_PHASE_CONDITIONS]   Saturation pressure: {P_sat:E3} Pa");
         Logger.Log($"[SET_TWO_PHASE_CONDITIONS]   Vapor quality: {quality}");
-        Logger.Log($"[SET_TWO_PHASE_CONDITIONS]   Liquid saturation: {domain.InitialConditions.LiquidSaturation}");
+        Logger.Log($"[SET_TWO_PHASE_CONDITIONS]   Liquid saturation: {cell.InitialConditions.LiquidSaturation}");
 
         return Task.FromResult<Dataset>(dataset);
     }
