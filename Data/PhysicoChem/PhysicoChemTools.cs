@@ -295,21 +295,6 @@ public class PhysicoChemTools : IDatasetTools
             }
         }
 
-        ImGui.Spacing();
-
-        if (ImGui.Button("Generate Mesh"))
-        {
-            try
-            {
-                dataset.GenerateMesh(resolution: 50);
-                Logger.Log($"Generated mesh: {dataset.GeneratedMesh.GridSize.X}x{dataset.GeneratedMesh.GridSize.Y}x{dataset.GeneratedMesh.GridSize.Z}");
-                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Failed to generate mesh: {ex.Message}");
-            }
-        }
 
         ImGui.Spacing();
         ImGui.Separator();

@@ -19,9 +19,10 @@ public class PhysicoChemBuilder
     private readonly PhysicoChemDataset _dataset;
 
     // Selection state
-    private string _selectedCellID = null;
+    private List<string> _selectedCellIDs = new();
     private int _selectedBoundaryIndex = -1;
     private List<int> _selectedVertices = new();
+    private SelectionMode _selectionMode = SelectionMode.Single;
 
     // Gizmo state
     private GizmoMode _gizmoMode = GizmoMode.Translate;
@@ -41,6 +42,11 @@ public class PhysicoChemBuilder
     private float _brushStrength = 1.0f;
     private Vector3 _deformationDirection = new Vector3(0, 0, 1);
 
+    // Rectangle selection
+    private bool _isRectangleSelecting = false;
+    private Vector2 _rectangleStart;
+    private Vector2 _rectangleEnd;
+
     public PhysicoChemBuilder(PhysicoChemDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
@@ -59,6 +65,27 @@ public class PhysicoChemBuilder
             _activeTool = BuilderTool.Select;
         ImGui.SameLine();
 
+        // Selection mode
+        if (_activeTool == BuilderTool.Select)
+        {
+            ImGui.Text("Selection Mode:");
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Single", _selectionMode == SelectionMode.Single))
+                _selectionMode = SelectionMode.Single;
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Plane XY", _selectionMode == SelectionMode.PlaneXY))
+                _selectionMode = SelectionMode.PlaneXY;
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Plane XZ", _selectionMode == SelectionMode.PlaneXZ))
+                _selectionMode = SelectionMode.PlaneXZ;
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Plane YZ", _selectionMode == SelectionMode.PlaneYZ))
+                _selectionMode = SelectionMode.PlaneYZ;
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Rectangle", _selectionMode == SelectionMode.Rectangle))
+                _selectionMode = SelectionMode.Rectangle;
+        }
+
 
         if (ImGui.RadioButton("Deform", _activeTool == BuilderTool.Deform))
             _activeTool = BuilderTool.Deform;
@@ -72,7 +99,7 @@ public class PhysicoChemBuilder
         ImGui.SameLine();
 
         // Gizmo mode (for select tool)
-        if (_activeTool == BuilderTool.Select && _selectedCellID != null)
+        if (_activeTool == BuilderTool.Select && _selectedCellIDs.Count > 0)
         {
             ImGui.Text("Gizmo:");
             ImGui.SameLine();
@@ -124,9 +151,16 @@ public class PhysicoChemBuilder
     {
         ImGui.Begin("Properties");
 
-        if (_selectedCellID != null && _dataset.Mesh.Cells.TryGetValue(_selectedCellID, out var selectedCell))
+        if (_selectedCellIDs.Count > 0)
         {
-            DrawCellProperties(selectedCell);
+            if (_selectedCellIDs.Count == 1 && _dataset.Mesh.Cells.TryGetValue(_selectedCellIDs[0], out var selectedCell))
+            {
+                DrawCellProperties(selectedCell);
+            }
+            else
+            {
+                ImGui.Text($"{_selectedCellIDs.Count} cells selected.");
+            }
         }
         else if (_selectedBoundaryIndex >= 0 && _selectedBoundaryIndex < _dataset.BoundaryConditions.Count)
         {
@@ -168,12 +202,12 @@ public class PhysicoChemBuilder
         // Render cell bounding boxes with selection highlight
         foreach (var cell in _dataset.Mesh.Cells.Values)
         {
-            var cellIsSelected = cell.ID == _selectedCellID;
+            var cellIsSelected = _selectedCellIDs.Contains(cell.ID);
             RenderCellBoundingBox(drawList, screenPos, size, cell, cellIsSelected, cameraYaw, cameraPitch, cameraDistance);
         }
 
-        // Render gizmo for selected cell
-        if (_selectedCellID != null && _dataset.Mesh.Cells.TryGetValue(_selectedCellID, out var selectedCell))
+        // Render gizmo for selected cell (only if a single cell is selected)
+        if (_selectedCellIDs.Count == 1 && _dataset.Mesh.Cells.TryGetValue(_selectedCellIDs[0], out var selectedCell))
         {
             RenderGizmo(drawList, screenPos, size, selectedCell, cameraYaw, cameraPitch, cameraDistance);
         }
@@ -191,6 +225,35 @@ public class PhysicoChemBuilder
         if (_activeTool == BuilderTool.Deform)
         {
             RenderDeformationBrush(drawList, screenPos, size);
+        }
+
+        // Render selection rectangle
+        RenderSelectionRectangle(drawList);
+
+        // Handle context menu
+        if (ImGui.BeginPopupContextWindow())
+        {
+            if (ImGui.MenuItem("Enable Selected"))
+            {
+                foreach (var cellID in _selectedCellIDs)
+                {
+                    if (_dataset.Mesh.Cells.TryGetValue(cellID, out var cell))
+                    {
+                        cell.IsActive = true;
+                    }
+                }
+            }
+            if (ImGui.MenuItem("Disable Selected"))
+            {
+                foreach (var cellID in _selectedCellIDs)
+                {
+                    if (_dataset.Mesh.Cells.TryGetValue(cellID, out var cell))
+                    {
+                        cell.IsActive = false;
+                    }
+                }
+            }
+            ImGui.EndPopup();
         }
     }
 
@@ -215,20 +278,28 @@ public class PhysicoChemBuilder
             }
             if (picked.Type == PickType.Cell)
             {
-                _selectedCellID = picked.CellID;
+                if (_selectionMode == SelectionMode.Single)
+                {
+                    _selectedCellIDs.Clear();
+                    _selectedCellIDs.Add(picked.CellID);
+                }
+                else
+                {
+                    SelectPlane(picked.CellID);
+                }
                 _selectedBoundaryIndex = -1;
                 return true;
             }
             if (picked.Type == PickType.Boundary)
             {
                 _selectedBoundaryIndex = picked.Index;
-                _selectedCellID = null;
+                _selectedCellIDs.Clear();
                 return true;
             }
             else
             {
                 // Clicked empty space
-                _selectedCellID = null;
+                _selectedCellIDs.Clear();
                 _selectedBoundaryIndex = -1;
             }
         }
@@ -237,6 +308,27 @@ public class PhysicoChemBuilder
         {
             ApplyGizmoTransform(mousePos, screenPos, size);
             return true;
+        }
+
+        if (_selectionMode == SelectionMode.Rectangle)
+        {
+            if (isClicked)
+            {
+                _isRectangleSelecting = true;
+                _rectangleStart = mousePos;
+                _rectangleEnd = mousePos;
+            }
+
+            if (_isRectangleSelecting)
+            {
+                _rectangleEnd = mousePos;
+
+                if (!isDragging)
+                {
+                    _isRectangleSelecting = false;
+                    SelectCellsInRectangle(screenPos, size, cameraYaw, cameraPitch);
+                }
+            }
         }
 
         if (!isDragging && _isDragging)
@@ -472,7 +564,7 @@ public class PhysicoChemBuilder
                                            float cameraYaw, float cameraPitch)
     {
         // Check gizmo axes first (if selected object exists)
-        if (_selectedCellID != null)
+        if (_selectedCellIDs.Count > 0)
         {
             var axis = PickGizmoAxis(mousePos, screenPos, size, cameraYaw, cameraPitch);
             if (axis != GizmoAxis.None)
@@ -505,7 +597,7 @@ public class PhysicoChemBuilder
     private GizmoAxis PickGizmoAxis(Vector2 mousePos, Vector2 screenPos, Vector2 size,
                                    float cameraYaw, float cameraPitch)
     {
-        if (_selectedCellID == null || !_dataset.Mesh.Cells.TryGetValue(_selectedCellID, out var cell))
+        if (_selectedCellIDs.Count == 0 || !_dataset.Mesh.Cells.TryGetValue(_selectedCellIDs[0], out var cell))
             return GizmoAxis.None;
 
         var center = screenPos + size * 0.5f;
@@ -551,7 +643,7 @@ public class PhysicoChemBuilder
 
     private void ApplyGizmoTransform(Vector2 mousePos, Vector2 screenPos, Vector2 size)
     {
-        if (_selectedCellID == null || !_dataset.Mesh.Cells.TryGetValue(_selectedCellID, out var cell))
+        if (_selectedCellIDs.Count == 0 || !_dataset.Mesh.Cells.TryGetValue(_selectedCellIDs[0], out var cell))
             return;
 
         Vector2 delta = mousePos - _dragStart;
@@ -734,7 +826,31 @@ public class PhysicoChemBuilder
 
     private void RenderCellBoundingBox(ImDrawListPtr drawList, Vector2 screenPos, Vector2 size, Cell cell, bool isSelected, float cameraYaw, float cameraPitch, float cameraDistance)
     {
-        // Implementation similar to PhysicoChemViewer's DrawCellBox, but with selection highlight
+        var color = isSelected ? ImGui.GetColorU32(new Vector4(1, 1, 0, 1)) : ImGui.GetColorU32(new Vector4(1, 1, 1, 0.5f));
+        var corners = GetProjectedCellCorners(cell, screenPos + size * 0.5f, 100.0f, cameraYaw, cameraPitch);
+
+        for (int i = 0; i < 4; i++)
+        {
+            drawList.AddLine(corners[i], corners[(i + 1) % 4], color);
+            drawList.AddLine(corners[i + 4], corners[((i + 1) % 4) + 4], color);
+            drawList.AddLine(corners[i], corners[i + 4], color);
+        }
+    }
+
+    private Vector2[] GetProjectedCellCorners(Cell cell, Vector2 center, float scale, float cameraYaw, float cameraPitch)
+    {
+        var corners = new Vector2[8];
+        var halfSize = (float)Math.Pow(cell.Volume, 1.0 / 3.0) / 2.0f;
+
+        for (int i = 0; i < 8; i++)
+        {
+            var x = cell.Center.X + halfSize * ((i & 1) == 0 ? -1 : 1);
+            var y = cell.Center.Y + halfSize * ((i & 2) == 0 ? -1 : 1);
+            var z = cell.Center.Z + halfSize * ((i & 4) == 0 ? -1 : 1);
+            corners[i] = ProjectPoint(x, y, z, center, scale, cameraYaw, cameraPitch);
+        }
+
+        return corners;
     }
 
     private bool IsPointNearCell(Vector2 mousePos, Vector2 screenPos, Vector2 size, Cell cell, float cameraYaw, float cameraPitch)
@@ -759,9 +875,63 @@ public class PhysicoChemBuilder
         }
     }
 
-    public string SelectedCellID => _selectedCellID;
+    public List<string> SelectedCellIDs => _selectedCellIDs;
     public int SelectedBoundaryIndex => _selectedBoundaryIndex;
     public BuilderTool ActiveTool => _activeTool;
+
+    private void SelectPlane(string cellID)
+    {
+        _selectedCellIDs.Clear();
+        if (!_dataset.Mesh.Cells.TryGetValue(cellID, out var selectedCell))
+            return;
+
+        _selectedCellIDs.Add(cellID);
+
+        foreach (var cell in _dataset.Mesh.Cells.Values)
+        {
+            if (cell.ID == cellID) continue;
+
+            bool isInPlane = _selectionMode switch
+            {
+                SelectionMode.PlaneXY => Math.Abs(cell.Center.Z - selectedCell.Center.Z) < 0.01,
+                SelectionMode.PlaneXZ => Math.Abs(cell.Center.Y - selectedCell.Center.Y) < 0.01,
+                SelectionMode.PlaneYZ => Math.Abs(cell.Center.X - selectedCell.Center.X) < 0.01,
+                _ => false
+            };
+
+            if (isInPlane)
+            {
+                _selectedCellIDs.Add(cell.ID);
+            }
+        }
+    }
+
+    private void SelectCellsInRectangle(Vector2 screenPos, Vector2 size, float cameraYaw, float cameraPitch)
+    {
+        _selectedCellIDs.Clear();
+
+        var min = new Vector2(Math.Min(_rectangleStart.X, _rectangleEnd.X), Math.Min(_rectangleStart.Y, _rectangleEnd.Y));
+        var max = new Vector2(Math.Max(_rectangleStart.X, _rectangleEnd.X), Math.Max(_rectangleStart.Y, _rectangleEnd.Y));
+
+        foreach (var cell in _dataset.Mesh.Cells.Values)
+        {
+            var projectedCenter = ProjectPoint(cell.Center.X, cell.Center.Y, cell.Center.Z, screenPos + size * 0.5f, 100.0f, cameraYaw, cameraPitch);
+
+            if (projectedCenter.X >= min.X && projectedCenter.X <= max.X &&
+                projectedCenter.Y >= min.Y && projectedCenter.Y <= max.Y)
+            {
+                _selectedCellIDs.Add(cell.ID);
+            }
+        }
+    }
+
+    private void RenderSelectionRectangle(ImDrawListPtr drawList)
+    {
+        if (_isRectangleSelecting)
+        {
+            drawList.AddRect(_rectangleStart, _rectangleEnd, ImGui.GetColorU32(new Vector4(1, 1, 0, 1)));
+        }
+    }
 }
 
 /// <summary>
@@ -772,6 +942,15 @@ public enum BuilderTool
     Select,
     Deform,
     Paint
+}
+
+public enum SelectionMode
+{
+    Single,
+    PlaneXY,
+    PlaneXZ,
+    PlaneYZ,
+    Rectangle
 }
 
 /// <summary>

@@ -363,6 +363,13 @@ public class PhysicoChemViewer : IDatasetViewer
     {
         var io = ImGui.GetIO();
 
+        if (!ImGui.IsItemHovered())
+        {
+            _isDragging = false;
+            _isPanning = false;
+            return;
+        }
+
         // Mouse wheel zoom
         if (io.MouseWheel != 0)
         {
@@ -370,18 +377,15 @@ public class PhysicoChemViewer : IDatasetViewer
         }
 
         // Start dragging/panning
-        if (!_isDragging && !_isPanning)
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
-            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-            {
-                _isDragging = true;
-                _lastMousePos = io.MousePos;
-            }
-            else if (ImGui.IsMouseClicked(ImGuiMouseButton.Right) || ImGui.IsMouseClicked(ImGuiMouseButton.Middle))
-            {
-                _isPanning = true;
-                _lastMousePos = io.MousePos;
-            }
+            _isDragging = true;
+            _lastMousePos = io.MousePos;
+        }
+        else if (ImGui.IsMouseClicked(ImGuiMouseButton.Right) || ImGui.IsMouseClicked(ImGuiMouseButton.Middle))
+        {
+            _isPanning = true;
+            _lastMousePos = io.MousePos;
         }
 
         // Orbit rotation (left mouse)
