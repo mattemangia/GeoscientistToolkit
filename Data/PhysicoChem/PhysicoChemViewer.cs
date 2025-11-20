@@ -363,17 +363,15 @@ public class PhysicoChemViewer : IDatasetViewer
     {
         var io = ImGui.GetIO();
 
-        if (!ImGui.IsItemHovered())
-        {
-            _isDragging = false;
-            _isPanning = false;
-            return;
-        }
-
-        // Mouse wheel zoom
-        if (io.MouseWheel != 0)
+        // Mouse wheel zoom (works even when not hovering if we're already interacting)
+        if (io.MouseWheel != 0 && (ImGui.IsItemHovered() || _isDragging || _isPanning))
         {
             _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * 0.1f), 0.5f, 50.0f);
+        }
+
+        if (!ImGui.IsItemHovered() && !_isDragging && !_isPanning)
+        {
+            return;
         }
 
         // Start dragging/panning
@@ -434,7 +432,8 @@ public class PhysicoChemViewer : IDatasetViewer
         {
             foreach (var cell in _dataset.Mesh.Cells.Values)
             {
-                DrawCellBox(drawList, center, cell, renderMode);
+                bool isSelected = _dataset.SelectedCellIDs.Contains(cell.ID);
+                DrawCellBox(drawList, center, cell, renderMode, isSelected);
             }
         }
 
@@ -472,11 +471,23 @@ public class PhysicoChemViewer : IDatasetViewer
         drawList.AddCircle(pos, 6, ImGui.GetColorU32(new Vector4(1, 1, 1, 0.8f)), 0, 1.5f);
     }
 
-    private void DrawCellBox(ImDrawListPtr drawList, Vector2 center, Cell cell, RenderMode renderMode)
+    private void DrawCellBox(ImDrawListPtr drawList, Vector2 center, Cell cell, RenderMode renderMode, bool isSelected = false)
     {
         var material = _dataset.Materials.FirstOrDefault(m => m.MaterialID == cell.MaterialID);
-        var wireframeColor = material != null ? ImGui.GetColorU32(new Vector4(material.Color.X, material.Color.Y, material.Color.Z, 1.0f)) : ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.8f, 1.0f));
-        var solidColor = material != null ? ImGui.GetColorU32(new Vector4(material.Color.X, material.Color.Y, material.Color.Z, 0.3f)) : ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.8f, 0.3f));
+
+        // Use bright selection color if selected, otherwise use material color
+        var wireframeColor = isSelected
+            ? ImGui.GetColorU32(new Vector4(1.0f, 0.8f, 0.0f, 1.0f))  // Bright orange/yellow for selection
+            : material != null
+                ? ImGui.GetColorU32(new Vector4(material.Color.X, material.Color.Y, material.Color.Z, 1.0f))
+                : ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.8f, 1.0f));
+
+        var solidColor = isSelected
+            ? ImGui.GetColorU32(new Vector4(1.0f, 0.8f, 0.0f, 0.5f))  // Semi-transparent selection
+            : material != null
+                ? ImGui.GetColorU32(new Vector4(material.Color.X, material.Color.Y, material.Color.Z, 0.3f))
+                : ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.8f, 0.3f));
+
         var scale = 80.0f;
 
         // Simple 2D projection of 3D box
@@ -495,12 +506,15 @@ public class PhysicoChemViewer : IDatasetViewer
         // Draw wireframe if enabled
         if (renderMode == RenderMode.Wireframe || renderMode == RenderMode.SolidWireframe)
         {
+            // Use thicker lines for selected cells
+            float lineThickness = isSelected ? 3.0f : 1.5f;
+
             // Draw box edges
             for (int i = 0; i < 4; i++)
             {
-                drawList.AddLine(corners[i], corners[(i + 1) % 4], wireframeColor, 1.5f);
-                drawList.AddLine(corners[i + 4], corners[((i + 1) % 4) + 4], wireframeColor, 1.5f);
-                drawList.AddLine(corners[i], corners[i + 4], wireframeColor, 1.5f);
+                drawList.AddLine(corners[i], corners[(i + 1) % 4], wireframeColor, lineThickness);
+                drawList.AddLine(corners[i + 4], corners[((i + 1) % 4) + 4], wireframeColor, lineThickness);
+                drawList.AddLine(corners[i], corners[i + 4], wireframeColor, lineThickness);
             }
         }
     }
@@ -578,6 +592,19 @@ public class PhysicoChemViewer : IDatasetViewer
         if (_dataset.CurrentState != null)
         {
             info += $"\nTime: {_dataset.CurrentState.CurrentTime:F2}s";
+        }
+
+        // Add selection info
+        if (_dataset.SelectedCellIDs.Count > 0)
+        {
+            info += $"\n\nSelected: {_dataset.SelectedCellIDs.Count} cells";
+            if (_dataset.SelectedCellIDs.Count == 1 && _dataset.Mesh.Cells.TryGetValue(_dataset.SelectedCellIDs[0], out var cell))
+            {
+                info += $"\n  ID: {cell.ID}";
+                info += $"\n  Material: {cell.MaterialID}";
+                info += $"\n  Volume: {cell.Volume:E2}";
+                info += $"\n  Center: ({cell.Center.X:F2}, {cell.Center.Y:F2}, {cell.Center.Z:F2})";
+            }
         }
 
         // Draw background

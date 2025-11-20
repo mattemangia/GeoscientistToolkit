@@ -96,9 +96,9 @@ public class PhysicoChemTools : IDatasetTools
     private int _yDivisions = 10;
     private int _zDivisions = 10;
 
-    // Cell selection state
+    // Cell selection state (legacy single selection)
     private string _selectedCellID = null;
-    private List<string> _selectedCellIDs = new();
+    // Note: Multi-cell selection now stored in dataset.SelectedCellIDs for viewer sync
 
     // Mesh editing state
     private Vector3 _translationOffset = Vector3.Zero;
@@ -391,26 +391,26 @@ public class PhysicoChemTools : IDatasetTools
         // Multi-cell selection
         ImGui.BeginChild("cell_selection_list", new Vector2(200, 150), ImGuiChildFlags.Border);
 
-        bool selectAll = _selectedCellIDs.Count == dataset.Mesh.Cells.Count && dataset.Mesh.Cells.Count > 0;
+        bool selectAll = dataset.SelectedCellIDs.Count == dataset.Mesh.Cells.Count && dataset.Mesh.Cells.Count > 0;
         if (ImGui.Checkbox("Select All", ref selectAll))
         {
             if (selectAll)
-                _selectedCellIDs = dataset.Mesh.Cells.Keys.ToList();
+                dataset.SelectedCellIDs = dataset.Mesh.Cells.Keys.ToList();
             else
-                _selectedCellIDs.Clear();
+                dataset.SelectedCellIDs.Clear();
         }
 
         ImGui.Separator();
 
         foreach (var cell in dataset.Mesh.Cells.Values)
         {
-            bool isSelected = _selectedCellIDs.Contains(cell.ID);
+            bool isSelected = dataset.SelectedCellIDs.Contains(cell.ID);
             if (ImGui.Checkbox($"##sel_{cell.ID}", ref isSelected))
             {
-                if (isSelected && !_selectedCellIDs.Contains(cell.ID))
-                    _selectedCellIDs.Add(cell.ID);
+                if (isSelected && !dataset.SelectedCellIDs.Contains(cell.ID))
+                    dataset.SelectedCellIDs.Add(cell.ID);
                 else if (!isSelected)
-                    _selectedCellIDs.Remove(cell.ID);
+                    dataset.SelectedCellIDs.Remove(cell.ID);
             }
             ImGui.SameLine();
             ImGui.Text(cell.ID);
@@ -421,17 +421,17 @@ public class PhysicoChemTools : IDatasetTools
 
         // Selection info
         ImGui.BeginChild("selection_info", new Vector2(0, 150), ImGuiChildFlags.Border);
-        ImGui.Text($"Selected: {_selectedCellIDs.Count} cells");
+        ImGui.Text($"Selected: {dataset.SelectedCellIDs.Count} cells");
 
-        if (_selectedCellIDs.Count > 0)
+        if (dataset.SelectedCellIDs.Count > 0)
         {
             if (ImGui.Button("Clear Selection", new Vector2(-1, 0)))
-                _selectedCellIDs.Clear();
+                dataset.SelectedCellIDs.Clear();
 
             ImGui.Spacing();
 
             // Calculate selection bounds
-            var selectedCells = _selectedCellIDs.Select(id => dataset.Mesh.Cells[id]).ToList();
+            var selectedCells = dataset.SelectedCellIDs.Select(id => dataset.Mesh.Cells[id]).ToList();
             var centerX = selectedCells.Average(c => c.Center.X);
             var centerY = selectedCells.Average(c => c.Center.Y);
             var centerZ = selectedCells.Average(c => c.Center.Z);
@@ -449,7 +449,7 @@ public class PhysicoChemTools : IDatasetTools
         ImGui.Separator();
 
         // Transformation tools
-        if (_selectedCellIDs.Count > 0)
+        if (dataset.SelectedCellIDs.Count > 0)
         {
             ImGui.Text("Transformation Tools:");
             ImGui.Separator();
@@ -462,7 +462,7 @@ public class PhysicoChemTools : IDatasetTools
 
                 if (ImGui.Button("Apply Translation", new Vector2(-1, 0)))
                 {
-                    TranslateCells(dataset, _selectedCellIDs, _translationOffset);
+                    TranslateCells(dataset, dataset.SelectedCellIDs, _translationOffset);
                     _translationOffset = Vector3.Zero;
                 }
 
@@ -480,7 +480,7 @@ public class PhysicoChemTools : IDatasetTools
 
                 if (ImGui.Button("Apply Scale", new Vector2(-1, 0)))
                 {
-                    ScaleCells(dataset, _selectedCellIDs, _scaleFactors);
+                    ScaleCells(dataset, dataset.SelectedCellIDs, _scaleFactors);
                     _scaleFactors = Vector3.One;
                 }
 
@@ -498,7 +498,7 @@ public class PhysicoChemTools : IDatasetTools
 
                 if (ImGui.Button("Apply Rotation", new Vector2(-1, 0)))
                 {
-                    RotateCells(dataset, _selectedCellIDs, _rotationAngles);
+                    RotateCells(dataset, dataset.SelectedCellIDs, _rotationAngles);
                     _rotationAngles = Vector3.Zero;
                 }
 
@@ -517,23 +517,23 @@ public class PhysicoChemTools : IDatasetTools
 
             if (ImGui.Button("Delete Selected Cells", new Vector2(-1, 0)))
             {
-                foreach (var cellID in _selectedCellIDs.ToList())
+                foreach (var cellID in dataset.SelectedCellIDs.ToList())
                 {
                     dataset.Mesh.Cells.Remove(cellID);
                 }
-                Logger.Log($"Deleted {_selectedCellIDs.Count} cells from mesh.");
-                _selectedCellIDs.Clear();
+                Logger.Log($"Deleted {dataset.SelectedCellIDs.Count} cells from mesh.");
+                dataset.SelectedCellIDs.Clear();
                 ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             }
 
             if (ImGui.Button("Duplicate Selected Cells", new Vector2(-1, 0)))
             {
-                DuplicateCells(dataset, _selectedCellIDs);
+                DuplicateCells(dataset, dataset.SelectedCellIDs);
             }
 
             if (ImGui.Button("Merge Selected Cells", new Vector2(-1, 0)))
             {
-                MergeCells(dataset, _selectedCellIDs);
+                MergeCells(dataset, dataset.SelectedCellIDs);
             }
         }
 
@@ -706,8 +706,8 @@ public class PhysicoChemTools : IDatasetTools
 
         dataset.Mesh.Cells[mergedID] = mergedCell;
 
-        _selectedCellIDs.Clear();
-        _selectedCellIDs.Add(mergedID);
+        dataset.SelectedCellIDs.Clear();
+        dataset.SelectedCellIDs.Add(mergedID);
 
         Logger.Log($"Merged {cellIDs.Count} cells into {mergedID}");
         ProjectManager.Instance.NotifyDatasetDataChanged(dataset);

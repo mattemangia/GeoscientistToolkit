@@ -68,6 +68,12 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
     public List<PhysicoChemState> ResultHistory { get; set; } = new();
 
     /// <summary>
+    /// Currently selected cell IDs (for editor/viewer synchronization)
+    /// </summary>
+    [JsonIgnore]
+    public List<string> SelectedCellIDs { get; set; } = new();
+
+    /// <summary>
     /// Flag to enable coupling with geothermal simulation
     /// </summary>
     [JsonProperty]
