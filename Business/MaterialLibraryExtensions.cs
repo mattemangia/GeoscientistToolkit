@@ -10,6 +10,9 @@
 // - Kestin, J. et al., 1981. Viscosity of aqueous NaCl solutions. Journal of Physical and Chemical Reference Data.
 // - Mindess, S. & Young, J.F., 2002. Concrete. 2nd ed. Prentice Hall.
 // - Neville, A.M., 2011. Properties of Concrete, 5th ed. Pearson.
+// - Ashby, M.F. & Jones, D.R.H., 2012. Engineering Materials 1, 4th ed. Butterworth-Heinemann.
+// - ASM International, 1990. ASM Handbook, Volume 1: Properties and Selection: Irons, Steels, and High-Performance Alloys.
+// - Titow, W.V., 1990. PVC Technology, 4th ed. Springer.
 // - Petrenko, V.F. & Whitworth, R.W., 1999. Physics of Ice. Oxford University Press.
 // - Schon, J., 2015. Physical Properties of Rocks, 2nd ed. Elsevier.
 // - Additional rock property compilations: Carmichael, R.S., 1982. Handbook of Physical Properties of Rocks.
@@ -205,6 +208,26 @@ public static class MaterialLibraryExtensions
             },
             new PhysicalMaterial
             {
+                Name = "Polyvinyl Chloride (rigid PVC-U)",
+                Phase = PhaseType.Solid,
+                Density_kg_m3 = 1380,
+                YoungModulus_GPa = 3.0,
+                PoissonRatio = 0.38,
+                TensileStrength_MPa = 55,
+                ThermalConductivity_W_mK = 0.19,
+                SpecificHeatCapacity_J_kgK = 900,
+                ThermalDiffusivity_m2_s = 1.5e-7,
+                ElectricalResistivity_Ohm_m = 1e12,
+                Notes = "Unplasticized PVC used for pipes and structural profiles; properties at room temperature.",
+                Sources = new List<string>
+                {
+                    "Ashby & Jones (2012) Engineering Materials 1",
+                    "Titow (1990) PVC Technology"
+                },
+                IsUserMaterial = false
+            },
+            new PhysicalMaterial
+            {
                 Name = "Bentonite Clay (saturated)",
                 Phase = PhaseType.Solid,
                 MohsHardness = 1.5,
@@ -225,6 +248,33 @@ public static class MaterialLibraryExtensions
                 {
                     "Lambe & Whitman (1969) Soil Mechanics",
                     "Mitchell & Soga (2005) Fundamentals of Soil Behavior"
+                },
+                IsUserMaterial = false
+            },
+            new PhysicalMaterial
+            {
+                Name = "Carbon Steel (structural)",
+                Phase = PhaseType.Solid,
+                MohsHardness = 4.0,
+                Density_kg_m3 = 7850,
+                YoungModulus_GPa = 200,
+                PoissonRatio = 0.3,
+                FrictionAngle_deg = 35,
+                CompressiveStrength_MPa = 400,
+                TensileStrength_MPa = 420,
+                YieldStrength_MPa = 250,
+                ThermalConductivity_W_mK = 50,
+                SpecificHeatCapacity_J_kgK = 490,
+                Vp_m_s = 5900,
+                Vs_m_s = 3200,
+                AcousticImpedance_MRayl = 46.3,
+                ElectricalResistivity_Ohm_m = 1.6e-7,
+                MagneticSusceptibility_SI = 1e-3,
+                Notes = "Generic low-carbon structural steel akin to ASTM A36, room temperature properties.",
+                Sources = new List<string>
+                {
+                    "ASM Handbook Vol. 1 (1990) Properties and Selection: Irons, Steels, and High-Performance Alloys",
+                    "Gere & Goodno (2012) Mechanics of Materials"
                 },
                 IsUserMaterial = false
             },
