@@ -1,0 +1,204 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="GtkSharp" Version="3.24.24.95" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="MathNet.Numerics" Version="6.0.0-beta2" />
+    <PackageReference Include="SharpVoronoiLib" Version="1.1.0" />
+    <PackageReference Include="OpenCvSharp4" Version="4.10.0.20240616" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240616" Condition="'$(RuntimeIdentifier)' == 'win-x64' OR ($([MSBuild]::IsOSPlatform('Windows')) AND '$(RuntimeIdentifier)' == '')" />
+    <PackageReference Include="OpenCvSharp4_.runtime.ubuntu.20.04-x64" Version="4.10.0.20240616" Condition="'$(RuntimeIdentifier)' == 'linux-x64' OR ($([MSBuild]::IsOSPlatform('Linux')) AND '$(RuntimeIdentifier)' == '')" />
+    <PackageReference Include="OpenCvSharp4.runtime.osx.10.15-x64" Version="4.6.0.20230105" Condition="'$(RuntimeIdentifier)' == 'osx-x64'" />
+    <PackageReference Include="NetTopologySuite" Version="2.6.0" />
+    <PackageReference Include="NetTopologySuite.IO.ShapeFile" Version="2.1.0" />
+    <PackageReference Include="Silk.NET.OpenCL" Version="2.21.0" />
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <PackageReference Include="ProjNET" Version="2.0.0" />
+    <PackageReference Include="GDAL" Version="3.11.3" />
+    <PackageReference Include="GDAL.Native" Version="3.11.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Include Data, Business, Analysis, Util from parent project -->
+    <Compile Include="..\Data\**\*.cs" LinkBase="Data" />
+    <Compile Include="..\Business\**\*.cs" LinkBase="Business" />
+    <Compile Include="..\Analysis\**\*.cs" LinkBase="Analysis" />
+    <Compile Include="..\Util\**\*.cs" LinkBase="Util" />
+
+    <!-- Include OpenCL wrapper -->
+    <Compile Include="..\OpenCL\**\*.cs" LinkBase="OpenCL" />
+
+    <!-- Network dependencies -->
+    <Compile Include="..\Network\SimulatorNodeSupport.cs" LinkBase="Network\SimulatorNodeSupport.cs" />
+    <Compile Include="..\Network\NodeMessages.cs" LinkBase="Network\NodeMessages.cs" />
+    <Compile Include="..\Network\NodeManager.cs" LinkBase="Network\NodeManager.cs" />
+    <Compile Include="..\Network\NodeInfo.cs" LinkBase="Network\NodeInfo.cs" />
+    <!-- Settings.cs excluded because local copy exists -->
+    <Compile Remove="..\Settings\Settings.cs" />
+    <Compile Include="..\Settings\SettingsManager.cs" LinkBase="Settings\SettingsManager.cs" />
+
+    <!-- UI Exclusions -->
+    <Compile Remove="..\**\*Viewer.cs" />
+    <Compile Remove="..\**\*UI.cs" />
+    <Compile Remove="..\**\*Panel.cs" />
+    <Compile Remove="..\**\*Dialog.cs" />
+    <Compile Remove="..\**\*Overlay.cs" />
+    <Compile Remove="..\**\*Renderer.cs" />
+    <Compile Remove="..\**\*Window.cs" />
+
+    <!-- ImGui specific exclusions -->
+    <Compile Remove="..\**\*ImGui*.cs" />
+    <Compile Remove="..\**\ImGuiController.cs" />
+    <Compile Remove="..\**\Application.cs" />
+    <Compile Remove="..\Program.cs" /> <!-- Exclude PARENT Program.cs -->
+
+    <Compile Remove="..\**\*Tool.cs" />
+    <Compile Remove="..\**\*Tools.cs" />
+    <Compile Remove="..\**\*Editor.cs" />
+
+    <!-- Data inclusions/exclusions -->
+    <Compile Remove="..\Data\CtImageStack\**" />
+
+    <Compile Remove="..\Data\Mesh3D\**" />
+    <Compile Include="..\Data\Mesh3D\Mesh3DDataset.cs" LinkBase="Data\Mesh3D\Mesh3DDataset.cs" />
+    <Compile Include="..\Data\Mesh3D\GridMesh3D.cs" LinkBase="Data\Mesh3D\GridMesh3D.cs" />
+
+    <Compile Remove="..\Data\GIS\**" />
+    <Compile Include="..\Data\GIS\GISDataset.cs" LinkBase="Data\GIS\GISDataset.cs" />
+    <Compile Include="..\Data\GIS\GISProperties.cs" LinkBase="Data\GIS\GISProperties.cs" />
+    <Compile Include="..\Data\GIS\GISTag.cs" LinkBase="Data\GIS\GISTag.cs" />
+    <Compile Include="..\Data\GIS\GISExporter.cs" LinkBase="Data\GIS\GISExporter.cs" />
+    <Compile Remove="..\Data\GIS\GISProperties.cs" />
+    <Compile Remove="..\Data\GIS\GISDataset.cs" />
+    <Compile Remove="..\Data\GIS\GISExporter.cs" />
+    <Compile Remove="..\Data\GIS\GISTag.cs" />
+
+    <Compile Remove="..\Data\AcousticVolume\**" />
+    <Compile Include="..\Data\AcousticVolume\AcousticVolumeDataset.cs" LinkBase="Data\AcousticVolume\AcousticVolumeDataset.cs" />
+    <Compile Include="..\Data\AcousticVolume\DensityVolume.cs" LinkBase="Data\AcousticVolume\DensityVolume.cs" />
+    <Compile Include="..\Data\AcousticVolume\RockMaterialLibrary.cs" LinkBase="Data\AcousticVolume\RockMaterialLibrary.cs" />
+
+    <Compile Remove="..\Data\Media\**" />
+    <Compile Remove="..\Data\TwoDGeology\**" />
+    <Compile Remove="..\Data\Image\**" />
+    <Compile Remove="..\Data\Exporters\**" />
+    <Compile Remove="..\Data\Loaders\**" />
+    <Compile Include="..\Data\Loaders\**\*.cs" LinkBase="Data\Loaders" />
+    <Compile Remove="..\Data\Loaders\*LoaderWrapper.cs" />
+    <Compile Remove="..\Data\Loaders\ImageFolderLoader.cs" />
+    <Compile Remove="..\Data\Loaders\AudioLoader.cs" />
+    <Compile Remove="..\Data\Loaders\VideoLoader.cs" />
+    <Compile Remove="..\Data\Loaders\SegmentationLoader.cs" />
+    <Compile Remove="..\Data\Loaders\TwoDGeologyLoader.cs" />
+    <Compile Remove="..\Data\Loaders\SingleImageLoader.cs" />
+    <Compile Remove="..\Data\Loaders\GISLoader.cs" />
+    <Compile Remove="..\Data\Loaders\PNMLoader.cs" />
+    <Compile Remove="..\Data\Loaders\DualPNMLoader.cs" />
+    <Compile Remove="..\Data\Loaders\SeismicLoader.cs" />
+    <Compile Remove="..\Data\Loaders\SubsurfaceGISLoader.cs" />
+    <Compile Remove="..\Data\Loaders\TableLoader.cs" />
+    <Compile Remove="..\Data\Loaders\TextLoader.cs" />
+    <Compile Remove="..\Data\Loaders\CtStackLoaderWrapper.cs" />
+    <Compile Remove="..\Data\Loaders\LabeledVolumeLoaderWrapper.cs" />
+    <Compile Remove="..\Data\Loaders\IDataLoader.cs" />
+    <Compile Include="..\Data\Loaders\IDataLoader.cs" LinkBase="Data\Loaders\IDataLoader.cs" />
+    <Compile Remove="..\Data\Loaders\AcousticVolumeLoader.cs" />
+
+    <Compile Remove="..\Data\Text\TextDataset.cs" />
+    <Compile Remove="..\Data\Table\TableDataset.cs" />
+    <Compile Remove="..\Data\EarthquakeDataset.cs" />
+
+    <!-- Util Exclusions -->
+    <Compile Remove="..\Util\VeldridManager.cs" />
+    <Compile Remove="..\Util\TextureManager.cs" />
+    <Compile Remove="..\Util\ScreenshotUtility.cs" />
+    <Compile Remove="..\Util\ImGuiWindowScreenshotTool.cs" />
+    <Compile Remove="..\Util\ColorCorrectionProcessor.cs" />
+    <Compile Remove="..\Util\ImageStitcher.cs" />
+    <Compile Remove="..\Util\SatelliteBandComposer.cs" />
+    <Compile Remove="..\Util\ViewerScreenshotUtility.cs" />
+    <Compile Remove="..\Util\ImageExporter.cs" />
+    <Compile Remove="..\Util\StlExporter.cs" />
+    <Compile Remove="..\Util\TextureCacheManager.cs" />
+    <Compile Remove="..\Util\ImageDecoder.cs" />
+    <Compile Remove="..\Util\TableExporter.cs" />
+    <Compile Remove="..\Util\ImageLoader.cs" />
+
+    <!-- Exclude NodeEndpoint etc as per original csproj -->
+    <Compile Remove="..\NodeEndpoint\**" />
+    <Compile Remove="..\InstallerPackager\**" />
+    <Compile Remove="..\InstallerWizard\**" />
+
+    <!-- Analysis Exclusions -->
+    <Compile Remove="..\Analysis\TextureClassification\**" />
+    <Compile Remove="..\Analysis\ThermalConductivity\**" />
+    <Compile Remove="..\Analysis\ParticleSeparator\**" />
+
+    <Compile Remove="..\Analysis\Geothermal\**" />
+
+    <Compile Remove="..\Data\PhysicoChem\PhysicoChemBuilder.cs" />
+    <Compile Remove="..\Data\PhysicoChem\ParameterSweepManager.cs" />
+    <Compile Remove="..\Data\PhysicoChem\MultiphysicsExamples.cs" />
+
+    <Compile Remove="..\Analysis\RockCoreExtractor\**" />
+
+    <Compile Remove="..\Analysis\PNM\**" />
+    <Compile Remove="..\Data\PNM\**" />
+
+    <Compile Remove="..\Analysis\Hydrological\**" />
+
+    <Compile Remove="..\Analysis\Geomechanics\**" />
+    <Compile Remove="..\Analysis\Multiphase\**" />
+    <Compile Remove="..\Analysis\NMR\**" />
+    <Compile Remove="..\Analysis\AcousticSimulation\**" />
+    <Compile Remove="..\Analysis\PhysicoChem\PhysicoChemSolver.cs" />
+
+    <Compile Remove="..\Analysis\Seismology\**" />
+    <Compile Remove="..\Analysis\Thermodynamic\**" />
+
+    <Compile Remove="..\Business\GeoScript*.cs" />
+    <Compile Remove="..\Business\OllamaService.cs" />
+    <Compile Remove="..\Business\MaterialLibrary.cs" />
+    <Compile Remove="..\Business\ORCFluidLibrary.cs" />
+    <Compile Remove="..\Business\MaterialLibraryExtensions.cs" />
+    <Compile Remove="..\Business\CompoundLibraryExtensions.cs" />
+    <Compile Remove="..\Business\CompoundLibraryMetamorphicExtensions.cs" />
+    <Compile Remove="..\Business\CompoundLibraryMultiphaseExtensions.cs" />
+    <Compile Remove="..\Business\CompoundLibrary.cs" />
+    <Compile Remove="..\Business\Petrology\**" />
+
+    <!-- Exclude ProjectManager as it depends on all dataset types -->
+    <Compile Remove="..\Business\ProjectManager.cs" />
+    <Compile Remove="..\Business\ProjectSerializer.cs" />
+    <Compile Remove="..\Business\GlobalPerformanceManager.cs" />
+    <Compile Remove="..\Business\UndoManager.cs" />
+
+    <Compile Remove="..\Analysis\Transform\**" />
+    <Compile Remove="..\Analysis\Photogrammetry\**" />
+    <Compile Remove="..\Analysis\AmbientOcclusionSegmentation\**" />
+    <Compile Remove="..\Analysis\UnifiedCalibrationManager.cs" />
+
+    <!-- UI Namespace -->
+    <Compile Remove="..\UI\**" />
+    <Compile Include="..\UI\Interfaces\**" LinkBase="UI\Interfaces" />
+    <Compile Remove="..\UI\Interfaces\IDatasetPropertiesRenderer.cs" />
+
+    <!-- Use local versions -->
+    <Compile Remove="..\Data\Borehole\BoreholeDataset.cs" />
+    <Compile Remove="..\Data\DatasetDTO.cs" />
+    <Compile Remove="..\Data\Seismic\SeismicDataset.cs" />
+
+    <!-- Explicitly include MainWindow to override exclusion pattern -->
+    <Compile Include="MainWindow.cs" />
+
+  </ItemGroup>
+
+</Project>
