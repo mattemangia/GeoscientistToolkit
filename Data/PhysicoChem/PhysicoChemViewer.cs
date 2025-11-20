@@ -266,15 +266,17 @@ public class PhysicoChemViewer : IDatasetViewer
         ImGui.InvisibleButton("PhysicoChemViewArea", availableSize,
             ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
 
-        // Get mouse position and manually check if it's in bounds
+        // Get ImGui IO for mouse state
         var io = ImGui.GetIO();
+
+        // Check if mouse is in bounds manually (more reliable than ImGui hover for all mouse buttons)
         var mousePos = io.MousePos;
         var isMouseInBounds = mousePos.X >= cursorPos.X && mousePos.X <= cursorPos.X + availableSize.X &&
                               mousePos.Y >= cursorPos.Y && mousePos.Y <= cursorPos.Y + availableSize.Y;
 
-        // Use manual bounds check OR ImGui's hover (whichever works)
-        var isButtonHovered = ImGui.IsItemHovered();
-        var isHovered = isButtonHovered || (isMouseInBounds && !io.WantCaptureMouse);
+        // For hover detection, prioritize manual bounds check and ensure we're not blocking other UI
+        var isButtonHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
+        var isHovered = (isButtonHovered || isMouseInBounds) && !io.WantCaptureMouse;
 
         var isClicked = ImGui.IsMouseClicked(ImGuiMouseButton.Left) && isHovered;
         var isMouseDragging = ImGui.IsMouseDragging(ImGuiMouseButton.Left);
@@ -383,25 +385,24 @@ public class PhysicoChemViewer : IDatasetViewer
             _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * 0.1f), 0.5f, 50.0f);
         }
 
-        // Only handle mouse clicks and drags when hovering or already interacting
-        if (!isHovered && !_isDragging && !_isPanning)
+        // Start new interactions when hovering
+        if (isHovered)
         {
-            return;
+            // Start dragging on left click
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !_isDragging && !_isPanning)
+            {
+                _isDragging = true;
+                _lastMousePos = io.MousePos;
+            }
+            // Start panning on right or middle click
+            else if ((ImGui.IsMouseClicked(ImGuiMouseButton.Right) || ImGui.IsMouseClicked(ImGuiMouseButton.Middle)) && !_isDragging && !_isPanning)
+            {
+                _isPanning = true;
+                _lastMousePos = io.MousePos;
+            }
         }
 
-        // Start dragging/panning
-        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-        {
-            _isDragging = true;
-            _lastMousePos = io.MousePos;
-        }
-        else if (ImGui.IsMouseClicked(ImGuiMouseButton.Right) || ImGui.IsMouseClicked(ImGuiMouseButton.Middle))
-        {
-            _isPanning = true;
-            _lastMousePos = io.MousePos;
-        }
-
-        // Orbit rotation (left mouse)
+        // Continue orbit rotation (left mouse drag)
         if (_isDragging)
         {
             if (ImGui.IsMouseDown(ImGuiMouseButton.Left))
@@ -417,7 +418,7 @@ public class PhysicoChemViewer : IDatasetViewer
             }
         }
 
-        // Pan (middle/right mouse)
+        // Continue panning (right/middle mouse drag)
         if (_isPanning)
         {
             if (ImGui.IsMouseDown(ImGuiMouseButton.Right) || ImGui.IsMouseDown(ImGuiMouseButton.Middle))
