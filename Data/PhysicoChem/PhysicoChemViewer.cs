@@ -259,7 +259,9 @@ public class PhysicoChemViewer : IDatasetViewer
         drawList.AddRectFilled(cursorPos, cursorPos + availableSize, bgColor);
 
         // Invisible button for mouse interaction
-        ImGui.InvisibleButton("PhysicoChemViewArea", availableSize);
+        // Use ImGuiButtonFlags.MouseButtonLeft | Right | Middle to capture all mouse buttons
+        ImGui.InvisibleButton("PhysicoChemViewArea", availableSize,
+            ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
         var isHovered = ImGui.IsItemHovered();
         var isActive = ImGui.IsItemActive();
         var isClicked = ImGui.IsMouseClicked(ImGuiMouseButton.Left) && isHovered;
@@ -275,14 +277,14 @@ public class PhysicoChemViewer : IDatasetViewer
                 _cameraYaw, _cameraPitch
             );
 
-            if (!handledByBuilder && (isHovered || isActive || _isDragging || _isPanning))
+            if (!handledByBuilder)
             {
-                HandleMouseInput();
+                HandleMouseInput(isHovered || isActive);
             }
         }
-        else if (isHovered || isActive || _isDragging || _isPanning)
+        else
         {
-            HandleMouseInput();
+            HandleMouseInput(isHovered || isActive);
         }
 
         // Render 3D content with render mode
@@ -359,17 +361,18 @@ public class PhysicoChemViewer : IDatasetViewer
         _cameraTarget = Vector3.Zero;
     }
 
-    private void HandleMouseInput()
+    private void HandleMouseInput(bool isHovered)
     {
         var io = ImGui.GetIO();
 
-        // Mouse wheel zoom (works even when not hovering if we're already interacting)
-        if (io.MouseWheel != 0 && (ImGui.IsItemHovered() || _isDragging || _isPanning))
+        // Mouse wheel zoom - works when hovering OR already interacting (dragging/panning)
+        if (io.MouseWheel != 0 && (isHovered || _isDragging || _isPanning))
         {
             _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * 0.1f), 0.5f, 50.0f);
         }
 
-        if (!ImGui.IsItemHovered() && !_isDragging && !_isPanning)
+        // Only handle mouse clicks and drags when hovering or already interacting
+        if (!isHovered && !_isDragging && !_isPanning)
         {
             return;
         }
