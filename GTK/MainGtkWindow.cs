@@ -13,6 +13,7 @@ using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
+using GeoscientistToolkit.GtkUI.Dialogs;
 using Cairo;
 using Gtk;
 
@@ -136,6 +137,16 @@ public class MainGtkWindow : Window
         viewMenuItem.Submenu = viewMenu;
         menuBar.Append(viewMenuItem);
 
+        var toolsMenuItem = new MenuItem("Tools");
+        var toolsMenu = new Menu();
+        toolsMenu.Append(CreateMenuItem("Material Library Browser...", (_, _) => OpenMaterialLibraryDialog()));
+        toolsMenu.Append(CreateMenuItem("Create Domain...", (_, _) => OpenDomainCreatorDialog()));
+        toolsMenu.Append(CreateMenuItem("Configure Species...", (_, _) => OpenSpeciesSelectorDialog()));
+        toolsMenu.Append(new SeparatorMenuItem());
+        toolsMenu.Append(CreateMenuItem("Geothermal Deep Wells Wizard...", (_, _) => OpenGeothermalConfigDialog()));
+        toolsMenuItem.Submenu = toolsMenu;
+        menuBar.Append(toolsMenuItem);
+
         var helpMenuItem = new MenuItem("Help");
         var helpMenu = new Menu();
         helpMenu.Append(CreateMenuItem("About", (_, _) => ShowAboutDialog()));
@@ -229,6 +240,12 @@ public class MainGtkWindow : Window
 
         buttonRow.PackStart(CreateSlimActionButton("Import mesh", IconSymbol.MeshImport, (_, _) => AddExistingDataset()), false, false, 0);
         buttonRow.PackStart(CreateSlimActionButton("Import table/CSV", IconSymbol.Table, (_, _) => ImportTableDataset()), false, false, 0);
+
+        buttonRow.PackStart(new Separator(Orientation.Horizontal), false, false, 4);
+
+        buttonRow.PackStart(CreateSlimActionButton("Geothermal Well Wizard", IconSymbol.PhysicoChem, (_, _) => OpenGeothermalConfigDialog()), false, false, 0);
+        buttonRow.PackStart(CreateSlimActionButton("Create Domain", IconSymbol.Mesh, (_, _) => OpenDomainCreatorDialog()), false, false, 0);
+        buttonRow.PackStart(CreateSlimActionButton("Material Library", IconSymbol.Material, (_, _) => OpenMaterialLibraryDialog()), false, false, 0);
 
         panel.PackStart(buttonRow, false, false, 0);
 
@@ -1621,6 +1638,149 @@ public class MainGtkWindow : Window
     {
         Union,
         Subtract
+    }
+
+    private void OpenMaterialLibraryDialog()
+    {
+        var dialog = new MaterialLibraryDialog(this);
+        var response = (ResponseType)dialog.Run();
+        dialog.Destroy();
+
+        if (response == ResponseType.Ok)
+        {
+            if (dialog.SelectedMaterial != null)
+            {
+                SetStatus($"Selected material: {dialog.SelectedMaterial.Name}");
+
+                // If we have a PhysicoChemDataset selected, add material to it
+                if (_selectedDataset is PhysicoChemDataset physico)
+                {
+                    if (!physico.Materials.Any(m => m.MaterialID == dialog.SelectedMaterial.MaterialID))
+                    {
+                        physico.Materials.Add(dialog.SelectedMaterial);
+                        SetStatus($"Added material {dialog.SelectedMaterial.Name} to {physico.Name}");
+                        RefreshDatasetList();
+                    }
+                }
+            }
+            else if (dialog.SelectedCompound != null)
+            {
+                SetStatus($"Selected compound: {dialog.SelectedCompound.Name}");
+            }
+        }
+    }
+
+    private void OpenDomainCreatorDialog()
+    {
+        if (_selectedDataset is not PhysicoChemDataset physico)
+        {
+            var msgDialog = new MessageDialog(this, DialogFlags.Modal, MessageType.Warning, ButtonsType.Ok,
+                "Please select a PhysicoChemDataset first to add domains.");
+            msgDialog.Run();
+            msgDialog.Destroy();
+            return;
+        }
+
+        var dialog = new DomainCreatorDialog(this, physico.Materials.ToList());
+        var response = (ResponseType)dialog.Run();
+        dialog.Destroy();
+
+        if (response == ResponseType.Ok && dialog.CreatedDomain != null)
+        {
+            // Add domain to dataset (Note: ReactorDomain is not directly added to PhysicoChemDataset in current architecture)
+            // For now, we'll create cells from the domain using the mesh generator
+            SetStatus($"Domain '{dialog.CreatedDomain.Name}' created. Generating mesh...");
+
+            // Generate mesh from domain
+            var generator = new ReactorMeshGenerator();
+            // Note: This requires a list of domains. We'd need to extend the architecture
+            // For now, show a message
+            var msgDialog = new MessageDialog(this, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok,
+                $"Domain '{dialog.CreatedDomain.Name}' created successfully!\n\n" +
+                $"Geometry: {dialog.CreatedDomain.Geometry}\n" +
+                $"Material: {dialog.CreatedDomain.MaterialProperties?.MaterialID ?? "None"}\n\n" +
+                $"Note: Full domain-to-mesh conversion will be implemented in next update.");
+            msgDialog.Run();
+            msgDialog.Destroy();
+        }
+    }
+
+    private void OpenSpeciesSelectorDialog()
+    {
+        if (_selectedDataset is not PhysicoChemDataset physico)
+        {
+            var msgDialog = new MessageDialog(this, DialogFlags.Modal, MessageType.Warning, ButtonsType.Ok,
+                "Please select a PhysicoChemDataset first to configure species.");
+            msgDialog.Run();
+            msgDialog.Destroy();
+            return;
+        }
+
+        // Get current concentrations from selected cells or use defaults
+        var initialConcentrations = new Dictionary<string, double>();
+        if (_meshViewport.SelectedCellIDs.Count > 0)
+        {
+            var firstCellId = _meshViewport.SelectedCellIDs.First();
+            if (physico.Mesh.Cells.TryGetValue(firstCellId, out var cell) &&
+                cell.InitialConditions?.Concentrations != null)
+            {
+                initialConcentrations = new Dictionary<string, double>(cell.InitialConditions.Concentrations);
+            }
+        }
+
+        var dialog = new SpeciesSelectorDialog(this, initialConcentrations);
+        var response = (ResponseType)dialog.Run();
+        dialog.Destroy();
+
+        if (response == ResponseType.Ok)
+        {
+            var concentrations = dialog.SelectedConcentrations;
+
+            // Apply to selected cells or all cells
+            if (_meshViewport.SelectedCellIDs.Count > 0)
+            {
+                foreach (var cellId in _meshViewport.SelectedCellIDs)
+                {
+                    if (physico.Mesh.Cells.TryGetValue(cellId, out var cell))
+                    {
+                        if (cell.InitialConditions == null)
+                            cell.InitialConditions = new InitialConditions();
+
+                        cell.InitialConditions.Concentrations = new Dictionary<string, double>(concentrations);
+                    }
+                }
+                SetStatus($"Applied {concentrations.Count} species to {_meshViewport.SelectedCellIDs.Count} cells");
+            }
+            else
+            {
+                // Apply to all cells
+                foreach (var cell in physico.Mesh.Cells.Values)
+                {
+                    if (cell.InitialConditions == null)
+                        cell.InitialConditions = new InitialConditions();
+
+                    cell.InitialConditions.Concentrations = new Dictionary<string, double>(concentrations);
+                }
+                SetStatus($"Applied {concentrations.Count} species to all cells");
+            }
+
+            _meshViewport.QueueDraw();
+        }
+    }
+
+    private void OpenGeothermalConfigDialog()
+    {
+        var dialog = new GeothermalConfigDialog(this);
+        var response = (ResponseType)dialog.Run();
+        dialog.Destroy();
+
+        if (response == ResponseType.Ok && dialog.CreatedDataset != null)
+        {
+            _projectManager.AddDataset(dialog.CreatedDataset);
+            RefreshDatasetList();
+            SelectFirstDataset();
+            SetStatus($"Geothermal well '{dialog.CreatedDataset.Name}' created with deep well configuration");
+        }
     }
 
     private void EnsureDefaultReactor()
