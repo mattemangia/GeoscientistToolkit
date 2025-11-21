@@ -131,6 +131,8 @@ public class MeshViewport3D : DrawingArea
         cr.SetSourceRGB(0.08, 0.09, 0.11);
         cr.Paint();
 
+        DrawAxisGizmo(cr, Allocation.Width, Allocation.Height);
+
         if (_points.Count == 0)
             return base.OnDrawn(cr);
 
@@ -180,10 +182,12 @@ public class MeshViewport3D : DrawingArea
         }
         else
         {
+            var radius = _points.Count <= 2 ? 9 : 3;
             foreach (var pt in projected)
             {
                 var p = Project(pt, min, scale, width, height);
-                cr.Arc(p.X, p.Y, 2, 0, Math.PI * 2);
+                cr.Arc(p.X, p.Y, radius, 0, Math.PI * 2);
+                cr.SetSourceRGB(0.3, 0.7, 1.0);
                 cr.Fill();
             }
         }
@@ -210,7 +214,7 @@ public class MeshViewport3D : DrawingArea
         cr.SelectFontFace("Sans", Cairo.FontSlant.Normal, Cairo.FontWeight.Normal);
         cr.SetFontSize(12);
         cr.MoveTo(12, 18);
-        cr.ShowText($"Punti: {_points.Count} | Lati: {_edges.Count} | Yaw {_yaw:F0}° | Pitch {_pitch:F0}°");
+        cr.ShowText($"Points: {_points.Count} | Edges: {_edges.Count} | Yaw {_yaw:F0}° | Pitch {_pitch:F0}°");
 
         return base.OnDrawn(cr);
     }
@@ -227,6 +231,35 @@ public class MeshViewport3D : DrawingArea
         if (a == b) return;
         var ordered = a < b ? (a, b) : (b, a);
         edges.Add(ordered);
+    }
+
+    private static void DrawAxisGizmo(Cairo.Context cr, int width, int height)
+    {
+        var origin = new Vector2(width - 70, height - 60);
+        var axisLength = 36f;
+
+        cr.LineWidth = 2.4;
+
+        cr.SetSourceRGB(0.82, 0.32, 0.32); // X red
+        cr.MoveTo(origin.X, origin.Y);
+        cr.LineTo(origin.X + axisLength, origin.Y);
+        cr.Stroke();
+        cr.MoveTo(origin.X + axisLength + 6, origin.Y + 4);
+        cr.ShowText("X");
+
+        cr.SetSourceRGB(0.35, 0.8, 0.45); // Y green
+        cr.MoveTo(origin.X, origin.Y);
+        cr.LineTo(origin.X, origin.Y - axisLength);
+        cr.Stroke();
+        cr.MoveTo(origin.X - 8, origin.Y - axisLength - 4);
+        cr.ShowText("Y");
+
+        cr.SetSourceRGB(0.35, 0.55, 0.95); // Z blue
+        cr.MoveTo(origin.X, origin.Y);
+        cr.LineTo(origin.X - axisLength * 0.7, origin.Y + axisLength * 0.7);
+        cr.Stroke();
+        cr.MoveTo(origin.X - axisLength * 0.7 - 12, origin.Y + axisLength * 0.7 + 2);
+        cr.ShowText("Z");
     }
 
     private int? FindClosestPoint(Vector2 pointer, float maxDistance = 12f)
