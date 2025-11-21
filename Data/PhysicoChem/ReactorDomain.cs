@@ -123,16 +123,43 @@ public class ReactorGeometry
     public (double X, double Y, double Z) Center { get; set; }
 
     [JsonProperty]
+    public (double X, double Y, double Z) CylinderBase { get; set; }
+
+    [JsonProperty]
+    public (double X, double Y, double Z) CylinderAxis { get; set; } = (0, 0, 1);
+
+    [JsonProperty]
     public (double Width, double Height, double Depth) Dimensions { get; set; }
 
     [JsonProperty]
     public double Radius { get; set; }
 
     [JsonProperty]
+    public double TopRadius { get; set; }
+
+    [JsonProperty]
     public double InnerRadius { get; set; }
 
     [JsonProperty]
     public double Height { get; set; }
+
+    [JsonProperty]
+    public double MajorRadius { get; set; }
+
+    [JsonProperty]
+    public double MinorRadius { get; set; }
+
+    [JsonProperty]
+    public (double X, double Y, double Z) Corner { get; set; }
+
+    [JsonProperty]
+    public (double X, double Y, double Z) Edge1 { get; set; }
+
+    [JsonProperty]
+    public (double X, double Y, double Z) Edge2 { get; set; }
+
+    [JsonProperty]
+    public (double X, double Y, double Z) Edge3 { get; set; }
 
     // For 2D profile definition
     [JsonProperty]
@@ -156,27 +183,37 @@ public class ReactorGeometry
     /// </summary>
     public bool ContainsPoint(double x, double y, double z)
     {
-        switch (Type)
-        {
-            case GeometryType.Box:
-                return IsInsideBox(x, y, z);
+            switch (Type)
+            {
+                case GeometryType.Box:
+                    return IsInsideBox(x, y, z);
 
-            case GeometryType.Sphere:
-                return IsInsideSphere(x, y, z);
+                case GeometryType.Sphere:
+                    return IsInsideSphere(x, y, z);
 
-            case GeometryType.Cylinder:
-                return IsInsideCylinder(x, y, z);
+                case GeometryType.Cylinder:
+                    return IsInsideCylinder(x, y, z);
 
-            case GeometryType.Cone:
-                return IsInsideCone(x, y, z);
+                case GeometryType.Cone:
+                    return IsInsideCone(x, y, z);
 
-            case GeometryType.Custom2D:
-                return IsInside2DExtrusion(x, y, z);
+                case GeometryType.Torus:
+                    return IsInsideTorus(x, y, z);
 
-            default:
-                return false;
+                case GeometryType.Parallelepiped:
+                    return IsInsideParallelepiped(x, y, z);
+
+                case GeometryType.Custom2D:
+                    return IsInside2DExtrusion(x, y, z);
+
+                case GeometryType.Custom3D:
+                case GeometryType.FromMesh:
+                    return IsInsideCustomMesh(x, y, z);
+
+                default:
+                    return false;
+            }
         }
-    }
 
     private bool IsInsideBox(double x, double y, double z)
     {
@@ -229,9 +266,59 @@ public class ReactorGeometry
         if (heightFraction < 0 || heightFraction > 1) return false;
 
         double r2 = dx * dx + dy * dy;
-        double maxRadius = Radius * (1.0 - heightFraction);
+        double topRadius = TopRadius > 0 ? TopRadius : 0.0;
+        double maxRadius = Radius + (topRadius - Radius) * heightFraction;
 
         return r2 <= maxRadius * maxRadius;
+    }
+
+    private bool IsInsideTorus(double x, double y, double z)
+    {
+        var dx = x - Center.X;
+        var dy = y - Center.Y;
+        var dz = z - Center.Z;
+
+        var radialDistance = Math.Sqrt(dx * dx + dy * dy);
+        var tubeCenterOffset = radialDistance - MajorRadius;
+
+        return (tubeCenterOffset * tubeCenterOffset + dz * dz) <= MinorRadius * MinorRadius;
+    }
+
+    private bool IsInsideParallelepiped(double x, double y, double z)
+    {
+        var corner = new Vector3((float)Corner.X, (float)Corner.Y, (float)Corner.Z);
+        var e1 = new Vector3((float)Edge1.X, (float)Edge1.Y, (float)Edge1.Z);
+        var e2 = new Vector3((float)Edge2.X, (float)Edge2.Y, (float)Edge2.Z);
+        var e3 = new Vector3((float)Edge3.X, (float)Edge3.Y, (float)Edge3.Z);
+
+        var p = new Vector3((float)x, (float)y, (float)z) - corner;
+
+        var denom = Vector3.Dot(e1, Vector3.Cross(e2, e3));
+        if (Math.Abs(denom) < 1e-6)
+            return false;
+
+        var a = Vector3.Dot(p, Vector3.Cross(e2, e3)) / denom;
+        var b = Vector3.Dot(p, Vector3.Cross(e3, e1)) / denom;
+        var c = Vector3.Dot(p, Vector3.Cross(e1, e2)) / denom;
+
+        return a >= 0 && a <= 1 && b >= 0 && b <= 1 && c >= 0 && c <= 1;
+    }
+
+    private bool IsInsideCustomMesh(double x, double y, double z)
+    {
+        if (CustomPoints == null || CustomPoints.Count == 0)
+            return false;
+
+        var minX = CustomPoints.Min(p => p.X);
+        var maxX = CustomPoints.Max(p => p.X);
+        var minY = CustomPoints.Min(p => p.Y);
+        var maxY = CustomPoints.Max(p => p.Y);
+        var minZ = CustomPoints.Min(p => p.Z);
+        var maxZ = CustomPoints.Max(p => p.Z);
+
+        return x >= minX && x <= maxX &&
+               y >= minY && y <= maxY &&
+               z >= minZ && z <= maxZ;
     }
 
     private bool IsInside2DExtrusion(double x, double y, double z)

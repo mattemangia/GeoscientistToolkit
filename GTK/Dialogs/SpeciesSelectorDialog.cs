@@ -153,7 +153,7 @@ public class SpeciesSelectorDialog : Dialog
 
         contentBox.PackStart(mainPane, true, true, 0);
 
-        VBox.PackStart(contentBox, true, true, 0);
+        this.ContentArea.PackStart(contentBox, true, true, 0);
     }
 
     private void PopulateCompounds()
@@ -163,10 +163,10 @@ public class SpeciesSelectorDialog : Dialog
         // Populate selected species
         foreach (var (species, conc) in _selectedConcentrations)
         {
-            var compound = _compoundLibrary.Compounds.FirstOrDefault(c => c.Name == species || c.Formula == species);
+            var compound = _compoundLibrary.Compounds.FirstOrDefault(c => c.Name == species || c.ChemicalFormula == species);
             if (compound != null)
             {
-                _selectedStore.AppendValues(compound.Name, compound.Formula ?? "", conc.ToString("F6"), compound);
+                _selectedStore.AppendValues(compound.Name, compound.ChemicalFormula ?? string.Empty, conc.ToString("F6"), compound);
             }
         }
     }
@@ -180,13 +180,13 @@ public class SpeciesSelectorDialog : Dialog
         var filtered = _compoundLibrary.Compounds
             .Where(c => string.IsNullOrEmpty(searchTerm) ||
                        c.Name.ToLower().Contains(searchTerm) ||
-                       (c.Formula != null && c.Formula.ToLower().Contains(searchTerm)))
-            .Where(c => phaseFilter == "all" || c.Phase.ToLower() == phaseFilter)
+                       (!string.IsNullOrEmpty(c.ChemicalFormula) && c.ChemicalFormula.ToLower().Contains(searchTerm)))
+            .Where(c => phaseFilter == "all" || c.Phase.ToString().ToLower() == phaseFilter)
             .OrderBy(c => c.Name);
 
         foreach (var compound in filtered)
         {
-            _availableStore.AppendValues(compound.Name, compound.Formula ?? "", compound.Phase, compound);
+            _availableStore.AppendValues(compound.Name, compound.ChemicalFormula ?? string.Empty, compound.Phase.ToString(), compound);
         }
     }
 
@@ -218,7 +218,7 @@ public class SpeciesSelectorDialog : Dialog
             // Add with default concentration
             double defaultConc = 0.001; // 1 mM
             _selectedConcentrations[compound.Name] = defaultConc;
-            _selectedStore.AppendValues(compound.Name, compound.Formula ?? "", defaultConc.ToString("F6"), compound);
+            _selectedStore.AppendValues(compound.Name, compound.ChemicalFormula ?? string.Empty, defaultConc.ToString("F6"), compound);
         }
     }
 
@@ -248,28 +248,35 @@ public class SpeciesSelectorDialog : Dialog
     private void DisplayCompoundInfo(ChemicalCompound compound)
     {
         var text = $"COMPOUND: {compound.Name}\n";
-        if (!string.IsNullOrEmpty(compound.Formula))
-            text += $"Formula: {compound.Formula}\n";
+        if (!string.IsNullOrEmpty(compound.ChemicalFormula))
+            text += $"Formula: {compound.ChemicalFormula}\n";
         text += $"Phase: {compound.Phase}\n";
         text += $"{'=',50}\n\n";
 
-        text += $"Molecular Weight: {compound.MolecularWeight:F2} g/mol\n";
-        if (compound.Density > 0)
-            text += $"Density: {compound.Density:F2} g/cm³\n\n";
+        if (compound.MolecularWeight_g_mol.HasValue)
+            text += $"Molecular Weight: {compound.MolecularWeight_g_mol:F2} g/mol\n";
+        if (compound.Density_g_cm3.HasValue)
+            text += $"Density: {compound.Density_g_cm3:F2} g/cm³\n\n";
 
-        if (compound.GibbsEnergy != 0 || compound.Enthalpy != 0)
+        if (compound.GibbsFreeEnergyFormation_kJ_mol.HasValue || compound.EnthalpyFormation_kJ_mol.HasValue)
         {
             text += "THERMODYNAMIC DATA (298.15 K):\n";
-            text += $"  ΔG°f: {compound.GibbsEnergy:F1} kJ/mol\n";
-            text += $"  ΔH°f: {compound.Enthalpy:F1} kJ/mol\n";
-            text += $"  S°: {compound.Entropy:F2} J/mol·K\n\n";
+            if (compound.GibbsFreeEnergyFormation_kJ_mol.HasValue)
+                text += $"  ΔG°f: {compound.GibbsFreeEnergyFormation_kJ_mol:F1} kJ/mol\n";
+            if (compound.EnthalpyFormation_kJ_mol.HasValue)
+                text += $"  ΔH°f: {compound.EnthalpyFormation_kJ_mol:F1} kJ/mol\n";
+            if (compound.Entropy_J_molK.HasValue)
+                text += $"  S°: {compound.Entropy_J_molK:F2} J/mol·K\n\n";
         }
 
-        if (compound.Ksp > 0)
+        if (compound.LogKsp_25C.HasValue)
         {
             text += "SOLUBILITY:\n";
-            text += $"  Ksp: {compound.Ksp:E2}\n";
-            text += $"  Solubility: {compound.Solubility:F4} mol/L\n\n";
+            var logKsp = compound.LogKsp_25C.Value;
+            text += $"  log10(Ksp): {logKsp:F2}\n";
+            text += $"  Ksp: {Math.Pow(10, logKsp):E2}\n";
+            if (compound.Solubility_g_100mL_25C.HasValue)
+                text += $"  Solubility: {compound.Solubility_g_100mL_25C:F4} g/100mL\n\n";
         }
 
         if (compound.pKa > 0)
@@ -277,9 +284,13 @@ public class SpeciesSelectorDialog : Dialog
         if (compound.pKb > 0)
             text += $"pKb: {compound.pKb:F2}\n";
 
-        if (compound.ActivationEnergy > 0)
+        if (compound.ActivationEnergy_Dissolution_kJ_mol.HasValue || compound.ActivationEnergy_Precipitation_kJ_mol.HasValue)
         {
-            text += $"\nActivation Energy: {compound.ActivationEnergy:F1} kJ/mol\n";
+            text += "\nKINETIC PROPERTIES:\n";
+            if (compound.ActivationEnergy_Dissolution_kJ_mol.HasValue)
+                text += $"  Activation Energy (dissolution): {compound.ActivationEnergy_Dissolution_kJ_mol:F1} kJ/mol\n";
+            if (compound.ActivationEnergy_Precipitation_kJ_mol.HasValue)
+                text += $"  Activation Energy (precipitation): {compound.ActivationEnergy_Precipitation_kJ_mol:F1} kJ/mol\n";
         }
 
         _compoundInfoView.Buffer.Text = text;

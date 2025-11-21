@@ -19,6 +19,7 @@
     <Compile Include="Program.cs" />
     <Compile Include="SplashWindow.cs" />
     <Compile Include="MainGtkWindow.cs" />
+    <Compile Include="Dialogs\*.cs" />
     <Compile Include="Views\MeshViewport3D.cs" />
   </ItemGroup>
   <ItemGroup>

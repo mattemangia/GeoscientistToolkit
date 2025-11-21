@@ -25,6 +25,12 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
     [JsonProperty]
     public PhysicoChemMesh Mesh { get; set; } = new();
 
+    /// <summary>
+    /// Reactor domains that define the geometry and material distribution
+    /// </summary>
+    [JsonProperty]
+    public List<ReactorDomain> Domains { get; set; } = new();
+
     [JsonProperty]
     public List<MaterialProperties> Materials { get; set; } = new();
 
@@ -96,7 +102,63 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
     public void GenerateMesh(int resolution = 50)
     {
         var meshGenerator = new ReactorMeshGenerator();
-        GeneratedMesh = meshGenerator.GenerateMeshFromDomains(new List<ReactorDomain>(), resolution);
+        GeneratedMesh = meshGenerator.GenerateMeshFromDomains(Domains, resolution);
+
+        Mesh = ConvertGridMeshToPhysicoChem(GeneratedMesh);
+    }
+
+    private PhysicoChemMesh ConvertGridMeshToPhysicoChem(GridMesh3D gridMesh)
+    {
+        var mesh = new PhysicoChemMesh();
+
+        // Try to read material assignments from the grid metadata
+        gridMesh.Metadata.TryGetValue("MaterialIds", out var materialFieldObj);
+        var materialField = materialFieldObj as int[,,];
+
+        var (nx, ny, nz) = gridMesh.GridSize;
+        var cellVolume = gridMesh.Spacing.X * gridMesh.Spacing.Y * gridMesh.Spacing.Z;
+
+        for (var i = 0; i < nx; i++)
+        for (var j = 0; j < ny; j++)
+        for (var k = 0; k < nz; k++)
+        {
+            var id = $"C_{i}_{j}_{k}";
+            var center = gridMesh.GetCellCenter(i, j, k);
+
+            var domainIndex = materialField != null ? materialField[i, j, k] : -1;
+            var materialId = "Default";
+            InitialConditions? initialConditions = null;
+
+            if (domainIndex >= 0 && domainIndex < Domains.Count)
+            {
+                var domain = Domains[domainIndex];
+                materialId = domain.Material?.MaterialID ?? materialId;
+
+                if (domain.InitialConditions != null)
+                {
+                    initialConditions = new InitialConditions
+                    {
+                        Temperature = domain.InitialConditions.Temperature,
+                        Pressure = domain.InitialConditions.Pressure,
+                        Concentrations = new Dictionary<string, double>(domain.InitialConditions.Concentrations),
+                        InitialVelocity = domain.InitialConditions.InitialVelocity,
+                        LiquidSaturation = domain.InitialConditions.LiquidSaturation,
+                        FluidType = domain.InitialConditions.FluidType
+                    };
+                }
+            }
+
+            mesh.Cells[id] = new Cell
+            {
+                ID = id,
+                MaterialID = materialId,
+                InitialConditions = initialConditions,
+                Center = center,
+                Volume = cellVolume
+            };
+        }
+
+        return mesh;
     }
 
     /// <summary>
