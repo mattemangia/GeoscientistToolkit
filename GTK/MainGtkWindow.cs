@@ -29,6 +29,8 @@ public class MainGtkWindow : Window
     private readonly ListStore _datasetStore = new(typeof(string), typeof(string), typeof(Dataset));
     private readonly TreeView _datasetView = new();
     private readonly TextView _detailsView = new() { Editable = false, WrapMode = WrapMode.Word, Monospace = true };
+    private readonly TreeStore _assetStore = new(typeof(string), typeof(string));
+    private readonly TreeView _assetTreeView = new();
     private readonly MeshViewport3D _meshViewport = new();
     private readonly DrawingArea _boreholeLithologyCanvas = new();
     private readonly DrawingArea _boreholeLogCanvas = new();
@@ -221,6 +223,8 @@ public class MainGtkWindow : Window
         buttonRow.PackStart(CreateSlimActionButton("Import table/CSV", IconSymbol.Table, (_, _) => ImportTableDataset()), false, false, 0);
 
         panel.PackStart(buttonRow, false, false, 0);
+
+        panel.PackStart(BuildAssetTree(), true, true, 0);
 
         return panel;
     }
@@ -483,10 +487,12 @@ public class MainGtkWindow : Window
         if (_selectedDataset == null)
         {
             _detailsView.Buffer.Text = "No dataset selected.";
+            _assetStore.Clear();
             return;
         }
 
         _detailsView.Buffer.Text = BuildDatasetSummary(_selectedDataset);
+        RefreshAssetTree(_selectedDataset);
         UpdateMeshViewport(_selectedDataset);
         _boreholeLithologyCanvas.QueueDraw();
         _boreholeLogCanvas.QueueDraw();
@@ -708,10 +714,11 @@ public class MainGtkWindow : Window
         var button = new Button
         {
             Relief = ReliefStyle.Half,
-            HeightRequest = 30,
-            WidthRequest = 160,
+            HeightRequest = 28,
+            WidthRequest = 140,
             TooltipText = label,
-            Halign = Align.Start
+            Halign = Align.Start,
+            Hexpand = false
         };
         button.Add(box);
         button.Clicked += handler;
@@ -901,6 +908,72 @@ public class MainGtkWindow : Window
         return frame;
     }
 
+    private Widget BuildAssetTree()
+    {
+        var frame = new Frame("Datasets, materials, and forces") { BorderWidth = 4 };
+        _assetTreeView.Model = _assetStore;
+        _assetTreeView.HeadersVisible = true;
+        _assetTreeView.AppendColumn("Item", new CellRendererText(), "text", 0);
+        _assetTreeView.AppendColumn("Details", new CellRendererText(), "text", 1);
+
+        var scroller = new ScrolledWindow { ShadowType = ShadowType.In };
+        scroller.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+        scroller.Add(_assetTreeView);
+        frame.Add(scroller);
+        return frame;
+    }
+
+    private void RefreshAssetTree(Dataset dataset)
+    {
+        _assetStore.Clear();
+
+        var root = _assetStore.AppendValues(dataset.Name, dataset.Type.ToString());
+
+        switch (dataset)
+        {
+            case PhysicoChemDataset physico:
+                var materials = _assetStore.AppendValues(root, "Materials", $"{physico.Materials.Count} items");
+                foreach (var mat in physico.Materials)
+                {
+                    var info = $"ρ={mat.Density} kg/m³, k={mat.ThermalConductivity} W/mK";
+                    _assetStore.AppendValues(materials, mat.MaterialID, info);
+                }
+
+                var forces = _assetStore.AppendValues(root, "Forces", $"{physico.Forces.Count} items");
+                foreach (var force in physico.Forces)
+                {
+                    var info = force.Type.ToString();
+                    _assetStore.AppendValues(forces, force.Name, info);
+                }
+
+                _assetStore.AppendValues(root, "Mesh", $"Cells: {physico.Mesh.Cells.Count}, Connections: {physico.Mesh.Connections.Count}");
+                break;
+            case BoreholeDataset borehole:
+                var lithologies = _assetStore.AppendValues(root, "Lithology", $"{borehole.LithologyUnits.Count} units");
+                foreach (var unit in borehole.LithologyUnits)
+                    _assetStore.AppendValues(lithologies, unit.LithologyType, $"{unit.DepthFrom:F1}-{unit.DepthTo:F1} m");
+                var logs = _assetStore.AppendValues(root, "Parameter tracks", $"Tracks: {borehole.ParameterTracks.Count}");
+                foreach (var track in borehole.ParameterTracks.Values)
+                    _assetStore.AppendValues(logs, track.Name, $"{track.MinValue}-{track.MaxValue} {track.Unit}");
+                break;
+            case Mesh3DDataset mesh3D:
+                _assetStore.AppendValues(root, "Vertices", mesh3D.VertexCount.ToString());
+                _assetStore.AppendValues(root, "Faces", mesh3D.FaceCount.ToString());
+                break;
+            case TableDataset table:
+                var columns = _assetStore.AppendValues(root, "Columns", $"{table.ColumnCount} fields");
+                for (int i = 0; i < table.ColumnNames.Count; i++)
+                {
+                    var typeName = table.ColumnTypes.ElementAtOrDefault(i)?.Name ?? "";
+                    _assetStore.AppendValues(columns, table.ColumnNames[i], typeName);
+                }
+                _assetStore.AppendValues(root, "Rows", table.RowCount.ToString());
+                break;
+        }
+
+        _assetTreeView.ExpandAll();
+    }
+
     private void CreateDatasetFromInputs()
     {
         var name = string.IsNullOrWhiteSpace(_datasetNameEntry.Text) ? $"Dataset_{DateTime.Now:HHmmss}" : _datasetNameEntry.Text.Trim();
@@ -947,6 +1020,7 @@ public class MainGtkWindow : Window
             cell.MaterialID = mat.MaterialID;
 
         _detailsView.Buffer.Text = BuildDatasetSummary(physico);
+        RefreshAssetTree(physico);
         SetStatus($"Material '{mat.MaterialID}' assigned to all cells.");
     }
 
@@ -968,6 +1042,7 @@ public class MainGtkWindow : Window
 
         physico.Forces.Add(force);
         _detailsView.Buffer.Text = BuildDatasetSummary(physico);
+        RefreshAssetTree(physico);
         SetStatus($"Force '{forceName}' added ({type}).");
     }
 
@@ -1167,16 +1242,19 @@ public class MainGtkWindow : Window
         var provider = new CssProvider();
         provider.LoadFromData(@"
             * { color: #e8ecf0; font-family: Cantarell, Segoe UI, sans-serif; }
-            window, dialog, toolbar, menubar, notebook, frame, scrolledwindow, box { background: #0f1015; }
+            window, dialog, toolbar, menubar, notebook, frame, scrolledwindow, box, paned, revealer { background: #0f1015; }
+            notebook > header, notebook > header > tabs { background: #141621; }
+            notebook > header tab, notebook > header tab label { background: #1b1d26; color: #e8ecf0; padding: 6px 10px; }
+            notebook > header tab:checked, notebook > header tab:active { background: #222738; }
+            notebook stack, scrolledwindow > viewport, textview > text, treeview.view { background: #0f1015; color: #e8ecf0; }
             treeview, textview, entry, combobox { background: #141620; color: #e8ecf0; }
             textview text { color: #e8ecf0; }
             treeview.view row:selected, treeview.view row:selected:focus { background: #26304a; color: #f8fbff; }
-            notebook tab, notebook tab label { background: #1b1d26; color: #e8ecf0; padding: 6px 10px; }
-            notebook tab:checked, notebook tab:active { background: #222738; }
             toolbar { border-bottom: 1px solid #1f2230; background: #141621; }
             menubar, menu, menuitem, menuitem * { background: #141621; color: #e8ecf0; }
             menuitem:hover, menuitem:selected { background: #1f2433; color: #f8fbff; }
-            button { background: #1d202c; color: #f5f7fb; border-radius: 6px; padding: 4px 8px; }
+            menu { border: 1px solid #1f2230; }
+            button, toolbutton { background: #1d202c; color: #f5f7fb; border-radius: 6px; padding: 4px 8px; }
             button:hover { background: #262a38; }
             frame > label { color: #9fb4ff; }
             scale trough { background: #1f2230; }
