@@ -53,6 +53,50 @@ namespace GeoscientistToolkit.Data.PhysicoChem
     }
 
     /// <summary>
+    ///     Represents an object inside the reactor (e.g., Heat Exchanger, Baffle).
+    /// </summary>
+    public class ReactorObject
+    {
+        public string Name { get; set; }
+        public string MaterialID { get; set; }
+        public string Type { get; set; } // "HeatExchanger", "Baffle", "Obstacle"
+
+        // Simplified Geometry (Box or Cylinder for now)
+        public (double X, double Y, double Z) Center { get; set; }
+        public (double X, double Y, double Z) Size { get; set; } // For Box
+        public double Radius { get; set; } // For Cylinder
+        public double Height { get; set; } // For Cylinder
+        public bool IsCylinder { get; set; }
+
+        public bool IsPointInside(double x, double y, double z)
+        {
+            if (IsCylinder)
+            {
+                var dx = x - Center.X;
+                var dy = y - Center.Y;
+                var distSq = dx * dx + dy * dy;
+                return distSq <= Radius * Radius && z >= Center.Z - Height / 2 && z <= Center.Z + Height / 2;
+            }
+            else
+            {
+                return x >= Center.X - Size.X / 2 && x <= Center.X + Size.X / 2 &&
+                       y >= Center.Y - Size.Y / 2 && y <= Center.Y + Size.Y / 2 &&
+                       z >= Center.Z - Size.Z / 2 && z <= Center.Z + Size.Z / 2;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Represents a nucleation point for crystallization or phase change.
+    /// </summary>
+    public class NucleationPoint
+    {
+        public string ID { get; set; }
+        public (double X, double Y, double Z) Position { get; set; }
+        public bool Active { get; set; } = true;
+    }
+
+    /// <summary>
     ///     Represents the simulation mesh for a PhysicoChem dataset.
     /// </summary>
     public class PhysicoChemMesh
@@ -68,6 +112,52 @@ namespace GeoscientistToolkit.Data.PhysicoChem
         /// </summary>
         [JsonProperty]
         public List<(string Cell1_ID, string Cell2_ID)> Connections { get; set; } = new List<(string, string)>();
+
+        /// <summary>
+        ///     List of objects embedded in the mesh.
+        /// </summary>
+        [JsonProperty]
+        public List<ReactorObject> ReactorObjects { get; set; } = new List<ReactorObject>();
+
+        /// <summary>
+        ///     List of nucleation points.
+        /// </summary>
+        [JsonProperty]
+        public List<NucleationPoint> NucleationPoints { get; set; } = new List<NucleationPoint>();
+
+        /// <summary>
+        ///     Embeds a reactor object into the mesh, updating cell materials.
+        /// </summary>
+        public void EmbedObject(ReactorObject obj)
+        {
+            ReactorObjects.Add(obj);
+            foreach (var cell in Cells.Values)
+            {
+                if (obj.IsPointInside(cell.Center.X, cell.Center.Y, cell.Center.Z))
+                {
+                    cell.MaterialID = obj.MaterialID;
+                }
+            }
+        }
+
+        /// <summary>
+        ///     Updates the mesh based on all reactor objects (re-applies materials).
+        /// </summary>
+        public void RefreshObjects()
+        {
+            // Reset to default if needed? Or just overwrite.
+            // Assuming base material is set, we overwrite with object materials.
+            foreach (var obj in ReactorObjects)
+            {
+                foreach (var cell in Cells.Values)
+                {
+                    if (obj.IsPointInside(cell.Center.X, cell.Center.Y, cell.Center.Z))
+                    {
+                        cell.MaterialID = obj.MaterialID;
+                    }
+                }
+            }
+        }
 
         /// <summary>
         ///     Splits the mesh into a structured grid of cells.

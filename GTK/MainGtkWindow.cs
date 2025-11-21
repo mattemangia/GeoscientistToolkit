@@ -47,6 +47,10 @@ public class MainGtkWindow : Window
     private readonly ComboBoxText _renderModeSelector = new();
     private readonly ComboBoxText _selectionModeSelector = new();
     private readonly ComboBoxText _colorModeSelector = new();
+    private readonly CheckButton _enableSlicingCheck = new("Enable Slicing");
+    private readonly Scale _slicePositionScale = new(Orientation.Horizontal, new Adjustment(0, -50, 50, 1, 10, 0));
+    private readonly CheckButton _enableIsosurfaceCheck = new("Show Isosurface");
+    private readonly Scale _isosurfaceThresholdScale = new(Orientation.Horizontal, new Adjustment(300, 0, 1000, 10, 50, 0));
     private readonly Label _selectionInfoLabel = new() { Xalign = 0 };
     private readonly TextView _cellPropertiesView = new() { Editable = false, WrapMode = WrapMode.Word, Monospace = true };
     private readonly Adjustment _yawAdjustment = new(35, -180, 180, 1, 10, 0);
@@ -141,9 +145,15 @@ public class MainGtkWindow : Window
         var toolsMenu = new Menu();
         toolsMenu.Append(CreateMenuItem("Material Library Browser...", (_, _) => OpenMaterialLibraryDialog()));
         toolsMenu.Append(CreateMenuItem("Create Domain...", (_, _) => OpenDomainCreatorDialog()));
+        toolsMenu.Append(CreateMenuItem("Add Heat Exchanger / Object...", (_, _) => OpenHeatExchangerDialog()));
         toolsMenu.Append(CreateMenuItem("Configure Species...", (_, _) => OpenSpeciesSelectorDialog()));
+        toolsMenu.Append(CreateMenuItem("Set Boundary Conditions...", (_, _) => OpenBoundaryConditionEditor()));
+        toolsMenu.Append(CreateMenuItem("Force Field Editor...", (_, _) => OpenForceFieldEditor()));
         toolsMenu.Append(new SeparatorMenuItem());
+        toolsMenu.Append(CreateMenuItem("Simulation Setup Wizard...", (_, _) => OpenSimulationSetupWizard()));
+        toolsMenu.Append(CreateMenuItem("Boolean Operations...", (_, _) => OpenBooleanOperationsUI()));
         toolsMenu.Append(CreateMenuItem("Geothermal Deep Wells Wizard...", (_, _) => OpenGeothermalConfigDialog()));
+        toolsMenu.Append(CreateMenuItem("Add Nucleation Point", (_, _) => AddNucleationPoint()));
         toolsMenuItem.Submenu = toolsMenu;
         menuBar.Append(toolsMenuItem);
 
@@ -413,8 +423,62 @@ public class MainGtkWindow : Window
         };
         renderGrid.Attach(_colorModeSelector, 1, 1, 2, 1);
 
+        // Slicing Controls
+        _enableSlicingCheck.Toggled += (_, _) =>
+        {
+            _meshViewport.EnableSlicing = _enableSlicingCheck.Active;
+            _meshViewport.QueueDraw();
+        };
+        renderGrid.Attach(_enableSlicingCheck, 0, 2, 2, 1);
+
+        var sliceAxisCombo = new ComboBoxText();
+        sliceAxisCombo.AppendText("X Axis");
+        sliceAxisCombo.AppendText("Y Axis");
+        sliceAxisCombo.AppendText("Z Axis");
+        sliceAxisCombo.Active = 2; // Default Z
+
+        renderGrid.Attach(new Label("Slice Axis") { Xalign = 0 }, 0, 3, 1, 1);
+        renderGrid.Attach(sliceAxisCombo, 1, 3, 1, 1);
+
+        renderGrid.Attach(new Label("Position") { Xalign = 0 }, 0, 4, 1, 1);
+        _slicePositionScale.DrawValue = true;
+
+        void UpdateSlicePlane()
+        {
+            var pos = (float)-_slicePositionScale.Value;
+            _meshViewport.SlicePlane = sliceAxisCombo.Active switch
+            {
+                0 => new System.Numerics.Vector4(1, 0, 0, pos),
+                1 => new System.Numerics.Vector4(0, 1, 0, pos),
+                _ => new System.Numerics.Vector4(0, 0, 1, pos)
+            };
+            _meshViewport.QueueDraw();
+        }
+
+        sliceAxisCombo.Changed += (_, _) => UpdateSlicePlane();
+        _slicePositionScale.ValueChanged += (_, _) => UpdateSlicePlane();
+
+        renderGrid.Attach(_slicePositionScale, 1, 4, 1, 1);
+
+        // Isosurface Controls
+        _enableIsosurfaceCheck.Toggled += (_, _) =>
+        {
+            _meshViewport.ShowIsosurface = _enableIsosurfaceCheck.Active;
+            _meshViewport.QueueDraw();
+        };
+        renderGrid.Attach(_enableIsosurfaceCheck, 0, 5, 2, 1);
+
+        renderGrid.Attach(new Label("Iso Threshold") { Xalign = 0 }, 0, 6, 1, 1);
+        _isosurfaceThresholdScale.DrawValue = true;
+        _isosurfaceThresholdScale.ValueChanged += (_, _) =>
+        {
+            _meshViewport.IsosurfaceThreshold = _isosurfaceThresholdScale.Value;
+            _meshViewport.QueueDraw();
+        };
+        renderGrid.Attach(_isosurfaceThresholdScale, 1, 6, 1, 1);
+
         // Selection mode selector
-        renderGrid.Attach(new Label("Selection") { Xalign = 0 }, 0, 2, 1, 1);
+        renderGrid.Attach(new Label("Selection") { Xalign = 0 }, 0, 7, 1, 1);
         _selectionModeSelector.AppendText("Single");
         _selectionModeSelector.AppendText("Multiple");
         _selectionModeSelector.AppendText("Plane XY");
@@ -433,23 +497,23 @@ public class MainGtkWindow : Window
                 _ => SelectionMode.Single
             };
         };
-        renderGrid.Attach(_selectionModeSelector, 1, 2, 2, 1);
+        renderGrid.Attach(_selectionModeSelector, 1, 7, 2, 1);
 
         // Camera controls
-        renderGrid.Attach(new Label("Yaw") { Xalign = 0 }, 0, 3, 1, 1);
+        renderGrid.Attach(new Label("Yaw") { Xalign = 0 }, 0, 8, 1, 1);
         var yawScale = new Scale(Orientation.Horizontal, _yawAdjustment) { DrawValue = true };
         yawScale.ValueChanged += (_, _) => UpdateViewportCamera();
-        renderGrid.Attach(yawScale, 1, 3, 2, 1);
+        renderGrid.Attach(yawScale, 1, 8, 2, 1);
 
-        renderGrid.Attach(new Label("Pitch") { Xalign = 0 }, 0, 4, 1, 1);
+        renderGrid.Attach(new Label("Pitch") { Xalign = 0 }, 0, 9, 1, 1);
         var pitchScale = new Scale(Orientation.Horizontal, _pitchAdjustment) { DrawValue = true };
         pitchScale.ValueChanged += (_, _) => UpdateViewportCamera();
-        renderGrid.Attach(pitchScale, 1, 4, 2, 1);
+        renderGrid.Attach(pitchScale, 1, 9, 2, 1);
 
-        renderGrid.Attach(new Label("Zoom") { Xalign = 0 }, 0, 5, 1, 1);
+        renderGrid.Attach(new Label("Zoom") { Xalign = 0 }, 0, 10, 1, 1);
         var zoomScale = new Scale(Orientation.Horizontal, _zoomAdjustment) { DrawValue = true };
         zoomScale.ValueChanged += (_, _) => UpdateViewportCamera();
-        renderGrid.Attach(zoomScale, 1, 5, 2, 1);
+        renderGrid.Attach(zoomScale, 1, 10, 2, 1);
 
         renderFrame.Add(renderGrid);
         container.PackStart(renderFrame, false, false, 0);
@@ -1781,6 +1845,113 @@ public class MainGtkWindow : Window
             SelectFirstDataset();
             SetStatus($"Geothermal well '{dialog.CreatedDataset.Name}' created with deep well configuration");
         }
+    }
+
+    private void OpenHeatExchangerDialog()
+    {
+        if (_selectedDataset is not PhysicoChemDataset physico)
+        {
+            var msg = new MessageDialog(this, DialogFlags.Modal, MessageType.Warning, ButtonsType.Ok, "Please select a PhysicoChem dataset first.");
+            msg.Run();
+            msg.Destroy();
+            return;
+        }
+
+        var dialog = new HeatExchangerConfigDialog(this, physico.Materials.ToList());
+        var response = (ResponseType)dialog.Run();
+        dialog.Destroy();
+
+        if (response == ResponseType.Ok && dialog.CreatedObject != null)
+        {
+            physico.Mesh.EmbedObject(dialog.CreatedObject);
+            _meshViewport.QueueDraw();
+            SetStatus($"Added reactor object: {dialog.CreatedObject.Name} ({dialog.CreatedObject.Type})");
+        }
+    }
+
+    private void OpenSimulationSetupWizard()
+    {
+        var dialog = new SimulationSetupWizard(this);
+        var response = (ResponseType)dialog.Run();
+        dialog.Destroy();
+        if (response == ResponseType.Ok)
+        {
+            SetStatus("Simulation configuration saved.");
+        }
+    }
+
+    private void OpenBooleanOperationsUI()
+    {
+        var dialog = new BooleanOperationsUI(this);
+        dialog.Run();
+        dialog.Destroy();
+    }
+
+    private void OpenBoundaryConditionEditor()
+    {
+        var dialog = new BoundaryConditionEditor(this);
+        if (dialog.Run() == (int)ResponseType.Ok)
+        {
+            SetStatus("Boundary conditions applied.");
+        }
+        dialog.Destroy();
+    }
+
+    private void OpenForceFieldEditor()
+    {
+        var dialog = new ForceFieldEditor(this);
+        dialog.Run();
+        dialog.Destroy();
+    }
+
+    private void AddNucleationPoint()
+    {
+        if (_selectedDataset is not PhysicoChemDataset physico) return;
+
+        var dialog = new Dialog("Add Nucleation Point", this, DialogFlags.Modal);
+        dialog.AddButton("Cancel", ResponseType.Cancel);
+        dialog.AddButton("Add", ResponseType.Ok);
+        dialog.AddButton("Add Random", ResponseType.Apply);
+
+        var content = dialog.ContentArea;
+        var grid = new Grid { ColumnSpacing = 8, RowSpacing = 8, BorderWidth = 10 };
+
+        var xSpin = new SpinButton(-1000, 1000, 0.1) { Value = 0 };
+        var ySpin = new SpinButton(-1000, 1000, 0.1) { Value = 0 };
+        var zSpin = new SpinButton(-1000, 1000, 0.1) { Value = 0 };
+
+        grid.Attach(new Label("X:"), 0, 0, 1, 1); grid.Attach(xSpin, 1, 0, 1, 1);
+        grid.Attach(new Label("Y:"), 0, 1, 1, 1); grid.Attach(ySpin, 1, 1, 1, 1);
+        grid.Attach(new Label("Z:"), 0, 2, 1, 1); grid.Attach(zSpin, 1, 2, 1, 1);
+
+        content.PackStart(grid, true, true, 0);
+        dialog.ShowAll();
+
+        var response = (ResponseType)dialog.Run();
+
+        if (response == ResponseType.Ok)
+        {
+            var point = new NucleationPoint
+            {
+                ID = $"Nuc_{physico.Mesh.NucleationPoints.Count + 1}",
+                Position = (xSpin.Value, ySpin.Value, zSpin.Value)
+            };
+            physico.Mesh.NucleationPoints.Add(point);
+            SetStatus($"Added Nucleation Point at ({point.Position.X}, {point.Position.Y}, {point.Position.Z}).");
+        }
+        else if (response == ResponseType.Apply)
+        {
+            var rand = new Random();
+            var point = new NucleationPoint
+            {
+                ID = $"Nuc_{physico.Mesh.NucleationPoints.Count + 1}",
+                Position = (rand.NextDouble() * 20 - 10, rand.NextDouble() * 20 - 10, rand.NextDouble() * 100) // Approx range
+            };
+            physico.Mesh.NucleationPoints.Add(point);
+            SetStatus($"Added Random Nucleation Point at ({point.Position.X:F1}, {point.Position.Y:F1}, {point.Position.Z:F1}).");
+        }
+
+        dialog.Destroy();
     }
 
     private void EnsureDefaultReactor()

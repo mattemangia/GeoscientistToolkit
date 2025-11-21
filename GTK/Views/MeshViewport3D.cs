@@ -41,6 +41,15 @@ public class MeshViewport3D : DrawingArea
     public ColorCodingMode ColorMode { get; set; } = ColorCodingMode.Material;
     public HashSet<string> SelectedCellIDs { get; } = new();
 
+    // Visualization settings
+    public bool EnableSlicing { get; set; }
+    public Vector4 SlicePlane { get; set; } = new Vector4(0, 0, 1, 0); // Default Z plane
+    public bool ShowCrossSection { get; set; }
+
+    public bool ShowIsosurface { get; set; }
+    public double IsosurfaceThreshold { get; set; }
+    public bool IsosurfaceGreaterThan { get; set; } = true;
+
     public event EventHandler<CellSelectionEventArgs>? CellSelectionChanged;
 
     public MeshViewport3D()
@@ -289,9 +298,33 @@ public class MeshViewport3D : DrawingArea
         if ((RenderMode == RenderMode.Solid || RenderMode == RenderMode.SolidWireframe) && _faces.Count > 0)
         {
             // Sort faces by average Z depth (painter's algorithm for simple depth sorting)
-            var faceDepths = new List<(List<int> face, float depth)>();
-            foreach (var face in _faces)
+            var faceDepths = new List<(List<int> face, float depth, int originalIndex)>();
+            for (int i = 0; i < _faces.Count; i++)
             {
+                var face = _faces[i];
+
+                // 1. Visibility Check (Slicing)
+                if (EnableSlicing)
+                {
+                    // Check if face center is on the correct side of the plane
+                    var p1 = _points[face[0]];
+                    var p2 = _points[face[2]]; // Diagonal
+                    var center = (p1 + p2) * 0.5f;
+
+                    // Plane equation: Ax + By + Cz + D = 0
+                    float dist = SlicePlane.X * center.X + SlicePlane.Y * center.Y + SlicePlane.Z * center.Z + SlicePlane.W;
+                    if (dist < 0) continue; // Clipped
+                }
+
+                // 2. Isosurface Filtering
+                var cellInfo = FindCellForFace(i);
+                if (ShowIsosurface && cellInfo != null)
+                {
+                    double val = GetValueForColorMode(cellInfo.Cell);
+                    bool visible = IsosurfaceGreaterThan ? val >= IsosurfaceThreshold : val <= IsosurfaceThreshold;
+                    if (!visible) continue;
+                }
+
                 float avgZ = 0;
                 foreach (var idx in face)
                 {
@@ -299,18 +332,17 @@ public class MeshViewport3D : DrawingArea
                     avgZ += rotated.Z;
                 }
                 avgZ /= face.Count;
-                faceDepths.Add((face, avgZ));
+                faceDepths.Add((face, avgZ, i));
             }
             faceDepths.Sort((a, b) => a.depth.CompareTo(b.depth)); // Draw back to front
 
             // Draw filled faces
-            for (int faceIdx = 0; faceIdx < faceDepths.Count; faceIdx++)
+            foreach (var (face, _, originalIdx) in faceDepths)
             {
-                var (face, _) = faceDepths[faceIdx];
                 if (face.Count < 3) continue;
 
                 // Find which cell this face belongs to
-                var cellInfo = FindCellForFace(faceIdx);
+                var cellInfo = FindCellForFace(originalIdx);
                 bool isSelected = cellInfo != null && SelectedCellIDs.Contains(cellInfo.ID);
                 bool isHovered = cellInfo != null && _hoveredCellIndex.HasValue &&
                                 _hoveredCellIndex.Value < _cells.Count &&
@@ -524,6 +556,17 @@ public class MeshViewport3D : DrawingArea
                 return cell;
         }
         return null;
+    }
+
+    private double GetValueForColorMode(Cell cell)
+    {
+        if (cell.InitialConditions == null) return 0;
+        return ColorMode switch
+        {
+            ColorCodingMode.Temperature => cell.InitialConditions.Temperature,
+            ColorCodingMode.Pressure => cell.InitialConditions.Pressure,
+            _ => 0
+        };
     }
 
     private (double, double, double, double) GetCellColor(CellInfo? cellInfo, bool isSelected, bool isHovered, bool isInactive)
