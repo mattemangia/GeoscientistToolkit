@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -6,7 +5,7 @@ using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.PhysicoChem;
 using Gtk;
 
-namespace GeoscientistToolkit.GtkUI;
+namespace GeoscientistToolkit.Gtk;
 
 /// <summary>
 /// Lightweight 3D viewport built with GTK that mirrors the mesh behaviour of the ImGui renderer.
@@ -17,15 +16,6 @@ public class MeshViewport3D : DrawingArea
 {
     private readonly List<Vector3> _points = new();
     private readonly List<(int Start, int End)> _edges = new();
-    private readonly List<Vector2> _projected = new();
-    private Mesh3DDataset? _activeMesh;
-    private int? _selectedIndex;
-    private int? _hoverIndex;
-    private bool _isDragging;
-    private Matrix4x4 _lastRotation = Matrix4x4.Identity;
-    private Vector3 _lastMin = Vector3.Zero;
-    private float _lastScale = 1f;
-    private Vector2 _lastPointer;
 
     private float _yaw = 35f;
     private float _pitch = -20f;
@@ -33,37 +23,12 @@ public class MeshViewport3D : DrawingArea
 
     public MeshViewport3D()
     {
-        AddEvents((int)(Gdk.EventMask.ScrollMask | Gdk.EventMask.ButtonPressMask | Gdk.EventMask.PointerMotionMask | Gdk.EventMask.ButtonReleaseMask));
+        AddEvents((int)Gdk.EventMask.ScrollMask);
         ScrollEvent += (_, args) =>
         {
             _zoom = Math.Clamp(_zoom + (float)(-args.Event.DeltaY * 0.05), 0.1f, 8f);
             QueueDraw();
         };
-
-        ButtonPressEvent += (_, args) =>
-        {
-            _lastPointer = new Vector2((float)args.Event.X, (float)args.Event.Y);
-            if (_projected.Count == 0) return;
-            var idx = FindClosestPoint(_lastPointer);
-            _selectedIndex = idx;
-            _isDragging = idx.HasValue;
-            QueueDraw();
-        };
-
-        MotionNotifyEvent += (_, args) =>
-        {
-            var previousPointer = _lastPointer;
-            _lastPointer = new Vector2((float)args.Event.X, (float)args.Event.Y);
-            _hoverIndex = FindClosestPoint(_lastPointer, 18f);
-            if (_isDragging && _selectedIndex.HasValue && _activeMesh != null)
-            {
-                var delta = _lastPointer - previousPointer;
-                ApplyDragDelta(_selectedIndex.Value, delta);
-                QueueDraw();
-            }
-        };
-
-        ButtonReleaseEvent += (_, _) => _isDragging = false;
     }
 
     public void LoadFromPhysicoChem(PhysicoChemMesh mesh)
@@ -91,7 +56,6 @@ public class MeshViewport3D : DrawingArea
     {
         _points.Clear();
         _edges.Clear();
-        _activeMesh = mesh;
 
         _points.AddRange(mesh.Vertices);
 
@@ -112,9 +76,6 @@ public class MeshViewport3D : DrawingArea
     {
         _points.Clear();
         _edges.Clear();
-        _activeMesh = null;
-        _selectedIndex = null;
-        _hoverIndex = null;
         QueueDraw();
     }
 
@@ -143,9 +104,6 @@ public class MeshViewport3D : DrawingArea
             MathF.PI / 180f * _pitch,
             0f);
 
-        _lastRotation = rotation;
-        _projected.Clear();
-
         var projected = new List<Vector2>(_points.Count);
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
@@ -156,13 +114,10 @@ public class MeshViewport3D : DrawingArea
             min = Vector3.Min(min, rotated);
             max = Vector3.Max(max, rotated);
             projected.Add(new Vector2(rotated.X, rotated.Y));
-            _projected.Add(new Vector2(rotated.X, rotated.Y));
         }
 
         var size = Vector3.Max(max - min, new Vector3(1, 1, 1));
         var scale = MathF.Min(width / size.X, height / size.Y) * 0.45f;
-        _lastScale = scale;
-        _lastMin = min;
 
         cr.SetSourceRGB(0.25, 0.55, 0.95);
         cr.LineWidth = 1.2;
@@ -188,24 +143,6 @@ public class MeshViewport3D : DrawingArea
             }
         }
 
-        if (_selectedIndex.HasValue && _selectedIndex.Value < projected.Count)
-        {
-            var p = Project(projected[_selectedIndex.Value], min, scale, width, height);
-            cr.SetSourceRGB(1, 0.8, 0.2);
-            cr.Arc(p.X, p.Y, 6, 0, Math.PI * 2);
-            cr.LineWidth = 2.5;
-            cr.Stroke();
-        }
-
-        if (_hoverIndex.HasValue && _hoverIndex.Value < projected.Count && _hoverIndex != _selectedIndex)
-        {
-            var p = Project(projected[_hoverIndex.Value], min, scale, width, height);
-            cr.SetSourceRGB(0.9, 0.6, 0.9);
-            cr.Arc(p.X, p.Y, 4, 0, Math.PI * 2);
-            cr.LineWidth = 1.5;
-            cr.Stroke();
-        }
-
         cr.SetSourceRGB(0.8, 0.8, 0.8);
         cr.SelectFontFace("Sans", Cairo.FontSlant.Normal, Cairo.FontWeight.Normal);
         cr.SetFontSize(12);
@@ -227,43 +164,5 @@ public class MeshViewport3D : DrawingArea
         if (a == b) return;
         var ordered = a < b ? (a, b) : (b, a);
         edges.Add(ordered);
-    }
-
-    private int? FindClosestPoint(Vector2 pointer, float maxDistance = 12f)
-    {
-        if (_projected.Count == 0) return null;
-        var allocation = Allocation;
-        var width = allocation.Width;
-        var height = allocation.Height;
-        var min = _lastMin;
-        var scale = _lastScale;
-
-        int? bestIndex = null;
-        var bestDistance = maxDistance;
-        for (var i = 0; i < _projected.Count; i++)
-        {
-            var p = Project(_projected[i], min, scale, width, height);
-            var dist = (float)Math.Sqrt(Math.Pow(p.X - pointer.X, 2) + Math.Pow(p.Y - pointer.Y, 2));
-            if (dist <= bestDistance)
-            {
-                bestDistance = dist;
-                bestIndex = i;
-            }
-        }
-
-        return bestIndex;
-    }
-
-    private void ApplyDragDelta(int index, Vector2 screenDelta)
-    {
-        if (_activeMesh == null || index >= _points.Count) return;
-
-        var viewDelta = new Vector3(screenDelta.X / _lastScale, -screenDelta.Y / _lastScale, 0);
-        var worldDelta = Vector3.Transform(viewDelta, Matrix4x4.Transpose(_lastRotation));
-
-        var updated = _points[index] + worldDelta;
-        _points[index] = updated;
-        _activeMesh.Vertices[index] = updated;
-        _activeMesh.CalculateBounds();
     }
 }

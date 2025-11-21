@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using System.Text;
 using GeoscientistToolkit.Business;
@@ -6,16 +5,12 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
-using Cairo;
 using Gtk;
 
-using Pixbuf = Gdk.Pixbuf;
-
-namespace GeoscientistToolkit.GtkUI;
+namespace GeoscientistToolkit.Gtk;
 
 public class MainGtkWindow : Window
 {
@@ -36,15 +31,6 @@ public class MainGtkWindow : Window
     private readonly Adjustment _zoomAdjustment = new(1.2, 0.1, 8, 0.05, 0.1, 0);
 
     private readonly ListStore _nodeStore = new(typeof(string), typeof(string), typeof(string));
-    private readonly Revealer _meshOptionsRevealer = new() { RevealChild = true, TransitionType = RevealerTransitionType.SlideRight, TransitionDuration = 250 };
-    private readonly Entry _datasetNameEntry = new() { PlaceholderText = "Nome dataset" };
-    private readonly ComboBoxText _datasetTypeSelector = new();
-    private readonly Entry _materialNameEntry = new() { PlaceholderText = "Materiale" };
-    private readonly ComboBoxText _materialPhaseSelector = new();
-    private readonly Entry _forceNameEntry = new() { PlaceholderText = "Forza" };
-    private readonly ComboBoxText _forceTypeSelector = new();
-    private readonly Label _statusBar = new() { Xalign = 0 };
-
     private Dataset? _selectedDataset;
 
     public MainGtkWindow(ProjectManager projectManager, SettingsManager settingsManager, NodeManager nodeManager) : base("GeoscientistToolkit GTK Edition")
@@ -64,43 +50,37 @@ public class MainGtkWindow : Window
         split.Pack2(BuildWorkspace(), true, false);
 
         root.PackStart(split, true, true, 0);
-        root.PackStart(_statusBar, false, false, 4);
         Add(root);
 
         WireNodeEvents();
         RefreshDatasetList();
         RefreshNodeList();
-
-        ApplyProfessionalStyling();
     }
 
     private Widget BuildToolbar()
     {
-        var toolbar = new Toolbar { IconSize = IconSize.LargeToolbar, Style = ToolbarStyle.BothHoriz };
+        var box = new HBox(false, 6);
 
-        toolbar.Insert(CreateIconButton("Nuovo", "Crea un nuovo progetto", CairoExtensions.MakeIcon(CairoExtensions.Accent), (_, _) =>
+        var newProjectButton = new Button("Nuovo Progetto");
+        newProjectButton.Clicked += (_, _) =>
         {
             _projectManager.NewProject();
-            EnsureDefaultReactor();
             RefreshDatasetList();
             _meshViewport.Clear();
-            SetStatus("Nuovo progetto creato.");
-        }), -1);
+            _detailsView.Buffer.Text = "Nuovo progetto creato.";
+        };
 
-        toolbar.Insert(CreateIconButton("Apri", "Apri progetto .gtp", CairoExtensions.MakeIcon(CairoExtensions.Info), (_, _) => OpenProjectDialog()), -1);
-        toolbar.Insert(CreateIconButton("Salva", "Salva progetto", CairoExtensions.MakeIcon(CairoExtensions.Success), (_, _) => SaveProjectDialog()), -1);
-        toolbar.Insert(new SeparatorToolItem(), -1);
-        toolbar.Insert(CreateIconButton("Dataset", "Aggiungi dataset da file", CairoExtensions.MakeIcon(CairoExtensions.Warning), (_, _) => AddExistingDataset()), -1);
-        toolbar.Insert(CreateIconButton("Reload", "Ricarica progetto corrente", CairoExtensions.MakeIcon(CairoExtensions.Accent2), (_, _) => ReloadCurrentProject()), -1);
-        toolbar.Insert(new SeparatorToolItem(), -1);
-        toolbar.Insert(CreateIconButton("Cluster", "Aggiorna cluster", CairoExtensions.MakeIcon(CairoExtensions.Primary), (_, _) => RefreshNodeList()), -1);
-        toolbar.Insert(CreateIconButton("Settings", "Salva impostazioni", CairoExtensions.MakeIcon(CairoExtensions.Muted), (_, _) =>
-        {
-            _settingsManager.SaveSettings();
-            SetStatus("Impostazioni salvate.");
-        }), -1);
+        var saveSettingsButton = new Button("Salva impostazioni");
+        saveSettingsButton.Clicked += (_, _) => _settingsManager.SaveSettings();
 
-        return toolbar;
+        var refreshNodesButton = new Button("Aggiorna cluster");
+        refreshNodesButton.Clicked += (_, _) => RefreshNodeList();
+
+        box.PackStart(newProjectButton, false, false, 0);
+        box.PackStart(saveSettingsButton, false, false, 0);
+        box.PackStart(refreshNodesButton, false, false, 0);
+
+        return box;
     }
 
     private Widget BuildDatasetPanel()
@@ -158,10 +138,6 @@ public class MainGtkWindow : Window
         buttonRow.PackStart(addBoreholeButton, false, false, 0);
         buttonRow.PackStart(addMeshButton, false, false, 0);
 
-        var importDataset = new Button("Importa dataset esistente");
-        importDataset.Clicked += (_, _) => AddExistingDataset();
-        buttonRow.PackStart(importDataset, false, false, 0);
-
         panel.PackStart(buttonRow, false, false, 0);
 
         return panel;
@@ -193,8 +169,6 @@ public class MainGtkWindow : Window
         detailFrame.Add(detailScroller);
         box.PackStart(detailFrame, true, true, 0);
 
-        box.PackStart(BuildComposerPanel(), false, false, 0);
-
         return box;
     }
 
@@ -202,29 +176,7 @@ public class MainGtkWindow : Window
     {
         var box = new VBox(false, 6);
 
-        var headerRow = new HBox(false, 6);
-        var toggleOptions = new ToggleButton("Mostra/Nascondi pannello opzioni") { Active = true };
-        toggleOptions.Toggled += (_, _) => _meshOptionsRevealer.RevealChild = toggleOptions.Active;
-        headerRow.PackStart(toggleOptions, false, false, 0);
-        box.PackStart(headerRow, false, false, 0);
-
-        var hbox = new HPaned { Position = 420 };
-        hbox.Add1(BuildMeshOptionsPanel());
-
-        var viewportFrame = new Frame("Visualizzazione 3D stile PetraSim/COMSOL");
-        viewportFrame.Add(_meshViewport);
-        hbox.Add2(viewportFrame);
-
-        box.PackStart(hbox, true, true, 0);
-
-        return box;
-    }
-
-    private Widget BuildMeshOptionsPanel()
-    {
-        var container = new VBox(false, 4);
-
-        var controls = new Grid { ColumnSpacing = 8, RowSpacing = 6, BorderWidth = 4 };
+        var controls = new Grid { ColumnSpacing = 8, RowSpacing = 6 };
         controls.Attach(new Label("Borehole"), 0, 0, 1, 1);
         controls.Attach(_boreholeSelector, 1, 0, 2, 1);
 
@@ -263,24 +215,13 @@ public class MainGtkWindow : Window
         zoomScale.ValueChanged += (_, _) => UpdateViewportCamera();
         controls.Attach(zoomScale, 1, 9, 2, 1);
 
-        container.PackStart(controls, false, false, 0);
+        box.PackStart(controls, false, false, 0);
 
-        var editFrame = new Frame("Editor mesh avanzato") { BorderWidth = 4 };
-        var editGrid = new Grid { ColumnSpacing = 6, RowSpacing = 6, BorderWidth = 6 };
-        var unifyButton = new Button("Unisci mesh");
-        unifyButton.Clicked += (_, _) => CombineMeshes(BooleanOperation.Union);
-        var subtractButton = new Button("Sottrai mesh");
-        subtractButton.Clicked += (_, _) => CombineMeshes(BooleanOperation.Subtract);
-        var voronoiButton = new Button("Voronoi da mesh selezionata");
-        voronoiButton.Clicked += (_, _) => GenerateVoronoiFromMesh();
-        editGrid.Attach(unifyButton, 0, 0, 1, 1);
-        editGrid.Attach(subtractButton, 1, 0, 1, 1);
-        editGrid.Attach(voronoiButton, 0, 1, 2, 1);
-        editFrame.Add(editGrid);
-        container.PackStart(editFrame, false, false, 0);
+        var viewportFrame = new Frame("Visualizzazione 3D stile PetraSim/COMSOL");
+        viewportFrame.Add(_meshViewport);
+        box.PackStart(viewportFrame, true, true, 0);
 
-        _meshOptionsRevealer.Child = container;
-        return _meshOptionsRevealer;
+        return box;
     }
 
     private Widget BuildNodeTab()
@@ -355,7 +296,6 @@ public class MainGtkWindow : Window
 
         _detailsView.Buffer.Text = BuildDatasetSummary(_selectedDataset);
         UpdateMeshViewport(_selectedDataset);
-        SetStatus($"Dataset attivo: {_selectedDataset.Name}");
     }
 
     private string BuildDatasetSummary(Dataset dataset)
@@ -375,7 +315,6 @@ public class MainGtkWindow : Window
                 sb.AppendLine($"Celle mesh: {physico.Mesh.Cells.Count}");
                 sb.AppendLine($"Connessioni: {physico.Mesh.Connections.Count}");
                 sb.AppendLine("Simulazioni supportate: geotermica, multifisica, termodinamica");
-                sb.AppendLine($"Materiali: {physico.Materials.Count}, Forze: {physico.Forces.Count}");
                 break;
             case Mesh3DDataset mesh3D:
                 sb.AppendLine($"Vertici: {mesh3D.VertexCount}, Facce: {mesh3D.FaceCount}");
@@ -447,7 +386,6 @@ public class MainGtkWindow : Window
         physico.Mesh.SplitIntoGrid(divisions, divisions, divisions);
         _meshViewport.LoadFromPhysicoChem(physico.Mesh);
         _detailsView.Buffer.Text = BuildDatasetSummary(physico);
-        SetStatus("Mesh Voronoi generata e sincronizzata con l'editor 3D.");
     }
 
     private void ImportFromMeshDataset()
@@ -468,7 +406,6 @@ public class MainGtkWindow : Window
         physico.Mesh.FromMesh3DDataset(meshDataset, _heightInput.Value);
         _meshViewport.LoadFromPhysicoChem(physico.Mesh);
         _detailsView.Buffer.Text = BuildDatasetSummary(physico);
-        SetStatus("Mesh importata e pronta per simulazioni multiphysics.");
     }
 
     private void UpdateViewportCamera()
@@ -502,339 +439,5 @@ public class MainGtkWindow : Window
 
             _nodeStore.AppendValues(node.NodeName, node.Status.ToString(), capsText);
         }
-    }
-
-    private ToolItem CreateIconButton(string label, string tooltip, Pixbuf icon, EventHandler handler)
-    {
-        var button = new ToolButton(new Image(icon), label) { TooltipText = tooltip };
-        button.Clicked += handler;
-        return button;
-    }
-
-    private void OpenProjectDialog()
-    {
-        using var dialog = new FileChooserDialog("Apri progetto", this, FileChooserAction.Open, "Annulla", ResponseType.Cancel, "Apri", ResponseType.Accept)
-        {
-            SelectMultiple = false
-        };
-        var filter = new FileFilter { Name = "Progetti Geoscientist (.gtp)" };
-        filter.AddPattern("*.gtp");
-        dialog.AddFilter(filter);
-        if (dialog.Run() == (int)ResponseType.Accept)
-        {
-            try
-            {
-                _projectManager.LoadProject(dialog.Filename);
-                RefreshDatasetList();
-                SetStatus($"Progetto caricato: {dialog.Filename}");
-            }
-            catch (Exception ex)
-            {
-                SetStatus($"Errore apertura progetto: {ex.Message}");
-            }
-        }
-        dialog.Destroy();
-    }
-
-    private void SaveProjectDialog()
-    {
-        using var dialog = new FileChooserDialog("Salva progetto", this, FileChooserAction.Save, "Annulla", ResponseType.Cancel, "Salva", ResponseType.Accept)
-        {
-            DoOverwriteConfirmation = true
-        };
-        var filter = new FileFilter { Name = "Progetti Geoscientist (.gtp)" };
-        filter.AddPattern("*.gtp");
-        dialog.AddFilter(filter);
-        if (dialog.Run() == (int)ResponseType.Accept)
-        {
-            var path = dialog.Filename.EndsWith(".gtp") ? dialog.Filename : dialog.Filename + ".gtp";
-            _projectManager.SaveProject(path);
-            SetStatus($"Progetto salvato in {path}");
-        }
-        dialog.Destroy();
-    }
-
-    private void AddExistingDataset()
-    {
-        using var dialog = new FileChooserDialog("Importa dataset", this, FileChooserAction.Open, "Annulla", ResponseType.Cancel, "Importa", ResponseType.Accept)
-        {
-            SelectMultiple = false
-        };
-        var objFilter = new FileFilter { Name = "Mesh OBJ" };
-        objFilter.AddPattern("*.obj");
-        dialog.AddFilter(objFilter);
-        var stlFilter = new FileFilter { Name = "Mesh STL" };
-        stlFilter.AddPattern("*.stl");
-        dialog.AddFilter(stlFilter);
-        if (dialog.Run() == (int)ResponseType.Accept)
-        {
-            var name = System.IO.Path.GetFileNameWithoutExtension(dialog.Filename);
-            var mesh = new Mesh3DDataset(name, dialog.Filename);
-            mesh.Load();
-            _projectManager.AddDataset(mesh);
-            RefreshDatasetList();
-            SetStatus($"Dataset importato: {name}");
-        }
-        dialog.Destroy();
-    }
-
-    private void ReloadCurrentProject()
-    {
-        if (string.IsNullOrWhiteSpace(_projectManager.ProjectPath))
-        {
-            SetStatus("Nessun progetto da ricaricare.");
-            return;
-        }
-
-        try
-        {
-            _projectManager.LoadProject(_projectManager.ProjectPath);
-            RefreshDatasetList();
-            SetStatus("Progetto ricaricato e sincronizzato.");
-        }
-        catch (Exception ex)
-        {
-            SetStatus($"Errore reload: {ex.Message}");
-        }
-    }
-
-    private Widget BuildComposerPanel()
-    {
-        var frame = new Frame("Designer e librerie") { BorderWidth = 4 };
-        var grid = new Grid { ColumnSpacing = 6, RowSpacing = 6, BorderWidth = 6 };
-
-        _datasetTypeSelector.AppendText("PhysicoChem");
-        _datasetTypeSelector.AppendText("Borehole");
-        _datasetTypeSelector.AppendText("Mesh3D");
-        _datasetTypeSelector.Active = 0;
-
-        grid.Attach(new Label("Nome"), 0, 0, 1, 1);
-        grid.Attach(_datasetNameEntry, 1, 0, 1, 1);
-        grid.Attach(new Label("Tipo"), 0, 1, 1, 1);
-        grid.Attach(_datasetTypeSelector, 1, 1, 1, 1);
-
-        var createButton = new Button("Crea dataset da zero");
-        createButton.Clicked += (_, _) => CreateDatasetFromInputs();
-        grid.Attach(createButton, 0, 2, 2, 1);
-
-        _materialPhaseSelector.AppendText("Solido");
-        _materialPhaseSelector.AppendText("Liquido");
-        _materialPhaseSelector.AppendText("Gas");
-        _materialPhaseSelector.Active = 0;
-
-        grid.Attach(new Label("Materiale"), 0, 3, 1, 1);
-        grid.Attach(_materialNameEntry, 1, 3, 1, 1);
-        grid.Attach(_materialPhaseSelector, 2, 3, 1, 1);
-
-        var materialButton = new Button("Aggiungi materiale e assegna alla mesh");
-        materialButton.Clicked += (_, _) => AddMaterialToDataset();
-        grid.Attach(materialButton, 0, 4, 3, 1);
-
-        foreach (var type in Enum.GetNames(typeof(ForceType)))
-            _forceTypeSelector.AppendText(type);
-        _forceTypeSelector.Active = 0;
-
-        grid.Attach(new Label("Forza"), 0, 5, 1, 1);
-        grid.Attach(_forceNameEntry, 1, 5, 1, 1);
-        grid.Attach(_forceTypeSelector, 2, 5, 1, 1);
-        var forceButton = new Button("Aggiungi forza multiphysics");
-        forceButton.Clicked += (_, _) => AddForceToDataset();
-        grid.Attach(forceButton, 0, 6, 3, 1);
-
-        frame.Add(grid);
-        return frame;
-    }
-
-    private void CreateDatasetFromInputs()
-    {
-        var name = string.IsNullOrWhiteSpace(_datasetNameEntry.Text) ? $"Dataset_{DateTime.Now:HHmmss}" : _datasetNameEntry.Text.Trim();
-        var type = _datasetTypeSelector.ActiveText ?? "PhysicoChem";
-
-        Dataset dataset = type switch
-        {
-            "PhysicoChem" => new PhysicoChemDataset(name, "Designer GTK")
-            {
-                Materials = { new MaterialProperties { MaterialID = "Rock", Density = 2500, ThermalConductivity = 2.1, SpecificHeat = 900 } },
-                Forces = { new ForceField("Gravity", ForceType.Gravity) }
-            },
-            "Borehole" => new BoreholeDataset(name, string.Empty)
-            {
-                SurfaceCoordinates = new System.Numerics.Vector2(0, 0),
-                TotalDepth = 800,
-                Elevation = 120
-            },
-            _ => Mesh3DDataset.CreateEmpty(name, string.Empty)
-        };
-
-        _projectManager.AddDataset(dataset);
-        RefreshDatasetList();
-        SetStatus($"Creato dataset {name} ({type}).");
-    }
-
-    private void AddMaterialToDataset()
-    {
-        if (_selectedDataset is not PhysicoChemDataset physico)
-        {
-            SetStatus("Seleziona un dataset PhysicoChem per assegnare materiali.");
-            return;
-        }
-
-        var mat = new MaterialProperties
-        {
-            MaterialID = string.IsNullOrWhiteSpace(_materialNameEntry.Text) ? "Materiale GTK" : _materialNameEntry.Text.Trim(),
-            Density = 2400,
-            ThermalConductivity = 1.8,
-            SpecificHeat = 800
-        };
-        physico.Materials.Add(mat);
-        foreach (var cell in physico.Mesh.Cells.Values)
-            cell.MaterialID = mat.MaterialID;
-
-        _detailsView.Buffer.Text = BuildDatasetSummary(physico);
-        SetStatus($"Materiale '{mat.MaterialID}' assegnato a tutte le celle.");
-    }
-
-    private void AddForceToDataset()
-    {
-        if (_selectedDataset is not PhysicoChemDataset physico)
-        {
-            SetStatus("Seleziona un dataset PhysicoChem per aggiungere forze.");
-            return;
-        }
-
-        var forceName = string.IsNullOrWhiteSpace(_forceNameEntry.Text) ? "Forza" + (physico.Forces.Count + 1) : _forceNameEntry.Text.Trim();
-        var type = Enum.TryParse<ForceType>(_forceTypeSelector.ActiveText, out var parsed) ? parsed : ForceType.Gravity;
-        var force = new ForceField(forceName, type);
-        if (type == ForceType.Gravity)
-            force.GravityVector = (0, 0, -9.81);
-        else if (type == ForceType.Vortex)
-            force.VortexStrength = 2.5;
-
-        physico.Forces.Add(force);
-        _detailsView.Buffer.Text = BuildDatasetSummary(physico);
-        SetStatus($"Forza '{forceName}' aggiunta ({type}).");
-    }
-
-    private void CombineMeshes(BooleanOperation op)
-    {
-        var meshes = _projectManager.LoadedDatasets.OfType<Mesh3DDataset>().ToList();
-        if (meshes.Count < 2 && _selectedDataset is not Mesh3DDataset)
-        {
-            SetStatus("Servono almeno due mesh 3D per unire o sottrarre.");
-            return;
-        }
-
-        var primary = _selectedDataset as Mesh3DDataset ?? meshes.First();
-        var secondary = meshes.FirstOrDefault(m => m != primary);
-        if (secondary == null)
-        {
-            SetStatus("Seleziona una seconda mesh da combinare.");
-            return;
-        }
-
-        if (op == BooleanOperation.Union)
-        {
-            var offset = primary.Vertices.Count;
-            primary.Vertices.AddRange(secondary.Vertices);
-            foreach (var face in secondary.Faces)
-                primary.Faces.Add(face.Select(i => i + offset).ToArray());
-        }
-        else
-        {
-            var min = secondary.BoundingBoxMin;
-            var max = secondary.BoundingBoxMax;
-            for (var i = primary.Vertices.Count - 1; i >= 0; i--)
-            {
-                var v = primary.Vertices[i];
-                if (v.X >= min.X && v.X <= max.X && v.Y >= min.Y && v.Y <= max.Y && v.Z >= min.Z && v.Z <= max.Z)
-                    primary.Vertices.RemoveAt(i);
-            }
-            primary.Faces.RemoveAll(f => f.Any(idx => idx >= primary.Vertices.Count));
-        }
-
-        primary.VertexCount = primary.Vertices.Count;
-        primary.FaceCount = primary.Faces.Count;
-        primary.CalculateBounds();
-        _meshViewport.LoadFromMesh(primary);
-        SetStatus(op == BooleanOperation.Union ? "Mesh unificate." : "Mesh sottratta.");
-    }
-
-    private void GenerateVoronoiFromMesh()
-    {
-        if (_selectedDataset is not Mesh3DDataset mesh || !_projectManager.LoadedDatasets.OfType<PhysicoChemDataset>().Any())
-        {
-            SetStatus("Seleziona una mesh 3D e un dataset PhysicoChem per trasferire la Voronoi.");
-            return;
-        }
-
-        var target = _projectManager.LoadedDatasets.OfType<PhysicoChemDataset>().First();
-        target.Mesh.FromMesh3DDataset(mesh, _heightInput.Value);
-        _meshViewport.LoadFromPhysicoChem(target.Mesh);
-        _detailsView.Buffer.Text = BuildDatasetSummary(target);
-        SetStatus("Mesh Voronoi aggiornata dal dataset 3D selezionato.");
-    }
-
-    private void SetStatus(string message)
-    {
-        _statusBar.Text = "🔹 " + message;
-        Logger.Log(message);
-    }
-
-    private void ApplyProfessionalStyling()
-    {
-        _detailsView.ModifyFont(Pango.FontDescription.FromString("Cantarell 11"));
-    }
-
-    private enum BooleanOperation
-    {
-        Union,
-        Subtract
-    }
-
-    private void EnsureDefaultReactor()
-    {
-        if (_projectManager.LoadedDatasets.OfType<PhysicoChemDataset>().Any()) return;
-        var reactor = MultiphysicsExamples.CreateExothermicReactor(3.5, 6.0);
-        reactor.Name = "Default Exothermic Reactor";
-        _projectManager.AddDataset(reactor);
-    }
-}
-
-internal static class CairoExtensions
-{
-    public static readonly Cairo.Color Accent = new(0.23, 0.74, 0.98);
-    public static readonly Cairo.Color Accent2 = new(0.75, 0.49, 0.99);
-    public static readonly Cairo.Color Warning = new(0.98, 0.72, 0.29);
-    public static readonly Cairo.Color Success = new(0.38, 0.87, 0.54);
-    public static readonly Cairo.Color Info = new(0.31, 0.6, 0.91);
-    public static readonly Cairo.Color Primary = new(0.58, 0.65, 0.98);
-    public static readonly Cairo.Color Muted = new(0.55, 0.58, 0.66);
-
-    public static Pixbuf MakeIcon(Cairo.Color color)
-    {
-        const int size = 28;
-        using var surface = new Cairo.ImageSurface(Cairo.Format.Argb32, size, size);
-        using var ctx = new Cairo.Context(surface);
-        ctx.Operator = Cairo.Operator.Source;
-        ctx.SetSourceRGBA(0, 0, 0, 0);
-        ctx.Paint();
-        ctx.Operator = Cairo.Operator.Over;
-
-        ctx.Arc(size / 2.0, size / 2.0, size / 2.4, 0, Math.PI * 2);
-        ctx.SetSourceRGBA(color.R, color.G, color.B, 0.85);
-        ctx.FillPreserve();
-        ctx.SetSourceRGBA(1, 1, 1, 0.35);
-        ctx.LineWidth = 2;
-        ctx.Stroke();
-
-        ctx.MoveTo(size * 0.3, size * 0.55);
-        ctx.LineTo(size * 0.48, size * 0.7);
-        ctx.LineTo(size * 0.74, size * 0.32);
-        ctx.SetSourceRGB(0.95, 0.97, 0.99);
-        ctx.LineWidth = 3.6;
-        ctx.Stroke();
-
-        surface.Flush();
-        return new Pixbuf(surface.Data, Gdk.Colorspace.Rgb, true, 8, size, size, surface.Stride);
     }
 }
