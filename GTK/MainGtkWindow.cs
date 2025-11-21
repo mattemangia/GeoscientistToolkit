@@ -86,7 +86,6 @@ public class MainGtkWindow : Gtk.Window
         _nodeManager = nodeManager;
 
         SetDefaultSize(1200, 700);
-        SetGeometryHints(this, new Geometry { MaxWidth = 1280, MaxHeight = 720 }, WindowHints.MaxSize);
         BorderWidth = 8;
 
         var root = new VBox(false, 6);
@@ -94,8 +93,8 @@ public class MainGtkWindow : Gtk.Window
         root.PackStart(BuildToolbar(), false, false, 0);
 
         var split = new Paned(Orientation.Horizontal) { Position = 320 };
-        split.Pack1(BuildDatasetPanel(), false, false);
-        split.Pack2(BuildWorkspace(), true, false);
+        split.Pack1(BuildDatasetPanel(), false, true);
+        split.Pack2(BuildWorkspace(), true, true);
 
         root.PackStart(split, true, true, 0);
         root.PackStart(_statusBar, false, false, 4);
@@ -310,11 +309,11 @@ public class MainGtkWindow : Gtk.Window
         hbox.Add1(BuildMeshOptionsPanel());
 
         // Right side: viewport + cell properties
-        var rightSide = new VPaned { Position = 450 };
+        var rightSide = new VPaned { Position = 500 };
 
         var viewportFrame = new Frame("3D viewport (PetraSim/COMSOL style)");
         viewportFrame.Add(_meshViewport);
-        rightSide.Add1(viewportFrame);
+        rightSide.Pack1(viewportFrame, true, false);
 
         // Cell properties panel
         var cellPropsFrame = new Frame("Selected Cell Properties");
@@ -322,9 +321,9 @@ public class MainGtkWindow : Gtk.Window
         cellPropsScroller.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
         cellPropsScroller.Add(_cellPropertiesView);
         cellPropsFrame.Add(cellPropsScroller);
-        rightSide.Add2(cellPropsFrame);
+        rightSide.Pack2(cellPropsFrame, false, false);
 
-        hbox.Add2(rightSide);
+        hbox.Pack2(rightSide, true, false);
 
         box.PackStart(hbox, true, true, 0);
 
