@@ -182,7 +182,7 @@ public class GeothermalConfigDialog : Dialog
         infoFrame.Add(infoText);
         contentBox.PackStart(infoFrame, false, false, 0);
 
-        VBox.PackStart(contentBox, true, true, 0);
+        this.ContentArea.PackStart(contentBox, true, true, 0);
     }
 
     private void OnResponse(object? sender, ResponseArgs args)
@@ -328,8 +328,7 @@ public class GeothermalConfigDialog : Dialog
         dataset.SimulationParams.TimeStep = _timeStepInput.Value * 86400;
         dataset.SimulationParams.EnableFlow = true;
         dataset.SimulationParams.EnableHeatTransfer = true;
-        dataset.SimulationParams.EnableChemistry = _reactiveTransportCheckbox.Active;
-        dataset.SimulationParams.EnableMultiphase = _multiphaseCheckbox.Active;
+        dataset.SimulationParams.EnableReactiveTransport = _reactiveTransportCheckbox.Active;
 
         return dataset;
     }

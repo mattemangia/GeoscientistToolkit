@@ -103,7 +103,7 @@ public class MaterialLibraryDialog : Dialog
 
         contentBox.PackStart(mainPane, true, true, 0);
 
-        VBox.PackStart(contentBox, true, true, 0);
+        this.ContentArea.PackStart(contentBox, true, true, 0);
     }
 
     private void PopulateMaterials()
@@ -133,7 +133,9 @@ public class MaterialLibraryDialog : Dialog
 
         // Filter physical materials
         var filteredMaterials = _materialLibrary.Materials
-            .Where(m => (string.IsNullOrEmpty(searchTerm) || m.Name.ToLower().Contains(searchTerm)))
+            .Where(m => string.IsNullOrEmpty(searchTerm) ||
+                        m.Name.ToLower().Contains(searchTerm) ||
+                        (!string.IsNullOrEmpty(m.Notes) && m.Notes.ToLower().Contains(searchTerm)))
             .Where(m => categoryFilter == "All" || DetermineCategory(m) == categoryFilter);
 
         foreach (var material in filteredMaterials.OrderBy(m => m.Name))
@@ -143,8 +145,8 @@ public class MaterialLibraryDialog : Dialog
 
         // Filter chemical compounds
         var filteredCompounds = _compoundLibrary.Compounds
-            .Where(c => (string.IsNullOrEmpty(searchTerm) || c.Name.ToLower().Contains(searchTerm) ||
-                        (c.Formula != null && c.Formula.ToLower().Contains(searchTerm))))
+            .Where(c => string.IsNullOrEmpty(searchTerm) || c.Name.ToLower().Contains(searchTerm) ||
+                        (!string.IsNullOrEmpty(c.ChemicalFormula) && c.ChemicalFormula.ToLower().Contains(searchTerm)))
             .Where(c => categoryFilter == "All" || DetermineCompoundCategory(c) == categoryFilter);
 
         foreach (var compound in filteredCompounds.OrderBy(c => c.Name))
@@ -182,32 +184,37 @@ public class MaterialLibraryDialog : Dialog
         text += $"{'=',60}\n\n";
 
         text += "THERMAL PROPERTIES:\n";
-        text += $"  Thermal Conductivity: {material.ThermalConductivity:F3} W/m·K\n";
-        text += $"  Specific Heat: {material.SpecificHeat:F0} J/kg·K\n\n";
+        if (material.ThermalConductivity_W_mK.HasValue)
+            text += $"  Thermal Conductivity: {material.ThermalConductivity_W_mK:F3} W/m·K\n";
+        if (material.SpecificHeatCapacity_J_kgK.HasValue)
+            text += $"  Specific Heat: {material.SpecificHeatCapacity_J_kgK:F0} J/kg·K\n";
+        text += "\n";
 
         text += "MECHANICAL PROPERTIES:\n";
-        text += $"  Density: {material.Density:F0} kg/m³\n";
-        if (material.YoungModulus > 0)
-            text += $"  Young's Modulus: {material.YoungModulus / 1e9:F1} GPa\n";
-        if (material.PoissonRatio > 0)
+        if (material.Density_kg_m3.HasValue)
+            text += $"  Density: {material.Density_kg_m3:F0} kg/m³\n";
+        if (material.YoungModulus_GPa.HasValue)
+            text += $"  Young's Modulus: {material.YoungModulus_GPa:F1} GPa\n";
+        if (material.PoissonRatio.HasValue)
             text += $"  Poisson's Ratio: {material.PoissonRatio:F3}\n\n";
 
         text += "PETROPHYSICAL PROPERTIES:\n";
-        text += $"  Porosity: {material.Porosity * 100:F1} %\n";
-        if (material.Permeability > 0)
-            text += $"  Permeability: {material.Permeability:E2} m²\n\n";
+        if (material.TypicalPorosity_fraction.HasValue)
+            text += $"  Porosity: {material.TypicalPorosity_fraction * 100:F1} %\n";
+        if (material.Extra.TryGetValue("Permeability", out var permeability))
+            text += $"  Permeability: {permeability:E2} m²\n\n";
 
-        if (material.AcousticVelocityP > 0 || material.AcousticVelocityS > 0)
+        if (material.Vp_m_s.HasValue || material.Vs_m_s.HasValue)
         {
             text += "ACOUSTIC PROPERTIES:\n";
-            if (material.AcousticVelocityP > 0)
-                text += $"  P-wave Velocity: {material.AcousticVelocityP:F0} m/s\n";
-            if (material.AcousticVelocityS > 0)
-                text += $"  S-wave Velocity: {material.AcousticVelocityS:F0} m/s\n\n";
+            if (material.Vp_m_s.HasValue)
+                text += $"  P-wave Velocity: {material.Vp_m_s:F0} m/s\n";
+            if (material.Vs_m_s.HasValue)
+                text += $"  S-wave Velocity: {material.Vs_m_s:F0} m/s\n\n";
         }
 
-        if (!string.IsNullOrEmpty(material.Description))
-            text += $"DESCRIPTION:\n{material.Description}\n";
+        if (!string.IsNullOrEmpty(material.Notes))
+            text += $"NOTES:\n{material.Notes}\n";
 
         _propertiesView.Buffer.Text = text;
     }
@@ -215,30 +222,38 @@ public class MaterialLibraryDialog : Dialog
     private void DisplayCompoundProperties(ChemicalCompound compound)
     {
         var text = $"CHEMICAL COMPOUND: {compound.Name}\n";
-        if (!string.IsNullOrEmpty(compound.Formula))
-            text += $"Formula: {compound.Formula}\n";
+        if (!string.IsNullOrEmpty(compound.ChemicalFormula))
+            text += $"Formula: {compound.ChemicalFormula}\n";
         text += $"{'=',60}\n\n";
 
         text += "THERMODYNAMIC PROPERTIES:\n";
-        text += $"  Molecular Weight: {compound.MolecularWeight:F2} g/mol\n";
-        if (compound.Density > 0)
-            text += $"  Density: {compound.Density:F2} g/cm³\n";
-        if (compound.MolarVolume > 0)
-            text += $"  Molar Volume: {compound.MolarVolume:F2} cm³/mol\n\n";
+        if (compound.MolecularWeight_g_mol.HasValue)
+            text += $"  Molecular Weight: {compound.MolecularWeight_g_mol:F2} g/mol\n";
+        if (compound.Density_g_cm3.HasValue)
+            text += $"  Density: {compound.Density_g_cm3:F2} g/cm³\n";
+        if (compound.MolarVolume_cm3_mol.HasValue)
+            text += $"  Molar Volume: {compound.MolarVolume_cm3_mol:F2} cm³/mol\n\n";
 
-        if (compound.GibbsEnergy != 0 || compound.Enthalpy != 0 || compound.Entropy != 0)
+        if (compound.GibbsFreeEnergyFormation_kJ_mol.HasValue || compound.EnthalpyFormation_kJ_mol.HasValue ||
+            compound.Entropy_J_molK.HasValue)
         {
             text += "STANDARD FORMATION PROPERTIES (298.15 K):\n";
-            text += $"  ΔG°: {compound.GibbsEnergy:F1} kJ/mol\n";
-            text += $"  ΔH°: {compound.Enthalpy:F1} kJ/mol\n";
-            text += $"  S°: {compound.Entropy:F2} J/mol·K\n\n";
+            if (compound.GibbsFreeEnergyFormation_kJ_mol.HasValue)
+                text += $"  ΔG°: {compound.GibbsFreeEnergyFormation_kJ_mol:F1} kJ/mol\n";
+            if (compound.EnthalpyFormation_kJ_mol.HasValue)
+                text += $"  ΔH°: {compound.EnthalpyFormation_kJ_mol:F1} kJ/mol\n";
+            if (compound.Entropy_J_molK.HasValue)
+                text += $"  S°: {compound.Entropy_J_molK:F2} J/mol·K\n\n";
         }
 
-        if (compound.Ksp > 0)
+        if (compound.LogKsp_25C.HasValue)
         {
             text += "SOLUBILITY:\n";
-            text += $"  Ksp: {compound.Ksp:E2}\n";
-            text += $"  Solubility: {compound.Solubility:F4} mol/L\n\n";
+            var logKsp = compound.LogKsp_25C.Value;
+            text += $"  log10(Ksp): {logKsp:F2}\n";
+            text += $"  Ksp: {Math.Pow(10, logKsp):E2}\n";
+            if (compound.Solubility_g_100mL_25C.HasValue)
+                text += $"  Solubility: {compound.Solubility_g_100mL_25C:F4} g/100mL\n\n";
         }
 
         if (compound.pKa > 0 || compound.pKb > 0)
@@ -250,12 +265,17 @@ public class MaterialLibraryDialog : Dialog
                 text += $"  pKb: {compound.pKb:F2}\n\n";
         }
 
-        if (compound.ActivationEnergy > 0)
+        if (compound.ActivationEnergy_Dissolution_kJ_mol.HasValue || compound.ActivationEnergy_Precipitation_kJ_mol.HasValue)
         {
             text += "KINETIC PROPERTIES:\n";
-            text += $"  Activation Energy: {compound.ActivationEnergy:F1} kJ/mol\n";
-            if (compound.RateConstant > 0)
-                text += $"  Rate Constant: {compound.RateConstant:E2} (units vary)\n\n";
+            if (compound.ActivationEnergy_Dissolution_kJ_mol.HasValue)
+                text += $"  Activation Energy (dissolution): {compound.ActivationEnergy_Dissolution_kJ_mol:F1} kJ/mol\n";
+            if (compound.ActivationEnergy_Precipitation_kJ_mol.HasValue)
+                text += $"  Activation Energy (precipitation): {compound.ActivationEnergy_Precipitation_kJ_mol:F1} kJ/mol\n";
+            if (compound.RateConstant_Dissolution_mol_m2_s.HasValue)
+                text += $"  Rate Constant (dissolution): {compound.RateConstant_Dissolution_mol_m2_s:E2} mol/m²/s\n";
+            if (compound.RateConstant_Precipitation_mol_m2_s.HasValue)
+                text += $"  Rate Constant (precipitation): {compound.RateConstant_Precipitation_mol_m2_s:E2} mol/m²/s\n\n";
         }
 
         text += "CLASSIFICATION:\n";
@@ -282,12 +302,12 @@ public class MaterialLibraryDialog : Dialog
 
     private string DetermineCompoundCategory(ChemicalCompound compound)
     {
-        if (compound.Phase == "gas")
-            return "Gases";
-        if (compound.Phase == "aqueous" || compound.Phase == "liquid")
-            return "Fluids";
-        if (compound.Phase == "solid" && compound.CrystalSystem != "Unknown")
-            return "Minerals";
-        return "Compounds";
+        return compound.Phase switch
+        {
+            CompoundPhase.Gas => "Gases",
+            CompoundPhase.Aqueous or CompoundPhase.Liquid => "Fluids",
+            CompoundPhase.Solid when compound.CrystalSystem.HasValue => "Minerals",
+            _ => "Compounds"
+        };
     }
 }

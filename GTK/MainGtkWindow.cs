@@ -1719,10 +1719,21 @@ public class MainGtkWindow : Window
                 // If we have a PhysicoChemDataset selected, add material to it
                 if (_selectedDataset is PhysicoChemDataset physico)
                 {
-                    if (!physico.Materials.Any(m => m.MaterialID == dialog.SelectedMaterial.MaterialID))
+                    var mappedMaterial = new MaterialProperties
                     {
-                        physico.Materials.Add(dialog.SelectedMaterial);
-                        SetStatus($"Added material {dialog.SelectedMaterial.Name} to {physico.Name}");
+                        MaterialID = dialog.SelectedMaterial.Name,
+                        Porosity = dialog.SelectedMaterial.TypicalPorosity_fraction ?? 0.1,
+                        Permeability = 1e-12,
+                        ThermalConductivity = dialog.SelectedMaterial.ThermalConductivity_W_mK ?? 2.0,
+                        SpecificHeat = dialog.SelectedMaterial.SpecificHeatCapacity_J_kgK ?? 1000.0,
+                        Density = dialog.SelectedMaterial.Density_kg_m3 ?? 2500.0,
+                        MineralComposition = dialog.SelectedMaterial.Notes ?? string.Empty
+                    };
+
+                    if (!physico.Materials.Any(m => m.MaterialID == mappedMaterial.MaterialID))
+                    {
+                        physico.Materials.Add(mappedMaterial);
+                        SetStatus($"Added material {mappedMaterial.MaterialID} to {physico.Name}");
                         RefreshDatasetList();
                     }
                 }
@@ -1751,21 +1762,23 @@ public class MainGtkWindow : Window
 
         if (response == ResponseType.Ok && dialog.CreatedDomain != null)
         {
-            // Add domain to dataset (Note: ReactorDomain is not directly added to PhysicoChemDataset in current architecture)
-            // For now, we'll create cells from the domain using the mesh generator
-            SetStatus($"Domain '{dialog.CreatedDomain.Name}' created. Generating mesh...");
+            // Store domain on the dataset and make sure its material is registered
+            physico.Domains.Add(dialog.CreatedDomain);
 
-            // Generate mesh from domain
-            var generator = new ReactorMeshGenerator();
-            // Note: This requires a list of domains. We'd need to extend the architecture
-            // For now, show a message
-            var msgDialog = new MessageDialog(this, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok,
-                $"Domain '{dialog.CreatedDomain.Name}' created successfully!\n\n" +
-                $"Geometry: {dialog.CreatedDomain.Geometry}\n" +
-                $"Material: {dialog.CreatedDomain.MaterialProperties?.MaterialID ?? "None"}\n\n" +
-                $"Note: Full domain-to-mesh conversion will be implemented in next update.");
-            msgDialog.Run();
-            msgDialog.Destroy();
+            var selectedMaterial = dialog.CreatedDomain.Material;
+            if (selectedMaterial != null && physico.Materials.All(m => m.MaterialID != selectedMaterial.MaterialID))
+            {
+                physico.Materials.Add(selectedMaterial);
+            }
+
+            // Generate cells from the domain definitions
+            var resolution = (int)_resolutionInput.Value;
+            physico.GenerateMesh(resolution);
+
+            _meshViewport.LoadFromPhysicoChem(physico.Mesh, physico);
+            RefreshDatasetList();
+
+            SetStatus($"Domain '{dialog.CreatedDomain.Name}' created and mesh regenerated at {resolution}³ resolution.");
         }
     }
 

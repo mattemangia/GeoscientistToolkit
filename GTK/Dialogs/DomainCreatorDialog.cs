@@ -87,7 +87,7 @@ public class DomainCreatorDialog : Dialog
         contentBox.PackStart(_activeCheckbox, false, false, 0);
         contentBox.PackStart(_interactionCheckbox, false, false, 0);
 
-        VBox.PackStart(contentBox, true, true, 0);
+        this.ContentArea.PackStart(contentBox, true, true, 0);
     }
 
     private void PopulateGeometries()
@@ -256,60 +256,87 @@ public class DomainCreatorDialog : Dialog
         if (_materialSelector.Active > 0)
         {
             var materialId = _materialSelector.ActiveText;
-            domain.MaterialProperties = _availableMaterials.Find(m => m.MaterialID == materialId);
+            domain.Material = _availableMaterials.Find(m => m.MaterialID == materialId);
         }
 
-        // Set geometry based on selection
+        var geometry = new ReactorGeometry();
+
         switch (_geometrySelector.Active)
         {
             case 0: // Box
-                domain.Geometry = GeometryType.Box;
-                domain.Center = (GetParamValue("Center X (m)"), GetParamValue("Center Y (m)"), GetParamValue("Center Z (m)"));
-                domain.Dimensions = (GetParamValue("Width (m)"), GetParamValue("Depth (m)"), GetParamValue("Height (m)"));
+                geometry.Type = GeometryType.Box;
+                geometry.Center = (GetParamValue("Center X (m)"), GetParamValue("Center Y (m)"), GetParamValue("Center Z (m)"));
+                geometry.Dimensions = (GetParamValue("Width (m)"), GetParamValue("Height (m)"), GetParamValue("Depth (m)"));
                 break;
 
             case 1: // Sphere
-                domain.Geometry = GeometryType.Sphere;
-                domain.Center = (GetParamValue("Center X (m)"), GetParamValue("Center Y (m)"), GetParamValue("Center Z (m)"));
-                domain.Radius = GetParamValue("Radius (m)");
+                geometry.Type = GeometryType.Sphere;
+                geometry.Center = (GetParamValue("Center X (m)"), GetParamValue("Center Y (m)"), GetParamValue("Center Z (m)"));
+                geometry.Radius = GetParamValue("Radius (m)");
                 break;
 
             case 2: // Cylinder
-                domain.Geometry = GeometryType.Cylinder;
-                domain.CylinderBase = (GetParamValue("Base Center X (m)"), GetParamValue("Base Center Y (m)"), GetParamValue("Base Center Z (m)"));
-                domain.CylinderAxis = (GetParamValue("Axis X"), GetParamValue("Axis Y"), GetParamValue("Axis Z"));
-                domain.Radius = GetParamValue("Radius (m)");
-                domain.Height = GetParamValue("Height (m)");
+                geometry.Type = GeometryType.Cylinder;
+                geometry.CylinderBase = (GetParamValue("Base Center X (m)"), GetParamValue("Base Center Y (m)"), GetParamValue("Base Center Z (m)"));
+                geometry.CylinderAxis = NormalizeAxis((GetParamValue("Axis X"), GetParamValue("Axis Y"), GetParamValue("Axis Z")));
+                geometry.Radius = GetParamValue("Radius (m)");
+                geometry.Height = GetParamValue("Height (m)");
+                geometry.Center = AddAxisOffset(geometry.CylinderBase, geometry.CylinderAxis, geometry.Height / 2.0);
                 break;
 
             case 3: // Cone
-                domain.Geometry = GeometryType.Cone;
-                domain.CylinderBase = (GetParamValue("Base Center X (m)"), GetParamValue("Base Center Y (m)"), GetParamValue("Base Center Z (m)"));
-                domain.CylinderAxis = (GetParamValue("Axis X"), GetParamValue("Axis Y"), GetParamValue("Axis Z"));
-                domain.Radius = GetParamValue("Base Radius (m)");
-                domain.TopRadius = GetParamValue("Top Radius (m)");
-                domain.Height = GetParamValue("Height (m)");
+                geometry.Type = GeometryType.Cone;
+                geometry.CylinderBase = (GetParamValue("Base Center X (m)"), GetParamValue("Base Center Y (m)"), GetParamValue("Base Center Z (m)"));
+                geometry.CylinderAxis = NormalizeAxis((GetParamValue("Axis X"), GetParamValue("Axis Y"), GetParamValue("Axis Z")));
+                geometry.Radius = GetParamValue("Base Radius (m)");
+                geometry.TopRadius = GetParamValue("Top Radius (m)");
+                geometry.Height = GetParamValue("Height (m)");
+                geometry.Center = AddAxisOffset(geometry.CylinderBase, geometry.CylinderAxis, geometry.Height / 2.0);
                 break;
 
             case 4: // Torus
-                domain.Geometry = GeometryType.Torus;
-                domain.Center = (GetParamValue("Center X (m)"), GetParamValue("Center Y (m)"), GetParamValue("Center Z (m)"));
-                domain.MajorRadius = GetParamValue("Major Radius (m)");
-                domain.MinorRadius = GetParamValue("Minor Radius (m)");
+                geometry.Type = GeometryType.Torus;
+                geometry.Center = (GetParamValue("Center X (m)"), GetParamValue("Center Y (m)"), GetParamValue("Center Z (m)"));
+                geometry.MajorRadius = GetParamValue("Major Radius (m)");
+                geometry.MinorRadius = GetParamValue("Minor Radius (m)");
                 break;
 
             case 5: // Parallelepiped
-                domain.Geometry = GeometryType.Parallelepiped;
-                domain.Corner = (GetParamValue("Corner X (m)"), GetParamValue("Corner Y (m)"), GetParamValue("Corner Z (m)"));
-                domain.Edge1 = (GetParamValue("Edge1 X (m)"), GetParamValue("Edge1 Y (m)"), GetParamValue("Edge1 Z (m)"));
-                domain.Edge2 = (GetParamValue("Edge2 X (m)"), GetParamValue("Edge2 Y (m)"), GetParamValue("Edge2 Z (m)"));
-                domain.Edge3 = (GetParamValue("Edge3 X (m)"), GetParamValue("Edge3 Y (m)"), GetParamValue("Edge3 Z (m)"));
+                geometry.Type = GeometryType.Parallelepiped;
+                geometry.Corner = (GetParamValue("Corner X (m)"), GetParamValue("Corner Y (m)"), GetParamValue("Corner Z (m)"));
+                geometry.Edge1 = (GetParamValue("Edge1 X (m)"), GetParamValue("Edge1 Y (m)"), GetParamValue("Edge1 Z (m)"));
+                geometry.Edge2 = (GetParamValue("Edge2 X (m)"), GetParamValue("Edge2 Y (m)"), GetParamValue("Edge2 Z (m)"));
+                geometry.Edge3 = (GetParamValue("Edge3 X (m)"), GetParamValue("Edge3 Y (m)"), GetParamValue("Edge3 Z (m)"));
+                geometry.Center = (
+                    geometry.Corner.X + geometry.Edge1.X / 2.0 + geometry.Edge2.X / 2.0 + geometry.Edge3.X / 2.0,
+                    geometry.Corner.Y + geometry.Edge1.Y / 2.0 + geometry.Edge2.Y / 2.0 + geometry.Edge3.Y / 2.0,
+                    geometry.Corner.Z + geometry.Edge1.Z / 2.0 + geometry.Edge2.Z / 2.0 + geometry.Edge3.Z / 2.0);
+                break;
+
+            case 6: // Custom 2D
+                geometry.Type = GeometryType.Custom2D;
+                geometry.Profile2D = new List<(double X, double Y)>
+                {
+                    (-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)
+                };
+                geometry.ExtrusionDepth = 1.0;
+                geometry.Center = (0, 0, 0);
+                break;
+
+            case 7: // Custom 3D
+                geometry.Type = GeometryType.Custom3D;
+                geometry.CustomPoints = new List<(double X, double Y, double Z)>
+                {
+                    (-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)
+                };
+                geometry.Center = (0, 0, 0);
                 break;
 
             default:
-                // Custom geometries not yet implemented in this dialog
                 return null;
         }
+
+        domain.Geometry = geometry;
 
         // Set initial conditions
         domain.InitialConditions = new InitialConditions
@@ -321,5 +348,20 @@ public class DomainCreatorDialog : Dialog
         };
 
         return domain;
+    }
+
+    private static (double X, double Y, double Z) NormalizeAxis((double X, double Y, double Z) axis)
+    {
+        var magnitude = Math.Sqrt(axis.X * axis.X + axis.Y * axis.Y + axis.Z * axis.Z);
+        if (magnitude < 1e-6)
+            return (0, 0, 1);
+
+        return (axis.X / magnitude, axis.Y / magnitude, axis.Z / magnitude);
+    }
+
+    private static (double X, double Y, double Z) AddAxisOffset((double X, double Y, double Z) origin,
+        (double X, double Y, double Z) axis, double distance)
+    {
+        return (origin.X + axis.X * distance, origin.Y + axis.Y * distance, origin.Z + axis.Z * distance);
     }
 }
