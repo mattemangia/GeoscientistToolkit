@@ -183,8 +183,45 @@ public class MainGtkWindow : Window
         toolbar.Insert(CreateIconButton("Open", "Open .gtp project", CairoExtensions.MakeIcon(IconSymbol.FolderOpen), (_, _) => OpenProjectDialog()), -1);
         toolbar.Insert(CreateIconButton("Save", "Save project", CairoExtensions.MakeIcon(IconSymbol.Save), (_, _) => SaveProjectDialog()), -1);
         toolbar.Insert(new SeparatorToolItem(), -1);
-        toolbar.Insert(CreateIconButton("Mesh", "Import 3D mesh dataset", CairoExtensions.MakeIcon(IconSymbol.Mesh), (_, _) => AddExistingDataset()), -1);
-        toolbar.Insert(CreateIconButton("Table", "Import table/CSV dataset", CairoExtensions.MakeIcon(IconSymbol.Table), (_, _) => ImportTableDataset()), -1);
+        toolbar.Insert(CreateIconButton("Add PhysicoChem", "Add a new PhysicoChem dataset", CairoExtensions.MakeIcon(IconSymbol.PhysicoChem), (_, _) =>
+        {
+            var dataset = new PhysicoChemDataset($"PhysicoChem_{DateTime.Now:HHmmss}", "GTK multiphysics profile");
+            _projectManager.AddDataset(dataset);
+            RefreshDatasetList();
+            SelectFirstDataset();
+        }), -1);
+
+        toolbar.Insert(CreateIconButton("Add Borehole", "Create a new borehole dataset", CairoExtensions.MakeIcon(IconSymbol.Borehole), (_, _) =>
+        {
+            var dataset = new BoreholeDataset($"Borehole_{DateTime.Now:HHmmss}", string.Empty)
+            {
+                SurfaceCoordinates = new System.Numerics.Vector2(0, 0),
+                TotalDepth = 1200,
+                Elevation = 120
+            };
+            _projectManager.AddDataset(dataset);
+            RefreshDatasetList();
+            SelectFirstDataset();
+        }), -1);
+
+        toolbar.Insert(CreateIconButton("New Empty Mesh", "Create an empty 3D mesh", CairoExtensions.MakeIcon(IconSymbol.Mesh), (_, _) =>
+        {
+            var mesh = Mesh3DDataset.CreateEmpty("Mesh3D (GTK)", string.Empty);
+            _projectManager.AddDataset(mesh);
+            RefreshDatasetList();
+            SelectFirstDataset();
+        }), -1);
+
+        toolbar.Insert(new SeparatorToolItem(), -1);
+        toolbar.Insert(CreateIconButton("Import Mesh", "Import 3D mesh dataset", CairoExtensions.MakeIcon(IconSymbol.MeshImport), (_, _) => AddExistingDataset()), -1);
+        toolbar.Insert(CreateIconButton("Import Table/CSV", "Import table/CSV dataset", CairoExtensions.MakeIcon(IconSymbol.Table), (_, _) => ImportTableDataset()), -1);
+
+        toolbar.Insert(new SeparatorToolItem(), -1);
+        toolbar.Insert(CreateIconButton("Geothermal Well Wizard", "Launch the geothermal well wizard", CairoExtensions.MakeIcon(IconSymbol.PhysicoChem), (_, _) => OpenGeothermalConfigDialog()), -1);
+        toolbar.Insert(CreateIconButton("Create Domain", "Open domain creation dialog", CairoExtensions.MakeIcon(IconSymbol.Mesh), (_, _) => OpenDomainCreatorDialog()), -1);
+        toolbar.Insert(CreateIconButton("Material Library", "Open the material library", CairoExtensions.MakeIcon(IconSymbol.Material), (_, _) => OpenMaterialLibraryDialog()), -1);
+
+        toolbar.Insert(new SeparatorToolItem(), -1);
         toolbar.Insert(CreateIconButton("Reload", "Reload current project", CairoExtensions.MakeIcon(IconSymbol.Refresh), (_, _) => ReloadCurrentProject()), -1);
         toolbar.Insert(new SeparatorToolItem(), -1);
         toolbar.Insert(CreateIconButton("Cluster", "Refresh cluster", CairoExtensions.MakeIcon(IconSymbol.Cluster), (_, _) => RefreshNodeList()), -1);
@@ -214,50 +251,7 @@ public class MainGtkWindow : Window
         var scroller = new ScrolledWindow();
         scroller.Add(_datasetView);
         scroller.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
-        scroller.HeightRequest = 260;
-        panel.PackStart(scroller, false, true, 0);
-
-        var buttonRow = new VBox(false, 4);
-
-        buttonRow.PackStart(CreateSlimActionButton("Add PhysicoChem", IconSymbol.PhysicoChem, (_, _) =>
-        {
-            var dataset = new PhysicoChemDataset($"PhysicoChem_{DateTime.Now:HHmmss}", "GTK multiphysics profile");
-            _projectManager.AddDataset(dataset);
-            RefreshDatasetList();
-            SelectFirstDataset();
-        }), false, false, 0);
-
-        buttonRow.PackStart(CreateSlimActionButton("Add Borehole", IconSymbol.Borehole, (_, _) =>
-        {
-            var dataset = new BoreholeDataset($"Borehole_{DateTime.Now:HHmmss}", string.Empty)
-            {
-                SurfaceCoordinates = new System.Numerics.Vector2(0, 0),
-                TotalDepth = 1200,
-                Elevation = 120
-            };
-            _projectManager.AddDataset(dataset);
-            RefreshDatasetList();
-            SelectFirstDataset();
-        }), false, false, 0);
-
-        buttonRow.PackStart(CreateSlimActionButton("New empty mesh", IconSymbol.Mesh, (_, _) =>
-        {
-            var mesh = Mesh3DDataset.CreateEmpty("Mesh3D (GTK)", string.Empty);
-            _projectManager.AddDataset(mesh);
-            RefreshDatasetList();
-            SelectFirstDataset();
-        }), false, false, 0);
-
-        buttonRow.PackStart(CreateSlimActionButton("Import mesh", IconSymbol.MeshImport, (_, _) => AddExistingDataset()), false, false, 0);
-        buttonRow.PackStart(CreateSlimActionButton("Import table/CSV", IconSymbol.Table, (_, _) => ImportTableDataset()), false, false, 0);
-
-        buttonRow.PackStart(new Separator(Orientation.Horizontal), false, false, 4);
-
-        buttonRow.PackStart(CreateSlimActionButton("Geothermal Well Wizard", IconSymbol.PhysicoChem, (_, _) => OpenGeothermalConfigDialog()), false, false, 0);
-        buttonRow.PackStart(CreateSlimActionButton("Create Domain", IconSymbol.Mesh, (_, _) => OpenDomainCreatorDialog()), false, false, 0);
-        buttonRow.PackStart(CreateSlimActionButton("Material Library", IconSymbol.Material, (_, _) => OpenMaterialLibraryDialog()), false, false, 0);
-
-        panel.PackStart(buttonRow, false, false, 0);
+        panel.PackStart(scroller, true, true, 0);
 
         panel.PackStart(BuildAssetTree(), true, true, 0);
 
