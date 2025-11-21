@@ -7,9 +7,19 @@
     <UseAppHost>true</UseAppHost>
     <ApplicationIcon>../image.ico</ApplicationIcon>
     <RuntimeIdentifiers>win-x64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="GtkSharp" Version="3.24.24.95" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Explicitly include the GTK entrypoint and window types to avoid missing
+         type resolution errors when the project is built in isolation. -->
+    <Compile Include="GtkToolkitApp.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="SplashWindow.cs" />
+    <Compile Include="MainGtkWindow.cs" />
+    <Compile Include="Views\MeshViewport3D.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\GeoscientistToolkit.csproj" />

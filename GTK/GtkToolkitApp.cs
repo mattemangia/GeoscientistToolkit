@@ -5,7 +5,7 @@ using GeoscientistToolkit.Util;
 using Gtk;
 using GtkApplication = Gtk.Application;
 
-namespace GeoscientistToolkit.Gtk;
+namespace GeoscientistToolkit.GtkUI;
 
 /// <summary>
 /// Boots the GTK front-end while reusing the core GeoscientistToolkit runtime
