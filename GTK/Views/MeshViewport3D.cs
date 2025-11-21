@@ -19,9 +19,13 @@ public class MeshViewport3D : DrawingArea
     private readonly List<(int Start, int End)> _edges = new();
     private readonly List<List<int>> _faces = new();
     private readonly List<Vector2> _projected = new();
+    private readonly List<CellInfo> _cells = new();
     private Mesh3DDataset? _activeMesh;
+    private PhysicoChemMesh? _activePhysicoMesh;
+    private PhysicoChemDataset? _activePhysicoDataset;
     private int? _selectedIndex;
     private int? _hoverIndex;
+    private int? _hoveredCellIndex;
     private bool _isDragging;
     private Matrix4x4 _lastRotation = Matrix4x4.Identity;
     private Vector3 _lastMin = Vector3.Zero;
@@ -33,6 +37,11 @@ public class MeshViewport3D : DrawingArea
     private float _zoom = 1.2f;
 
     public RenderMode RenderMode { get; set; } = RenderMode.Wireframe;
+    public SelectionMode SelectionMode { get; set; } = SelectionMode.Single;
+    public ColorCodingMode ColorMode { get; set; } = ColorCodingMode.Material;
+    public HashSet<string> SelectedCellIDs { get; } = new();
+
+    public event EventHandler<CellSelectionEventArgs>? CellSelectionChanged;
 
     public MeshViewport3D()
     {
@@ -46,6 +55,36 @@ public class MeshViewport3D : DrawingArea
         ButtonPressEvent += (_, args) =>
         {
             _lastPointer = new Vector2((float)args.Event.X, (float)args.Event.Y);
+
+            // Try to select a cell first
+            var cellIdx = FindCellAtPosition(_lastPointer);
+            if (cellIdx.HasValue && cellIdx.Value < _cells.Count)
+            {
+                var cell = _cells[cellIdx.Value];
+                bool shiftPressed = (args.Event.State & Gdk.ModifierType.ShiftMask) != 0;
+                bool ctrlPressed = (args.Event.State & Gdk.ModifierType.ControlMask) != 0;
+
+                if (shiftPressed || ctrlPressed || SelectionMode != SelectionMode.Single)
+                {
+                    // Multi-selection mode
+                    if (SelectedCellIDs.Contains(cell.ID))
+                        SelectedCellIDs.Remove(cell.ID);
+                    else
+                        SelectedCellIDs.Add(cell.ID);
+                }
+                else
+                {
+                    // Single selection mode
+                    SelectedCellIDs.Clear();
+                    SelectedCellIDs.Add(cell.ID);
+                }
+
+                CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
+                QueueDraw();
+                return;
+            }
+
+            // Fallback to vertex selection for mesh editing
             if (_projected.Count == 0) return;
             var idx = FindClosestPoint(_lastPointer);
             _selectedIndex = idx;
@@ -57,23 +96,31 @@ public class MeshViewport3D : DrawingArea
         {
             var previousPointer = _lastPointer;
             _lastPointer = new Vector2((float)args.Event.X, (float)args.Event.Y);
+
+            // Update hovered cell
+            _hoveredCellIndex = FindCellAtPosition(_lastPointer);
             _hoverIndex = FindClosestPoint(_lastPointer, 18f);
+
             if (_isDragging && _selectedIndex.HasValue && _activeMesh != null)
             {
                 var delta = _lastPointer - previousPointer;
                 ApplyDragDelta(_selectedIndex.Value, delta);
-                QueueDraw();
             }
+
+            QueueDraw();
         };
 
         ButtonReleaseEvent += (_, _) => _isDragging = false;
     }
 
-    public void LoadFromPhysicoChem(PhysicoChemMesh mesh)
+    public void LoadFromPhysicoChem(PhysicoChemMesh mesh, PhysicoChemDataset? dataset = null)
     {
         _points.Clear();
         _edges.Clear();
         _faces.Clear();
+        _cells.Clear();
+        _activePhysicoMesh = mesh;
+        _activePhysicoDataset = dataset;
 
         var cellIndex = new Dictionary<string, int>();
 
@@ -87,7 +134,18 @@ public class MeshViewport3D : DrawingArea
 
             // Store starting index for this cell's vertices
             int startIdx = _points.Count;
+            int cellIdx = _cells.Count;
             cellIndex[id] = startIdx;
+
+            // Store cell info for selection
+            _cells.Add(new CellInfo
+            {
+                ID = id,
+                Cell = cell,
+                VertexStartIndex = startIdx,
+                FaceStartIndex = _faces.Count,
+                Center = center
+            });
 
             // Generate 8 corners of the box
             for (int i = 0; i < 2; i++)
@@ -246,9 +304,18 @@ public class MeshViewport3D : DrawingArea
             faceDepths.Sort((a, b) => a.depth.CompareTo(b.depth)); // Draw back to front
 
             // Draw filled faces
-            foreach (var (face, _) in faceDepths)
+            for (int faceIdx = 0; faceIdx < faceDepths.Count; faceIdx++)
             {
+                var (face, _) = faceDepths[faceIdx];
                 if (face.Count < 3) continue;
+
+                // Find which cell this face belongs to
+                var cellInfo = FindCellForFace(faceIdx);
+                bool isSelected = cellInfo != null && SelectedCellIDs.Contains(cellInfo.ID);
+                bool isHovered = cellInfo != null && _hoveredCellIndex.HasValue &&
+                                _hoveredCellIndex.Value < _cells.Count &&
+                                _cells[_hoveredCellIndex.Value].ID == cellInfo.ID;
+                bool isInactive = cellInfo?.Cell.IsActive == false;
 
                 var firstPoint = Project(projected[face[0]], min, scale, width, height);
                 cr.MoveTo(firstPoint.X, firstPoint.Y);
@@ -260,15 +327,19 @@ public class MeshViewport3D : DrawingArea
                 }
                 cr.ClosePath();
 
-                // Fill with semi-transparent color
-                cr.SetSourceRGBA(0.3, 0.6, 0.9, 0.6);
+                // Get color based on mode and state
+                var color = GetCellColor(cellInfo, isSelected, isHovered, isInactive);
+                cr.SetSourceRGBA(color.Item1, color.Item2, color.Item3, color.Item4);
                 cr.FillPreserve();
 
                 // Outline the face
-                if (RenderMode == RenderMode.SolidWireframe)
+                if (RenderMode == RenderMode.SolidWireframe || isSelected)
                 {
-                    cr.SetSourceRGB(0.2, 0.4, 0.7);
-                    cr.LineWidth = 0.8;
+                    if (isSelected)
+                        cr.SetSourceRGB(1.0, 0.8, 0.0); // Bright yellow for selection
+                    else
+                        cr.SetSourceRGB(0.2, 0.4, 0.7);
+                    cr.LineWidth = isSelected ? 2.0 : 0.8;
                     cr.Stroke();
                 }
                 else
@@ -413,6 +484,196 @@ public class MeshViewport3D : DrawingArea
         _activeMesh.Vertices[index] = updated;
         _activeMesh.CalculateBounds();
     }
+
+    private int? FindCellAtPosition(Vector2 pointer)
+    {
+        if (_cells.Count == 0) return null;
+
+        var allocation = Allocation;
+        var width = allocation.Width;
+        var height = allocation.Height;
+
+        // Check each cell's center
+        float minDistance = 50f; // Max click distance
+        int? closestCell = null;
+
+        for (int i = 0; i < _cells.Count; i++)
+        {
+            var cell = _cells[i];
+            var projected = _projected[cell.VertexStartIndex];
+            var screenPos = Project(projected, _lastMin, _lastScale, width, height);
+
+            float dist = MathF.Sqrt(MathF.Pow(screenPos.X - pointer.X, 2) + MathF.Pow(screenPos.Y - pointer.Y, 2));
+            if (dist < minDistance)
+            {
+                minDistance = dist;
+                closestCell = i;
+            }
+        }
+
+        return closestCell;
+    }
+
+    private CellInfo? FindCellForFace(int faceIndex)
+    {
+        foreach (var cell in _cells)
+        {
+            int cellFaceStart = cell.FaceStartIndex;
+            int cellFaceEnd = cellFaceStart + 6; // 6 faces per box
+            if (faceIndex >= cellFaceStart && faceIndex < cellFaceEnd)
+                return cell;
+        }
+        return null;
+    }
+
+    private (double, double, double, double) GetCellColor(CellInfo? cellInfo, bool isSelected, bool isHovered, bool isInactive)
+    {
+        // Inactive cells are gray
+        if (isInactive)
+            return (0.3, 0.3, 0.3, 0.3);
+
+        // Selected cells are highlighted in orange/yellow
+        if (isSelected)
+            return (1.0, 0.7, 0.2, 0.8);
+
+        // Hovered cells are highlighted in cyan
+        if (isHovered)
+            return (0.4, 0.9, 0.9, 0.7);
+
+        if (cellInfo == null || _activePhysicoMesh == null)
+            return (0.3, 0.6, 0.9, 0.6);
+
+        // Color-code by selected property
+        switch (ColorMode)
+        {
+            case ColorCodingMode.Material:
+                return GetMaterialColor(cellInfo.Cell);
+
+            case ColorCodingMode.Temperature:
+                return GetTemperatureColor(cellInfo.Cell);
+
+            case ColorCodingMode.Pressure:
+                return GetPressureColor(cellInfo.Cell);
+
+            case ColorCodingMode.Active:
+                return cellInfo.Cell.IsActive ? (0.3, 0.9, 0.3, 0.6) : (0.9, 0.3, 0.3, 0.6);
+
+            default:
+                return (0.3, 0.6, 0.9, 0.6);
+        }
+    }
+
+    private (double, double, double, double) GetMaterialColor(Cell cell)
+    {
+        // Use material color if available
+        if (_activePhysicoDataset != null)
+        {
+            var material = _activePhysicoDataset.Materials?.FirstOrDefault(m => m.MaterialID == cell.MaterialID);
+            if (material != null)
+            {
+                return (material.Color.X, material.Color.Y, material.Color.Z, 0.6);
+            }
+        }
+        return (0.3, 0.6, 0.9, 0.6);
+    }
+
+    private (double, double, double, double) GetTemperatureColor(Cell cell)
+    {
+        if (cell.InitialConditions == null)
+            return (0.3, 0.6, 0.9, 0.6);
+
+        // Map temperature to color (blue=cold, red=hot)
+        double temp = cell.InitialConditions.Temperature;
+        double normalized = Math.Clamp((temp - 273.15) / 100.0, 0.0, 1.0); // 0-100°C range
+
+        double r = normalized;
+        double g = 0.3;
+        double b = 1.0 - normalized;
+        return (r, g, b, 0.6);
+    }
+
+    private (double, double, double, double) GetPressureColor(Cell cell)
+    {
+        if (cell.InitialConditions == null)
+            return (0.3, 0.6, 0.9, 0.6);
+
+        // Map pressure to color
+        double pressure = cell.InitialConditions.Pressure;
+        double normalized = Math.Clamp((pressure - 101325.0) / 100000.0, 0.0, 1.0);
+
+        double r = 0.3;
+        double g = normalized;
+        double b = 1.0 - normalized;
+        return (r, g, b, 0.6);
+    }
+
+    public void SelectCellsInPlane(PlaneType plane, double position, double tolerance = 0.1)
+    {
+        SelectedCellIDs.Clear();
+
+        foreach (var cellInfo in _cells)
+        {
+            bool inPlane = plane switch
+            {
+                PlaneType.XY => Math.Abs(cellInfo.Cell.Center.Z - position) < tolerance,
+                PlaneType.XZ => Math.Abs(cellInfo.Cell.Center.Y - position) < tolerance,
+                PlaneType.YZ => Math.Abs(cellInfo.Cell.Center.X - position) < tolerance,
+                _ => false
+            };
+
+            if (inPlane && cellInfo.Cell.IsActive)
+                SelectedCellIDs.Add(cellInfo.ID);
+        }
+
+        CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
+        QueueDraw();
+    }
+
+    public void ToggleSelectedCellsActive()
+    {
+        if (_activePhysicoMesh == null) return;
+
+        foreach (var cellId in SelectedCellIDs)
+        {
+            if (_activePhysicoMesh.Cells.TryGetValue(cellId, out var cell))
+            {
+                cell.IsActive = !cell.IsActive;
+            }
+        }
+        QueueDraw();
+    }
+
+    public void ClearSelection()
+    {
+        SelectedCellIDs.Clear();
+        CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(new List<string>()));
+        QueueDraw();
+    }
+}
+
+/// <summary>
+/// Information about a cell for selection and rendering
+/// </summary>
+internal class CellInfo
+{
+    public string ID { get; set; } = "";
+    public Cell Cell { get; set; } = null!;
+    public int VertexStartIndex { get; set; }
+    public int FaceStartIndex { get; set; }
+    public Vector3 Center { get; set; }
+}
+
+/// <summary>
+/// Event args for cell selection changes
+/// </summary>
+public class CellSelectionEventArgs : EventArgs
+{
+    public List<string> SelectedCellIDs { get; }
+
+    public CellSelectionEventArgs(List<string> selectedCellIDs)
+    {
+        SelectedCellIDs = selectedCellIDs;
+    }
 }
 
 /// <summary>
@@ -423,4 +684,38 @@ public enum RenderMode
     Wireframe,
     Solid,
     SolidWireframe
+}
+
+/// <summary>
+/// Selection mode for cells
+/// </summary>
+public enum SelectionMode
+{
+    Single,
+    Multiple,
+    PlaneXY,
+    PlaneXZ,
+    PlaneYZ
+}
+
+/// <summary>
+/// Color coding mode for cells
+/// </summary>
+public enum ColorCodingMode
+{
+    Material,
+    Temperature,
+    Pressure,
+    Active,
+    None
+}
+
+/// <summary>
+/// Plane types for selection
+/// </summary>
+public enum PlaneType
+{
+    XY,
+    XZ,
+    YZ
 }

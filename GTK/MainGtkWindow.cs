@@ -44,6 +44,10 @@ public class MainGtkWindow : Window
     private readonly SpinButton _gridYInput = new(1, 20, 1) { Value = 3 };
     private readonly SpinButton _gridZInput = new(1, 20, 1) { Value = 3 };
     private readonly ComboBoxText _renderModeSelector = new();
+    private readonly ComboBoxText _selectionModeSelector = new();
+    private readonly ComboBoxText _colorModeSelector = new();
+    private readonly Label _selectionInfoLabel = new() { Xalign = 0 };
+    private readonly TextView _cellPropertiesView = new() { Editable = false, WrapMode = WrapMode.Word, Monospace = true };
     private readonly Adjustment _yawAdjustment = new(35, -180, 180, 1, 10, 0);
     private readonly Adjustment _pitchAdjustment = new(-20, -90, 90, 1, 10, 0);
     private readonly Adjustment _zoomAdjustment = new(1.2, 0.1, 8, 0.05, 0.1, 0);
@@ -278,9 +282,22 @@ public class MainGtkWindow : Window
         var hbox = new HPaned { Position = 400 };
         hbox.Add1(BuildMeshOptionsPanel());
 
+        // Right side: viewport + cell properties
+        var rightSide = new VPaned { Position = 450 };
+
         var viewportFrame = new Frame("3D viewport (PetraSim/COMSOL style)");
         viewportFrame.Add(_meshViewport);
-        hbox.Add2(viewportFrame);
+        rightSide.Add1(viewportFrame);
+
+        // Cell properties panel
+        var cellPropsFrame = new Frame("Selected Cell Properties");
+        var cellPropsScroller = new ScrolledWindow();
+        cellPropsScroller.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+        cellPropsScroller.Add(_cellPropertiesView);
+        cellPropsFrame.Add(cellPropsScroller);
+        rightSide.Add2(cellPropsFrame);
+
+        hbox.Add2(rightSide);
 
         box.PackStart(hbox, true, true, 0);
 
@@ -358,21 +375,64 @@ public class MainGtkWindow : Window
         };
         renderGrid.Attach(_renderModeSelector, 1, 0, 2, 1);
 
+        // Color mode selector
+        renderGrid.Attach(new Label("Color by") { Xalign = 0 }, 0, 1, 1, 1);
+        _colorModeSelector.AppendText("Material");
+        _colorModeSelector.AppendText("Temperature");
+        _colorModeSelector.AppendText("Pressure");
+        _colorModeSelector.AppendText("Active/Inactive");
+        _colorModeSelector.Active = 0;
+        _colorModeSelector.Changed += (_, _) =>
+        {
+            _meshViewport.ColorMode = _colorModeSelector.Active switch
+            {
+                0 => ColorCodingMode.Material,
+                1 => ColorCodingMode.Temperature,
+                2 => ColorCodingMode.Pressure,
+                3 => ColorCodingMode.Active,
+                _ => ColorCodingMode.Material
+            };
+            _meshViewport.QueueDraw();
+        };
+        renderGrid.Attach(_colorModeSelector, 1, 1, 2, 1);
+
+        // Selection mode selector
+        renderGrid.Attach(new Label("Selection") { Xalign = 0 }, 0, 2, 1, 1);
+        _selectionModeSelector.AppendText("Single");
+        _selectionModeSelector.AppendText("Multiple");
+        _selectionModeSelector.AppendText("Plane XY");
+        _selectionModeSelector.AppendText("Plane XZ");
+        _selectionModeSelector.AppendText("Plane YZ");
+        _selectionModeSelector.Active = 0;
+        _selectionModeSelector.Changed += (_, _) =>
+        {
+            _meshViewport.SelectionMode = _selectionModeSelector.Active switch
+            {
+                0 => SelectionMode.Single,
+                1 => SelectionMode.Multiple,
+                2 => SelectionMode.PlaneXY,
+                3 => SelectionMode.PlaneXZ,
+                4 => SelectionMode.PlaneYZ,
+                _ => SelectionMode.Single
+            };
+        };
+        renderGrid.Attach(_selectionModeSelector, 1, 2, 2, 1);
+
         // Camera controls
-        renderGrid.Attach(new Label("Yaw") { Xalign = 0 }, 0, 1, 1, 1);
+        renderGrid.Attach(new Label("Yaw") { Xalign = 0 }, 0, 3, 1, 1);
         var yawScale = new Scale(Orientation.Horizontal, _yawAdjustment) { DrawValue = true };
         yawScale.ValueChanged += (_, _) => UpdateViewportCamera();
-        renderGrid.Attach(yawScale, 1, 1, 2, 1);
+        renderGrid.Attach(yawScale, 1, 3, 2, 1);
 
-        renderGrid.Attach(new Label("Pitch") { Xalign = 0 }, 0, 2, 1, 1);
+        renderGrid.Attach(new Label("Pitch") { Xalign = 0 }, 0, 4, 1, 1);
         var pitchScale = new Scale(Orientation.Horizontal, _pitchAdjustment) { DrawValue = true };
         pitchScale.ValueChanged += (_, _) => UpdateViewportCamera();
-        renderGrid.Attach(pitchScale, 1, 2, 2, 1);
+        renderGrid.Attach(pitchScale, 1, 4, 2, 1);
 
-        renderGrid.Attach(new Label("Zoom") { Xalign = 0 }, 0, 3, 1, 1);
+        renderGrid.Attach(new Label("Zoom") { Xalign = 0 }, 0, 5, 1, 1);
         var zoomScale = new Scale(Orientation.Horizontal, _zoomAdjustment) { DrawValue = true };
         zoomScale.ValueChanged += (_, _) => UpdateViewportCamera();
-        renderGrid.Attach(zoomScale, 1, 3, 2, 1);
+        renderGrid.Attach(zoomScale, 1, 5, 2, 1);
 
         renderFrame.Add(renderGrid);
         container.PackStart(renderFrame, false, false, 0);
@@ -401,6 +461,63 @@ public class MainGtkWindow : Window
 
         reactorFrame.Add(reactorGrid);
         container.PackStart(reactorFrame, false, false, 0);
+
+        // Cell operations frame (PetraSim-style cell editing)
+        var cellOpsFrame = new Frame("Cell Operations") { BorderWidth = 4 };
+        var cellOpsGrid = new Grid { ColumnSpacing = 6, RowSpacing = 6, BorderWidth = 6 };
+
+        // Selection info
+        _meshViewport.CellSelectionChanged += (_, args) =>
+        {
+            _selectionInfoLabel.Text = args.SelectedCellIDs.Count > 0
+                ? $"{args.SelectedCellIDs.Count} cells selected"
+                : "No cells selected";
+            UpdateCellProperties(args.SelectedCellIDs);
+        };
+        cellOpsGrid.Attach(_selectionInfoLabel, 0, 0, 2, 1);
+
+        // Enable/Disable selected cells
+        var toggleActiveButton = CreateSlimActionButton("Toggle Active/Inactive", IconSymbol.PhysicoChem, (_, _) =>
+        {
+            _meshViewport.ToggleSelectedCellsActive();
+            SetStatus($"Toggled {_meshViewport.SelectedCellIDs.Count} cells");
+        });
+        cellOpsGrid.Attach(toggleActiveButton, 0, 1, 2, 1);
+
+        // Clear selection
+        var clearSelButton = CreateSlimActionButton("Clear Selection", IconSymbol.Refresh, (_, _) =>
+        {
+            _meshViewport.ClearSelection();
+            SetStatus("Selection cleared");
+        });
+        cellOpsGrid.Attach(clearSelButton, 0, 2, 2, 1);
+
+        // Plane selection tools
+        cellOpsGrid.Attach(new Label("Plane Selection:") { Xalign = 0 }, 0, 3, 2, 1);
+
+        var selectXYButton = CreateSlimActionButton("Select XY plane", IconSymbol.Mesh, (_, _) =>
+        {
+            _meshViewport.SelectCellsInPlane(PlaneType.XY, 0.0);
+            SetStatus($"Selected XY plane: {_meshViewport.SelectedCellIDs.Count} cells");
+        });
+        cellOpsGrid.Attach(selectXYButton, 0, 4, 2, 1);
+
+        var selectXZButton = CreateSlimActionButton("Select XZ plane", IconSymbol.Mesh, (_, _) =>
+        {
+            _meshViewport.SelectCellsInPlane(PlaneType.XZ, 0.0);
+            SetStatus($"Selected XZ plane: {_meshViewport.SelectedCellIDs.Count} cells");
+        });
+        cellOpsGrid.Attach(selectXZButton, 0, 5, 2, 1);
+
+        var selectYZButton = CreateSlimActionButton("Select YZ plane", IconSymbol.Mesh, (_, _) =>
+        {
+            _meshViewport.SelectCellsInPlane(PlaneType.YZ, 0.0);
+            SetStatus($"Selected YZ plane: {_meshViewport.SelectedCellIDs.Count} cells");
+        });
+        cellOpsGrid.Attach(selectYZButton, 0, 6, 2, 1);
+
+        cellOpsFrame.Add(cellOpsGrid);
+        container.PackStart(cellOpsFrame, false, false, 0);
 
         // Voronoi mesh generation
         var voronoiFrame = new Frame("Voronoi Mesh (from Borehole)") { BorderWidth = 4 };
@@ -554,6 +671,84 @@ public class MainGtkWindow : Window
         SetStatus($"Active dataset: {_selectedDataset.Name}");
     }
 
+    private void UpdateCellProperties(List<string> selectedCellIDs)
+    {
+        if (_selectedDataset is not PhysicoChemDataset physico || selectedCellIDs.Count == 0)
+        {
+            _cellPropertiesView.Buffer.Text = "No cells selected.";
+            return;
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Selected Cells: {selectedCellIDs.Count}");
+        sb.AppendLine();
+
+        if (selectedCellIDs.Count == 1)
+        {
+            // Show detailed properties for single cell
+            var cellId = selectedCellIDs[0];
+            if (physico.Mesh.Cells.TryGetValue(cellId, out var cell))
+            {
+                sb.AppendLine($"Cell ID: {cellId}");
+                sb.AppendLine($"Material: {cell.MaterialID}");
+                sb.AppendLine($"Active: {(cell.IsActive ? "Yes" : "No")}");
+                sb.AppendLine($"Center: ({cell.Center.X:F2}, {cell.Center.Y:F2}, {cell.Center.Z:F2})");
+                sb.AppendLine($"Volume: {cell.Volume:F3} m³");
+                sb.AppendLine();
+
+                if (cell.InitialConditions != null)
+                {
+                    sb.AppendLine("Initial Conditions:");
+                    sb.AppendLine($"  Temperature: {cell.InitialConditions.Temperature:F2} K ({cell.InitialConditions.Temperature - 273.15:F2} °C)");
+                    sb.AppendLine($"  Pressure: {cell.InitialConditions.Pressure:F0} Pa ({cell.InitialConditions.Pressure / 101325.0:F2} atm)");
+                    sb.AppendLine($"  Saturation: {cell.InitialConditions.LiquidSaturation:F2}");
+
+                    if (cell.InitialConditions.Concentrations != null && cell.InitialConditions.Concentrations.Count > 0)
+                    {
+                        sb.AppendLine();
+                        sb.AppendLine("Concentrations:");
+                        foreach (var (species, conc) in cell.InitialConditions.Concentrations)
+                        {
+                            sb.AppendLine($"  {species}: {conc:F4}");
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            // Show aggregate statistics for multiple cells
+            int activeCount = 0;
+            double totalVolume = 0;
+            double avgTemp = 0;
+            double avgPressure = 0;
+
+            foreach (var cellId in selectedCellIDs)
+            {
+                if (physico.Mesh.Cells.TryGetValue(cellId, out var cell))
+                {
+                    if (cell.IsActive) activeCount++;
+                    totalVolume += cell.Volume;
+                    if (cell.InitialConditions != null)
+                    {
+                        avgTemp += cell.InitialConditions.Temperature;
+                        avgPressure += cell.InitialConditions.Pressure;
+                    }
+                }
+            }
+
+            avgTemp /= selectedCellIDs.Count;
+            avgPressure /= selectedCellIDs.Count;
+
+            sb.AppendLine($"Active cells: {activeCount}/{selectedCellIDs.Count}");
+            sb.AppendLine($"Total volume: {totalVolume:F3} m³");
+            sb.AppendLine($"Avg temperature: {avgTemp:F2} K ({avgTemp - 273.15:F2} °C)");
+            sb.AppendLine($"Avg pressure: {avgPressure:F0} Pa ({avgPressure / 101325.0:F2} atm)");
+        }
+
+        _cellPropertiesView.Buffer.Text = sb.ToString();
+    }
+
     private string BuildDatasetSummary(Dataset dataset)
     {
         var sb = new StringBuilder();
@@ -609,7 +804,7 @@ public class MainGtkWindow : Window
         switch (dataset)
         {
             case PhysicoChemDataset physico:
-                _meshViewport.LoadFromPhysicoChem(physico.Mesh);
+                _meshViewport.LoadFromPhysicoChem(physico.Mesh, physico);
                 break;
             case Mesh3DDataset mesh3D:
                 _meshViewport.LoadFromMesh(mesh3D);
@@ -709,7 +904,7 @@ public class MainGtkWindow : Window
             cellId++;
         }
 
-        _meshViewport.LoadFromPhysicoChem(physico.Mesh);
+        _meshViewport.LoadFromPhysicoChem(physico.Mesh, physico);
         _detailsView.Buffer.Text = BuildDatasetSummary(physico);
         SetStatus($"Reactor grid created: {gridX}x{gridY}x{gridZ} = {cellId} cells");
     }
@@ -735,7 +930,7 @@ public class MainGtkWindow : Window
         physico.Mesh.GenerateVoronoiMesh(borehole, (int)_layerInput.Value, _radiusInput.Value, _heightInput.Value);
         var divisions = Math.Max(1, (int)_resolutionInput.Value / 10);
         physico.Mesh.SplitIntoGrid(divisions, divisions, divisions);
-        _meshViewport.LoadFromPhysicoChem(physico.Mesh);
+        _meshViewport.LoadFromPhysicoChem(physico.Mesh, physico);
         _detailsView.Buffer.Text = BuildDatasetSummary(physico);
         SetStatus("Voronoi mesh generated and synchronized with the 3D editor.");
     }
@@ -756,7 +951,7 @@ public class MainGtkWindow : Window
         }
 
         physico.Mesh.FromMesh3DDataset(meshDataset, _heightInput.Value);
-        _meshViewport.LoadFromPhysicoChem(physico.Mesh);
+        _meshViewport.LoadFromPhysicoChem(physico.Mesh, physico);
         _detailsView.Buffer.Text = BuildDatasetSummary(physico);
         SetStatus("Mesh imported and ready for multiphysics simulations.");
     }
@@ -1249,7 +1444,7 @@ public class MainGtkWindow : Window
 
         var target = _projectManager.LoadedDatasets.OfType<PhysicoChemDataset>().First();
         target.Mesh.FromMesh3DDataset(mesh, _heightInput.Value);
-        _meshViewport.LoadFromPhysicoChem(target.Mesh);
+        _meshViewport.LoadFromPhysicoChem(target.Mesh, target);
         _detailsView.Buffer.Text = BuildDatasetSummary(target);
         SetStatus("Voronoi mesh updated from the selected 3D dataset.");
     }
