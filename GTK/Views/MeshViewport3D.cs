@@ -17,6 +17,7 @@ public class MeshViewport3D : DrawingArea
 {
     private readonly List<Vector3> _points = new();
     private readonly List<(int Start, int End)> _edges = new();
+    private readonly List<List<int>> _faces = new();
     private readonly List<Vector2> _projected = new();
     private Mesh3DDataset? _activeMesh;
     private int? _selectedIndex;
@@ -30,6 +31,8 @@ public class MeshViewport3D : DrawingArea
     private float _yaw = 35f;
     private float _pitch = -20f;
     private float _zoom = 1.2f;
+
+    public RenderMode RenderMode { get; set; } = RenderMode.Wireframe;
 
     public MeshViewport3D()
     {
@@ -70,18 +73,76 @@ public class MeshViewport3D : DrawingArea
     {
         _points.Clear();
         _edges.Clear();
+        _faces.Clear();
 
         var cellIndex = new Dictionary<string, int>();
+
+        // For each cell, create a box based on its volume
         foreach (var (id, cell) in mesh.Cells.OrderBy(c => c.Key))
         {
-            cellIndex[id] = _points.Count;
-            _points.Add(new Vector3((float)cell.Center.X, (float)cell.Center.Y, (float)cell.Center.Z));
+            // Calculate box dimensions from volume (assume cubic cells)
+            float size = (float)Math.Pow(cell.Volume, 1.0 / 3.0) * 0.5f;
+
+            var center = new Vector3((float)cell.Center.X, (float)cell.Center.Y, (float)cell.Center.Z);
+
+            // Store starting index for this cell's vertices
+            int startIdx = _points.Count;
+            cellIndex[id] = startIdx;
+
+            // Generate 8 corners of the box
+            for (int i = 0; i < 2; i++)
+            for (int j = 0; j < 2; j++)
+            for (int k = 0; k < 2; k++)
+            {
+                float x = center.X + (i == 0 ? -size : size);
+                float y = center.Y + (j == 0 ? -size : size);
+                float z = center.Z + (k == 0 ? -size : size);
+                _points.Add(new Vector3(x, y, z));
+            }
+
+            // Add edges for the box (12 edges total)
+            // Bottom face (z = -size)
+            _edges.Add((startIdx + 0, startIdx + 1)); // 000 -> 100
+            _edges.Add((startIdx + 1, startIdx + 3)); // 100 -> 110
+            _edges.Add((startIdx + 3, startIdx + 2)); // 110 -> 010
+            _edges.Add((startIdx + 2, startIdx + 0)); // 010 -> 000
+
+            // Top face (z = +size)
+            _edges.Add((startIdx + 4, startIdx + 5)); // 001 -> 101
+            _edges.Add((startIdx + 5, startIdx + 7)); // 101 -> 111
+            _edges.Add((startIdx + 7, startIdx + 6)); // 111 -> 011
+            _edges.Add((startIdx + 6, startIdx + 4)); // 011 -> 001
+
+            // Vertical edges connecting bottom to top
+            _edges.Add((startIdx + 0, startIdx + 4)); // 000 -> 001
+            _edges.Add((startIdx + 1, startIdx + 5)); // 100 -> 101
+            _edges.Add((startIdx + 2, startIdx + 6)); // 010 -> 011
+            _edges.Add((startIdx + 3, startIdx + 7)); // 110 -> 111
+
+            // Add faces for solid rendering (6 faces per box)
+            // Bottom face (z = -size)
+            _faces.Add(new List<int> { startIdx + 0, startIdx + 1, startIdx + 3, startIdx + 2 });
+            // Top face (z = +size)
+            _faces.Add(new List<int> { startIdx + 4, startIdx + 5, startIdx + 7, startIdx + 6 });
+            // Front face (y = -size)
+            _faces.Add(new List<int> { startIdx + 0, startIdx + 1, startIdx + 5, startIdx + 4 });
+            // Back face (y = +size)
+            _faces.Add(new List<int> { startIdx + 2, startIdx + 3, startIdx + 7, startIdx + 6 });
+            // Left face (x = -size)
+            _faces.Add(new List<int> { startIdx + 0, startIdx + 2, startIdx + 6, startIdx + 4 });
+            // Right face (x = +size)
+            _faces.Add(new List<int> { startIdx + 1, startIdx + 3, startIdx + 7, startIdx + 5 });
         }
 
+        // Add connections between cells (optional - can be commented out for cleaner view)
         foreach (var (cell1, cell2) in mesh.Connections)
         {
             if (cellIndex.TryGetValue(cell1, out var start) && cellIndex.TryGetValue(cell2, out var end))
-                _edges.Add((start, end));
+            {
+                // Connect centers of cells (indices 0 of each cell's 8 vertices)
+                // Skip for now to avoid cluttering the view with too many edges
+                // _edges.Add((start, end));
+            }
         }
 
         QueueDraw();
@@ -166,11 +227,63 @@ public class MeshViewport3D : DrawingArea
         _lastScale = scale;
         _lastMin = min;
 
-        cr.SetSourceRGB(0.25, 0.55, 0.95);
-        cr.LineWidth = 1.2;
-
-        if (_edges.Count > 0)
+        // Render faces (solid mode)
+        if ((RenderMode == RenderMode.Solid || RenderMode == RenderMode.SolidWireframe) && _faces.Count > 0)
         {
+            // Sort faces by average Z depth (painter's algorithm for simple depth sorting)
+            var faceDepths = new List<(List<int> face, float depth)>();
+            foreach (var face in _faces)
+            {
+                float avgZ = 0;
+                foreach (var idx in face)
+                {
+                    var rotated = Vector3.Transform(_points[idx], rotation) * _zoom;
+                    avgZ += rotated.Z;
+                }
+                avgZ /= face.Count;
+                faceDepths.Add((face, avgZ));
+            }
+            faceDepths.Sort((a, b) => a.depth.CompareTo(b.depth)); // Draw back to front
+
+            // Draw filled faces
+            foreach (var (face, _) in faceDepths)
+            {
+                if (face.Count < 3) continue;
+
+                var firstPoint = Project(projected[face[0]], min, scale, width, height);
+                cr.MoveTo(firstPoint.X, firstPoint.Y);
+
+                for (int i = 1; i < face.Count; i++)
+                {
+                    var point = Project(projected[face[i]], min, scale, width, height);
+                    cr.LineTo(point.X, point.Y);
+                }
+                cr.ClosePath();
+
+                // Fill with semi-transparent color
+                cr.SetSourceRGBA(0.3, 0.6, 0.9, 0.6);
+                cr.FillPreserve();
+
+                // Outline the face
+                if (RenderMode == RenderMode.SolidWireframe)
+                {
+                    cr.SetSourceRGB(0.2, 0.4, 0.7);
+                    cr.LineWidth = 0.8;
+                    cr.Stroke();
+                }
+                else
+                {
+                    cr.NewPath(); // Clear the path without stroking
+                }
+            }
+        }
+
+        // Render edges (wireframe mode)
+        if ((RenderMode == RenderMode.Wireframe || RenderMode == RenderMode.SolidWireframe) && _edges.Count > 0)
+        {
+            cr.SetSourceRGB(0.25, 0.55, 0.95);
+            cr.LineWidth = 1.2;
+
             foreach (var edge in _edges)
             {
                 var start = Project(projected[edge.Start], min, scale, width, height);
@@ -180,8 +293,9 @@ public class MeshViewport3D : DrawingArea
                 cr.Stroke();
             }
         }
-        else
+        else if (_edges.Count == 0 && _faces.Count == 0)
         {
+            // Fallback to point rendering if no edges or faces
             var radius = _points.Count <= 2 ? 9 : 3;
             foreach (var pt in projected)
             {
@@ -299,4 +413,14 @@ public class MeshViewport3D : DrawingArea
         _activeMesh.Vertices[index] = updated;
         _activeMesh.CalculateBounds();
     }
+}
+
+/// <summary>
+/// Rendering mode for 3D visualization
+/// </summary>
+public enum RenderMode
+{
+    Wireframe,
+    Solid,
+    SolidWireframe
 }

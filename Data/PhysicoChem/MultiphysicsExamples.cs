@@ -1183,28 +1183,62 @@ public static class MultiphysicsExamples
         };
         dataset.Materials.Add(reactorMaterial);
 
-        // Create a mesh with a single cell representing the reactor
-        var reactorCell = new Cell
+        // Create a mesh with a 3x3x3 grid of cells representing the reactor
+        // This provides better visualization than a single cell
+        int gridX = 3, gridY = 3, gridZ = 3;
+        double cellWidth = (radius * 2) / gridX;
+        double cellHeight = height / gridZ;
+        double cellDepth = (radius * 2) / gridY;
+        double cellVolume = cellWidth * cellHeight * cellDepth;
+
+        int cellId = 0;
+        for (int i = 0; i < gridX; i++)
+        for (int j = 0; j < gridY; j++)
+        for (int k = 0; k < gridZ; k++)
         {
-            ID = "ReactorCell",
-            MaterialID = "ReactorContents",
-            Center = (0, 0, height / 2),
-            Volume = Math.PI * radius * radius * height,
-            InitialConditions = new InitialConditions
+            double centerX = -radius + cellWidth * (i + 0.5);
+            double centerY = -radius + cellDepth * (j + 0.5);
+            double centerZ = cellHeight * (k + 0.5);
+
+            var cell = new Cell
             {
-                Temperature = 298.15,
-                Pressure = 101325.0,
-                LiquidSaturation = 1.0,
-                Concentrations = new Dictionary<string, double>
+                ID = $"Cell_{cellId++}",
+                MaterialID = "ReactorContents",
+                Center = (centerX, centerY, centerZ),
+                Volume = cellVolume,
+                InitialConditions = new InitialConditions
                 {
-                    { "ReactantA", 5.0 },
-                    { "ReactantB", 3.0 },
-                    { "Product", 0.0 },
-                    { "Catalyst", 0.01 }
+                    Temperature = 298.15,
+                    Pressure = 101325.0,
+                    LiquidSaturation = 1.0,
+                    Concentrations = new Dictionary<string, double>
+                    {
+                        { "ReactantA", 5.0 },
+                        { "ReactantB", 3.0 },
+                        { "Product", 0.0 },
+                        { "Catalyst", 0.01 }
+                    }
                 }
+            };
+            dataset.Mesh.Cells[cell.ID] = cell;
+
+            // Add connections to adjacent cells for Voronoi connectivity
+            if (i > 0)
+            {
+                string neighborId = $"Cell_{cellId - gridY * gridZ - 1}";
+                dataset.Mesh.Connections.Add((cell.ID, neighborId));
             }
-        };
-        dataset.Mesh.Cells["ReactorCell"] = reactorCell;
+            if (j > 0)
+            {
+                string neighborId = $"Cell_{cellId - gridZ - 1}";
+                dataset.Mesh.Connections.Add((cell.ID, neighborId));
+            }
+            if (k > 0)
+            {
+                string neighborId = $"Cell_{cellId - 2}";
+                dataset.Mesh.Connections.Add((cell.ID, neighborId));
+            }
+        }
 
         // Exothermic reaction: A + B → Product (with catalyst)
         var reaction = new ForceField

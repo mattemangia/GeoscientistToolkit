@@ -40,6 +40,10 @@ public class MainGtkWindow : Window
     private readonly SpinButton _radiusInput = new(1, 500, 1) { Value = 50 };
     private readonly SpinButton _heightInput = new(1, 1000, 1) { Value = 120 };
     private readonly SpinButton _resolutionInput = new(10, 500, 10) { Value = 100 };
+    private readonly SpinButton _gridXInput = new(1, 20, 1) { Value = 3 };
+    private readonly SpinButton _gridYInput = new(1, 20, 1) { Value = 3 };
+    private readonly SpinButton _gridZInput = new(1, 20, 1) { Value = 3 };
+    private readonly ComboBoxText _renderModeSelector = new();
     private readonly Adjustment _yawAdjustment = new(35, -180, 180, 1, 10, 0);
     private readonly Adjustment _pitchAdjustment = new(-20, -90, 90, 1, 10, 0);
     private readonly Adjustment _zoomAdjustment = new(1.2, 0.1, 8, 0.05, 0.1, 0);
@@ -331,53 +335,104 @@ public class MainGtkWindow : Window
     {
         var container = new VBox(false, 8) { BorderWidth = 6, Halign = Align.Fill, Hexpand = true };
 
-        var controls = new Grid { ColumnSpacing = 8, RowSpacing = 6, BorderWidth = 4, Halign = Align.Fill, Hexpand = true };
-        controls.Attach(new Label("Borehole"), 0, 0, 1, 1);
-        controls.Attach(_boreholeSelector, 1, 0, 2, 1);
+        // Rendering controls frame (PetraSim-style)
+        var renderFrame = new Frame("Visualization") { BorderWidth = 4 };
+        var renderGrid = new Grid { ColumnSpacing = 6, RowSpacing = 6, BorderWidth = 6 };
 
-        controls.Attach(new Label("Voronoi layers"), 0, 1, 1, 1);
-        controls.Attach(_layerInput, 1, 1, 1, 1);
+        // Render mode selector
+        renderGrid.Attach(new Label("Render mode") { Xalign = 0 }, 0, 0, 1, 1);
+        _renderModeSelector.AppendText("Wireframe");
+        _renderModeSelector.AppendText("Solid");
+        _renderModeSelector.AppendText("Solid + Wireframe");
+        _renderModeSelector.Active = 0;
+        _renderModeSelector.Changed += (_, _) =>
+        {
+            _meshViewport.RenderMode = _renderModeSelector.Active switch
+            {
+                0 => RenderMode.Wireframe,
+                1 => RenderMode.Solid,
+                2 => RenderMode.SolidWireframe,
+                _ => RenderMode.Wireframe
+            };
+            _meshViewport.QueueDraw();
+        };
+        renderGrid.Attach(_renderModeSelector, 1, 0, 2, 1);
 
-        controls.Attach(new Label("Radius (m)"), 0, 2, 1, 1);
-        controls.Attach(_radiusInput, 1, 2, 1, 1);
-
-        controls.Attach(new Label("Height (m)"), 0, 3, 1, 1);
-        controls.Attach(_heightInput, 1, 3, 1, 1);
-
-        controls.Attach(new Label("Mesh resolution"), 0, 4, 1, 1);
-        controls.Attach(_resolutionInput, 1, 4, 1, 1);
-
-        var generateButton = CreateSlimActionButton("Generate Voronoi mesh", IconSymbol.Voronoi, (_, _) => GenerateVoronoiMesh());
-        controls.Attach(generateButton, 0, 5, 3, 1);
-
-        var importButton = CreateSlimActionButton("Import from 3D mesh", IconSymbol.MeshImport, (_, _) => ImportFromMeshDataset());
-        controls.Attach(importButton, 0, 6, 3, 1);
-
-        controls.Attach(new Label("Yaw"), 0, 7, 1, 1);
+        // Camera controls
+        renderGrid.Attach(new Label("Yaw") { Xalign = 0 }, 0, 1, 1, 1);
         var yawScale = new Scale(Orientation.Horizontal, _yawAdjustment) { DrawValue = true };
         yawScale.ValueChanged += (_, _) => UpdateViewportCamera();
-        controls.Attach(yawScale, 1, 7, 2, 1);
+        renderGrid.Attach(yawScale, 1, 1, 2, 1);
 
-        controls.Attach(new Label("Pitch"), 0, 8, 1, 1);
+        renderGrid.Attach(new Label("Pitch") { Xalign = 0 }, 0, 2, 1, 1);
         var pitchScale = new Scale(Orientation.Horizontal, _pitchAdjustment) { DrawValue = true };
         pitchScale.ValueChanged += (_, _) => UpdateViewportCamera();
-        controls.Attach(pitchScale, 1, 8, 2, 1);
+        renderGrid.Attach(pitchScale, 1, 2, 2, 1);
 
-        controls.Attach(new Label("Zoom"), 0, 9, 1, 1);
+        renderGrid.Attach(new Label("Zoom") { Xalign = 0 }, 0, 3, 1, 1);
         var zoomScale = new Scale(Orientation.Horizontal, _zoomAdjustment) { DrawValue = true };
         zoomScale.ValueChanged += (_, _) => UpdateViewportCamera();
-        controls.Attach(zoomScale, 1, 9, 2, 1);
+        renderGrid.Attach(zoomScale, 1, 3, 2, 1);
 
-        container.PackStart(controls, true, true, 0);
+        renderFrame.Add(renderGrid);
+        container.PackStart(renderFrame, false, false, 0);
 
-        var editFrame = new Frame("Advanced mesh editor") { BorderWidth = 4 };
+        // Reactor builder frame (PetraSim-style grid controls)
+        var reactorFrame = new Frame("Reactor Builder (PetraSim-style)") { BorderWidth = 4 };
+        var reactorGrid = new Grid { ColumnSpacing = 6, RowSpacing = 6, BorderWidth = 6 };
+
+        reactorGrid.Attach(new Label("Grid cells X") { Xalign = 0 }, 0, 0, 1, 1);
+        reactorGrid.Attach(_gridXInput, 1, 0, 1, 1);
+
+        reactorGrid.Attach(new Label("Grid cells Y") { Xalign = 0 }, 0, 1, 1, 1);
+        reactorGrid.Attach(_gridYInput, 1, 1, 1, 1);
+
+        reactorGrid.Attach(new Label("Grid cells Z") { Xalign = 0 }, 0, 2, 1, 1);
+        reactorGrid.Attach(_gridZInput, 1, 2, 1, 1);
+
+        reactorGrid.Attach(new Label("Radius (m)") { Xalign = 0 }, 0, 3, 1, 1);
+        reactorGrid.Attach(_radiusInput, 1, 3, 1, 1);
+
+        reactorGrid.Attach(new Label("Height (m)") { Xalign = 0 }, 0, 4, 1, 1);
+        reactorGrid.Attach(_heightInput, 1, 4, 1, 1);
+
+        var createReactorButton = CreateSlimActionButton("Create Reactor Grid", IconSymbol.PhysicoChem, (_, _) => CreateReactorGrid());
+        reactorGrid.Attach(createReactorButton, 0, 5, 2, 1);
+
+        reactorFrame.Add(reactorGrid);
+        container.PackStart(reactorFrame, false, false, 0);
+
+        // Voronoi mesh generation
+        var voronoiFrame = new Frame("Voronoi Mesh (from Borehole)") { BorderWidth = 4 };
+        var voronoiGrid = new Grid { ColumnSpacing = 6, RowSpacing = 6, BorderWidth = 6 };
+
+        voronoiGrid.Attach(new Label("Borehole") { Xalign = 0 }, 0, 0, 1, 1);
+        voronoiGrid.Attach(_boreholeSelector, 1, 0, 1, 1);
+
+        voronoiGrid.Attach(new Label("Voronoi layers") { Xalign = 0 }, 0, 1, 1, 1);
+        voronoiGrid.Attach(_layerInput, 1, 1, 1, 1);
+
+        voronoiGrid.Attach(new Label("Mesh resolution") { Xalign = 0 }, 0, 2, 1, 1);
+        voronoiGrid.Attach(_resolutionInput, 1, 2, 1, 1);
+
+        var generateButton = CreateSlimActionButton("Generate Voronoi", IconSymbol.Voronoi, (_, _) => GenerateVoronoiMesh());
+        voronoiGrid.Attach(generateButton, 0, 3, 2, 1);
+
+        voronoiFrame.Add(voronoiGrid);
+        container.PackStart(voronoiFrame, false, false, 0);
+
+        // Advanced mesh operations
+        var editFrame = new Frame("Advanced Operations") { BorderWidth = 4 };
         var editGrid = new Grid { ColumnSpacing = 6, RowSpacing = 6, BorderWidth = 6 };
+
+        var importButton = CreateSlimActionButton("Import 3D mesh", IconSymbol.MeshImport, (_, _) => ImportFromMeshDataset());
+        editGrid.Attach(importButton, 0, 0, 2, 1);
+
         var unifyButton = CreateSlimActionButton("Union", IconSymbol.MeshUnion, (_, _) => CombineMeshes(BooleanOperation.Union));
         var subtractButton = CreateSlimActionButton("Subtract", IconSymbol.MeshSubtract, (_, _) => CombineMeshes(BooleanOperation.Subtract));
-        var voronoiButton = CreateSlimActionButton("Voronoi from selection", IconSymbol.Voronoi, (_, _) => GenerateVoronoiFromMesh());
-        editGrid.Attach(unifyButton, 0, 0, 1, 1);
-        editGrid.Attach(subtractButton, 1, 0, 1, 1);
-        editGrid.Attach(voronoiButton, 0, 1, 2, 1);
+        editGrid.Attach(unifyButton, 0, 1, 1, 1);
+        editGrid.Attach(subtractButton, 1, 1, 1, 1);
+
         editFrame.Add(editGrid);
         container.PackStart(editFrame, false, false, 0);
 
@@ -563,6 +618,100 @@ public class MainGtkWindow : Window
                 _meshViewport.Clear();
                 break;
         }
+    }
+
+    private void CreateReactorGrid()
+    {
+        if (_selectedDataset is not PhysicoChemDataset physico)
+        {
+            _detailsView.Buffer.Text = "Select a PhysicoChem dataset to create a reactor grid.";
+            return;
+        }
+
+        int gridX = (int)_gridXInput.Value;
+        int gridY = (int)_gridYInput.Value;
+        int gridZ = (int)_gridZInput.Value;
+        double radius = _radiusInput.Value;
+        double height = _heightInput.Value;
+
+        // Clear existing mesh
+        physico.Mesh.Cells.Clear();
+        physico.Mesh.Connections.Clear();
+
+        // Create a material for the reactor
+        if (!physico.Materials.Any(m => m.MaterialID == "ReactorMaterial"))
+        {
+            physico.Materials.Add(new MaterialProperties
+            {
+                MaterialID = "ReactorMaterial",
+                Density = 1200.0,
+                Porosity = 1.0,
+                ThermalConductivity = 0.5,
+                SpecificHeat = 3500.0,
+                Color = new System.Numerics.Vector4(0.5f, 0.7f, 0.9f, 1.0f)
+            });
+        }
+
+        // Create grid of cells
+        double cellWidth = (radius * 2) / gridX;
+        double cellDepth = (radius * 2) / gridY;
+        double cellHeight = height / gridZ;
+        double cellVolume = cellWidth * cellHeight * cellDepth;
+
+        int cellId = 0;
+        for (int i = 0; i < gridX; i++)
+        for (int j = 0; j < gridY; j++)
+        for (int k = 0; k < gridZ; k++)
+        {
+            double centerX = -radius + cellWidth * (i + 0.5);
+            double centerY = -radius + cellDepth * (j + 0.5);
+            double centerZ = cellHeight * (k + 0.5);
+
+            var cell = new Cell
+            {
+                ID = $"Cell_{i}_{j}_{k}",
+                MaterialID = "ReactorMaterial",
+                Center = (centerX, centerY, centerZ),
+                Volume = cellVolume,
+                IsActive = true,
+                InitialConditions = new InitialConditions
+                {
+                    Temperature = 298.15,
+                    Pressure = 101325.0,
+                    LiquidSaturation = 1.0,
+                    Concentrations = new Dictionary<string, double>
+                    {
+                        { "ReactantA", 5.0 },
+                        { "ReactantB", 3.0 }
+                    }
+                }
+            };
+
+            physico.Mesh.Cells[cell.ID] = cell;
+
+            // Add connections to adjacent cells
+            if (i > 0)
+            {
+                string neighborId = $"Cell_{i - 1}_{j}_{k}";
+                physico.Mesh.Connections.Add((cell.ID, neighborId));
+            }
+            if (j > 0)
+            {
+                string neighborId = $"Cell_{i}_{j - 1}_{k}";
+                physico.Mesh.Connections.Add((cell.ID, neighborId));
+            }
+            if (k > 0)
+            {
+                string neighborId = $"Cell_{i}_{j}_{k - 1}";
+                physico.Mesh.Connections.Add((cell.ID, neighborId));
+            }
+
+            cellId++;
+        }
+
+        _meshViewport.LoadFromPhysicoChem(physico.Mesh);
+        _detailsView.Buffer.Text = BuildDatasetSummary(physico);
+        SetStatus($"Reactor grid created: {gridX}x{gridY}x{gridZ} = {cellId} cells");
     }
 
     private void GenerateVoronoiMesh()
