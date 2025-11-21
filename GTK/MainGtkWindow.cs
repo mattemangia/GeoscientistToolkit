@@ -15,13 +15,14 @@ using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
 using GeoscientistToolkit.GtkUI.Dialogs;
 using Cairo;
+using Gdk;
 using Gtk;
 
 using Pixbuf = Gdk.Pixbuf;
 
 namespace GeoscientistToolkit.GtkUI;
 
-public class MainGtkWindow : Window
+public class MainGtkWindow : Gtk.Window
 {
     private readonly ProjectManager _projectManager;
     private readonly SettingsManager _settingsManager;
@@ -84,7 +85,8 @@ public class MainGtkWindow : Window
         _settingsManager = settingsManager;
         _nodeManager = nodeManager;
 
-        SetDefaultSize(1400, 900);
+        SetDefaultSize(1200, 700);
+        SetGeometryHints(this, new Geometry { MaxWidth = 1280, MaxHeight = 720 }, WindowHints.MaxSize);
         BorderWidth = 8;
 
         var root = new VBox(false, 6);
@@ -271,24 +273,28 @@ public class MainGtkWindow : Window
 
     private Widget BuildOverviewTab()
     {
-        var box = new VBox(false, 6);
+        var content = new VBox(false, 6);
         var instructions = new Label("Select a dataset to edit PhysicoChem or Borehole data and run geothermal, multiphysics and thermodynamic simulations.")
         {
             Wrap = true,
             Xalign = 0
         };
-        box.PackStart(instructions, false, false, 0);
+        content.PackStart(instructions, false, false, 0);
 
         var detailFrame = new Frame("Dataset details");
         var detailScroller = new ScrolledWindow();
         detailScroller.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
         detailScroller.Add(_detailsView);
         detailFrame.Add(detailScroller);
-        box.PackStart(detailFrame, true, true, 0);
+        content.PackStart(detailFrame, true, true, 0);
 
-        box.PackStart(BuildComposerPanel(), false, false, 0);
+        content.PackStart(BuildComposerPanel(), false, false, 0);
 
-        return box;
+        var scroller = new ScrolledWindow { ShadowType = ShadowType.None };
+        scroller.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+        scroller.Add(content);
+
+        return scroller;
     }
 
     private Widget BuildMeshTab()
@@ -628,7 +634,11 @@ public class MainGtkWindow : Window
         editFrame.Add(editGrid);
         container.PackStart(editFrame, false, false, 0);
 
-        _meshOptionsRevealer.Child = container;
+        var scroller = new ScrolledWindow { ShadowType = ShadowType.None };
+        scroller.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+        scroller.Add(container);
+
+        _meshOptionsRevealer.Child = scroller;
         return _meshOptionsRevealer;
     }
 
