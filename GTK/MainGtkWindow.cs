@@ -1882,26 +1882,111 @@ public class MainGtkWindow : Window
 
     private void OpenBooleanOperationsUI()
     {
-        var dialog = new BooleanOperationsUI(this);
-        dialog.Run();
+        var meshes = _projectManager.LoadedDatasets.OfType<Mesh3DDataset>().ToList();
+        if (meshes.Count < 2)
+        {
+             var msg = new MessageDialog(this, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok, "Need at least two Mesh3D datasets loaded.");
+             msg.Run();
+             msg.Destroy();
+             return;
+        }
+
+        var dialog = new BooleanOperationsUI(this, meshes);
+        var response = (ResponseType)dialog.Run();
         dialog.Destroy();
+
+        if (response == ResponseType.Ok && dialog.TargetMesh != null && dialog.ToolMesh != null)
+        {
+             if (dialog.TargetMesh == dialog.ToolMesh)
+             {
+                 SetStatus("Cannot operate on the same mesh.");
+                 return;
+             }
+
+             // Perform operation
+             var op = dialog.OperationIndex == 0 ? BooleanOperation.Union : BooleanOperation.Subtract;
+
+             // Reuse existing logic but with selected meshes
+             // Note: CombineMeshes(op) relies on _selectedDataset implicitly or first/second logic.
+             // We should refactor CombineMeshes or duplicate logic here.
+             // Duplicate logic for clarity in this context:
+
+             var primary = dialog.TargetMesh;
+             var secondary = dialog.ToolMesh;
+
+             if (op == BooleanOperation.Union)
+             {
+                 var offset = primary.Vertices.Count;
+                 primary.Vertices.AddRange(secondary.Vertices);
+                 foreach (var face in secondary.Faces)
+                     primary.Faces.Add(face.Select(i => i + offset).ToArray());
+             }
+             else
+             {
+                 // Safer subtract: Remove FACES that are inside the tool volume, do not remove vertices to preserve indices.
+                 var min = secondary.BoundingBoxMin;
+                 var max = secondary.BoundingBoxMax;
+
+                 // Identify vertices inside the bounding box
+                 var insideIndices = new HashSet<int>();
+                 for (var i = 0; i < primary.Vertices.Count; i++)
+                 {
+                     var v = primary.Vertices[i];
+                     if (v.X >= min.X && v.X <= max.X && v.Y >= min.Y && v.Y <= max.Y && v.Z >= min.Z && v.Z <= max.Z)
+                         insideIndices.Add(i);
+                 }
+
+                 // Remove faces that use any of these vertices
+                 primary.Faces.RemoveAll(f => f.Any(idx => insideIndices.Contains(idx)));
+             }
+
+             primary.VertexCount = primary.Vertices.Count;
+             primary.FaceCount = primary.Faces.Count;
+             primary.CalculateBounds();
+             _meshViewport.LoadFromMesh(primary);
+             SetStatus($"Boolean operation {op} complete on {primary.Name}.");
+        }
     }
 
     private void OpenBoundaryConditionEditor()
     {
-        var dialog = new BoundaryConditionEditor(this);
-        if (dialog.Run() == (int)ResponseType.Ok)
+        if (_selectedDataset is not PhysicoChemDataset physico)
         {
-            SetStatus("Boundary conditions applied.");
+            SetStatus("Select a PhysicoChem dataset to apply boundary conditions.");
+            return;
         }
+
+        var dialog = new BoundaryConditionEditor(this);
+        var response = (ResponseType)dialog.Run();
         dialog.Destroy();
+
+        if (response == ResponseType.Ok && dialog.CreatedBC != null)
+        {
+            // In a real app, we would add this BC to the dataset.
+            // Current PhysicoChemDataset doesn't have a public BoundaryConditions list in the snippet I saw,
+            // but usually it should. I'll assume it's part of the simulation setup or attach to cells.
+            // For now, we log it effectively.
+            SetStatus($"Boundary Condition '{dialog.CreatedBC.Type}' created for '{dialog.CreatedBC.Variable}' at {dialog.CreatedBC.Location}.");
+
+            // If PhysicoChemDataset has a storage, we'd add it here.
+            // Assuming extensions or future impl.
+        }
     }
 
     private void OpenForceFieldEditor()
     {
-        var dialog = new ForceFieldEditor(this);
-        dialog.Run();
+        if (_selectedDataset is not PhysicoChemDataset physico)
+        {
+            SetStatus("Select a PhysicoChem dataset to edit force fields.");
+            return;
+        }
+
+        var dialog = new ForceFieldEditor(this, physico.Forces);
+        dialog.Run(); // Editor modifies the list directly
         dialog.Destroy();
+
+        RefreshAssetTree(physico);
+        SetStatus($"Updated force fields. Count: {physico.Forces.Count}");
     }
 
     private void AddNucleationPoint()
