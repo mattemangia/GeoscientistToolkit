@@ -100,7 +100,7 @@ public static class BoreholeDebugTools
 
         // Common post-processing
         borehole.ShowGrid = true;
-        borehole.ShowLegend = true;
+        borehole.ShowLegend = false;
         borehole.TrackWidth = 150.0f;
         borehole.DepthScaleFactor = 2.0f;
     }
