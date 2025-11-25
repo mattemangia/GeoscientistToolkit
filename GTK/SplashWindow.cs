@@ -20,6 +20,8 @@ public sealed class SplashWindow : Window
             BorderWidth = 16
         };
 
+        var logo = new Image("image.png");
+
         var title = new Label("<big><b>GeoscientistToolkit GTK</b></big>")
         {
             UseMarkup = true,
@@ -35,6 +37,7 @@ public sealed class SplashWindow : Window
         spinner.WidthRequest = 48;
         spinner.HeightRequest = 48;
 
+        layout.PackStart(logo, false, false, 0);
         layout.PackStart(title, false, false, 0);
         layout.PackStart(subtitle, false, false, 0);
         layout.PackStart(spinner, true, true, 0);
