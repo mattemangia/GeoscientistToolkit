@@ -522,8 +522,7 @@ public class GeothermalVisualization3D : IDisposable
         var nth = _mesh.AngularPoints;
         var nz = _mesh.VerticalPoints;
 
-        // PRODUCTION FIX: COMSOL-quality volume rendering
-        // Create all vertices with proper UVW coordinates for 3D texture sampling
+       // Create all vertices with proper UVW coordinates for 3D texture sampling
         for (var k = 0; k < nz; k++)
         for (var j = 0; j < nth; j++)
         for (var i = 0; i < nr; i++)

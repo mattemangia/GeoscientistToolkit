@@ -311,7 +311,7 @@ public class MainGtkWindow : Gtk.Window
         // Right side: viewport + cell properties
         var rightSide = new VPaned { Position = 500 };
 
-        var viewportFrame = new Frame("3D viewport (PetraSim/COMSOL style)");
+        var viewportFrame = new Frame("3D viewport");
         viewportFrame.Add(_meshViewport);
         rightSide.Pack1(viewportFrame, true, false);
 
@@ -378,7 +378,7 @@ public class MainGtkWindow : Gtk.Window
     {
         var container = new VBox(false, 8) { BorderWidth = 6, Halign = Align.Fill, Hexpand = true };
 
-        // Rendering controls frame (PetraSim-style)
+        // Rendering controls frame 
         var renderFrame = new Frame("Visualization") { BorderWidth = 4 };
         var renderGrid = new Grid { ColumnSpacing = 6, RowSpacing = 6, BorderWidth = 6 };
 
@@ -517,8 +517,8 @@ public class MainGtkWindow : Gtk.Window
         renderFrame.Add(renderGrid);
         container.PackStart(renderFrame, false, false, 0);
 
-        // Reactor builder frame (PetraSim-style grid controls)
-        var reactorFrame = new Frame("Reactor Builder (PetraSim-style)") { BorderWidth = 4 };
+        // Reactor builder frame 
+        var reactorFrame = new Frame("Reactor Builder") { BorderWidth = 4 };
         var reactorGrid = new Grid { ColumnSpacing = 6, RowSpacing = 6, BorderWidth = 6 };
 
         reactorGrid.Attach(new Label("Grid cells X") { Xalign = 0 }, 0, 0, 1, 1);
@@ -542,7 +542,7 @@ public class MainGtkWindow : Gtk.Window
         reactorFrame.Add(reactorGrid);
         container.PackStart(reactorFrame, false, false, 0);
 
-        // Cell operations frame (PetraSim-style cell editing)
+        // Cell operations frame 
         var cellOpsFrame = new Frame("Cell Operations") { BorderWidth = 4 };
         var cellOpsGrid = new Grid { ColumnSpacing = 6, RowSpacing = 6, BorderWidth = 6 };
 
@@ -1287,7 +1287,7 @@ public class MainGtkWindow : Gtk.Window
     {
         using var dialog = new MessageDialog(this, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok,
             "GeoscientistToolkit GTK Edition\nProfessional mesh/PhysicoChem client with node endpoint support.");
-        dialog.SecondaryText = "Includes dataset editor, material libraries, multiphysics forces, GeoScript runner, and PetraSim/COMSOL-style 3D viewport.";
+        dialog.SecondaryText = "Includes dataset editor, material libraries, multiphysics forces, GeoScript runner, and an user friendly 3D viewport.";
         dialog.Run();
         dialog.Destroy();
     }

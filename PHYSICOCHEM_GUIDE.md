@@ -627,6 +627,7 @@ Analysis/PhysicoChem/
 - TOUGH2/TOUGH3 (Lawrence Berkeley National Lab)
 - PHREEQC (USGS)
 - COMSOL Multiphysics
+- PetraSim
 - OpenFOAM
 
 ---

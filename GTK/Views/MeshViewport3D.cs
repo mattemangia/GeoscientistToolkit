@@ -11,7 +11,7 @@ namespace GeoscientistToolkit.GtkUI;
 /// <summary>
 /// Lightweight 3D viewport built with GTK that mirrors the mesh behaviour of the ImGui renderer.
 /// It renders PhysicoChem Voronoi cells or imported Mesh3D datasets using a simple orbit camera,
-/// so users can sculpt meshes in a PetraSim/COMSOL-like view without leaving the GTK client.
+/// so users can sculpt meshes in a user friendly view without leaving the GTK client.
 /// </summary>
 public class MeshViewport3D : DrawingArea
 {
