@@ -325,7 +325,7 @@ public class GeoScriptEditorWindow
         ImGui.BeginChild("##Output", new Vector2(-1, outputHeight), ImGuiChildFlags.Border);
 
         ImGui.PushFont(ImGui.GetIO().Fonts.Fonts[0]); // Monospace
-        ImGui.TextWrapped(_output.ToString());
+        ImGui.TextUnformatted(_output.ToString());
         ImGui.PopFont();
 
         // Auto-scroll to bottom
