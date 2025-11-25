@@ -2594,9 +2594,9 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         ImGui.SameLine();
 
         // 3D View Panel on the right
-        // CRITICAL: NoMove prevents window dragging, NoScrollWithMouse allows our custom mouse handling
+        // CRITICAL: NoMove prevents window dragging, allow mouse wheel for zoom
         ImGui.BeginChild("3DView", new Vector2(viewWidth, availableSize.Y), ImGuiChildFlags.Border,
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollWithMouse);
+            ImGuiWindowFlags.NoMove);
         {
             var viewportSize = ImGui.GetContentRegionAvail();
             _visualization3D.Resize((uint)viewportSize.X, (uint)viewportSize.Y);

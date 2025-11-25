@@ -622,6 +622,23 @@ public class GeothermalVisualization3D : IDisposable
         _graphicsDevice.UpdateBuffer(ib, 0, indices.ToArray());
         _domainGpuMesh = new GpuMesh { VertexBuffer = vb, IndexBuffer = ib, IndexCount = (uint)indices.Count };
 
+        // Calculate mesh center and update camera target for proper centering
+        if (vertices.Count > 0)
+        {
+            var minBounds = new Vector3(float.MaxValue);
+            var maxBounds = new Vector3(float.MinValue);
+
+            foreach (var vertex in vertices)
+            {
+                minBounds = Vector3.Min(minBounds, vertex.Position);
+                maxBounds = Vector3.Max(maxBounds, vertex.Position);
+            }
+
+            _cameraTarget = (minBounds + maxBounds) * 0.5f;
+            UpdateCamera();
+            Logger.Log($"[GenerateDomainAndBoreholeGpuMeshes] Camera target centered at: {_cameraTarget}");
+        }
+
         // Generate heat exchanger geometry (U-tube or coaxial)
         GenerateHeatExchangerGeometry();
 

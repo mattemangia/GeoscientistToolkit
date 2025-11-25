@@ -57,21 +57,41 @@ public class MeshViewport3D : DrawingArea
 
     public MeshViewport3D()
     {
-        AddEvents((int)(Gdk.EventMask.ScrollMask | Gdk.EventMask.ButtonPressMask | Gdk.EventMask.PointerMotionMask | Gdk.EventMask.ButtonReleaseMask));
+        CanFocus = true;
+        AddEvents((int)(Gdk.EventMask.ScrollMask | Gdk.EventMask.SmoothScrollMask | Gdk.EventMask.ButtonPressMask | Gdk.EventMask.PointerMotionMask | Gdk.EventMask.ButtonReleaseMask));
         ScrollEvent += (_, args) =>
         {
-            _zoom = Math.Clamp(_zoom + (float)(-args.Event.DeltaY * 0.05), 0.1f, 8f);
+            float delta = 0f;
+
+            // Handle both smooth scrolling and discrete scroll events
+            if (args.Event.Direction == Gdk.ScrollDirection.Smooth)
+            {
+                delta = (float)args.Event.DeltaY;
+            }
+            else if (args.Event.Direction == Gdk.ScrollDirection.Up)
+            {
+                delta = -1f;
+            }
+            else if (args.Event.Direction == Gdk.ScrollDirection.Down)
+            {
+                delta = 1f;
+            }
+
+            _zoom = Math.Clamp(_zoom - delta * 0.1f, 0.1f, 8f);
             QueueDraw();
+            args.RetVal = true; // Mark event as handled
         };
 
         ButtonPressEvent += (_, args) =>
         {
+            GrabFocus(); // Ensure we have focus for scroll events
             _lastPointer = new Vector2((float)args.Event.X, (float)args.Event.Y);
 
             // Middle or right button: Camera panning
             if (args.Event.Button == 2 || args.Event.Button == 3)
             {
                 _isCameraPanning = true;
+                args.RetVal = true;
                 return;
             }
 
@@ -82,6 +102,7 @@ public class MeshViewport3D : DrawingArea
             if (args.Event.Button == 1 && (altPressed || ctrlPressed))
             {
                 _isCameraRotating = true;
+                args.RetVal = true;
                 return;
             }
 
@@ -131,6 +152,7 @@ public class MeshViewport3D : DrawingArea
                 _yaw += delta.X * 0.5f;
                 _pitch = Math.Clamp(_pitch - delta.Y * 0.5f, -89f, 89f);
                 QueueDraw();
+                args.RetVal = true;
                 return;
             }
 
@@ -141,6 +163,7 @@ public class MeshViewport3D : DrawingArea
                 _cameraTarget.X += delta.X * panSpeed;
                 _cameraTarget.Y -= delta.Y * panSpeed;
                 QueueDraw();
+                args.RetVal = true;
                 return;
             }
 
@@ -156,11 +179,12 @@ public class MeshViewport3D : DrawingArea
             QueueDraw();
         };
 
-        ButtonReleaseEvent += (_, _) =>
+        ButtonReleaseEvent += (_, args) =>
         {
             _isDragging = false;
             _isCameraRotating = false;
             _isCameraPanning = false;
+            args.RetVal = true;
         };
     }
 
@@ -172,6 +196,10 @@ public class MeshViewport3D : DrawingArea
         _cells.Clear();
         _activePhysicoMesh = mesh;
         _activePhysicoDataset = dataset;
+
+        // Calculate mesh bounds for centering
+        var minBounds = new Vector3(float.MaxValue);
+        var maxBounds = new Vector3(float.MinValue);
 
         var cellIndex = new Dictionary<string, int>();
 
@@ -206,7 +234,12 @@ public class MeshViewport3D : DrawingArea
                 float x = center.X + (i == 0 ? -size : size);
                 float y = center.Y + (j == 0 ? -size : size);
                 float z = center.Z + (k == 0 ? -size : size);
-                _points.Add(new Vector3(x, y, z));
+                var point = new Vector3(x, y, z);
+                _points.Add(point);
+
+                // Update bounds for centering
+                minBounds = Vector3.Min(minBounds, point);
+                maxBounds = Vector3.Max(maxBounds, point);
             }
 
             // Add edges for the box (12 edges total)
@@ -254,6 +287,13 @@ public class MeshViewport3D : DrawingArea
             }
         }
 
+        // Center the mesh in the viewport
+        if (_points.Count > 0)
+        {
+            var meshCenter = (minBounds + maxBounds) * 0.5f;
+            _cameraTarget = -meshCenter; // Negate to center at origin
+        }
+
         QueueDraw();
     }
 
@@ -275,6 +315,21 @@ public class MeshViewport3D : DrawingArea
         }
 
         _edges.AddRange(uniqueEdges.Select(e => (Start: e.Item1, End: e.Item2)));
+
+        // Center the mesh in the viewport
+        if (_points.Count > 0)
+        {
+            var minBounds = new Vector3(float.MaxValue);
+            var maxBounds = new Vector3(float.MinValue);
+            foreach (var point in _points)
+            {
+                minBounds = Vector3.Min(minBounds, point);
+                maxBounds = Vector3.Max(maxBounds, point);
+            }
+            var meshCenter = (minBounds + maxBounds) * 0.5f;
+            _cameraTarget = -meshCenter; // Negate to center at origin
+        }
+
         QueueDraw();
     }
 
