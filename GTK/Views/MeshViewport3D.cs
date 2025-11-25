@@ -27,10 +27,13 @@ public class MeshViewport3D : DrawingArea
     private int? _hoverIndex;
     private int? _hoveredCellIndex;
     private bool _isDragging;
+    private bool _isCameraRotating;
+    private bool _isCameraPanning;
     private Matrix4x4 _lastRotation = Matrix4x4.Identity;
     private Vector3 _lastMin = Vector3.Zero;
     private float _lastScale = 1f;
     private Vector2 _lastPointer;
+    private Vector3 _cameraTarget = Vector3.Zero;
 
     private float _yaw = 35f;
     private float _pitch = -20f;
@@ -65,46 +68,81 @@ public class MeshViewport3D : DrawingArea
         {
             _lastPointer = new Vector2((float)args.Event.X, (float)args.Event.Y);
 
-            // Try to select a cell first
-            var cellIdx = FindCellAtPosition(_lastPointer);
-            if (cellIdx.HasValue && cellIdx.Value < _cells.Count)
+            // Middle or right button: Camera panning
+            if (args.Event.Button == 2 || args.Event.Button == 3)
             {
-                var cell = _cells[cellIdx.Value];
-                bool shiftPressed = (args.Event.State & Gdk.ModifierType.ShiftMask) != 0;
-                bool ctrlPressed = (args.Event.State & Gdk.ModifierType.ControlMask) != 0;
-
-                if (shiftPressed || ctrlPressed || SelectionMode != SelectionMode.Single)
-                {
-                    // Multi-selection mode
-                    if (SelectedCellIDs.Contains(cell.ID))
-                        SelectedCellIDs.Remove(cell.ID);
-                    else
-                        SelectedCellIDs.Add(cell.ID);
-                }
-                else
-                {
-                    // Single selection mode
-                    SelectedCellIDs.Clear();
-                    SelectedCellIDs.Add(cell.ID);
-                }
-
-                CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
-                QueueDraw();
+                _isCameraPanning = true;
                 return;
             }
 
-            // Fallback to vertex selection for mesh editing
-            if (_projected.Count == 0) return;
-            var idx = FindClosestPoint(_lastPointer);
-            _selectedIndex = idx;
-            _isDragging = idx.HasValue;
-            QueueDraw();
+            // Left button with Alt/Ctrl: Camera rotation
+            bool altPressed = (args.Event.State & Gdk.ModifierType.Mod1Mask) != 0;
+            bool ctrlPressed = (args.Event.State & Gdk.ModifierType.ControlMask) != 0;
+
+            if (args.Event.Button == 1 && (altPressed || ctrlPressed))
+            {
+                _isCameraRotating = true;
+                return;
+            }
+
+            // Left button: Try to select a cell first
+            if (args.Event.Button == 1)
+            {
+                var cellIdx = FindCellAtPosition(_lastPointer);
+                if (cellIdx.HasValue && cellIdx.Value < _cells.Count)
+                {
+                    var cell = _cells[cellIdx.Value];
+                    bool shiftPressed = (args.Event.State & Gdk.ModifierType.ShiftMask) != 0;
+
+                    if (shiftPressed || SelectionMode != SelectionMode.Single)
+                    {
+                        // Multi-selection mode
+                        if (SelectedCellIDs.Contains(cell.ID))
+                            SelectedCellIDs.Remove(cell.ID);
+                        else
+                            SelectedCellIDs.Add(cell.ID);
+                    }
+                    else
+                    {
+                        // Single selection mode
+                        SelectedCellIDs.Clear();
+                        SelectedCellIDs.Add(cell.ID);
+                    }
+
+                    CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
+                    QueueDraw();
+                    return;
+                }
+
+                // If no cell was clicked, start camera rotation
+                _isCameraRotating = true;
+            }
         };
 
         MotionNotifyEvent += (_, args) =>
         {
             var previousPointer = _lastPointer;
             _lastPointer = new Vector2((float)args.Event.X, (float)args.Event.Y);
+            var delta = _lastPointer - previousPointer;
+
+            // Handle camera rotation
+            if (_isCameraRotating)
+            {
+                _yaw += delta.X * 0.5f;
+                _pitch = Math.Clamp(_pitch - delta.Y * 0.5f, -89f, 89f);
+                QueueDraw();
+                return;
+            }
+
+            // Handle camera panning
+            if (_isCameraPanning)
+            {
+                var panSpeed = 0.01f / _zoom;
+                _cameraTarget.X += delta.X * panSpeed;
+                _cameraTarget.Y -= delta.Y * panSpeed;
+                QueueDraw();
+                return;
+            }
 
             // Update hovered cell
             _hoveredCellIndex = FindCellAtPosition(_lastPointer);
@@ -112,14 +150,18 @@ public class MeshViewport3D : DrawingArea
 
             if (_isDragging && _selectedIndex.HasValue && _activeMesh != null)
             {
-                var delta = _lastPointer - previousPointer;
                 ApplyDragDelta(_selectedIndex.Value, delta);
             }
 
             QueueDraw();
         };
 
-        ButtonReleaseEvent += (_, _) => _isDragging = false;
+        ButtonReleaseEvent += (_, _) =>
+        {
+            _isDragging = false;
+            _isCameraRotating = false;
+            _isCameraPanning = false;
+        };
     }
 
     public void LoadFromPhysicoChem(PhysicoChemMesh mesh, PhysicoChemDataset? dataset = null)
@@ -282,7 +324,7 @@ public class MeshViewport3D : DrawingArea
 
         foreach (var point in _points)
         {
-            var rotated = Vector3.Transform(point, rotation) * _zoom;
+            var rotated = Vector3.Transform(point + _cameraTarget, rotation) * _zoom;
             min = Vector3.Min(min, rotated);
             max = Vector3.Max(max, rotated);
             projected.Add(new Vector2(rotated.X, rotated.Y));
@@ -328,7 +370,7 @@ public class MeshViewport3D : DrawingArea
                 float avgZ = 0;
                 foreach (var idx in face)
                 {
-                    var rotated = Vector3.Transform(_points[idx], rotation) * _zoom;
+                    var rotated = Vector3.Transform(_points[idx] + _cameraTarget, rotation) * _zoom;
                     avgZ += rotated.Z;
                 }
                 avgZ /= face.Count;
