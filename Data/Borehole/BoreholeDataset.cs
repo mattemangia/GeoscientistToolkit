@@ -200,7 +200,7 @@ public class BoreholeDataset : Dataset, ISerializableDataset
     // Display settings
     public float DepthScaleFactor { get; set; } = 1.0f; // pixels per meter
     public bool ShowGrid { get; set; } = true;
-    public bool ShowLegend { get; set; } = true;
+    public bool ShowLegend { get; set; } = false;
     public float TrackWidth { get; set; } = 150.0f; // pixels
 
     // Lithology patterns mapping
