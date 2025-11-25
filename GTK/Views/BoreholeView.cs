@@ -176,7 +176,8 @@ namespace GeoscientistToolkit.GtkUI.Views
 
         private void OnSizeAllocated(object o, SizeAllocatedArgs args)
         {
-            var totalContentHeight = (_depthEnd - _depthStart) * _zoom;
+            var visibleDepthRange = _depthEnd - _depthStart;
+            var totalContentHeight = Math.Max(0, visibleDepthRange) * _zoom;
             _scrolledWindow.Vadjustment.Upper = Math.Max(args.Allocation.Height, totalContentHeight);
             _scrolledWindow.Vadjustment.PageSize = args.Allocation.Height;
         }
@@ -187,7 +188,11 @@ namespace GeoscientistToolkit.GtkUI.Views
             var mouseX = args.Event.X;
             var mouseY = args.Event.Y;
 
-            var pixelsPerMeterBefore = _scrolledWindow.AllocatedHeight / (_depthEnd - _depthStart) * _zoom;
+            var visibleDepthRange = _depthEnd - _depthStart;
+            if (visibleDepthRange <= 1e-6)
+                return;
+
+            var pixelsPerMeterBefore = _scrolledWindow.AllocatedHeight / visibleDepthRange * _zoom;
             var depthAtMouse = _scrolledWindow.Vadjustment.Value / pixelsPerMeterBefore + mouseY / pixelsPerMeterBefore;
 
             var zf = 1.2;
@@ -215,7 +220,24 @@ namespace GeoscientistToolkit.GtkUI.Views
             var width = _drawingArea.AllocatedWidth;
             var height = _drawingArea.AllocatedHeight;
 
+            // Background
+            cr.SetSourceRGB(0.1, 0.1, 0.1);
+            cr.Paint();
+
             var visibleDepthRange = _depthEnd - _depthStart;
+
+            if (visibleDepthRange <= 1e-6)
+            {
+                cr.SetSourceRGB(1, 0, 0);
+                cr.SelectFontFace("Sans", FontSlant.Normal, FontWeight.Bold);
+                cr.SetFontSize(16);
+                var extents = cr.TextExtents("Invalid Depth Range");
+                cr.MoveTo(width / 2.0 - extents.Width / 2.0, height / 2.0 - extents.Height / 2.0);
+                cr.ShowText("Invalid Depth Range");
+                return;
+            }
+
+
             var pixelsPerMeter = height / visibleDepthRange * _zoom;
 
             var voffsetInMeters = _depthStart;
