@@ -38,6 +38,9 @@ public class MeshViewport3D : DrawingArea
     private float _yaw = 35f;
     private float _pitch = -20f;
     private float _zoom = 1.2f;
+    private Vector2 _panOffset = Vector2.Zero;
+    private float _baseScale = 1f;
+    private Vector3 _meshCenter = Vector3.Zero;
 
     public RenderMode RenderMode { get; set; } = RenderMode.Wireframe;
     public SelectionMode SelectionMode { get; set; } = SelectionMode.Single;
@@ -159,9 +162,8 @@ public class MeshViewport3D : DrawingArea
             // Handle camera panning
             if (_isCameraPanning)
             {
-                var panSpeed = 0.01f / _zoom;
-                _cameraTarget.X += delta.X * panSpeed;
-                _cameraTarget.Y -= delta.Y * panSpeed;
+                _panOffset.X += delta.X;
+                _panOffset.Y += delta.Y;
                 QueueDraw();
                 args.RetVal = true;
                 return;
@@ -290,8 +292,8 @@ public class MeshViewport3D : DrawingArea
         // Center the mesh in the viewport
         if (_points.Count > 0)
         {
-            var meshCenter = (minBounds + maxBounds) * 0.5f;
-            _cameraTarget = -meshCenter; // Negate to center at origin
+            _meshCenter = (minBounds + maxBounds) * 0.5f;
+            _panOffset = Vector2.Zero; // Reset pan when loading new mesh
         }
 
         QueueDraw();
@@ -326,8 +328,8 @@ public class MeshViewport3D : DrawingArea
                 minBounds = Vector3.Min(minBounds, point);
                 maxBounds = Vector3.Max(maxBounds, point);
             }
-            var meshCenter = (minBounds + maxBounds) * 0.5f;
-            _cameraTarget = -meshCenter; // Negate to center at origin
+            _meshCenter = (minBounds + maxBounds) * 0.5f;
+            _panOffset = Vector2.Zero; // Reset pan when loading new mesh
         }
 
         QueueDraw();
@@ -337,9 +339,14 @@ public class MeshViewport3D : DrawingArea
     {
         _points.Clear();
         _edges.Clear();
+        _faces.Clear();
+        _cells.Clear();
         _activeMesh = null;
+        _activePhysicoMesh = null;
         _selectedIndex = null;
         _hoverIndex = null;
+        _panOffset = Vector2.Zero;
+        _meshCenter = Vector3.Zero;
         QueueDraw();
     }
 
@@ -377,9 +384,10 @@ public class MeshViewport3D : DrawingArea
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
 
+        // Calculate bounds WITHOUT zoom for stable base scale
         foreach (var point in _points)
         {
-            var rotated = Vector3.Transform(point + _cameraTarget, rotation) * _zoom;
+            var rotated = Vector3.Transform(point - _meshCenter, rotation);
             min = Vector3.Min(min, rotated);
             max = Vector3.Max(max, rotated);
             projected.Add(new Vector2(rotated.X, rotated.Y));
@@ -387,7 +395,8 @@ public class MeshViewport3D : DrawingArea
         }
 
         var size = Vector3.Max(max - min, new Vector3(1, 1, 1));
-        var scale = MathF.Min(width / size.X, height / size.Y) * 0.45f;
+        // Apply zoom to the scale, not to the coordinates
+        var scale = MathF.Min(width / size.X, height / size.Y) * 0.45f * _zoom;
         _lastScale = scale;
         _lastMin = min;
 
@@ -425,7 +434,7 @@ public class MeshViewport3D : DrawingArea
                 float avgZ = 0;
                 foreach (var idx in face)
                 {
-                    var rotated = Vector3.Transform(_points[idx] + _cameraTarget, rotation) * _zoom;
+                    var rotated = Vector3.Transform(_points[idx] - _meshCenter, rotation);
                     avgZ += rotated.Z;
                 }
                 avgZ /= face.Count;
@@ -528,15 +537,16 @@ public class MeshViewport3D : DrawingArea
         cr.SelectFontFace("Sans", Cairo.FontSlant.Normal, Cairo.FontWeight.Normal);
         cr.SetFontSize(12);
         cr.MoveTo(12, 18);
-        cr.ShowText($"Points: {_points.Count} | Edges: {_edges.Count} | Yaw {_yaw:F0}° | Pitch {_pitch:F0}°");
+        cr.ShowText($"Points: {_points.Count} | Edges: {_edges.Count} | Yaw {_yaw:F0}Â° | Pitch {_pitch:F0}Â°");
 
         return base.OnDrawn(cr);
     }
 
-    private static Vector2 Project(Vector2 v, Vector3 min, float scale, int width, int height)
+    private Vector2 Project(Vector2 v, Vector3 min, float scale, int width, int height)
     {
-        var x = (v.X - min.X) * scale + width / 2f;
-        var y = height / 2f - (v.Y - min.Y) * scale;
+        // Project from rotated coordinates to screen, apply pan offset
+        var x = v.X * scale + width / 2f + _panOffset.X;
+        var y = height / 2f - v.Y * scale + _panOffset.Y;
         return new Vector2(x, y);
     }
 
@@ -622,15 +632,22 @@ public class MeshViewport3D : DrawingArea
         var width = allocation.Width;
         var height = allocation.Height;
 
-        // Check each cell's center
-        float minDistance = 50f; // Max click distance
+        // Check each cell's actual center (not first vertex)
+        float minDistance = 25f; // Max click distance - reduced from 50f
         int? closestCell = null;
+
+        var rotation = Matrix4x4.CreateFromYawPitchRoll(
+            MathF.PI / 180f * _yaw,
+            MathF.PI / 180f * _pitch,
+            0f);
 
         for (int i = 0; i < _cells.Count; i++)
         {
             var cell = _cells[i];
-            var projected = _projected[cell.VertexStartIndex];
-            var screenPos = Project(projected, _lastMin, _lastScale, width, height);
+            // Project the actual cell center, not a vertex
+            var rotatedCenter = Vector3.Transform(cell.Center - _meshCenter, rotation);
+            var projectedCenter = new Vector2(rotatedCenter.X, rotatedCenter.Y);
+            var screenPos = Project(projectedCenter, _lastMin, _lastScale, width, height);
 
             float dist = MathF.Sqrt(MathF.Pow(screenPos.X - pointer.X, 2) + MathF.Pow(screenPos.Y - pointer.Y, 2));
             if (dist < minDistance)
@@ -724,7 +741,7 @@ public class MeshViewport3D : DrawingArea
 
         // Map temperature to color (blue=cold, red=hot)
         double temp = cell.InitialConditions.Temperature;
-        double normalized = Math.Clamp((temp - 273.15) / 100.0, 0.0, 1.0); // 0-100°C range
+        double normalized = Math.Clamp((temp - 273.15) / 100.0, 0.0, 1.0); // 0-100Â°C range
 
         double r = normalized;
         double g = 0.3;

@@ -796,13 +796,13 @@ public class MainGtkWindow : Gtk.Window
                 sb.AppendLine($"Material: {cell.MaterialID}");
                 sb.AppendLine($"Active: {(cell.IsActive ? "Yes" : "No")}");
                 sb.AppendLine($"Center: ({cell.Center.X:F2}, {cell.Center.Y:F2}, {cell.Center.Z:F2})");
-                sb.AppendLine($"Volume: {cell.Volume:F3} m³");
+                sb.AppendLine($"Volume: {cell.Volume:F3} mÂ³");
                 sb.AppendLine();
 
                 if (cell.InitialConditions != null)
                 {
                     sb.AppendLine("Initial Conditions:");
-                    sb.AppendLine($"  Temperature: {cell.InitialConditions.Temperature:F2} K ({cell.InitialConditions.Temperature - 273.15:F2} °C)");
+                    sb.AppendLine($"  Temperature: {cell.InitialConditions.Temperature:F2} K ({cell.InitialConditions.Temperature - 273.15:F2} Â°C)");
                     sb.AppendLine($"  Pressure: {cell.InitialConditions.Pressure:F0} Pa ({cell.InitialConditions.Pressure / 101325.0:F2} atm)");
                     sb.AppendLine($"  Saturation: {cell.InitialConditions.LiquidSaturation:F2}");
 
@@ -844,8 +844,8 @@ public class MainGtkWindow : Gtk.Window
             avgPressure /= selectedCellIDs.Count;
 
             sb.AppendLine($"Active cells: {activeCount}/{selectedCellIDs.Count}");
-            sb.AppendLine($"Total volume: {totalVolume:F3} m³");
-            sb.AppendLine($"Avg temperature: {avgTemp:F2} K ({avgTemp - 273.15:F2} °C)");
+            sb.AppendLine($"Total volume: {totalVolume:F3} mÂ³");
+            sb.AppendLine($"Avg temperature: {avgTemp:F2} K ({avgTemp - 273.15:F2} Â°C)");
             sb.AppendLine($"Avg pressure: {avgPressure:F0} Pa ({avgPressure / 101325.0:F2} atm)");
         }
 
@@ -963,7 +963,7 @@ public class MainGtkWindow : Gtk.Window
         {
             double centerX = -radius + cellWidth * (i + 0.5);
             double centerY = -radius + cellDepth * (j + 0.5);
-            double centerZ = cellHeight * (k + 0.5);
+            double centerZ = -height / 2 + cellHeight * (k + 0.5); // Center Z around 0
 
             var cell = new Cell
             {
@@ -1138,7 +1138,7 @@ public class MainGtkWindow : Gtk.Window
     {
         var statusText = _nodeManager.IsRunning ? $"Node manager running ({_nodeManager.Status})" : "Node manager stopped";
         if (!string.IsNullOrWhiteSpace(context))
-            statusText += $" • {context}";
+            statusText += $" â€¢ {context}";
 
         _nodeStatusLabel.Text = statusText;
     }
@@ -1332,7 +1332,7 @@ public class MainGtkWindow : Gtk.Window
         infoBox.PackStart(new Label("Geoscientist's Toolkit") { Xalign = 0 }, false, false, 0);
         infoBox.PackStart(new Label("GTK Edition") { Xalign = 0 }, false, false, 0);
         infoBox.PackStart(new Label("The Geoscientist's Toolkit Dev Team") { Xalign = 0 }, false, false, 0);
-        infoBox.PackStart(new Label("Contact: Matteo Mangiagalli - Università degli Studi di Urbino Carlo Bo\nm.mangiagalli@campus.uniurb.it")
+        infoBox.PackStart(new Label("Contact: Matteo Mangiagalli - UniversitÃ  degli Studi di Urbino Carlo Bo\nm.mangiagalli@campus.uniurb.it")
         {
             Xalign = 0,
             Justify = Justification.Left,
@@ -1462,7 +1462,7 @@ public class MainGtkWindow : Gtk.Window
                 var materials = _assetStore.AppendValues(root, "Materials", $"{physico.Materials.Count} items");
                 foreach (var mat in physico.Materials)
                 {
-                    var info = $"ρ={mat.Density} kg/m³, k={mat.ThermalConductivity} W/mK";
+                    var info = $"Ï={mat.Density} kg/mÂ³, k={mat.ThermalConductivity} W/mK";
                     _assetStore.AppendValues(materials, mat.MaterialID, info);
                 }
 
@@ -1664,7 +1664,7 @@ public class MainGtkWindow : Gtk.Window
 
     private void SetStatus(string message)
     {
-        _statusBar.Text = "🔹 " + message;
+        _statusBar.Text = "ðŸ”¹ " + message;
         Logger.Log(message);
     }
 
@@ -1784,7 +1784,7 @@ public class MainGtkWindow : Gtk.Window
             _meshViewport.LoadFromPhysicoChem(physico.Mesh, physico);
             RefreshDatasetList();
 
-            SetStatus($"Domain '{dialog.CreatedDomain.Name}' created and mesh regenerated at {resolution}³ resolution.");
+            SetStatus($"Domain '{dialog.CreatedDomain.Name}' created and mesh regenerated at {resolution}Â³ resolution.");
         }
     }
 
