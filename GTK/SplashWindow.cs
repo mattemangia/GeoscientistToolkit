@@ -20,7 +20,7 @@ public sealed class SplashWindow : Window
             BorderWidth = 16
         };
 
-        var logo = new Image("image.png");
+        var logo = new Image(GtkResourceLoader.LoadLogoPixbuf(320, 152));
 
         var title = new Label("<big><b>GeoscientistToolkit GTK</b></big>")
         {

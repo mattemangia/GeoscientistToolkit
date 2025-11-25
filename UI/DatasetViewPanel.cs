@@ -51,15 +51,31 @@ public class DatasetViewPanel : BasePanel
         ImGui.Separator();
 
         var contentSize = ImGui.GetContentRegionAvail();
-        ImGui.BeginChild("ViewerContent", contentSize);
-        _viewer.DrawContent(ref _zoom, ref _pan);
-        ImGui.EndChild();
-        
-        // CRITICAL FIX: Render legend AFTER viewer content is complete
-        // This prevents circular dependency when legend is docked to the viewer
+
         if (_viewer is BoreholeViewer boreholeViewer)
         {
-            boreholeViewer.DrawLegendWindow();
+            if (ImGui.BeginTable("DatasetViewerLayout", 2, ImGuiTableFlags.SizingStretchProp))
+            {
+                ImGui.TableSetupColumn("Viewer", ImGuiTableColumnFlags.WidthStretch, 3f);
+                ImGui.TableSetupColumn("Legend", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.BeginChild("ViewerContent", new Vector2(0, contentSize.Y));
+                _viewer.DrawContent(ref _zoom, ref _pan);
+                ImGui.EndChild();
+
+                ImGui.TableSetColumnIndex(1);
+                boreholeViewer.DrawLegendPanel(new Vector2(0, contentSize.Y));
+
+                ImGui.EndTable();
+            }
+        }
+        else
+        {
+            ImGui.BeginChild("ViewerContent", contentSize);
+            _viewer.DrawContent(ref _zoom, ref _pan);
+            ImGui.EndChild();
         }
     }
 

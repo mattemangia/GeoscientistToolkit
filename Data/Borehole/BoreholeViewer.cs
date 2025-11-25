@@ -29,8 +29,6 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     private readonly List<LithologyUnit> _selectedLithologyUnits = new();
     private readonly Vector4 _depthTextColor = new(0.85f, 0.85f, 0.85f, 1.00f);
     private readonly Vector4 _gridColor = new(0.30f, 0.30f, 0.30f, 0.50f);
-    private readonly Vector2 _legendInitPos = new(60f, 60f);
-    private readonly Vector2 _legendInitSize = new(320f, 240f);
 
     private readonly float _lithologyColumnWidth = 150f;
     private readonly Vector4 _mutedText = new(0.75f, 0.75f, 0.75f, 1.00f);
@@ -44,11 +42,6 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     private float _depthEnd;
     private float _depthStart;
     private bool _enableTooltip = true; // <--- NEW
-    private bool _isRenderingLegend; // Re-entry guard
-    private int _lastLegendFrame = -1; // Track which frame legend was last rendered
-
-    // Legend window initial placement (first frame only)
-    private bool _legendInit;
 
     // toggles
     private bool _showDepthGrid = true;
@@ -123,7 +116,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
         ImGui.SameLine();
         ImGui.Checkbox("Values", ref _showParameterValues);
         ImGui.SameLine();
-        ImGui.Checkbox("Legend (window)", ref _showLegend);
+        ImGui.Checkbox("Legend", ref _showLegend);
         ImGui.SameLine();
         ImGui.Checkbox("Enable Tooltip", ref _enableTooltip); // <--- NEW
     }
@@ -349,9 +342,6 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
 
         ImGui.PopStyleVar();
 
-        // Legend is now rendered separately via DrawLegendWindow() to prevent docking flicker
-        // DO NOT render legend here - it causes circular dependency when docked
-
         HandleInput(ref zoom, row2Height);
     }
 
@@ -359,111 +349,18 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     {
     }
 
-    /// <summary>
-    ///     Renders the legend window separately from DrawContent() to avoid docking feedback loops.
-    ///     This method should be called from outside the viewer's draw cycle.
-    /// </summary>
-    public void DrawLegendWindow()
+    public void DrawLegendPanel(Vector2 maxSize)
     {
-        if (!_showLegend || _isRenderingLegend) return;
+        if (!_showLegend) return;
 
-        var currentFrame = ImGui.GetFrameCount();
-        if (_lastLegendFrame == currentFrame) return; // Already rendered this frame
+        ImGui.BeginChild($"BoreholeLegend##{_dataset.GetHashCode()}", maxSize,
+            ImGuiChildFlags.Border | ImGuiChildFlags.AlwaysUseWindowPadding);
 
-        _isRenderingLegend = true;
-        _lastLegendFrame = currentFrame;
+        ImGui.TextColored(_mutedText, "Legend");
+        ImGui.Separator();
 
-        try
-        {
-            // CRITICAL: Use unique window ID per dataset to prevent docking conflicts
-            // This makes ImGui treat it as a completely separate window
-            var uniqueWindowName = $"Borehole Legend###{_dataset.GetHashCode()}";
-
-            if (!_legendInit)
-            {
-                ImGui.SetNextWindowPos(_legendInitPos, ImGuiCond.FirstUseEver);
-                ImGui.SetNextWindowSize(_legendInitSize, ImGuiCond.FirstUseEver);
-                _legendInit = true;
-            }
-
-            // CRITICAL: Prevent docking to avoid feedback loop entirely
-            var flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking;
-            var legendOpen = _showLegend;
-
-            if (ImGui.Begin(uniqueWindowName, ref legendOpen, flags))
-            {
-                // Show a note that docking is disabled to prevent flickering
-                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.8f, 0.3f, 1f));
-                ImGui.TextWrapped("(!!) Docking disabled for this window to prevent UI flickering");
-                ImGui.PopStyleColor();
-                ImGui.Separator();
-
-                var visibleTracks = _dataset.ParameterTracks.Values.Where(t => t.IsVisible).ToList();
-
-                if (visibleTracks.Count > 0)
-                {
-                    ImGui.TextColored(_mutedText, "Tracks");
-                    if (ImGui.BeginTable("tbl_tracks", 2, ImGuiTableFlags.SizingFixedFit))
-                    {
-                        ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
-                        ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
-
-                        foreach (var t in visibleTracks)
-                        {
-                            ImGui.TableNextRow();
-                            ImGui.TableSetColumnIndex(0);
-                            DrawColorSwatch(t.Color);
-                            ImGui.TableSetColumnIndex(1);
-                            var label = string.IsNullOrWhiteSpace(t.Unit) ? t.Name : $"{t.Name} [{t.Unit}]";
-                            ImGui.TextUnformatted(label);
-                        }
-
-                        ImGui.EndTable();
-                    }
-                }
-
-                var lithoTypes = _dataset.LithologyUnits
-                    .Select(u => u.LithologyType)
-                    .Where(s => !string.IsNullOrWhiteSpace(s))
-                    .Distinct()
-                    .OrderBy(s => s)
-                    .ToList();
-
-                if (lithoTypes.Count > 0)
-                {
-                    if (visibleTracks.Count > 0) ImGui.Separator();
-                    ImGui.TextColored(_mutedText, "Lithologies");
-
-                    if (ImGui.BeginTable("tbl_litho", 2, ImGuiTableFlags.SizingFixedFit))
-                    {
-                        ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
-                        ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
-
-                        foreach (var lt in lithoTypes)
-                        {
-                            var first = _dataset.LithologyUnits.FirstOrDefault(u => u.LithologyType == lt);
-                            var col = first != null ? first.Color : GetDefaultLithologyColor(lt);
-
-                            ImGui.TableNextRow();
-                            ImGui.TableSetColumnIndex(0);
-                            DrawColorSwatch(col, true);
-                            ImGui.TableSetColumnIndex(1);
-                            ImGui.TextUnformatted(lt);
-                        }
-
-                        ImGui.EndTable();
-                    }
-                }
-            }
-
-            ImGui.End();
-
-            _showLegend = legendOpen;
-        }
-        finally
-        {
-            _isRenderingLegend = false;
-        }
+        DrawLegendContents();
+        ImGui.EndChild();
     }
 
     private float GetAdaptiveGridInterval(float ppm)
@@ -480,6 +377,65 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     }
 
     // ---------------- Legend helpers ----------------
+
+    private void DrawLegendContents()
+    {
+        var visibleTracks = _dataset.ParameterTracks.Values.Where(t => t.IsVisible).ToList();
+        if (visibleTracks.Count > 0)
+        {
+            ImGui.TextColored(_mutedText, "Tracks");
+            if (ImGui.BeginTable("tbl_tracks", 2, ImGuiTableFlags.SizingFixedFit))
+            {
+                ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
+                ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
+
+                foreach (var t in visibleTracks)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    DrawColorSwatch(t.Color);
+                    ImGui.TableSetColumnIndex(1);
+                    var label = string.IsNullOrWhiteSpace(t.Unit) ? t.Name : $"{t.Name} [{t.Unit}]";
+                    ImGui.TextUnformatted(label);
+                }
+
+                ImGui.EndTable();
+            }
+        }
+
+        var lithoTypes = _dataset.LithologyUnits
+            .Select(u => u.LithologyType)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct()
+            .OrderBy(s => s)
+            .ToList();
+
+        if (lithoTypes.Count > 0)
+        {
+            if (visibleTracks.Count > 0) ImGui.Separator();
+            ImGui.TextColored(_mutedText, "Lithologies");
+
+            if (ImGui.BeginTable("tbl_litho", 2, ImGuiTableFlags.SizingFixedFit))
+            {
+                ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
+                ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
+
+                foreach (var lt in lithoTypes)
+                {
+                    var first = _dataset.LithologyUnits.FirstOrDefault(u => u.LithologyType == lt);
+                    var col = first != null ? first.Color : GetDefaultLithologyColor(lt);
+
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    DrawColorSwatch(col, true);
+                    ImGui.TableSetColumnIndex(1);
+                    ImGui.TextUnformatted(lt);
+                }
+
+                ImGui.EndTable();
+            }
+        }
+    }
 
     private void DrawColorSwatch(Vector4 col, bool hatch = false)
     {

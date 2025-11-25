@@ -1318,7 +1318,16 @@ public class MainGtkWindow : Gtk.Window
         content.Spacing = 8;
 
         var headerBox = new HBox(false, 8);
-        var logo = new Image(new Gdk.Pixbuf("image.png"));
+        Image logo;
+        try
+        {
+            logo = new Image(GtkResourceLoader.LoadLogoPixbuf(128, 60));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Warning: unable to load about dialog logo: {ex.Message}");
+            logo = new Image(Stock.MissingImage, IconSize.Dialog);
+        }
         var infoBox = new VBox(false, 2);
         infoBox.PackStart(new Label("Geoscientist's Toolkit") { Xalign = 0 }, false, false, 0);
         infoBox.PackStart(new Label("GTK Edition") { Xalign = 0 }, false, false, 0);
