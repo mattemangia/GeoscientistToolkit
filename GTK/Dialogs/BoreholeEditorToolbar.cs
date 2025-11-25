@@ -55,7 +55,7 @@ namespace GeoscientistToolkit.GtkUI.Dialogs
             _gridCheck.Toggled += (s, e) => ShowGridChanged?.Invoke(_gridCheck.Active);
             Add(_gridCheck);
 
-            _legendCheck = new CheckButton("Legend") { Active = true };
+            _legendCheck = new CheckButton("Legend") { Active = false };
             _legendCheck.Toggled += (s, e) => ShowLegendChanged?.Invoke(_legendCheck.Active);
             Add(_legendCheck);
 

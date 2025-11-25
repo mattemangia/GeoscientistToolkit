@@ -49,6 +49,7 @@ namespace GeoscientistToolkit.GtkUI.Views
             PackStart(_scrolledWindow, true, true, 0);
 
             _legend = new BoreholeLegend(dataset);
+            _legend.Hide();
 
             _drawingArea.Drawn += OnDrawn;
             _drawingArea.AddEvents((int)EventMask.ScrollMask | (int)EventMask.ButtonPressMask);
