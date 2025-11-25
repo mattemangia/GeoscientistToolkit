@@ -1297,9 +1297,17 @@ public class MainGtkWindow : Gtk.Window
 
     private void ShowAboutDialog()
     {
-        using var dialog = new MessageDialog(this, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok,
-            "GeoscientistToolkit GTK Edition\nProfessional mesh/PhysicoChem client with node endpoint support.");
-        dialog.SecondaryText = "Includes dataset editor, material libraries, multiphysics forces, GeoScript runner, and an user friendly 3D viewport.";
+        var dialog = new AboutDialog
+        {
+            TransientFor = this,
+            Modal = true,
+            Logo = new Gdk.Pixbuf("image.png"),
+            ProgramName = "Geoscientist's Toolkit",
+            Version = "GTK Edition",
+            Comments = "The Geoscientist's Toolkit Dev Team\n\nContact:\nMatteo Mangiagalli - Università degli Studi di Urbino Carlo Bo\nm.mangiagalli@campus.uniurb.it",
+            Website = "https://github.com/mangiag/geoscientist-toolkit",
+            WebsiteLabel = "Project Page"
+        };
         dialog.Run();
         dialog.Destroy();
     }
