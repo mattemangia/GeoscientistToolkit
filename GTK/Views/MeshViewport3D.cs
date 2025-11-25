@@ -959,7 +959,7 @@ public class MeshViewport3D : DrawingArea
 
         // Map temperature to color (blue=cold, red=hot)
         double temp = cell.InitialConditions.Temperature;
-        double normalized = Math.Clamp((temp - 273.15) / 100.0, 0.0, 1.0); // 0-100Â°C range
+        double normalized = Math.Clamp((temp - 273.15) / 100.0, 0.0, 1.0); // 0-100°C range
 
         double r = normalized;
         double g = 0.3;
