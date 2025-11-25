@@ -1305,7 +1305,7 @@ public class MainGtkWindow : Gtk.Window
             ProgramName = "Geoscientist's Toolkit",
             Version = "GTK Edition",
             Comments = "The Geoscientist's Toolkit Dev Team\n\nContact:\nMatteo Mangiagalli - Università degli Studi di Urbino Carlo Bo\nm.mangiagalli@campus.uniurb.it",
-            Website = "https://github.com/mangiag/geoscientist-toolkit",
+            Website = "https://github.com/mattemangia/geoscientisttoolkit",
             WebsiteLabel = "Project Page"
         };
         dialog.Run();
