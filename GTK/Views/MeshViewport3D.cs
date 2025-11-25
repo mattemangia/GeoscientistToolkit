@@ -456,8 +456,31 @@ public class MeshViewport3D : DrawingArea
                 bool isInactive = cellInfo?.Cell.IsActive == false;
 
                 var firstPoint = Project(projected[face[0]], min, scale, width, height);
-                cr.MoveTo(firstPoint.X, firstPoint.Y);
+                
+                // Draw selection glow FIRST (outer glow for selected cells)
+                if (isSelected)
+                {
+                    cr.MoveTo(firstPoint.X, firstPoint.Y);
+                    for (int i = 1; i < face.Count; i++)
+                    {
+                        var point = Project(projected[face[i]], min, scale, width, height);
+                        cr.LineTo(point.X, point.Y);
+                    }
+                    cr.ClosePath();
+                    
+                    // Outer glow - thick semi-transparent orange
+                    cr.SetSourceRGBA(1.0, 0.6, 0.0, 0.4);
+                    cr.LineWidth = 6.0;
+                    cr.StrokePreserve();
+                    
+                    // Middle glow
+                    cr.SetSourceRGBA(1.0, 0.8, 0.2, 0.6);
+                    cr.LineWidth = 3.0;
+                    cr.Stroke();
+                }
 
+                // Draw the face fill
+                cr.MoveTo(firstPoint.X, firstPoint.Y);
                 for (int i = 1; i < face.Count; i++)
                 {
                     var point = Project(projected[face[i]], min, scale, width, height);
@@ -471,13 +494,23 @@ public class MeshViewport3D : DrawingArea
                 cr.FillPreserve();
 
                 // Outline the face
-                if (RenderMode == RenderMode.SolidWireframe || isSelected)
+                if (RenderMode == RenderMode.SolidWireframe || isSelected || isHovered)
                 {
                     if (isSelected)
-                        cr.SetSourceRGB(1.0, 0.8, 0.0); // Bright yellow for selection
+                    {
+                        cr.SetSourceRGB(1.0, 0.9, 0.3); // Bright yellow for selection
+                        cr.LineWidth = 2.5;
+                    }
+                    else if (isHovered)
+                    {
+                        cr.SetSourceRGB(0.4, 0.9, 0.9); // Cyan for hover
+                        cr.LineWidth = 1.5;
+                    }
                     else
+                    {
                         cr.SetSourceRGB(0.2, 0.4, 0.7);
-                    cr.LineWidth = isSelected ? 2.0 : 0.8;
+                        cr.LineWidth = 0.8;
+                    }
                     cr.Stroke();
                 }
                 else
@@ -500,6 +533,39 @@ public class MeshViewport3D : DrawingArea
                 cr.MoveTo(start.X, start.Y);
                 cr.LineTo(end.X, end.Y);
                 cr.Stroke();
+            }
+            
+            // Highlight selected cells in wireframe mode
+            if (SelectedCellIDs.Count > 0 && RenderMode == RenderMode.Wireframe)
+            {
+                foreach (var cellInfo in _cells)
+                {
+                    if (!SelectedCellIDs.Contains(cellInfo.ID)) continue;
+                    
+                    int startIdx = cellInfo.VertexStartIndex;
+                    
+                    // Draw glow effect first
+                    cr.SetSourceRGBA(1.0, 0.6, 0.0, 0.5);
+                    cr.LineWidth = 5.0;
+                    DrawCellEdges(cr, projected, startIdx, min, scale, width, height);
+                    
+                    // Draw bright outline
+                    cr.SetSourceRGB(1.0, 0.9, 0.3);
+                    cr.LineWidth = 2.5;
+                    DrawCellEdges(cr, projected, startIdx, min, scale, width, height);
+                }
+            }
+            
+            // Highlight hovered cell in wireframe mode
+            if (_hoveredCellIndex.HasValue && _hoveredCellIndex.Value < _cells.Count && RenderMode == RenderMode.Wireframe)
+            {
+                var cellInfo = _cells[_hoveredCellIndex.Value];
+                if (!SelectedCellIDs.Contains(cellInfo.ID))
+                {
+                    cr.SetSourceRGBA(0.3, 0.95, 0.95, 0.8);
+                    cr.LineWidth = 2.0;
+                    DrawCellEdges(cr, projected, cellInfo.VertexStartIndex, min, scale, width, height);
+                }
             }
         }
         else if (_edges.Count == 0 && _faces.Count == 0)
@@ -533,11 +599,20 @@ public class MeshViewport3D : DrawingArea
             cr.Stroke();
         }
 
+        // Draw HUD
         cr.SetSourceRGB(0.8, 0.8, 0.8);
         cr.SelectFontFace("Sans", Cairo.FontSlant.Normal, Cairo.FontWeight.Normal);
         cr.SetFontSize(12);
         cr.MoveTo(12, 18);
-        cr.ShowText($"Points: {_points.Count} | Edges: {_edges.Count} | Yaw {_yaw:F0}Â° | Pitch {_pitch:F0}Â°");
+        cr.ShowText($"Cells: {_cells.Count} | Yaw {_yaw:F0}° | Pitch {_pitch:F0}° | Zoom {_zoom:F1}x");
+        
+        // Show selection info if cells are selected
+        if (SelectedCellIDs.Count > 0)
+        {
+            cr.SetSourceRGB(1.0, 0.8, 0.3); // Orange/yellow for selection info
+            cr.MoveTo(12, 36);
+            cr.ShowText($"▶ Selected: {SelectedCellIDs.Count} cell{(SelectedCellIDs.Count > 1 ? "s" : "")}");
+        }
 
         return base.OnDrawn(cr);
     }
@@ -548,6 +623,36 @@ public class MeshViewport3D : DrawingArea
         var x = v.X * scale + width / 2f + _panOffset.X;
         var y = height / 2f - v.Y * scale + _panOffset.Y;
         return new Vector2(x, y);
+    }
+
+    private void DrawCellEdges(Cairo.Context cr, List<Vector2> projected, int startIdx, Vector3 min, float scale, int width, int height)
+    {
+        // Draw the 12 edges of a box cell
+        // Bottom face edges
+        DrawEdgeLine(cr, projected, startIdx + 0, startIdx + 1, min, scale, width, height);
+        DrawEdgeLine(cr, projected, startIdx + 1, startIdx + 3, min, scale, width, height);
+        DrawEdgeLine(cr, projected, startIdx + 3, startIdx + 2, min, scale, width, height);
+        DrawEdgeLine(cr, projected, startIdx + 2, startIdx + 0, min, scale, width, height);
+        // Top face edges
+        DrawEdgeLine(cr, projected, startIdx + 4, startIdx + 5, min, scale, width, height);
+        DrawEdgeLine(cr, projected, startIdx + 5, startIdx + 7, min, scale, width, height);
+        DrawEdgeLine(cr, projected, startIdx + 7, startIdx + 6, min, scale, width, height);
+        DrawEdgeLine(cr, projected, startIdx + 6, startIdx + 4, min, scale, width, height);
+        // Vertical edges
+        DrawEdgeLine(cr, projected, startIdx + 0, startIdx + 4, min, scale, width, height);
+        DrawEdgeLine(cr, projected, startIdx + 1, startIdx + 5, min, scale, width, height);
+        DrawEdgeLine(cr, projected, startIdx + 2, startIdx + 6, min, scale, width, height);
+        DrawEdgeLine(cr, projected, startIdx + 3, startIdx + 7, min, scale, width, height);
+    }
+
+    private void DrawEdgeLine(Cairo.Context cr, List<Vector2> projected, int idx1, int idx2, Vector3 min, float scale, int width, int height)
+    {
+        if (idx1 >= projected.Count || idx2 >= projected.Count) return;
+        var p1 = Project(projected[idx1], min, scale, width, height);
+        var p2 = Project(projected[idx2], min, scale, width, height);
+        cr.MoveTo(p1.X, p1.Y);
+        cr.LineTo(p2.X, p2.Y);
+        cr.Stroke();
     }
 
     private static void AddEdge(HashSet<(int, int)> edges, int a, int b)
@@ -689,13 +794,13 @@ public class MeshViewport3D : DrawingArea
         if (isInactive)
             return (0.3, 0.3, 0.3, 0.3);
 
-        // Selected cells are highlighted in orange/yellow
+        // Selected cells are highlighted with bright orange fill
         if (isSelected)
-            return (1.0, 0.7, 0.2, 0.8);
+            return (1.0, 0.6, 0.1, 0.85);
 
-        // Hovered cells are highlighted in cyan
+        // Hovered cells are highlighted in bright cyan
         if (isHovered)
-            return (0.4, 0.9, 0.9, 0.7);
+            return (0.3, 0.95, 0.95, 0.75);
 
         if (cellInfo == null || _activePhysicoMesh == null)
             return (0.3, 0.6, 0.9, 0.6);
