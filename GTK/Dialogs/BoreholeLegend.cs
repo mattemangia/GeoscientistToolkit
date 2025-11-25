@@ -4,7 +4,7 @@ using GeoscientistToolkit.Data.Borehole;
 using Gtk;
 using System.Linq;
 
-namespace GeoscientistToolkit.Gtk.Dialogs
+namespace GeoscientistToolkit.GtkUI.Dialogs
 {
     public class BoreholeLegend : Window
     {

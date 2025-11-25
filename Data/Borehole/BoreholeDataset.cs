@@ -138,13 +138,13 @@ public class FractureData
 /// </summary>
 public class BoreholeDataset : Dataset, ISerializableDataset
 {
-    public BoreholeDataset(string name, string filePath) : base(name, filePath)
+    public BoreholeDataset(string name, string filePath, bool initializeDefaultTracks = true) : base(name, filePath)
     {
         Type = DatasetType.Borehole;
         WellName = name;
 
-        // Initialize default parameter tracks
-        InitializeDefaultTracks();
+        if (initializeDefaultTracks)
+            InitializeDefaultTracks();
     }
 
     // Core properties
@@ -214,6 +214,20 @@ public class BoreholeDataset : Dataset, ISerializableDataset
         ["Conglomerate"] = LithologyPattern.Crosses,
         ["Basement"] = LithologyPattern.Diagonal
     };
+
+    public static BoreholeDataset CreateEmpty(string name, string filePath)
+    {
+        var dataset = new BoreholeDataset(name, filePath, false)
+        {
+            TotalDepth = 0,
+            Elevation = 0,
+            SurfaceCoordinates = Vector2.Zero
+        };
+
+        dataset.ParameterTracks.Clear();
+        dataset.LithologyUnits.Clear();
+        return dataset;
+    }
 
     public object ToSerializableObject()
     {
