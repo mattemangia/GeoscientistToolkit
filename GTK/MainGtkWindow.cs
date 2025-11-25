@@ -60,6 +60,7 @@ public class MainGtkWindow : Gtk.Window
 
     private readonly ListStore _nodeStore = new(typeof(string), typeof(string), typeof(string));
     private readonly Revealer _meshOptionsRevealer = new() { RevealChild = true, TransitionType = RevealerTransitionType.SlideRight, TransitionDuration = 250 };
+    private HPaned? _meshHPaned;
     private readonly ToggleButton _meshOptionsToggle = new("Toggle mesh options") { Active = true };
     private readonly Entry _datasetNameEntry = new() { PlaceholderText = "Dataset name" };
     private readonly ComboBoxText _datasetTypeSelector = new();
@@ -301,31 +302,42 @@ public class MainGtkWindow : Gtk.Window
         var box = new VBox(false, 6);
 
         var headerRow = new HBox(false, 6);
-        _meshOptionsToggle.Toggled += (_, _) => _meshOptionsRevealer.RevealChild = _meshOptionsToggle.Active;
+        _meshOptionsToggle.Toggled += (_, _) =>
+        {
+            _meshOptionsRevealer.RevealChild = _meshOptionsToggle.Active;
+            // Update HPaned position to expand viewport when options are hidden
+            if (_meshHPaned != null)
+            {
+                _meshHPaned.Position = _meshOptionsToggle.Active ? 350 : 0;
+            }
+        };
         headerRow.PackStart(_meshOptionsToggle, false, false, 0);
         box.PackStart(headerRow, false, false, 0);
 
-        var hbox = new HPaned { Position = 400 };
-        hbox.Add1(BuildMeshOptionsPanel());
+        _meshHPaned = new HPaned { Position = 350 };
+        _meshHPaned.Add1(BuildMeshOptionsPanel());
 
         // Right side: viewport + cell properties
-        var rightSide = new VPaned { Position = 500 };
+        var rightSide = new VPaned();
 
         var viewportFrame = new Frame("3D viewport");
+        _meshViewport.WidthRequest = 400;
+        _meshViewport.HeightRequest = 400;
         viewportFrame.Add(_meshViewport);
-        rightSide.Pack1(viewportFrame, true, false);
+        rightSide.Pack1(viewportFrame, true, true);
 
         // Cell properties panel
         var cellPropsFrame = new Frame("Selected Cell Properties");
         var cellPropsScroller = new ScrolledWindow();
         cellPropsScroller.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+        cellPropsScroller.HeightRequest = 150;
         cellPropsScroller.Add(_cellPropertiesView);
         cellPropsFrame.Add(cellPropsScroller);
-        rightSide.Pack2(cellPropsFrame, false, false);
+        rightSide.Pack2(cellPropsFrame, false, true);
 
-        hbox.Pack2(rightSide, true, false);
+        _meshHPaned.Pack2(rightSide, true, true);
 
-        box.PackStart(hbox, true, true, 0);
+        box.PackStart(_meshHPaned, true, true, 0);
 
         return box;
     }
