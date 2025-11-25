@@ -364,15 +364,69 @@ public class BoreholeDataset : Dataset, ISerializableDataset
         }
 
         // Check for overlaps and adjust if necessary
-        foreach (var existing in LithologyUnits)
-            if ((unit.DepthFrom >= existing.DepthFrom && unit.DepthFrom < existing.DepthTo) ||
-                (unit.DepthTo > existing.DepthFrom && unit.DepthTo <= existing.DepthTo))
-                Logger.LogWarning($"Lithology unit {unit.Name} overlaps with {existing.Name}");
-        // Could implement automatic splitting/merging here
+        var overlappingUnits = LithologyUnits.Where(existing =>
+            (unit.DepthFrom >= existing.DepthFrom && unit.DepthFrom < existing.DepthTo) ||
+            (unit.DepthTo > existing.DepthFrom && unit.DepthTo <= existing.DepthTo) ||
+            (unit.DepthFrom < existing.DepthFrom && unit.DepthTo > existing.DepthTo)).ToList();
+
+        foreach (var existing in overlappingUnits)
+        {
+            // Case 1: The new unit completely covers an existing unit.
+            if (unit.DepthFrom <= existing.DepthFrom && unit.DepthTo >= existing.DepthTo)
+            {
+                LithologyUnits.Remove(existing);
+            }
+            // Case 2: The new unit is completely contained within an existing unit, splitting it.
+            else if (unit.DepthFrom > existing.DepthFrom && unit.DepthTo < existing.DepthTo)
+            {
+                var newUnit = new LithologyUnit
+                {
+                    Name = existing.Name,
+                    LithologyType = existing.LithologyType,
+                    DepthFrom = unit.DepthTo,
+                    DepthTo = existing.DepthTo,
+                    UpperContactType = ContactType.Sharp,
+                    LowerContactType = existing.LowerContactType,
+                    Color = existing.Color,
+                    Description = existing.Description,
+                    GrainSize = existing.GrainSize,
+                    Parameters = new Dictionary<string, float>(existing.Parameters),
+                    ParameterSources = new Dictionary<string, ParameterSource>(existing.ParameterSources)
+                };
+                existing.DepthTo = unit.DepthFrom;
+                LithologyUnits.Add(newUnit);
+            }
+            // Case 3: The new unit overlaps with the lower part of an existing unit.
+            else if (unit.DepthFrom > existing.DepthFrom)
+            {
+                existing.DepthTo = unit.DepthFrom;
+            }
+            // Case 4: The new unit overlaps with the upper part of an existing unit.
+            else if (unit.DepthTo < existing.DepthTo)
+            {
+                existing.DepthFrom = unit.DepthTo;
+            }
+        }
         LithologyUnits.Add(unit);
         LithologyUnits.Sort((a, b) => a.DepthFrom.CompareTo(b.DepthFrom));
 
         Logger.Log($"Added lithology unit {unit.Name} from {unit.DepthFrom}m to {unit.DepthTo}m");
+    }
+
+    public void AddLithologyUnits(List<LithologyUnit> units)
+    {
+        foreach (var unit in units)
+        {
+            AddLithologyUnit(unit);
+        }
+    }
+
+    public void RemoveLithologyUnits(List<LithologyUnit> units)
+    {
+        foreach (var unit in units)
+        {
+            LithologyUnits.Remove(unit);
+        }
     }
 
     /// <summary>
@@ -411,6 +465,49 @@ public class BoreholeDataset : Dataset, ISerializableDataset
         }
 
         // Update parameter tracks with new data points
+        UpdateParameterTracks();
+    }
+
+    public void SplitLithologyUnit(LithologyUnit unitToSplit, float splitDepth)
+    {
+        if (unitToSplit == null)
+        {
+            Logger.LogError("Provided unit to split is null.");
+            return;
+        }
+
+        var originalUnit = LithologyUnits.FirstOrDefault(u => u.ID == unitToSplit.ID);
+        if (originalUnit == null)
+        {
+            Logger.LogError($"Unit with ID {unitToSplit.ID} not found in the dataset.");
+            return;
+        }
+
+        if (splitDepth <= originalUnit.DepthFrom || splitDepth >= originalUnit.DepthTo)
+        {
+            Logger.LogWarning($"Split depth {splitDepth} is outside the unit's range ({originalUnit.DepthFrom} - {originalUnit.DepthTo}).");
+            return;
+        }
+
+        var originalDepthTo = originalUnit.DepthTo;
+        originalUnit.DepthTo = splitDepth;
+        originalUnit.LowerContactType = ContactType.Sharp;
+
+        var newUnit = new LithologyUnit
+        {
+            Name = originalUnit.Name,
+            LithologyType = originalUnit.LithologyType,
+            DepthFrom = splitDepth,
+            DepthTo = originalDepthTo,
+            UpperContactType = ContactType.Sharp,
+            LowerContactType = originalUnit.LowerContactType,
+            Color = originalUnit.Color,
+            Description = originalUnit.Description,
+            GrainSize = originalUnit.GrainSize,
+            Parameters = new Dictionary<string, float>(originalUnit.Parameters),
+            ParameterSources = new Dictionary<string, ParameterSource>(originalUnit.ParameterSources)
+        };
+        AddLithologyUnit(newUnit);
         UpdateParameterTracks();
     }
 

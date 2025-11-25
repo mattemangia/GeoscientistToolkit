@@ -4,6 +4,8 @@ using System.Numerics;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace GeoscientistToolkit.UI.Borehole;
 
@@ -24,6 +26,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     private const float DepthScaleWidth = 56f; // label padding included
     private const float BottomBarHeight = 18f;
     private readonly BoreholeDataset _dataset;
+    private readonly List<LithologyUnit> _selectedLithologyUnits = new();
     private readonly Vector4 _depthTextColor = new(0.85f, 0.85f, 0.85f, 1.00f);
     private readonly Vector4 _gridColor = new(0.30f, 0.30f, 0.30f, 0.50f);
     private readonly Vector2 _legendInitPos = new(60f, 60f);
@@ -50,6 +53,8 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     // toggles
     private bool _showDepthGrid = true;
     private bool _showLegend = true;
+    private bool _showSplitDialog;
+    private float _splitDepth;
     private bool _showLithologyNames = true;
     private bool _showParameterValues = true;
 
@@ -560,6 +565,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     private void DrawLithologyVisible(ImDrawListPtr dl, Vector2 origin, float width,
         float ppm, float step, float top, float bottom, Vector2 clipMin, Vector2 clipMax)
     {
+        var mouse = ImGui.GetIO().MousePos;
         var yTop = origin.Y;
         var yBot = origin.Y + (bottom - top) * ppm;
 
@@ -587,6 +593,16 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
             dl.AddRect(new Vector2(origin.X, y1), new Vector2(origin.X + width, y2),
                 ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 0.3f, 1)), 0, ImDrawFlags.None, 1f);
 
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Right) && mouse.X >= origin.X && mouse.X <= origin.X + width && mouse.Y >= y1c && mouse.Y <= y2c)
+            {
+                if (!_selectedLithologyUnits.Contains(u))
+                {
+                    _selectedLithologyUnits.Clear();
+                    _selectedLithologyUnits.Add(u);
+                }
+                ImGui.OpenPopup("LithologyContextMenu");
+            }
+
             if (_showLithologyNames && y2 - y1 > 20f)
             {
                 var name = u.Name;
@@ -599,8 +615,6 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
             // --------- TOOLTIP and CLICK for lithology ---------
             if (_enableTooltip || OnLithologyClicked != null)
             {
-                var mouse = ImGui.GetIO().MousePos;
-
                 // CRITICAL FIX: Check if mouse is within visible window bounds first
                 // clipMin and clipMax define the actual visible viewport area
                 var isMouseInVisibleArea = mouse.X >= clipMin.X && mouse.X <= clipMax.X &&
@@ -628,13 +642,67 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
                         }
 
                         // Handle click to edit - ONLY if the window is actually hovered/focused
-                        if (OnLithologyClicked != null && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-                            // CRITICAL: Check if the parent child window is hovered before processing clicks
-                            // This prevents the viewer from intercepting clicks when it's in the background
+                        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                        {
                             if (ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows))
-                                OnLithologyClicked.Invoke(u);
+                            {
+                                HandleLithologyClick(u);
+                                OnLithologyClicked?.Invoke(u);
+                            }
+                        }
                     }
                 }
+            }
+            if (_selectedLithologyUnits.Contains(u))
+            {
+                dl.AddRect(new Vector2(origin.X, y1c), new Vector2(origin.X + width, y2c),
+                    ImGui.GetColorU32(new Vector4(1.0f, 1.0f, 0.0f, 1.0f)), 0, ImDrawFlags.None, 2.0f);
+            }
+        }
+
+        if (ImGui.BeginPopup("LithologyContextMenu"))
+        {
+            if (ImGui.MenuItem("Copy", "Ctrl+C", false, _selectedLithologyUnits.Any()))
+            {
+                HandleCopy();
+            }
+            if (ImGui.MenuItem("Cut", "Ctrl+X", false, _selectedLithologyUnits.Any()))
+            {
+                HandleCut();
+            }
+            if (ImGui.MenuItem("Paste", "Ctrl+V"))
+            {
+                HandlePaste();
+            }
+            ImGui.Separator();
+            if (ImGui.MenuItem("Split", "Ctrl+T", false, _selectedLithologyUnits.Count == 1))
+            {
+                _splitDepth = _selectedLithologyUnits.First().DepthFrom;
+                _showSplitDialog = true;
+            }
+            ImGui.EndPopup();
+        }
+
+        if (_showSplitDialog)
+        {
+            ImGui.OpenPopup("Split Lithology Unit");
+            if (ImGui.BeginPopupModal("Split Lithology Unit", ref _showSplitDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.Text("Enter split depth:");
+                ImGui.InputFloat("##splitdepth", ref _splitDepth);
+
+                if (ImGui.Button("OK"))
+                {
+                    _dataset.SplitLithologyUnit(_selectedLithologyUnits.First(), _splitDepth);
+                    _showSplitDialog = false;
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel"))
+                {
+                    _showSplitDialog = false;
+                }
+                ImGui.EndPopup();
             }
         }
 
@@ -918,6 +986,83 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
                 _depthStart = 0f;
                 _depthEnd = Math.Max(_dataset.TotalDepth, 1f);
             }
+        }
+
+        if (io.KeyCtrl)
+        {
+            if (ImGui.IsKeyPressed(ImGuiKey.C))
+            {
+                HandleCopy();
+            }
+            else if (ImGui.IsKeyPressed(ImGuiKey.X))
+            {
+                HandleCut();
+            }
+            else if (ImGui.IsKeyPressed(ImGuiKey.V))
+            {
+                HandlePaste();
+            }
+        }
+    }
+
+    private void HandleCopy()
+    {
+        ClipboardService.Copy(_selectedLithologyUnits);
+    }
+
+    private void HandleCut()
+    {
+        ClipboardService.Cut(_selectedLithologyUnits, _dataset);
+    }
+
+    private void HandlePaste()
+    {
+        var pastedUnits = ClipboardService.Paste();
+        if (pastedUnits.Any())
+        {
+            _dataset.AddLithologyUnits(pastedUnits);
+            if (ClipboardService.IsCut())
+            {
+                ClipboardService.Clear();
+            }
+        }
+    }
+
+    private void HandleLithologyClick(LithologyUnit clickedUnit)
+    {
+        var io = ImGui.GetIO();
+        bool ctrlPressed = io.KeyCtrl;
+        bool shiftPressed = io.KeyShift;
+
+        if (!ctrlPressed && !shiftPressed)
+        {
+            _selectedLithologyUnits.Clear();
+            _selectedLithologyUnits.Add(clickedUnit);
+        }
+        else if (ctrlPressed)
+        {
+            if (_selectedLithologyUnits.Contains(clickedUnit))
+                _selectedLithologyUnits.Remove(clickedUnit);
+            else
+                _selectedLithologyUnits.Add(clickedUnit);
+        }
+        else if (shiftPressed && _selectedLithologyUnits.Any())
+        {
+            var lastSelected = _selectedLithologyUnits.Last();
+            var allUnits = _dataset.LithologyUnits.OrderBy(u => u.DepthFrom).ToList();
+            int lastIndex = allUnits.IndexOf(lastSelected);
+            int clickedIndex = allUnits.IndexOf(clickedUnit);
+
+            _selectedLithologyUnits.Clear();
+            int startIndex = Math.Min(lastIndex, clickedIndex);
+            int endIndex = Math.Max(lastIndex, clickedIndex);
+
+            for (int i = startIndex; i <= endIndex; i++)
+                _selectedLithologyUnits.Add(allUnits[i]);
+        }
+        else
+        {
+            _selectedLithologyUnits.Add(clickedUnit);
         }
     }
 
