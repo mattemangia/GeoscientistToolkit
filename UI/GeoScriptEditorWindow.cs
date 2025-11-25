@@ -302,7 +302,7 @@ public class GeoScriptEditorWindow
             UpdateAutocomplete();
         }
 
-        if (ImGui.IsItemFocused() && ImGui.GetIO().KeyCtrl && ImGui.IsKeyPressed(ImGui.GetKeyIndex(ImGuiKey.Enter)))
+        if (ImGui.IsItemFocused() && ImGui.GetIO().KeyCtrl && ImGui.IsKeyPressed(ImGuiKey.Enter))
         {
             ExecuteScript();
         }
