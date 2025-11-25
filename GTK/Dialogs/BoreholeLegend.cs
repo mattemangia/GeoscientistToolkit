@@ -68,7 +68,6 @@ namespace GeoscientistToolkit.GtkUI.Dialogs
                     _grid.Attach(new Label(lithoType) { Halign = Align.Start }, 1, offset + i + 1, 1, 1);
                 }
             }
-            ShowAll();
         }
     }
 }
