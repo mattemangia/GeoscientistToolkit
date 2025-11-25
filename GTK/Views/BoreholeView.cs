@@ -49,6 +49,7 @@ namespace GeoscientistToolkit.GtkUI.Views
             PackStart(_scrolledWindow, true, true, 0);
 
             _legend = new BoreholeLegend(dataset);
+            _legend.Hide();
 
             _drawingArea.Drawn += OnDrawn;
             _drawingArea.AddEvents((int)EventMask.ScrollMask | (int)EventMask.ButtonPressMask);
@@ -61,7 +62,18 @@ namespace GeoscientistToolkit.GtkUI.Views
             _toolbar.AutoScaleDepthChanged += OnAutoScaleDepthChanged;
             _toolbar.DepthRangeChanged += OnDepthRangeChanged;
             _toolbar.ShowGridChanged += (show) => { _showGrid = show; _drawingArea.QueueDraw(); };
-            _toolbar.ShowLegendChanged += (show) => { if (show) _legend.Show(); else _legend.Hide(); };
+            _toolbar.ShowLegendChanged += (show) =>
+            {
+                if (show)
+                {
+                    _legend.UpdateDataset(_dataset);
+                    _legend.ShowAll();
+                }
+                else
+                {
+                    _legend.Hide();
+                }
+            };
             _toolbar.ImportLasClicked += () =>
             {
                 global::GeoscientistToolkit.GtkUI.BoreholeLasTools.ImportFromLas(this.Toplevel as Gtk.Window, _dataset);
