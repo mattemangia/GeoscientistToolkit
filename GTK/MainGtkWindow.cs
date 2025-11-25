@@ -14,6 +14,7 @@ using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
 using GeoscientistToolkit.GtkUI.Dialogs;
+using GeoscientistToolkit.Gtk.Views;
 using Cairo;
 using Gdk;
 using Gtk;
@@ -34,8 +35,8 @@ public class MainGtkWindow : Gtk.Window
     private readonly TreeStore _assetStore = new(typeof(string), typeof(string));
     private readonly TreeView _assetTreeView = new();
     private readonly MeshViewport3D _meshViewport = new();
-    private readonly DrawingArea _boreholeLithologyCanvas = new();
-    private readonly DrawingArea _boreholeLogCanvas = new();
+    private BoreholeView _boreholeView;
+    private readonly Notebook _notebook;
     private readonly TextView _geoScriptEditor = new() { Monospace = true };
     private readonly ComboBoxText _boreholeSelector = new();
     private readonly SpinButton _layerInput = new(1, 50, 1) { Value = 4 };
@@ -95,7 +96,8 @@ public class MainGtkWindow : Gtk.Window
 
         var split = new Paned(Orientation.Horizontal) { Position = 320 };
         split.Pack1(BuildDatasetPanel(), false, true);
-        split.Pack2(BuildWorkspace(), true, true);
+        _notebook = BuildWorkspace();
+        split.Pack2(_notebook, true, true);
 
         root.PackStart(split, true, true, 0);
         root.PackStart(_statusBar, false, false, 4);
@@ -344,23 +346,16 @@ public class MainGtkWindow : Gtk.Window
 
     private Widget BuildBoreholeTab()
     {
-        var box = new VBox(false, 6);
-        var intro = new Label("Preview lithologies and data tracks just like the ImGui borehole editor.")
+        var borehole = _projectManager.LoadedDatasets.OfType<BoreholeDataset>().FirstOrDefault();
+        if (borehole == null)
         {
-            Wrap = true,
-            Xalign = 0
-        };
-        box.PackStart(intro, false, false, 0);
+            borehole = new BoreholeDataset("Default", "");
+            _projectManager.AddDataset(borehole);
+            RefreshDatasetList();
+        }
 
-        _boreholeLithologyCanvas.HeightRequest = 260;
-        _boreholeLithologyCanvas.Drawn += (_, args) => DrawLithologyColumn(args.Cr);
-        box.PackStart(_boreholeLithologyCanvas, false, false, 0);
-
-        _boreholeLogCanvas.HeightRequest = 220;
-        _boreholeLogCanvas.Drawn += (_, args) => DrawBoreholeLogs(args.Cr);
-        box.PackStart(_boreholeLogCanvas, false, false, 0);
-
-        return box;
+        _boreholeView = new BoreholeView(borehole);
+        return _boreholeView;
     }
 
     private Widget BuildGeoScriptTab()
@@ -762,8 +757,17 @@ public class MainGtkWindow : Gtk.Window
         _detailsView.Buffer.Text = BuildDatasetSummary(_selectedDataset);
         RefreshAssetTree(_selectedDataset);
         UpdateMeshViewport(_selectedDataset);
-        _boreholeLithologyCanvas.QueueDraw();
-        _boreholeLogCanvas.QueueDraw();
+
+        if (_selectedDataset is BoreholeDataset borehole)
+        {
+            var oldView = _notebook.GetNthPage(2);
+            if (oldView != null)
+                oldView.Destroy();
+
+            _boreholeView = new BoreholeView(borehole);
+            _notebook.SetNthPage(2, _boreholeView);
+        }
+
         SetStatus($"Active dataset: {_selectedDataset.Name}");
     }
 
@@ -1551,104 +1555,6 @@ public class MainGtkWindow : Gtk.Window
         _meshViewport.LoadFromPhysicoChem(target.Mesh, target);
         _detailsView.Buffer.Text = BuildDatasetSummary(target);
         SetStatus("Voronoi mesh updated from the selected 3D dataset.");
-    }
-
-    private void DrawLithologyColumn(Cairo.Context cr)
-    {
-        cr.SetSourceRGB(0.08, 0.09, 0.11);
-        cr.Paint();
-
-        if (_selectedDataset is not BoreholeDataset borehole)
-        {
-            cr.SetSourceRGB(0.78, 0.82, 0.88);
-            cr.SelectFontFace("Cantarell", Cairo.FontSlant.Normal, Cairo.FontWeight.Bold);
-            cr.SetFontSize(14);
-            cr.MoveTo(12, 30);
-            cr.ShowText("Select a Borehole dataset to preview lithology");
-            return;
-        }
-
-        if (!borehole.LithologyUnits.Any())
-        {
-            borehole.LithologyUnits.Add(new LithologyUnit { Name = "Sandstone", DepthFrom = 0, DepthTo = borehole.TotalDepth * 0.25f });
-            borehole.LithologyUnits.Add(new LithologyUnit { Name = "Shale", DepthFrom = borehole.TotalDepth * 0.25f, DepthTo = borehole.TotalDepth * 0.55f });
-            borehole.LithologyUnits.Add(new LithologyUnit { Name = "Limestone", DepthFrom = borehole.TotalDepth * 0.55f, DepthTo = borehole.TotalDepth });
-        }
-
-        var width = Allocation.Width;
-        var height = _boreholeLithologyCanvas.Allocation.Height;
-        foreach (var unit in borehole.LithologyUnits)
-        {
-            var start = unit.DepthFrom / borehole.TotalDepth;
-            var end = unit.DepthTo / borehole.TotalDepth;
-            var y1 = start * height;
-            var y2 = end * height;
-            var color = CairoExtensions.ColorForMaterial(unit.Name);
-            cr.SetSourceRGB(color.R, color.G, color.B);
-            cr.Rectangle(12, y1, width - 24, Math.Max(6, y2 - y1));
-            cr.FillPreserve();
-            cr.SetSourceRGB(0.08, 0.08, 0.1);
-            cr.LineWidth = 1;
-            cr.Stroke();
-
-            cr.SetSourceRGB(0.92, 0.95, 0.98);
-            cr.MoveTo(18, (y1 + y2) / 2);
-            cr.ShowText($"{unit.Name} ({unit.DepthTo - unit.DepthFrom:0} m)");
-        }
-    }
-
-    private void DrawBoreholeLogs(Cairo.Context cr)
-    {
-        cr.SetSourceRGB(0.06, 0.07, 0.09);
-        cr.Paint();
-
-        if (_selectedDataset is not BoreholeDataset borehole)
-        {
-            cr.SetSourceRGB(0.78, 0.82, 0.88);
-            cr.MoveTo(12, 24);
-            cr.ShowText("Select a Borehole dataset to display logs");
-            return;
-        }
-
-        var track = borehole.ParameterTracks.Values.FirstOrDefault();
-        if (track == null || track.Points.Count == 0)
-        {
-            track = new ParameterTrack
-            {
-                Name = "Temperature",
-                Unit = "C",
-                Points =
-                {
-                    new ParameterPoint { Depth = 0, Value = 35 },
-                    new ParameterPoint { Depth = borehole.TotalDepth * 0.5f, Value = 65 },
-                    new ParameterPoint { Depth = borehole.TotalDepth, Value = 95 }
-                }
-            };
-            borehole.ParameterTracks["Temperature"] = track;
-        }
-
-        var width = _boreholeLogCanvas.Allocation.Width - 40;
-        var height = _boreholeLogCanvas.Allocation.Height - 20;
-        var maxValue = track.Points.Max(p => p.Value);
-        var minValue = track.Points.Min(p => p.Value);
-        var range = Math.Max(1, maxValue - minValue);
-
-        cr.SetSourceRGB(0.28, 0.62, 0.94);
-        cr.LineWidth = 2;
-        for (var i = 0; i < track.Points.Count; i++)
-        {
-            var x = 20 + ((track.Points[i].Value - minValue) / range) * width;
-            var y = 10 + (track.Points[i].Depth / borehole.TotalDepth) * height;
-            if (i == 0)
-                cr.MoveTo(x, y);
-            else
-                cr.LineTo(x, y);
-        }
-        cr.Stroke();
-
-        cr.SetSourceRGB(0.92, 0.95, 0.98);
-        cr.MoveTo(20, 14);
-        cr.ShowText($"{track.Name} ({track.Unit})");
     }
 
     private async void RunGeoScript()
