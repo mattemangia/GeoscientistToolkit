@@ -3,16 +3,16 @@
 using Gtk;
 using System;
 
-namespace GeoscientistToolkit.Gtk.Dialogs
+namespace GeoscientistToolkit.GtkUI.Dialogs
 {
     public class BoreholeEditorToolbar : Box
     {
-        public event Action<bool> AutoScaleDepthChanged;
-        public event Action<double, double> DepthRangeChanged;
-        public event Action<bool> ShowGridChanged;
-        public event Action<bool> ShowLegendChanged;
-        public event Action ImportLasClicked;
-        public event Action<double> ExportLasClicked;
+        public event System.Action<bool>? AutoScaleDepthChanged;
+        public event System.Action<double, double>? DepthRangeChanged;
+        public event System.Action<bool>? ShowGridChanged;
+        public event System.Action<bool>? ShowLegendChanged;
+        public event System.Action? ImportLasClicked;
+        public event System.Action<double>? ExportLasClicked;
 
         private readonly CheckButton _autoScaleCheck;
         private readonly SpinButton _startDepthSpin;

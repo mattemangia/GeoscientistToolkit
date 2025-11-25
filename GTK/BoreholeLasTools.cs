@@ -7,7 +7,7 @@ using GeoscientistToolkit.Util;
 using Gtk;
 using System.Linq;
 
-namespace GeoscientistToolkit.Gtk
+namespace GeoscientistToolkit.GtkUI
 {
     public static class BoreholeLasTools
     {
@@ -21,15 +21,17 @@ namespace GeoscientistToolkit.Gtk
 
             if (dialog.Run() == (int)ResponseType.Accept)
             {
-                var loader = new LASLoader();
-                loader.LoadFromFile(dialog.Filename, null);
-                var loadedDataset = loader.GetDataset();
-                if (loadedDataset is BoreholeDataset borehole)
+                var loader = new LASLoader { FilePath = dialog.Filename };
+                if (loader.CanImport)
                 {
-                    dataset.LithologyUnits = borehole.LithologyUnits;
-                    dataset.ParameterTracks = borehole.ParameterTracks;
-                    dataset.TotalDepth = borehole.TotalDepth;
-                    Logger.Log($"Successfully imported LAS file: {dialog.Filename}");
+                    if (loader.LoadAsync(null).GetAwaiter().GetResult() is BoreholeDataset borehole)
+                    {
+                        dataset.LithologyUnits = borehole.LithologyUnits;
+                        dataset.ParameterTracks = borehole.ParameterTracks;
+                        dataset.TotalDepth = borehole.TotalDepth;
+                        dataset.WellName = borehole.WellName;
+                        Logger.Log($"Successfully imported LAS file: {dialog.Filename}");
+                    }
                 }
             }
             dialog.Destroy();

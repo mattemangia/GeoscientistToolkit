@@ -6,12 +6,13 @@ using Gtk;
 using System;
 using System.Linq;
 using Gdk;
-using GeoscientistToolkit.Gtk.Dialogs;
+using GeoscientistToolkit.GtkUI.Dialogs;
+using GeoscientistToolkit.GtkUI;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using GeoscientistToolkit.Util;
 
-namespace GeoscientistToolkit.Gtk.Views
+namespace GeoscientistToolkit.GtkUI.Views
 {
     public class BoreholeView : Box
     {
@@ -61,8 +62,13 @@ namespace GeoscientistToolkit.Gtk.Views
             _toolbar.DepthRangeChanged += OnDepthRangeChanged;
             _toolbar.ShowGridChanged += (show) => { _showGrid = show; _drawingArea.QueueDraw(); };
             _toolbar.ShowLegendChanged += (show) => { if (show) _legend.Show(); else _legend.Hide(); };
-            _toolbar.ImportLasClicked += () => { BoreholeLasTools.ImportFromLas(this.Toplevel as Window, _dataset); SetDataset(_dataset); };
-            _toolbar.ExportLasClicked += (step) => BoreholeLasTools.ExportToLas(this.Toplevel as Window, _dataset, step);
+            _toolbar.ImportLasClicked += () =>
+            {
+                global::GeoscientistToolkit.GtkUI.BoreholeLasTools.ImportFromLas(this.Toplevel as Gtk.Window, _dataset);
+                SetDataset(_dataset);
+            };
+            _toolbar.ExportLasClicked += step =>
+                global::GeoscientistToolkit.GtkUI.BoreholeLasTools.ExportToLas(this.Toplevel as Gtk.Window, _dataset, step);
 
             SetDataset(dataset);
         }
@@ -166,7 +172,8 @@ namespace GeoscientistToolkit.Gtk.Views
         private void OnScroll(object o, ScrollEventArgs args)
         {
             var direction = args.Event.Direction;
-            var (mouseX, mouseY) = args.Event.Position;
+            var mouseX = args.Event.X;
+            var mouseY = args.Event.Y;
 
             var pixelsPerMeterBefore = _scrolledWindow.AllocatedHeight / (_depthEnd - _depthStart) * _zoom;
             var depthAtMouse = _scrolledWindow.Vadjustment.Value / pixelsPerMeterBefore + mouseY / pixelsPerMeterBefore;
@@ -226,7 +233,7 @@ namespace GeoscientistToolkit.Gtk.Views
 
             var step = GetAdaptiveGridInterval(pixelsPerMeter);
 
-            for (var depth = 0; depth <= _dataset.TotalDepth; depth += step)
+            for (double depth = 0; depth <= _dataset.TotalDepth; depth += step)
             {
                 var y = (depth - voffsetMeters) * pixelsPerMeter;
                 if (y < 0 || y > height) continue;

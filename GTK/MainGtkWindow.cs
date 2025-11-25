@@ -14,7 +14,7 @@ using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
 using GeoscientistToolkit.GtkUI.Dialogs;
-using GeoscientistToolkit.Gtk.Views;
+using GeoscientistToolkit.GtkUI.Views;
 using Cairo;
 using Gdk;
 using Gtk;
@@ -65,6 +65,7 @@ public class MainGtkWindow : Gtk.Window
     private readonly ToggleButton _meshOptionsToggle = new("Toggle mesh options") { Active = true };
     private readonly Entry _datasetNameEntry = new() { PlaceholderText = "Dataset name" };
     private readonly ComboBoxText _datasetTypeSelector = new();
+    private readonly CheckButton _emptyBoreholeToggle = new("Create borehole without default tracks");
     private readonly Entry _materialNameEntry = new() { PlaceholderText = "Material" };
     private readonly ComboBoxText _materialPhaseSelector = new();
     private readonly Entry _forceNameEntry = new() { PlaceholderText = "Force" };
@@ -765,7 +766,9 @@ public class MainGtkWindow : Gtk.Window
                 oldView.Destroy();
 
             _boreholeView = new BoreholeView(borehole);
-            _notebook.SetNthPage(2, _boreholeView);
+            _notebook.RemovePage(2);
+            _notebook.InsertPage(_boreholeView, new Label("Borehole editor"), 2);
+            _notebook.ShowAll();
         }
 
         SetStatus($"Active dataset: {_selectedDataset.Name}");
@@ -1301,17 +1304,66 @@ public class MainGtkWindow : Gtk.Window
 
     private void ShowAboutDialog()
     {
-        var dialog = new AboutDialog
+        const string citation = "Mangiagalli, M. (2024). Geoscientist's Toolkit (GTK Edition) [Computer software]. GitHub. https://github.com/mattemangia/geoscientisttoolkit";
+        var dialog = new Dialog("About Geoscientist's Toolkit", this, DialogFlags.Modal)
         {
             TransientFor = this,
             Modal = true,
-            Logo = new Gdk.Pixbuf("image.png"),
-            ProgramName = "Geoscientist's Toolkit",
-            Version = "GTK Edition",
-            Comments = "The Geoscientist's Toolkit Dev Team\n\nContact:\nMatteo Mangiagalli - Università degli Studi di Urbino Carlo Bo\nm.mangiagalli@campus.uniurb.it",
-            Website = "https://github.com/mattemangia/geoscientisttoolkit",
-            WebsiteLabel = "Project Page"
+            BorderWidth = 10,
+            Resizable = false
         };
+        dialog.AddButton("Close", ResponseType.Close);
+
+        var content = dialog.ContentArea;
+        content.Spacing = 8;
+
+        var headerBox = new HBox(false, 8);
+        var logo = new Image(new Gdk.Pixbuf("image.png"));
+        var infoBox = new VBox(false, 2);
+        infoBox.PackStart(new Label("Geoscientist's Toolkit") { Xalign = 0 }, false, false, 0);
+        infoBox.PackStart(new Label("GTK Edition") { Xalign = 0 }, false, false, 0);
+        infoBox.PackStart(new Label("The Geoscientist's Toolkit Dev Team") { Xalign = 0 }, false, false, 0);
+        infoBox.PackStart(new Label("Contact: Matteo Mangiagalli - Università degli Studi di Urbino Carlo Bo\nm.mangiagalli@campus.uniurb.it")
+        {
+            Xalign = 0,
+            Justify = Justification.Left,
+            LineWrap = true
+        }, false, false, 0);
+        infoBox.PackStart(new LinkButton("https://github.com/mattemangia/geoscientisttoolkit", "Project Page") { Xalign = 0 }, false, false, 0);
+
+        headerBox.PackStart(logo, false, false, 0);
+        headerBox.PackStart(infoBox, true, true, 0);
+        content.PackStart(headerBox, false, false, 0);
+
+        var citationNote = new Label("Citation (APA):")
+        {
+            Xalign = 0,
+            Justify = Justification.Left
+        };
+        content.PackStart(citationNote, false, false, 0);
+
+        var citationBox = new HBox(false, 6);
+        var citationLabel = new Label("Citation (APA):") { Xalign = 0 };
+        var citationEntry = new Entry(citation)
+        {
+            IsEditable = false,
+            WidthChars = citation.Length
+        };
+        var copyButton = new Button("Copy citation");
+        copyButton.Clicked += (_, _) =>
+        {
+            var clipboard = Clipboard.Get(Gdk.Atom.Intern("CLIPBOARD", false));
+            if (clipboard != null)
+                clipboard.Text = citationEntry.Text;
+            SetStatus("APA citation copied to clipboard.");
+        };
+
+        citationBox.PackStart(citationLabel, false, false, 0);
+        citationBox.PackStart(citationEntry, true, true, 0);
+        citationBox.PackStart(copyButton, false, false, 0);
+        content.PackStart(citationBox, false, false, 0);
+        content.ShowAll();
+
         dialog.Run();
         dialog.Destroy();
     }
@@ -1325,39 +1377,53 @@ public class MainGtkWindow : Gtk.Window
         _datasetTypeSelector.AppendText("Borehole");
         _datasetTypeSelector.AppendText("Mesh3D");
         _datasetTypeSelector.Active = 0;
+        _datasetTypeSelector.Changed += (_, _) => UpdateDatasetCreationControls();
 
         grid.Attach(new Label("Name"), 0, 0, 1, 1);
         grid.Attach(_datasetNameEntry, 1, 0, 1, 1);
         grid.Attach(new Label("Type"), 0, 1, 1, 1);
         grid.Attach(_datasetTypeSelector, 1, 1, 1, 1);
 
+        grid.Attach(_emptyBoreholeToggle, 0, 2, 2, 1);
+
         var createButton = CreateSlimActionButton("Create dataset", IconSymbol.ProjectNew, (_, _) => CreateDatasetFromInputs());
-        grid.Attach(createButton, 0, 2, 2, 1);
+        grid.Attach(createButton, 0, 3, 2, 1);
 
         _materialPhaseSelector.AppendText("Solid");
         _materialPhaseSelector.AppendText("Liquid");
         _materialPhaseSelector.AppendText("Gas");
         _materialPhaseSelector.Active = 0;
 
-        grid.Attach(new Label("Material"), 0, 3, 1, 1);
-        grid.Attach(_materialNameEntry, 1, 3, 1, 1);
-        grid.Attach(_materialPhaseSelector, 2, 3, 1, 1);
+        grid.Attach(new Label("Material"), 0, 4, 1, 1);
+        grid.Attach(_materialNameEntry, 1, 4, 1, 1);
+        grid.Attach(_materialPhaseSelector, 2, 4, 1, 1);
 
         var materialButton = CreateSlimActionButton("Add material & assign", IconSymbol.Material, (_, _) => AddMaterialToDataset());
-        grid.Attach(materialButton, 0, 4, 3, 1);
+        grid.Attach(materialButton, 0, 5, 3, 1);
 
         foreach (var type in Enum.GetNames(typeof(ForceType)))
             _forceTypeSelector.AppendText(type);
         _forceTypeSelector.Active = 0;
 
-        grid.Attach(new Label("Force"), 0, 5, 1, 1);
-        grid.Attach(_forceNameEntry, 1, 5, 1, 1);
-        grid.Attach(_forceTypeSelector, 2, 5, 1, 1);
+        grid.Attach(new Label("Force"), 0, 6, 1, 1);
+        grid.Attach(_forceNameEntry, 1, 6, 1, 1);
+        grid.Attach(_forceTypeSelector, 2, 6, 1, 1);
         var forceButton = CreateSlimActionButton("Add multiphysics force", IconSymbol.Force, (_, _) => AddForceToDataset());
-        grid.Attach(forceButton, 0, 6, 3, 1);
+        grid.Attach(forceButton, 0, 7, 3, 1);
 
         frame.Add(grid);
+        UpdateDatasetCreationControls();
         return frame;
+    }
+
+    private void UpdateDatasetCreationControls()
+    {
+        var isBorehole = string.Equals(_datasetTypeSelector.ActiveText, "Borehole", StringComparison.OrdinalIgnoreCase);
+        _emptyBoreholeToggle.Visible = isBorehole;
+        _emptyBoreholeToggle.Sensitive = isBorehole;
+
+        if (!isBorehole)
+            _emptyBoreholeToggle.Active = false;
     }
 
     private Widget BuildAssetTree()
@@ -1438,12 +1504,14 @@ public class MainGtkWindow : Gtk.Window
                 Materials = { new MaterialProperties { MaterialID = "Rock", Density = 2500, ThermalConductivity = 2.1, SpecificHeat = 900 } },
                 Forces = { new ForceField("Gravity", ForceType.Gravity) }
             },
-            "Borehole" => new BoreholeDataset(name, string.Empty)
-            {
-                SurfaceCoordinates = new System.Numerics.Vector2(0, 0),
-                TotalDepth = 800,
-                Elevation = 120
-            },
+            "Borehole" => _emptyBoreholeToggle.Active
+                ? BoreholeDataset.CreateEmpty(name, string.Empty)
+                : new BoreholeDataset(name, string.Empty)
+                {
+                    SurfaceCoordinates = new System.Numerics.Vector2(0, 0),
+                    TotalDepth = 800,
+                    Elevation = 120
+                },
             _ => Mesh3DDataset.CreateEmpty(name, string.Empty)
         };
 
