@@ -33,6 +33,7 @@ public class MeshViewport3D : DrawingArea
     private Vector3 _lastMin = Vector3.Zero;
     private float _lastScale = 1f;
     private Vector2 _lastPointer;
+    private Vector2 _clickStartPointer;
     private Vector3 _cameraTarget = Vector3.Zero;
 
     private float _yaw = 35f;
@@ -89,6 +90,7 @@ public class MeshViewport3D : DrawingArea
         {
             GrabFocus(); // Ensure we have focus for scroll events
             _lastPointer = new Vector2((float)args.Event.X, (float)args.Event.Y);
+            _clickStartPointer = _lastPointer; // Track where click started
 
             // Middle or right button: Camera panning
             if (args.Event.Button == 2 || args.Event.Button == 3)
@@ -138,7 +140,16 @@ public class MeshViewport3D : DrawingArea
                     return;
                 }
 
-                // If no cell was clicked, start camera rotation
+                // No cell clicked - clear selection if not shift-clicking
+                bool shiftHeld = (args.Event.State & Gdk.ModifierType.ShiftMask) != 0;
+                if (!shiftHeld && SelectedCellIDs.Count > 0)
+                {
+                    SelectedCellIDs.Clear();
+                    CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
+                    QueueDraw();
+                }
+
+                // Start camera rotation
                 _isCameraRotating = true;
             }
         };
@@ -600,21 +611,123 @@ public class MeshViewport3D : DrawingArea
         }
 
         // Draw HUD
-        cr.SetSourceRGB(0.8, 0.8, 0.8);
-        cr.SelectFontFace("Sans", Cairo.FontSlant.Normal, Cairo.FontWeight.Normal);
-        cr.SetFontSize(12);
-        cr.MoveTo(12, 18);
-        cr.ShowText($"Cells: {_cells.Count} | Yaw {_yaw:F0}° | Pitch {_pitch:F0}° | Zoom {_zoom:F1}x");
-        
-        // Show selection info if cells are selected
-        if (SelectedCellIDs.Count > 0)
-        {
-            cr.SetSourceRGB(1.0, 0.8, 0.3); // Orange/yellow for selection info
-            cr.MoveTo(12, 36);
-            cr.ShowText($"▶ Selected: {SelectedCellIDs.Count} cell{(SelectedCellIDs.Count > 1 ? "s" : "")}");
-        }
+        DrawHUD(cr, width, height);
 
         return base.OnDrawn(cr);
+    }
+
+    private void DrawHUD(Cairo.Context cr, int width, int height)
+    {
+        cr.SelectFontFace("Sans", Cairo.FontSlant.Normal, Cairo.FontWeight.Normal);
+        
+        // Calculate HUD dimensions
+        int hudWidth = 200;
+        int lineHeight = 18;
+        int padding = 8;
+        int hudX = 8;
+        int hudY = 8;
+        
+        // Count lines needed
+        int lines = 3; // Camera, Mesh, Render mode
+        if (SelectedCellIDs.Count > 0) lines++;
+        if (_hoveredCellIndex.HasValue) lines++;
+        
+        int hudHeight = lines * lineHeight + padding * 2;
+        
+        // Draw semi-transparent background
+        cr.SetSourceRGBA(0.05, 0.05, 0.1, 0.75);
+        DrawRoundedRect(cr, hudX, hudY, hudWidth, hudHeight, 6);
+        cr.Fill();
+        
+        // Draw border
+        cr.SetSourceRGBA(0.3, 0.4, 0.6, 0.6);
+        cr.LineWidth = 1;
+        DrawRoundedRect(cr, hudX, hudY, hudWidth, hudHeight, 6);
+        cr.Stroke();
+        
+        int textX = hudX + padding;
+        int textY = hudY + padding + 12;
+        
+        cr.SetFontSize(11);
+        
+        // Camera info
+        cr.SetSourceRGB(0.7, 0.8, 0.9);
+        cr.MoveTo(textX, textY);
+        cr.ShowText($"⟳ Yaw {_yaw:F0}°  Pitch {_pitch:F0}°  ×{_zoom:F1}");
+        textY += lineHeight;
+        
+        // Mesh info
+        cr.SetSourceRGB(0.6, 0.8, 1.0);
+        cr.MoveTo(textX, textY);
+        cr.ShowText($"◈ Cells: {_cells.Count}  Edges: {_edges.Count}");
+        textY += lineHeight;
+        
+        // Render mode
+        cr.SetSourceRGB(0.6, 0.7, 0.8);
+        cr.MoveTo(textX, textY);
+        string modeStr = RenderMode switch
+        {
+            RenderMode.Wireframe => "Wireframe",
+            RenderMode.Solid => "Solid",
+            RenderMode.SolidWireframe => "Solid+Wire",
+            _ => "Unknown"
+        };
+        cr.ShowText($"◉ Mode: {modeStr}");
+        textY += lineHeight;
+        
+        // Selection info
+        if (SelectedCellIDs.Count > 0)
+        {
+            cr.SetSourceRGB(1.0, 0.75, 0.25);
+            cr.MoveTo(textX, textY);
+            cr.ShowText($"▸ Selected: {SelectedCellIDs.Count} cell{(SelectedCellIDs.Count > 1 ? "s" : "")}");
+            textY += lineHeight;
+        }
+        
+        // Hover info
+        if (_hoveredCellIndex.HasValue && _hoveredCellIndex.Value < _cells.Count)
+        {
+            var hoveredCell = _cells[_hoveredCellIndex.Value];
+            cr.SetSourceRGB(0.5, 0.9, 0.9);
+            cr.MoveTo(textX, textY);
+            string cellName = hoveredCell.ID.Length > 18 ? hoveredCell.ID[..15] + "..." : hoveredCell.ID;
+            cr.ShowText($"◌ Hover: {cellName}");
+        }
+        
+        // Draw controls hint at bottom
+        int hintY = height - 28;
+        int hintHeight = 22;
+        int hintWidth = 380;
+        int hintX = (width - hintWidth) / 2;
+        
+        // Background for hint
+        cr.SetSourceRGBA(0.05, 0.05, 0.1, 0.7);
+        DrawRoundedRect(cr, hintX, hintY, hintWidth, hintHeight, 4);
+        cr.Fill();
+        
+        cr.SetSourceRGBA(0.3, 0.4, 0.5, 0.5);
+        cr.LineWidth = 1;
+        DrawRoundedRect(cr, hintX, hintY, hintWidth, hintHeight, 4);
+        cr.Stroke();
+        
+        cr.SetFontSize(10);
+        cr.SetSourceRGB(0.6, 0.65, 0.7);
+        cr.MoveTo(hintX + 8, hintY + 15);
+        cr.ShowText("LMB: Select  Shift+LMB: Multi-select  MMB/RMB: Pan  Scroll: Zoom  Alt+LMB: Rotate");
+    }
+
+    private static void DrawRoundedRect(Cairo.Context cr, double x, double y, double w, double h, double r)
+    {
+        cr.MoveTo(x + r, y);
+        cr.LineTo(x + w - r, y);
+        cr.Arc(x + w - r, y + r, r, -Math.PI / 2, 0);
+        cr.LineTo(x + w, y + h - r);
+        cr.Arc(x + w - r, y + h - r, r, 0, Math.PI / 2);
+        cr.LineTo(x + r, y + h);
+        cr.Arc(x + r, y + h - r, r, Math.PI / 2, Math.PI);
+        cr.LineTo(x, y + r);
+        cr.Arc(x + r, y + r, r, Math.PI, 3 * Math.PI / 2);
+        cr.ClosePath();
     }
 
     private Vector2 Project(Vector2 v, Vector3 min, float scale, int width, int height)
