@@ -54,21 +54,28 @@ public class DatasetViewPanel : BasePanel
 
         if (_viewer is BoreholeViewer boreholeViewer && boreholeViewer.ShowLegend)
         {
-            if (ImGui.BeginTable("DatasetViewerLayout", 2, ImGuiTableFlags.SizingStretchProp))
+            var tableStarted = ImGui.BeginTable("DatasetViewerLayout", 2, ImGuiTableFlags.SizingStretchProp);
+            if (tableStarted)
             {
-                ImGui.TableSetupColumn("Viewer", ImGuiTableColumnFlags.WidthStretch, 3f);
-                ImGui.TableSetupColumn("Legend", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+                try
+                {
+                    ImGui.TableSetupColumn("Viewer", ImGuiTableColumnFlags.WidthStretch, 3f);
+                    ImGui.TableSetupColumn("Legend", ImGuiTableColumnFlags.WidthStretch, 1.2f);
 
-                ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0);
-                ImGui.BeginChild("ViewerContent", new Vector2(0, contentSize.Y));
-                _viewer.DrawContent(ref _zoom, ref _pan);
-                ImGui.EndChild();
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    ImGui.BeginChild("ViewerContent", new Vector2(0, contentSize.Y));
+                    _viewer.DrawContent(ref _zoom, ref _pan);
+                    ImGui.EndChild();
 
-                ImGui.TableSetColumnIndex(1);
-                boreholeViewer.DrawLegendPanel(new Vector2(0, contentSize.Y));
-
-                ImGui.EndTable();
+                    ImGui.TableSetColumnIndex(1);
+                    boreholeViewer.DrawLegendPanel(new Vector2(0, contentSize.Y));
+                }
+                finally
+                {
+                    // Always end the table if it was successfully started, even if an exception occurred
+                    ImGui.EndTable();
+                }
             }
         }
         else
