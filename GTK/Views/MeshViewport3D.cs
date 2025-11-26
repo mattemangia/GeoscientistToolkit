@@ -233,57 +233,119 @@ public class MeshViewport3D : DrawingArea
                 Center = center
             });
 
-            var cellVertexIndices = new List<int>();
-
-            foreach (var vertex in cell.Vertices)
+            // Check if this is a Voronoi cell (has vertices) or a normal cell (uses volume)
+            if (cell.Vertices != null && cell.Vertices.Count > 0)
             {
-                if (!_vertexMap.TryGetValue(vertex, out var index))
+                // Voronoi cell - use vertices
+                var cellVertexIndices = new List<int>();
+
+                foreach (var vertex in cell.Vertices)
                 {
-                    index = _points.Count;
-                    _points.Add(vertex);
-                    _vertexMap[vertex] = index;
+                    if (!_vertexMap.TryGetValue(vertex, out var index))
+                    {
+                        index = _points.Count;
+                        _points.Add(vertex);
+                        _vertexMap[vertex] = index;
 
-                    minBounds = Vector3.Min(minBounds, vertex);
-                    maxBounds = Vector3.Max(maxBounds, vertex);
+                        minBounds = Vector3.Min(minBounds, vertex);
+                        maxBounds = Vector3.Max(maxBounds, vertex);
+                    }
+                    cellVertexIndices.Add(index);
                 }
-                cellVertexIndices.Add(index);
-            }
 
-            int half = cellVertexIndices.Count / 2;
+                int half = cellVertexIndices.Count / 2;
 
-            // Top and bottom faces
-            for (int i = 1; i < half - 1; i++)
-            {
-                _faces.Add(new List<int> { cellVertexIndices[0], cellVertexIndices[i], cellVertexIndices[i + 1] });
-                _faces.Add(new List<int> { cellVertexIndices[half], cellVertexIndices[half + i], cellVertexIndices[half + i + 1] });
-            }
-
-            // Side faces
-            for (int i = 0; i < half; i++)
-            {
-                int i2 = (i + 1) % half;
-                _faces.Add(new List<int> { cellVertexIndices[i], cellVertexIndices[i2], cellVertexIndices[i2 + half], cellVertexIndices[i + half] });
-            }
-
-            for (int i = 0; i < cell.Vertices.Count; i++)
-            {
-                var p1 = cell.Vertices[i];
-                var p2 = cell.Vertices[(i + 1) % (cell.Vertices.Count/2) + (i < cell.Vertices.Count/2 ? 0 : cell.Vertices.Count/2)];
-                if (_vertexMap.TryGetValue(p1, out var idx1) && _vertexMap.TryGetValue(p2, out var idx2))
+                // Top and bottom faces
+                for (int i = 1; i < half - 1; i++)
                 {
-                    var edge = idx1 < idx2 ? (idx1, idx2) : (idx2, idx1);
-                    if (!_edges.Contains(edge))
-                        _edges.Add(edge);
+                    _faces.Add(new List<int> { cellVertexIndices[0], cellVertexIndices[i], cellVertexIndices[i + 1] });
+                    _faces.Add(new List<int> { cellVertexIndices[half], cellVertexIndices[half + i], cellVertexIndices[half + i + 1] });
+                }
+
+                // Side faces
+                for (int i = 0; i < half; i++)
+                {
+                    int i2 = (i + 1) % half;
+                    _faces.Add(new List<int> { cellVertexIndices[i], cellVertexIndices[i2], cellVertexIndices[i2 + half], cellVertexIndices[i + half] });
+                }
+
+                // Edges for Voronoi cells
+                for (int i = 0; i < cell.Vertices.Count; i++)
+                {
+                    var p1 = cell.Vertices[i];
+                    var p2 = cell.Vertices[(i + 1) % (cell.Vertices.Count/2) + (i < cell.Vertices.Count/2 ? 0 : cell.Vertices.Count/2)];
+                    if (_vertexMap.TryGetValue(p1, out var idx1) && _vertexMap.TryGetValue(p2, out var idx2))
+                    {
+                        var edge = idx1 < idx2 ? (idx1, idx2) : (idx2, idx1);
+                        if (!_edges.Contains(edge))
+                            _edges.Add(edge);
+                    }
+                }
+                for (int i = 0; i < half; i++)
+                {
+                    if (_vertexMap.TryGetValue(cell.Vertices[i], out var idx1) && _vertexMap.TryGetValue(cell.Vertices[i+half], out var idx2))
+                    {
+                        var edge = idx1 < idx2 ? (idx1, idx2) : (idx2, idx1);
+                        if (!_edges.Contains(edge))
+                            _edges.Add(edge);
+                    }
                 }
             }
-             for (int i = 0; i < half; i++)
+            else
             {
-                 if (_vertexMap.TryGetValue(cell.Vertices[i], out var idx1) && _vertexMap.TryGetValue(cell.Vertices[i+half], out var idx2))
+                // Normal cell - create a box based on volume
+                float size = (float)Math.Pow(cell.Volume, 1.0 / 3.0) * 0.5f;
+
+                cellIndex[id] = startIdx;
+
+                // Generate 8 corners of the box
+                for (int i = 0; i < 2; i++)
+                for (int j = 0; j < 2; j++)
+                for (int k = 0; k < 2; k++)
                 {
-                    var edge = idx1 < idx2 ? (idx1, idx2) : (idx2, idx1);
-                    if (!_edges.Contains(edge))
-                        _edges.Add(edge);
+                    float x = center.X + (i == 0 ? -size : size);
+                    float y = center.Y + (j == 0 ? -size : size);
+                    float z = center.Z + (k == 0 ? -size : size);
+                    var point = new Vector3(x, y, z);
+                    _points.Add(point);
+
+                    // Update bounds for centering
+                    minBounds = Vector3.Min(minBounds, point);
+                    maxBounds = Vector3.Max(maxBounds, point);
                 }
+
+                // Add edges for the box (12 edges total)
+                // Bottom face (z = -size)
+                _edges.Add((startIdx + 0, startIdx + 1)); // 000 -> 100
+                _edges.Add((startIdx + 1, startIdx + 3)); // 100 -> 110
+                _edges.Add((startIdx + 3, startIdx + 2)); // 110 -> 010
+                _edges.Add((startIdx + 2, startIdx + 0)); // 010 -> 000
+
+                // Top face (z = +size)
+                _edges.Add((startIdx + 4, startIdx + 5)); // 001 -> 101
+                _edges.Add((startIdx + 5, startIdx + 7)); // 101 -> 111
+                _edges.Add((startIdx + 7, startIdx + 6)); // 111 -> 011
+                _edges.Add((startIdx + 6, startIdx + 4)); // 011 -> 001
+
+                // Vertical edges connecting bottom to top
+                _edges.Add((startIdx + 0, startIdx + 4)); // 000 -> 001
+                _edges.Add((startIdx + 1, startIdx + 5)); // 100 -> 101
+                _edges.Add((startIdx + 2, startIdx + 6)); // 010 -> 011
+                _edges.Add((startIdx + 3, startIdx + 7)); // 110 -> 111
+
+                // Add faces for solid rendering (6 faces per box)
+                // Bottom face (z = -size)
+                _faces.Add(new List<int> { startIdx + 0, startIdx + 1, startIdx + 3, startIdx + 2 });
+                // Top face (z = +size)
+                _faces.Add(new List<int> { startIdx + 4, startIdx + 5, startIdx + 7, startIdx + 6 });
+                // Front face (y = -size)
+                _faces.Add(new List<int> { startIdx + 0, startIdx + 1, startIdx + 5, startIdx + 4 });
+                // Back face (y = +size)
+                _faces.Add(new List<int> { startIdx + 2, startIdx + 3, startIdx + 7, startIdx + 6 });
+                // Left face (x = -size)
+                _faces.Add(new List<int> { startIdx + 0, startIdx + 2, startIdx + 6, startIdx + 4 });
+                // Right face (x = +size)
+                _faces.Add(new List<int> { startIdx + 1, startIdx + 3, startIdx + 7, startIdx + 5 });
             }
         }
 
@@ -739,26 +801,53 @@ public class MeshViewport3D : DrawingArea
     private void DrawCellEdges(Cairo.Context cr, List<Vector2> projected, CellInfo cellInfo, Vector3 min, float scale, int width, int height)
     {
         var vertices = cellInfo.Cell.Vertices;
-        if (vertices.Count < 2) return;
 
-        for (int i = 0; i < vertices.Count; i++)
+        // Check if this is a Voronoi cell or a normal box cell
+        if (vertices != null && vertices.Count > 0)
         {
-            var p1 = vertices[i];
-            var p2 = vertices[(i + 1) % (vertices.Count / 2) + (i < vertices.Count / 2 ? 0 : vertices.Count / 2)];
-
-            if (_vertexMap.TryGetValue(p1, out var idx1) && _vertexMap.TryGetValue(p2, out var idx2))
+            // Voronoi cell - draw edges from vertices
+            for (int i = 0; i < vertices.Count; i++)
             {
-                DrawEdgeLine(cr, projected, idx1, idx2, min, scale, width, height);
+                var p1 = vertices[i];
+                var p2 = vertices[(i + 1) % (vertices.Count / 2) + (i < vertices.Count / 2 ? 0 : vertices.Count / 2)];
+
+                if (_vertexMap.TryGetValue(p1, out var idx1) && _vertexMap.TryGetValue(p2, out var idx2))
+                {
+                    DrawEdgeLine(cr, projected, idx1, idx2, min, scale, width, height);
+                }
+            }
+
+            int half = vertices.Count / 2;
+            for (int i = 0; i < half; i++)
+            {
+                if (_vertexMap.TryGetValue(vertices[i], out var idx1) && _vertexMap.TryGetValue(vertices[i + half], out var idx2))
+                {
+                    DrawEdgeLine(cr, projected, idx1, idx2, min, scale, width, height);
+                }
             }
         }
-
-        int half = vertices.Count / 2;
-        for (int i = 0; i < half; i++)
+        else
         {
-            if (_vertexMap.TryGetValue(vertices[i], out var idx1) && _vertexMap.TryGetValue(vertices[i + half], out var idx2))
-            {
-                DrawEdgeLine(cr, projected, idx1, idx2, min, scale, width, height);
-            }
+            // Normal box cell - draw the 12 edges of a box
+            int startIdx = cellInfo.VertexStartIndex;
+
+            // Bottom face edges
+            DrawEdgeLine(cr, projected, startIdx + 0, startIdx + 1, min, scale, width, height);
+            DrawEdgeLine(cr, projected, startIdx + 1, startIdx + 3, min, scale, width, height);
+            DrawEdgeLine(cr, projected, startIdx + 3, startIdx + 2, min, scale, width, height);
+            DrawEdgeLine(cr, projected, startIdx + 2, startIdx + 0, min, scale, width, height);
+
+            // Top face edges
+            DrawEdgeLine(cr, projected, startIdx + 4, startIdx + 5, min, scale, width, height);
+            DrawEdgeLine(cr, projected, startIdx + 5, startIdx + 7, min, scale, width, height);
+            DrawEdgeLine(cr, projected, startIdx + 7, startIdx + 6, min, scale, width, height);
+            DrawEdgeLine(cr, projected, startIdx + 6, startIdx + 4, min, scale, width, height);
+
+            // Vertical edges
+            DrawEdgeLine(cr, projected, startIdx + 0, startIdx + 4, min, scale, width, height);
+            DrawEdgeLine(cr, projected, startIdx + 1, startIdx + 5, min, scale, width, height);
+            DrawEdgeLine(cr, projected, startIdx + 2, startIdx + 6, min, scale, width, height);
+            DrawEdgeLine(cr, projected, startIdx + 3, startIdx + 7, min, scale, width, height);
         }
     }
 
