@@ -65,18 +65,13 @@ public class DatasetViewPanel : BasePanel
                     ImGui.TableNextRow();
                     ImGui.TableSetColumnIndex(0);
 
-                    var childStarted = ImGui.BeginChild("ViewerContent", new Vector2(0, contentSize.Y));
-                    if (childStarted)
+                    // BeginChild must ALWAYS be followed by EndChild, regardless of return value
+                    var childVisible = ImGui.BeginChild("ViewerContent", new Vector2(0, contentSize.Y));
+                    if (childVisible)
                     {
-                        try
-                        {
-                            _viewer.DrawContent(ref _zoom, ref _pan);
-                        }
-                        finally
-                        {
-                            ImGui.EndChild();
-                        }
+                        _viewer.DrawContent(ref _zoom, ref _pan);
                     }
+                    ImGui.EndChild(); // Must always be called after BeginChild
 
                     ImGui.TableSetColumnIndex(1);
                     boreholeViewer.DrawLegendPanel(new Vector2(0, contentSize.Y));
@@ -90,18 +85,13 @@ public class DatasetViewPanel : BasePanel
         }
         else
         {
-            var childStarted = ImGui.BeginChild("ViewerContent", contentSize);
-            if (childStarted)
+            // BeginChild must ALWAYS be followed by EndChild, regardless of return value
+            var childVisible = ImGui.BeginChild("ViewerContent", contentSize);
+            if (childVisible)
             {
-                try
-                {
-                    _viewer.DrawContent(ref _zoom, ref _pan);
-                }
-                finally
-                {
-                    ImGui.EndChild();
-                }
+                _viewer.DrawContent(ref _zoom, ref _pan);
             }
+            ImGui.EndChild(); // Must always be called after BeginChild
         }
     }
 
@@ -136,9 +126,9 @@ public class DatasetViewPanel : BasePanel
         ImGui.Separator();
 
         // Prepare text content
-        var statusBarText = $"Dataset: {Dataset.Name} | Type: {Dataset.Type} | Zoom: {_zoom:F1}Ã—";
+        var statusBarText = $"Dataset: {Dataset.Name} | Type: {Dataset.Type} | Zoom: {_zoom:F1}Ãƒâ€”";
         if (Dataset is CtImageStackDataset ct && ct.Width > 0)
-            statusBarText += $" | Size: {ct.Width}Ã—{ct.Height}Ã—{ct.Depth}";
+            statusBarText += $" | Size: {ct.Width}Ãƒâ€”{ct.Height}Ãƒâ€”{ct.Depth}";
 
         // --- Draw a background for the status bar text ---
         var padding = 4f;

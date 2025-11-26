@@ -708,7 +708,12 @@ void main()
         io.MouseDown[1] = s.IsMouseDown(MouseButton.Right);
         io.MouseDown[2] = s.IsMouseDown(MouseButton.Middle);
         io.MouseWheel = s.WheelDelta;
-        io.MousePos = s.MousePosition;
+        
+        // FIX: Scale mouse position to match the scaled DisplaySize.
+        // The input snapshot provides mouse coordinates in physical pixels,
+        // but when UI scaling is applied, DisplaySize is in logical units.
+        // Without this division, mouse clicks are offset when UIScale != 1.0
+        io.MousePos = s.MousePosition / _scale;
 
         foreach (var c in s.KeyCharPresses) io.AddInputCharacter(c);
         foreach (var e in s.KeyEvents)
