@@ -166,172 +166,229 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
 
         // ---------------- Bottom horizontal scrollbar ----------------
         ImGui.SetCursorScreenPos(origin + new Vector2(DepthScaleWidth, HeaderHeight + row2Height));
-        ImGui.BeginChild("BottomHSB",
+        var bottomChildStarted = ImGui.BeginChild("BottomHSB",
             new Vector2(fullSize.X - DepthScaleWidth, BottomBarHeight),
             ImGuiChildFlags.None,
             ImGuiWindowFlags.AlwaysHorizontalScrollbar | ImGuiWindowFlags.NoScrollbar |
             ImGuiWindowFlags.NoScrollWithMouse);
 
-        if (reset) ImGui.SetScrollX(0);
+        float globalScrollX = 0;
+        if (bottomChildStarted)
+        {
+            try
+            {
+                if (reset) ImGui.SetScrollX(0);
 
-        var bottomAvail = ImGui.GetContentRegionAvail();
-        var bottomContentW = Math.Max(contentWidthX, bottomAvail.X + 1f);
-        ImGui.Dummy(new Vector2(bottomContentW, 1f));
-        var globalScrollX = ImGui.GetScrollX();
-        ImGui.EndChild();
+                var bottomAvail = ImGui.GetContentRegionAvail();
+                var bottomContentW = Math.Max(contentWidthX, bottomAvail.X + 1f);
+                ImGui.Dummy(new Vector2(bottomContentW, 1f));
+                globalScrollX = ImGui.GetScrollX();
+            }
+            finally
+            {
+                ImGui.EndChild();
+            }
+        }
 
         // ---------------- Header (reads X from bottom; no scrollbars) ----------------
         // Corner
         ImGui.SetCursorScreenPos(origin);
-        ImGui.BeginChild("CornerFrozen", new Vector2(DepthScaleWidth, HeaderHeight), ImGuiChildFlags.None,
+        var cornerChildStarted = ImGui.BeginChild("CornerFrozen", new Vector2(DepthScaleWidth, HeaderHeight), ImGuiChildFlags.None,
             ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
-        ImGui.EndChild();
+        if (cornerChildStarted)
+        {
+            try
+            {
+                // Empty corner
+            }
+            finally
+            {
+                ImGui.EndChild();
+            }
+        }
 
         // Header row
         ImGui.SetCursorScreenPos(origin + new Vector2(DepthScaleWidth, 0));
-        ImGui.BeginChild("HeaderView",
+        var headerChildStarted = ImGui.BeginChild("HeaderView",
             new Vector2(fullSize.X - DepthScaleWidth, HeaderHeight),
             ImGuiChildFlags.None,
             ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 
-        var headerPos = ImGui.GetCursorScreenPos();
-        var headerViewport = ImGui.GetContentRegionAvail();
+        if (headerChildStarted)
         {
-            var dl = ImGui.GetWindowDrawList();
-            var clipMin = headerPos;
-            var clipMax = headerPos + new Vector2(headerViewport.X, HeaderHeight);
-            dl.PushClipRect(clipMin, clipMax, true);
-
-            var x = headerPos.X - globalScrollX;
-            DrawLithologyHeader(dl, new Vector2(x, headerPos.Y), _lithologyColumnWidth);
-            x += _lithologyColumnWidth;
-
-            if (tracksWidth > 0)
+            try
             {
-                x += _trackSpacing;
-                foreach (var t in visibleTracks)
+                var headerPos = ImGui.GetCursorScreenPos();
+                var headerViewport = ImGui.GetContentRegionAvail();
                 {
-                    DrawTrackHeader(dl, t, new Vector2(x, headerPos.Y), _dataset.TrackWidth);
-                    x += _dataset.TrackWidth + _trackSpacing;
+                    var dl = ImGui.GetWindowDrawList();
+                    var clipMin = headerPos;
+                    var clipMax = headerPos + new Vector2(headerViewport.X, HeaderHeight);
+                    dl.PushClipRect(clipMin, clipMax, true);
+
+                    var x = headerPos.X - globalScrollX;
+                    DrawLithologyHeader(dl, new Vector2(x, headerPos.Y), _lithologyColumnWidth);
+                    x += _lithologyColumnWidth;
+
+                    if (tracksWidth > 0)
+                    {
+                        x += _trackSpacing;
+                        foreach (var t in visibleTracks)
+                        {
+                            DrawTrackHeader(dl, t, new Vector2(x, headerPos.Y), _dataset.TrackWidth);
+                            x += _dataset.TrackWidth + _trackSpacing;
+                        }
+                    }
+
+                    dl.PopClipRect();
                 }
             }
-
-            dl.PopClipRect();
+            finally
+            {
+                ImGui.EndChild();
+            }
         }
-        ImGui.EndChild();
 
         // ---------------- Body + PROXY vertical scrollbar ----------------
         var vScrollbarW = ImGui.GetStyle().ScrollbarSize;
         var bodyW = fullSize.X - DepthScaleWidth - vScrollbarW;
 
         ImGui.SetCursorScreenPos(origin + new Vector2(DepthScaleWidth, HeaderHeight));
-        ImGui.BeginChild("BodyView",
+        var bodyChildStarted = ImGui.BeginChild("BodyView",
             new Vector2(bodyW, row2Height),
             ImGuiChildFlags.None,
             ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 
-        var bodyPos = ImGui.GetCursorScreenPos();
-        var bodyViewport = ImGui.GetContentRegionAvail();
-
+        if (bodyChildStarted)
         {
-            var dl = ImGui.GetWindowDrawList();
-            var clipMin = bodyPos;
-            var clipMax = bodyPos + bodyViewport;
-            dl.PushClipRect(clipMin, clipMax, true);
-
-            var xLeft = bodyPos.X - globalScrollX;
-            var xRight = xLeft + contentWidthX;
-            dl.AddRectFilled(new Vector2(xLeft, bodyPos.Y),
-                new Vector2(xRight, bodyPos.Y + bodyViewport.Y),
-                ImGui.GetColorU32(new Vector4(0.10f, 0.10f, 0.10f, 1.0f)));
-
-            var originX = xLeft;
-            var originY = bodyPos.Y;
-
-            var topDepth = _depthStart;
-            var bottomDepth = _depthEnd;
-
-            // lithology column
-            DrawLithologyVisible(dl, new Vector2(originX, originY),
-                _lithologyColumnWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth, clipMin, clipMax);
-
-            var x = originX + _lithologyColumnWidth;
-
-            // tracks
-            if (tracksWidth > 0)
+            try
             {
-                x += _trackSpacing;
-                foreach (var t in visibleTracks)
+                var bodyPos = ImGui.GetCursorScreenPos();
+                var bodyViewport = ImGui.GetContentRegionAvail();
+
                 {
-                    DrawTrackVisible(dl, t, new Vector2(x, originY),
-                        _dataset.TrackWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth, clipMin, clipMax);
-                    x += _dataset.TrackWidth + _trackSpacing;
+                    var dl = ImGui.GetWindowDrawList();
+                    var clipMin = bodyPos;
+                    var clipMax = bodyPos + bodyViewport;
+                    dl.PushClipRect(clipMin, clipMax, true);
+
+                    var xLeft = bodyPos.X - globalScrollX;
+                    var xRight = xLeft + contentWidthX;
+                    dl.AddRectFilled(new Vector2(xLeft, bodyPos.Y),
+                        new Vector2(xRight, bodyPos.Y + bodyViewport.Y),
+                        ImGui.GetColorU32(new Vector4(0.10f, 0.10f, 0.10f, 1.0f)));
+
+                    var originX = xLeft;
+                    var originY = bodyPos.Y;
+
+                    var topDepth = _depthStart;
+                    var bottomDepth = _depthEnd;
+
+                    // lithology column
+                    DrawLithologyVisible(dl, new Vector2(originX, originY),
+                        _lithologyColumnWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth, clipMin, clipMax);
+
+                    var x = originX + _lithologyColumnWidth;
+
+                    // tracks
+                    if (tracksWidth > 0)
+                    {
+                        x += _trackSpacing;
+                        foreach (var t in visibleTracks)
+                        {
+                            DrawTrackVisible(dl, t, new Vector2(x, originY),
+                                _dataset.TrackWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth, clipMin, clipMax);
+                            x += _dataset.TrackWidth + _trackSpacing;
+                        }
+                    }
+
+                    dl.PopClipRect();
                 }
             }
-
-            dl.PopClipRect();
+            finally
+            {
+                ImGui.EndChild();
+            }
         }
-        ImGui.EndChild();
 
         // Depth scale (left)
         ImGui.SetCursorScreenPos(origin + new Vector2(0, HeaderHeight));
-        ImGui.BeginChild("DepthView",
+        var depthChildStarted = ImGui.BeginChild("DepthView",
             new Vector2(DepthScaleWidth, row2Height),
             ImGuiChildFlags.None,
             ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 
-        var depthInnerPos = ImGui.GetCursorScreenPos();
-        var depthViewport = ImGui.GetContentRegionAvail();
-        ImGui.Dummy(new Vector2(1f, depthViewport.Y));
+        if (depthChildStarted)
         {
-            var dl = ImGui.GetWindowDrawList();
-            var clipMin = depthInnerPos;
-            var clipMax = depthInnerPos + depthViewport;
-            dl.PushClipRect(clipMin, clipMax, true);
+            try
+            {
+                var depthInnerPos = ImGui.GetCursorScreenPos();
+                var depthViewport = ImGui.GetContentRegionAvail();
+                ImGui.Dummy(new Vector2(1f, depthViewport.Y));
+                {
+                    var dl = ImGui.GetWindowDrawList();
+                    var clipMin = depthInnerPos;
+                    var clipMax = depthInnerPos + depthViewport;
+                    dl.PushClipRect(clipMin, clipMax, true);
 
-            DrawDepthVisible(dl, new Vector2(depthInnerPos.X, depthInnerPos.Y),
-                pixelsPerMeter, gridInterval, _depthStart, _depthEnd);
+                    DrawDepthVisible(dl, new Vector2(depthInnerPos.X, depthInnerPos.Y),
+                        pixelsPerMeter, gridInterval, _depthStart, _depthEnd);
 
-            dl.PopClipRect();
+                    dl.PopClipRect();
+                }
+            }
+            finally
+            {
+                ImGui.EndChild();
+            }
         }
-        ImGui.EndChild();
 
         // -------- PROXY vertical scrollbar (separate child so body never scrolls) --------
         ImGui.SetCursorScreenPos(origin + new Vector2(DepthScaleWidth + bodyW, HeaderHeight));
         var proxyFlags = isFullRangeView
             ? ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
             : ImGuiWindowFlags.AlwaysVerticalScrollbar;
-        ImGui.BeginChild("VScrollProxy",
+        var proxyChildStarted = ImGui.BeginChild("VScrollProxy",
             new Vector2(vScrollbarW, row2Height),
             ImGuiChildFlags.None,
             proxyFlags);
 
-        var proxyAvail = ImGui.GetContentRegionAvail();
-
-        var virtualScrollMaxMeters = Math.Max(0f, totalDepth - rangeMeters);
-        var virtualContentPixels = isFullRangeView
-            ? proxyAvail.Y
-            : Math.Max(proxyAvail.Y + 1f, (virtualScrollMaxMeters + rangeMeters) * pixelsPerMeter);
-
-        ImGui.Dummy(new Vector2(1f, virtualContentPixels));
-
-        if (!_autoScaleDepth && !isFullRangeView)
+        if (proxyChildStarted)
         {
-            var proxyScroll = ImGui.GetScrollY();
-            var topMeters = Math.Clamp(proxyScroll / Math.Max(1e-6f, pixelsPerMeter), 0f, virtualScrollMaxMeters);
+            try
+            {
+                var proxyAvail = ImGui.GetContentRegionAvail();
 
-            _depthStart = topMeters;
-            _depthEnd = Math.Min(totalDepth, _depthStart + rangeMeters);
+                var virtualScrollMaxMeters = Math.Max(0f, totalDepth - rangeMeters);
+                var virtualContentPixels = isFullRangeView
+                    ? proxyAvail.Y
+                    : Math.Max(proxyAvail.Y + 1f, (virtualScrollMaxMeters + rangeMeters) * pixelsPerMeter);
 
-            var desiredScroll = Math.Clamp(_depthStart * pixelsPerMeter, 0f,
-                Math.Max(0f, virtualContentPixels - proxyAvail.Y));
-            ImGui.SetScrollY(desiredScroll);
-        }
-        else
-        {
-            ImGui.SetScrollY(0f);
-            _depthStart = 0f;
-            _depthEnd = totalDepth;
+                ImGui.Dummy(new Vector2(1f, virtualContentPixels));
+
+                if (!_autoScaleDepth && !isFullRangeView)
+                {
+                    var proxyScroll = ImGui.GetScrollY();
+                    var topMeters = Math.Clamp(proxyScroll / Math.Max(1e-6f, pixelsPerMeter), 0f, virtualScrollMaxMeters);
+
+                    _depthStart = topMeters;
+                    _depthEnd = Math.Min(totalDepth, _depthStart + rangeMeters);
+
+                    var desiredScroll = Math.Clamp(_depthStart * pixelsPerMeter, 0f,
+                        Math.Max(0f, virtualContentPixels - proxyAvail.Y));
+                    ImGui.SetScrollY(desiredScroll);
+                }
+                else
+                {
+                    ImGui.SetScrollY(0f);
+                    _depthStart = 0f;
+                    _depthEnd = totalDepth;
+                }
+            }
+            finally
+            {
+                ImGui.EndChild();
+            }
         }
 
         // frozen separators
@@ -354,14 +411,23 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     {
         if (!ShowLegend) return;
 
-        ImGui.BeginChild($"BoreholeLegend##{_dataset.GetHashCode()}", maxSize,
+        var childStarted = ImGui.BeginChild($"BoreholeLegend##{_dataset.GetHashCode()}", maxSize,
             ImGuiChildFlags.Border | ImGuiChildFlags.AlwaysUseWindowPadding);
 
-        ImGui.TextColored(_mutedText, "Legend");
-        ImGui.Separator();
+        if (childStarted)
+        {
+            try
+            {
+                ImGui.TextColored(_mutedText, "Legend");
+                ImGui.Separator();
 
-        DrawLegendContents();
-        ImGui.EndChild();
+                DrawLegendContents();
+            }
+            finally
+            {
+                ImGui.EndChild();
+            }
+        }
     }
 
     private float GetAdaptiveGridInterval(float ppm)
