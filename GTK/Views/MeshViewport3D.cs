@@ -6,6 +6,7 @@ using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.PhysicoChem;
 using Gtk;
 using Gdk;
+using GdkKey = Gdk.Key;
 
 namespace GeoscientistToolkit.GtkUI;
 
@@ -205,7 +206,7 @@ public class MeshViewport3D : DrawingArea
         KeyPressEvent += (_, args) =>
         {
             bool ctrlPressed = (args.Event.State & ModifierType.ControlMask) != 0;
-            bool isCtrlA = args.Event.KeyValue == (uint)Key.a || args.Event.KeyValue == (uint)Key.A;
+            bool isCtrlA = args.Event.KeyValue == (uint)GdkKey.a || args.Event.KeyValue == (uint)GdkKey.A;
 
             if (ctrlPressed && isCtrlA)
             {
