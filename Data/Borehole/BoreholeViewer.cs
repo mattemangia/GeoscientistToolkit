@@ -45,7 +45,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
 
     // toggles
     private bool _showDepthGrid = true;
-    private bool _showLegend = true;
+    public bool ShowLegend { get; set; } = true;
     private bool _showSplitDialog;
     private float _splitDepth;
     private bool _showLithologyNames = true;
@@ -116,7 +116,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
         ImGui.SameLine();
         ImGui.Checkbox("Values", ref _showParameterValues);
         ImGui.SameLine();
-        ImGui.Checkbox("Legend", ref _showLegend);
+        ImGui.Checkbox("Legend", ref ShowLegend);
         ImGui.SameLine();
         ImGui.Checkbox("Enable Tooltip", ref _enableTooltip); // <--- NEW
     }
@@ -351,7 +351,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
 
     public void DrawLegendPanel(Vector2 maxSize)
     {
-        if (!_showLegend) return;
+        if (!ShowLegend) return;
 
         ImGui.BeginChild($"BoreholeLegend##{_dataset.GetHashCode()}", maxSize,
             ImGuiChildFlags.Border | ImGuiChildFlags.AlwaysUseWindowPadding);
