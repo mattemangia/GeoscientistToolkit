@@ -582,17 +582,13 @@ public class MainGtkWindow : Gtk.Window
         });
         cellOpsGrid.Attach(clearSelButton, 0, 2, 2, 1);
 
-        // Plane selection tools
-        cellOpsGrid.Attach(new Label("Plane Selection:") { Xalign = 0 }, 0, 3, 2, 1);
+        // Add a hint for plane selection
+        var planeSelectionHint = new Label("For plane selection, use the 'Selection' dropdown above.")
+            { Xalign = 0, Wrap = true };
+        var hintFrame = new Frame();
+        hintFrame.Add(planeSelectionHint);
+        cellOpsGrid.Attach(hintFrame, 0, 3, 2, 1);
 
-        var selectXYButton = CreateSlimActionButton("Select XY plane", IconSymbol.Mesh, (_, _) => SelectPlane(PlaneType.XY));
-        cellOpsGrid.Attach(selectXYButton, 0, 4, 2, 1);
-
-        var selectXZButton = CreateSlimActionButton("Select XZ plane", IconSymbol.Mesh, (_, _) => SelectPlane(PlaneType.XZ));
-        cellOpsGrid.Attach(selectXZButton, 0, 5, 2, 1);
-
-        var selectYZButton = CreateSlimActionButton("Select YZ plane", IconSymbol.Mesh, (_, _) => SelectPlane(PlaneType.YZ));
-        cellOpsGrid.Attach(selectYZButton, 0, 6, 2, 1);
 
         cellOpsFrame.Add(cellOpsGrid);
         container.PackStart(cellOpsFrame, false, false, 0);
@@ -840,30 +836,6 @@ public class MainGtkWindow : Gtk.Window
         }
 
         _cellPropertiesView.Buffer.Text = sb.ToString();
-    }
-
-    private void SelectPlane(PlaneType plane)
-    {
-        double position = 0.0;
-        string planeName = plane.ToString();
-
-        if (_selectedDataset is PhysicoChemDataset physico && _meshViewport.SelectedCellIDs.Any())
-        {
-            var firstCellId = _meshViewport.SelectedCellIDs.First();
-            if (physico.Mesh.Cells.TryGetValue(firstCellId, out var cell))
-            {
-                position = plane switch
-                {
-                    PlaneType.XY => cell.Center.Z,
-                    PlaneType.XZ => cell.Center.Y,
-                    PlaneType.YZ => cell.Center.X,
-                    _ => 0.0
-                };
-            }
-        }
-
-        _meshViewport.SelectCellsInPlane(plane, position);
-        SetStatus($"Selected {planeName} plane at position {position:F2}: {_meshViewport.SelectedCellIDs.Count} cells");
     }
 
     private string BuildDatasetSummary(Dataset dataset)

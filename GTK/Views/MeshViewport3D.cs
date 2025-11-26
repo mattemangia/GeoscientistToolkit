@@ -132,6 +132,39 @@ public class MeshViewport3D : DrawingArea
 
                 // Other modes: Try to select a cell first
                 var cellIdx = FindCellAtPosition(_lastPointer);
+
+                // Handle plane selection modes
+                if (SelectionMode == SelectionMode.PlaneXY || SelectionMode == SelectionMode.PlaneXZ || SelectionMode == SelectionMode.PlaneYZ)
+                {
+                    if (cellIdx.HasValue && cellIdx.Value < _cells.Count)
+                    {
+                        var cell = _cells[cellIdx.Value].Cell;
+                        double position;
+                        PlaneType planeType;
+
+                        switch (SelectionMode)
+                        {
+                            case SelectionMode.PlaneXY:
+                                position = cell.Center.Z;
+                                planeType = PlaneType.XY;
+                                break;
+                            case SelectionMode.PlaneXZ:
+                                position = cell.Center.Y;
+                                planeType = PlaneType.XZ;
+                                break;
+                            case SelectionMode.PlaneYZ:
+                                position = cell.Center.X;
+                                planeType = PlaneType.YZ;
+                                break;
+                            default:
+                                return; // Should not happen
+                        }
+                        SelectCellsInPlane(planeType, position);
+                    }
+                    return;
+                }
+
+
                 if (cellIdx.HasValue && cellIdx.Value < _cells.Count)
                 {
                     var cell = _cells[cellIdx.Value];
