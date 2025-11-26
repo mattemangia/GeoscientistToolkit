@@ -20,6 +20,7 @@ public class MeshViewport3D : DrawingArea
     private readonly List<List<int>> _faces = new();
     private readonly List<Vector2> _projected = new();
     private readonly List<CellInfo> _cells = new();
+    private Dictionary<Vector3, int> _vertexMap = new();
     private Mesh3DDataset? _activeMesh;
     private PhysicoChemMesh? _activePhysicoMesh;
     private PhysicoChemDataset? _activePhysicoDataset;
@@ -216,20 +217,13 @@ public class MeshViewport3D : DrawingArea
 
         var cellIndex = new Dictionary<string, int>();
 
-        // For each cell, create a box based on its volume
+        _vertexMap.Clear();
+
         foreach (var (id, cell) in mesh.Cells.OrderBy(c => c.Key))
         {
-            // Calculate box dimensions from volume (assume cubic cells)
-            float size = (float)Math.Pow(cell.Volume, 1.0 / 3.0) * 0.5f;
-
             var center = new Vector3((float)cell.Center.X, (float)cell.Center.Y, (float)cell.Center.Z);
-
-            // Store starting index for this cell's vertices
             int startIdx = _points.Count;
-            int cellIdx = _cells.Count;
-            cellIndex[id] = startIdx;
 
-            // Store cell info for selection
             _cells.Add(new CellInfo
             {
                 ID = id,
@@ -239,54 +233,58 @@ public class MeshViewport3D : DrawingArea
                 Center = center
             });
 
-            // Generate 8 corners of the box
-            for (int i = 0; i < 2; i++)
-            for (int j = 0; j < 2; j++)
-            for (int k = 0; k < 2; k++)
-            {
-                float x = center.X + (i == 0 ? -size : size);
-                float y = center.Y + (j == 0 ? -size : size);
-                float z = center.Z + (k == 0 ? -size : size);
-                var point = new Vector3(x, y, z);
-                _points.Add(point);
+            var cellVertexIndices = new List<int>();
 
-                // Update bounds for centering
-                minBounds = Vector3.Min(minBounds, point);
-                maxBounds = Vector3.Max(maxBounds, point);
+            foreach (var vertex in cell.Vertices)
+            {
+                if (!_vertexMap.TryGetValue(vertex, out var index))
+                {
+                    index = _points.Count;
+                    _points.Add(vertex);
+                    _vertexMap[vertex] = index;
+
+                    minBounds = Vector3.Min(minBounds, vertex);
+                    maxBounds = Vector3.Max(maxBounds, vertex);
+                }
+                cellVertexIndices.Add(index);
             }
 
-            // Add edges for the box (12 edges total)
-            // Bottom face (z = -size)
-            _edges.Add((startIdx + 0, startIdx + 1)); // 000 -> 100
-            _edges.Add((startIdx + 1, startIdx + 3)); // 100 -> 110
-            _edges.Add((startIdx + 3, startIdx + 2)); // 110 -> 010
-            _edges.Add((startIdx + 2, startIdx + 0)); // 010 -> 000
+            int half = cellVertexIndices.Count / 2;
 
-            // Top face (z = +size)
-            _edges.Add((startIdx + 4, startIdx + 5)); // 001 -> 101
-            _edges.Add((startIdx + 5, startIdx + 7)); // 101 -> 111
-            _edges.Add((startIdx + 7, startIdx + 6)); // 111 -> 011
-            _edges.Add((startIdx + 6, startIdx + 4)); // 011 -> 001
+            // Top and bottom faces
+            for (int i = 1; i < half - 1; i++)
+            {
+                _faces.Add(new List<int> { cellVertexIndices[0], cellVertexIndices[i], cellVertexIndices[i + 1] });
+                _faces.Add(new List<int> { cellVertexIndices[half], cellVertexIndices[half + i], cellVertexIndices[half + i + 1] });
+            }
 
-            // Vertical edges connecting bottom to top
-            _edges.Add((startIdx + 0, startIdx + 4)); // 000 -> 001
-            _edges.Add((startIdx + 1, startIdx + 5)); // 100 -> 101
-            _edges.Add((startIdx + 2, startIdx + 6)); // 010 -> 011
-            _edges.Add((startIdx + 3, startIdx + 7)); // 110 -> 111
+            // Side faces
+            for (int i = 0; i < half; i++)
+            {
+                int i2 = (i + 1) % half;
+                _faces.Add(new List<int> { cellVertexIndices[i], cellVertexIndices[i2], cellVertexIndices[i2 + half], cellVertexIndices[i + half] });
+            }
 
-            // Add faces for solid rendering (6 faces per box)
-            // Bottom face (z = -size)
-            _faces.Add(new List<int> { startIdx + 0, startIdx + 1, startIdx + 3, startIdx + 2 });
-            // Top face (z = +size)
-            _faces.Add(new List<int> { startIdx + 4, startIdx + 5, startIdx + 7, startIdx + 6 });
-            // Front face (y = -size)
-            _faces.Add(new List<int> { startIdx + 0, startIdx + 1, startIdx + 5, startIdx + 4 });
-            // Back face (y = +size)
-            _faces.Add(new List<int> { startIdx + 2, startIdx + 3, startIdx + 7, startIdx + 6 });
-            // Left face (x = -size)
-            _faces.Add(new List<int> { startIdx + 0, startIdx + 2, startIdx + 6, startIdx + 4 });
-            // Right face (x = +size)
-            _faces.Add(new List<int> { startIdx + 1, startIdx + 3, startIdx + 7, startIdx + 5 });
+            for (int i = 0; i < cell.Vertices.Count; i++)
+            {
+                var p1 = cell.Vertices[i];
+                var p2 = cell.Vertices[(i + 1) % (cell.Vertices.Count/2) + (i < cell.Vertices.Count/2 ? 0 : cell.Vertices.Count/2)];
+                if (_vertexMap.TryGetValue(p1, out var idx1) && _vertexMap.TryGetValue(p2, out var idx2))
+                {
+                    var edge = idx1 < idx2 ? (idx1, idx2) : (idx2, idx1);
+                    if (!_edges.Contains(edge))
+                        _edges.Add(edge);
+                }
+            }
+             for (int i = 0; i < half; i++)
+            {
+                 if (_vertexMap.TryGetValue(cell.Vertices[i], out var idx1) && _vertexMap.TryGetValue(cell.Vertices[i+half], out var idx2))
+                {
+                    var edge = idx1 < idx2 ? (idx1, idx2) : (idx2, idx1);
+                    if (!_edges.Contains(edge))
+                        _edges.Add(edge);
+                }
+            }
         }
 
         // Add connections between cells (optional - can be commented out for cleaner view)
@@ -558,12 +556,12 @@ public class MeshViewport3D : DrawingArea
                     // Draw glow effect first
                     cr.SetSourceRGBA(1.0, 0.6, 0.0, 0.5);
                     cr.LineWidth = 5.0;
-                    DrawCellEdges(cr, projected, startIdx, min, scale, width, height);
+                    DrawCellEdges(cr, projected, cellInfo, min, scale, width, height);
                     
                     // Draw bright outline
                     cr.SetSourceRGB(1.0, 0.9, 0.3);
                     cr.LineWidth = 2.5;
-                    DrawCellEdges(cr, projected, startIdx, min, scale, width, height);
+                    DrawCellEdges(cr, projected, cellInfo, min, scale, width, height);
                 }
             }
             
@@ -575,7 +573,7 @@ public class MeshViewport3D : DrawingArea
                 {
                     cr.SetSourceRGBA(0.3, 0.95, 0.95, 0.8);
                     cr.LineWidth = 2.0;
-                    DrawCellEdges(cr, projected, cellInfo.VertexStartIndex, min, scale, width, height);
+                    DrawCellEdges(cr, projected, cellInfo, min, scale, width, height);
                 }
             }
         }
@@ -738,24 +736,30 @@ public class MeshViewport3D : DrawingArea
         return new Vector2(x, y);
     }
 
-    private void DrawCellEdges(Cairo.Context cr, List<Vector2> projected, int startIdx, Vector3 min, float scale, int width, int height)
+    private void DrawCellEdges(Cairo.Context cr, List<Vector2> projected, CellInfo cellInfo, Vector3 min, float scale, int width, int height)
     {
-        // Draw the 12 edges of a box cell
-        // Bottom face edges
-        DrawEdgeLine(cr, projected, startIdx + 0, startIdx + 1, min, scale, width, height);
-        DrawEdgeLine(cr, projected, startIdx + 1, startIdx + 3, min, scale, width, height);
-        DrawEdgeLine(cr, projected, startIdx + 3, startIdx + 2, min, scale, width, height);
-        DrawEdgeLine(cr, projected, startIdx + 2, startIdx + 0, min, scale, width, height);
-        // Top face edges
-        DrawEdgeLine(cr, projected, startIdx + 4, startIdx + 5, min, scale, width, height);
-        DrawEdgeLine(cr, projected, startIdx + 5, startIdx + 7, min, scale, width, height);
-        DrawEdgeLine(cr, projected, startIdx + 7, startIdx + 6, min, scale, width, height);
-        DrawEdgeLine(cr, projected, startIdx + 6, startIdx + 4, min, scale, width, height);
-        // Vertical edges
-        DrawEdgeLine(cr, projected, startIdx + 0, startIdx + 4, min, scale, width, height);
-        DrawEdgeLine(cr, projected, startIdx + 1, startIdx + 5, min, scale, width, height);
-        DrawEdgeLine(cr, projected, startIdx + 2, startIdx + 6, min, scale, width, height);
-        DrawEdgeLine(cr, projected, startIdx + 3, startIdx + 7, min, scale, width, height);
+        var vertices = cellInfo.Cell.Vertices;
+        if (vertices.Count < 2) return;
+
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            var p1 = vertices[i];
+            var p2 = vertices[(i + 1) % (vertices.Count / 2) + (i < vertices.Count / 2 ? 0 : vertices.Count / 2)];
+
+            if (_vertexMap.TryGetValue(p1, out var idx1) && _vertexMap.TryGetValue(p2, out var idx2))
+            {
+                DrawEdgeLine(cr, projected, idx1, idx2, min, scale, width, height);
+            }
+        }
+
+        int half = vertices.Count / 2;
+        for (int i = 0; i < half; i++)
+        {
+            if (_vertexMap.TryGetValue(vertices[i], out var idx1) && _vertexMap.TryGetValue(vertices[i + half], out var idx2))
+            {
+                DrawEdgeLine(cr, projected, idx1, idx2, min, scale, width, height);
+            }
+        }
     }
 
     private void DrawEdgeLine(Cairo.Context cr, List<Vector2> projected, int idx1, int idx2, Vector3 min, float scale, int width, int height)
@@ -880,12 +884,18 @@ public class MeshViewport3D : DrawingArea
 
     private CellInfo? FindCellForFace(int faceIndex)
     {
+        // This method is now less accurate due to triangulation, but can be approximated
+        // by finding which cell's faces are currently being processed.
+        int faceCounter = 0;
         foreach (var cell in _cells)
         {
-            int cellFaceStart = cell.FaceStartIndex;
-            int cellFaceEnd = cellFaceStart + 6; // 6 faces per box
-            if (faceIndex >= cellFaceStart && faceIndex < cellFaceEnd)
+            // Number of triangles for a convex polygon is (num_vertices - 2)
+            int numTriangles = Math.Max(0, cell.Cell.Vertices.Count - 2);
+            if (faceIndex >= faceCounter && faceIndex < faceCounter + numTriangles)
+            {
                 return cell;
+            }
+            faceCounter += numTriangles;
         }
         return null;
     }

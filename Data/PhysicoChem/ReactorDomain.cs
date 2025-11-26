@@ -39,6 +39,9 @@ public class ReactorDomain
     [JsonProperty]
     public bool AllowInteraction { get; set; } = true; // Can reactants cross boundary?
 
+    [JsonIgnore]
+    public PhysicoChemMesh? VoronoiMesh { get; set; }
+
     public ReactorDomain()
     {
     }
