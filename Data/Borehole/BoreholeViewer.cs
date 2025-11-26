@@ -116,7 +116,8 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
         ImGui.SameLine();
         ImGui.Checkbox("Values", ref _showParameterValues);
         ImGui.SameLine();
-        ImGui.Checkbox("Legend", ref ShowLegend);
+        var showLegend = ShowLegend;
+        ImGui.Checkbox("Legend", ref showLegend);
         ImGui.SameLine();
         ImGui.Checkbox("Enable Tooltip", ref _enableTooltip); // <--- NEW
     }
