@@ -43,6 +43,7 @@ public class TableViewer : IDatasetViewer, IDisposable
     private string _searchFilter = "";
     private int _selectedColumn = -1;
     private int _selectedRow = -1;
+    private bool _allCellsSelected = false;
     private bool _showStatistics;
 
     // Header/row context menu state
@@ -203,6 +204,7 @@ public class TableViewer : IDatasetViewer, IDisposable
         _dataTable = _dataset.GetDataTable();
         if (_dataTable != null)
         {
+            _allCellsSelected = false;
             _filteredRows = _dataTable.Rows.Cast<DataRow>().ToList();
             InitializeColumnWidths();
         }
@@ -243,6 +245,18 @@ public class TableViewer : IDatasetViewer, IDisposable
         _editingCell = (-1, -1);
     }
 
+    private void HandleSelectAllShortcut()
+    {
+        var io = ImGui.GetIO();
+
+        if (!io.WantTextInput && io.KeyCtrl && ImGui.IsKeyPressed(ImGuiKey.A))
+        {
+            _allCellsSelected = true;
+            _selectedRow = -1;
+            _selectedColumn = -1;
+        }
+    }
+
     private void DrawTable()
     {
         if (_filteredRows == null || _filteredRows.Count == 0)
@@ -250,6 +264,8 @@ public class TableViewer : IDatasetViewer, IDisposable
             ImGui.TextDisabled("No rows match the filter");
             return;
         }
+
+        HandleSelectAllShortcut();
 
         var tableFlags = ImGuiTableFlags.Borders |
                          ImGuiTableFlags.RowBg |
@@ -361,11 +377,12 @@ public class TableViewer : IDatasetViewer, IDisposable
                 // Row index column (right-click shows row menu)
                 ImGui.TableNextColumn();
                 ImGui.PushID(row);
-                bool dummySelected = _selectedRow == row && _selectedColumn == -1;
+                bool dummySelected = _allCellsSelected || (_selectedRow == row && _selectedColumn == -1);
                 if (ImGui.Selectable((row + 1).ToString(), dummySelected, ImGuiSelectableFlags.SpanAllColumns))
                 {
                     _selectedRow = row;
                     _selectedColumn = -1;
+                    _allCellsSelected = false;
                 }
                 ImGui.OpenPopupOnItemClick("RowMenu", ImGuiPopupFlags.MouseButtonRight);
                 if (ImGui.BeginPopup("RowMenu"))
@@ -409,13 +426,14 @@ public class TableViewer : IDatasetViewer, IDisposable
                     }
                     else
                     {
-                        var isSelected = _selectedRow == row && _selectedColumn == col;
+                        var isSelected = _allCellsSelected || (_selectedRow == row && _selectedColumn == col);
                         var cellValue = dataRow[col]?.ToString() ?? "";
 
                         if (ImGui.Selectable(cellValue, isSelected, ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowDoubleClick))
                         {
                             _selectedRow = row;
                             _selectedColumn = col;
+                            _allCellsSelected = false;
                             if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
                             {
                                 _editingCell = (row, col);
@@ -425,7 +443,7 @@ public class TableViewer : IDatasetViewer, IDisposable
 
                         // Handle keyboard shortcuts for clipboard operations on selected cell
                         // Check if this is the selected cell and keyboard shortcuts are pressed
-                        if (isSelected)
+                        if (isSelected && !_allCellsSelected)
                         {
                             var io = ImGui.GetIO();
                             if (io.KeyCtrl && !io.WantTextInput)
