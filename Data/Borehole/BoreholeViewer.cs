@@ -381,6 +381,19 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     private void DrawLegendContents()
     {
         var visibleTracks = _dataset.ParameterTracks.Values.Where(t => t.IsVisible).ToList();
+        var lithoTypes = _dataset.LithologyUnits
+            .Select(u => u.LithologyType)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct()
+            .OrderBy(s => s)
+            .ToList();
+
+        if (visibleTracks.Count == 0 && lithoTypes.Count == 0)
+        {
+            ImGui.TextUnformatted("No legend items to display.");
+            return;
+        }
+
         if (visibleTracks.Count > 0)
         {
             ImGui.TextColored(_mutedText, "Tracks");
@@ -402,13 +415,6 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
                 ImGui.EndTable();
             }
         }
-
-        var lithoTypes = _dataset.LithologyUnits
-            .Select(u => u.LithologyType)
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Distinct()
-            .OrderBy(s => s)
-            .ToList();
 
         if (lithoTypes.Count > 0)
         {
