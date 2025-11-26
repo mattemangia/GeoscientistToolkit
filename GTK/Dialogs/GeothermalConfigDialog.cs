@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using GeoscientistToolkit.Data.PhysicoChem;
+using GeoscientistToolkit.GtkUI.Views;
 using Gtk;
 
 namespace GeoscientistToolkit.GtkUI.Dialogs;
@@ -29,10 +32,19 @@ public class GeothermalConfigDialog : Dialog
     private readonly ComboBoxText _heatExchangerTypeSelector;
     private readonly Entry _rockTypeEntry;
 
-    public PhysicoChemDataset? CreatedDataset { get; private set; }
+    // BTES specific
+    private CheckButton _btesModeCheckbox;
+    private Button _editSeasonalCurveButton;
+    private List<double> _seasonalEnergyCurve = new();
 
-    public GeothermalConfigDialog(Window parent) : base("Geothermal Deep Wells Configuration", parent, DialogFlags.Modal)
+
+    public PhysicoChemDataset? CreatedDataset { get; private set; }
+    private readonly PhysicoChemDataset? _existingDataset;
+
+
+    public GeothermalConfigDialog(Window parent, PhysicoChemDataset? dataset = null) : base("Geothermal Deep Wells Configuration", parent, DialogFlags.Modal)
     {
+        _existingDataset = dataset;
         SetDefaultSize(600, 750);
         BorderWidth = 8;
 
@@ -52,12 +64,21 @@ public class GeothermalConfigDialog : Dialog
         _heatExchangerTypeSelector = new ComboBoxText();
         _rockTypeEntry = new Entry { PlaceholderText = "e.g., Granite, Sandstone" };
 
+        _btesModeCheckbox = new CheckButton("Enable BTES Mode");
+        _editSeasonalCurveButton = new Button("Edit Seasonal Curve...");
+
+
         BuildUI();
 
         AddButton("Cancel", ResponseType.Cancel);
         AddButton("Create Simulation", ResponseType.Ok);
 
         Response += OnResponse;
+
+        if (_existingDataset != null)
+        {
+            PopulateFieldsFromDataset();
+        }
 
         ShowAll();
     }
@@ -127,6 +148,21 @@ public class GeothermalConfigDialog : Dialog
         thermalFrame.Add(thermalGrid);
         contentBox.PackStart(thermalFrame, false, false, 0);
 
+        // BTES configuration frame
+        var btesFrame = new Frame("Borehole Thermal Energy Storage (BTES)");
+        var btesGrid = new Grid { ColumnSpacing = 8, RowSpacing = 6, BorderWidth = 6 };
+        btesGrid.Attach(_btesModeCheckbox, 0, 0, 2, 1);
+        btesGrid.Attach(_editSeasonalCurveButton, 0, 1, 2, 1);
+        btesFrame.Add(btesGrid);
+        contentBox.PackStart(btesFrame, false, false, 0);
+
+        _btesModeCheckbox.Toggled += (sender, args) => {
+            _editSeasonalCurveButton.Visible = _btesModeCheckbox.Active;
+        };
+        _editSeasonalCurveButton.Clicked += OnEditSeasonalCurveClicked;
+        _editSeasonalCurveButton.Visible = false;
+
+
         // Mesh configuration frame
         var meshFrame = new Frame("Mesh Configuration");
         var meshGrid = new Grid { ColumnSpacing = 8, RowSpacing = 6, BorderWidth = 6 };
@@ -190,6 +226,62 @@ public class GeothermalConfigDialog : Dialog
         if (args.ResponseId == ResponseType.Ok)
         {
             CreatedDataset = CreateGeothermalDataset();
+        }
+    }
+
+    private void OnEditSeasonalCurveClicked(object sender, EventArgs e)
+    {
+        if (_seasonalEnergyCurve.Count == 0)
+        {
+            InitializeDefaultSeasonalCurve();
+        }
+
+        var initialPoints = new List<CurvePoint>();
+        for (int i = 0; i < _seasonalEnergyCurve.Count; i++)
+        {
+            initialPoints.Add(new CurvePoint(i, (float)_seasonalEnergyCurve[i]));
+        }
+
+        float energyRange = (float)_seasonalEnergyCurve.Max(x => Math.Abs(x));
+
+        var editor = new CurveEditorView(this, "BTES Seasonal Energy Curve", "Day of Year", "Energy (kWh/day)",
+            initialPoints,
+            rangeMin: new System.Numerics.Vector2(0, -energyRange * 1.2f),
+            rangeMax: new System.Numerics.Vector2(364, energyRange * 1.2f)
+            );
+
+        if (editor.Run() == (int)ResponseType.Ok)
+        {
+            var newPoints = editor.GetCurveData(365);
+            if (newPoints != null)
+            {
+                _seasonalEnergyCurve = newPoints.Select(p => (double)p).ToList();
+            }
+        }
+        editor.Destroy();
+    }
+
+    private void InitializeDefaultSeasonalCurve(double annualEnergy = 1000, double peakRatio = 2.5)
+    {
+        _seasonalEnergyCurve = new List<double>();
+        double dailyAverageEnergy = (annualEnergy * 1000) / 365.0; // MWh to kWh
+
+        for (int day = 0; day < 365; day++)
+        {
+            // This generates a sinusoidal curve where summer months have positive energy (charging)
+            // and winter months have negative energy (discharging).
+            // The curve is shifted to align the peak with late June.
+            double radians = (day - 80) * 2.0 * Math.PI / 365.0; // Peak charging around day 172 (late June)
+            double seasonalFactor = -Math.Cos(radians); // Negative cos: peak in summer, trough in winter
+
+            double energy = dailyAverageEnergy * (1 + (peakRatio - 1) * seasonalFactor);
+            if (seasonalFactor < 0) { // Discharging
+                energy = dailyAverageEnergy * (1 + (peakRatio - 1) * -seasonalFactor);
+                energy *=-1;
+            }
+
+
+            _seasonalEnergyCurve.Add(energy);
         }
     }
 
@@ -330,6 +422,60 @@ public class GeothermalConfigDialog : Dialog
         dataset.SimulationParams.EnableHeatTransfer = true;
         dataset.SimulationParams.EnableReactiveTransport = _reactiveTransportCheckbox.Active;
 
+        dataset.EnableBTESMode = _btesModeCheckbox.Active;
+        if (dataset.EnableBTESMode)
+        {
+            dataset.SeasonalEnergyCurve = _seasonalEnergyCurve;
+        }
+        else
+        {
+            dataset.SeasonalEnergyCurve.Clear();
+        }
+
         return dataset;
+    }
+
+    private void PopulateFieldsFromDataset()
+    {
+        if (_existingDataset == null) return;
+
+        _nameEntry.Text = _existingDataset.Name;
+        _btesModeCheckbox.Active = _existingDataset.EnableBTESMode;
+        if (_existingDataset.EnableBTESMode)
+        {
+            _seasonalEnergyCurve = new List<double>(_existingDataset.SeasonalEnergyCurve);
+        }
+
+        // Populate other fields...
+        _simulationTimeInput.Value = _existingDataset.SimulationParams.TotalTime / 86400;
+        _timeStepInput.Value = _existingDataset.SimulationParams.TimeStep / 86400;
+        _reactiveTransportCheckbox.Active = _existingDataset.SimulationParams.EnableReactiveTransport;
+        _multiphaseCheckbox.Active = _existingDataset.SimulationParams.EnableMultiphaseFlow;
+
+        if (_existingDataset.Materials.Any())
+        {
+            var rockMaterial = _existingDataset.Materials.FirstOrDefault(m => m.MaterialID.Contains("Rock"));
+            if (rockMaterial != null)
+            {
+                _thermalConductivityInput.Value = rockMaterial.ThermalConductivity;
+                _rockTypeEntry.Text = rockMaterial.MaterialID.Replace("_Rock", "");
+            }
+        }
+
+        if (_existingDataset.BoundaryConditions.Any())
+        {
+            var inlet = _existingDataset.BoundaryConditions.FirstOrDefault(bc => bc.Type == BoundaryType.Inlet);
+            if (inlet != null)
+            {
+                _flowRateInput.Value = inlet.InletFlowRate * 1000; // kg/s to L/s
+                _surfaceTempInput.Value = inlet.InletTemperature - 273.15; // K to C
+            }
+        }
+
+        if (_existingDataset.Mesh != null && _existingDataset.Mesh.Cells.Any())
+        {
+            var maxDepth = _existingDataset.Mesh.Cells.Values.Max(c => -c.Center.Z);
+            _depthInput.Value = maxDepth;
+        }
     }
 }
