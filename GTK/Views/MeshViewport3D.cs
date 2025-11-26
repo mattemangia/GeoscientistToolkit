@@ -5,6 +5,7 @@ using System.Numerics;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.PhysicoChem;
 using Gtk;
+using Gdk;
 
 namespace GeoscientistToolkit.GtkUI;
 
@@ -63,7 +64,7 @@ public class MeshViewport3D : DrawingArea
     public MeshViewport3D()
     {
         CanFocus = true;
-        AddEvents((int)(Gdk.EventMask.ScrollMask | Gdk.EventMask.SmoothScrollMask | Gdk.EventMask.ButtonPressMask | Gdk.EventMask.PointerMotionMask | Gdk.EventMask.ButtonReleaseMask));
+        AddEvents((int)(Gdk.EventMask.ScrollMask | Gdk.EventMask.SmoothScrollMask | Gdk.EventMask.ButtonPressMask | Gdk.EventMask.PointerMotionMask | Gdk.EventMask.ButtonReleaseMask | Gdk.EventMask.KeyPressMask));
         ScrollEvent += (_, args) =>
         {
             float delta = 0f;
@@ -199,6 +200,18 @@ public class MeshViewport3D : DrawingArea
             _isCameraRotating = false;
             _isCameraPanning = false;
             args.RetVal = true;
+        };
+
+        KeyPressEvent += (_, args) =>
+        {
+            bool ctrlPressed = (args.Event.State & ModifierType.ControlMask) != 0;
+            bool isCtrlA = args.Event.KeyValue == (uint)Key.a || args.Event.KeyValue == (uint)Key.A;
+
+            if (ctrlPressed && isCtrlA)
+            {
+                SelectAllCells();
+                args.RetVal = true;
+            }
         };
     }
 
@@ -1121,6 +1134,20 @@ public class MeshViewport3D : DrawingArea
     {
         SelectedCellIDs.Clear();
         CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(new List<string>()));
+        QueueDraw();
+    }
+
+    public void SelectAllCells()
+    {
+        if (_cells.Count == 0)
+            return;
+
+        SelectedCellIDs.Clear();
+
+        foreach (var cell in _cells)
+            SelectedCellIDs.Add(cell.ID);
+
+        CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
         QueueDraw();
     }
 }
