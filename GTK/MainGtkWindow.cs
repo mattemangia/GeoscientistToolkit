@@ -1846,7 +1846,7 @@ public class MainGtkWindow : Gtk.Window
 
     private void OpenGeothermalConfigDialog()
     {
-        var dialog = new GeothermalConfigDialog(this);
+        var dialog = new GeothermalConfigDialog(this, _selectedDataset as PhysicoChemDataset);
         var response = (ResponseType)dialog.Run();
         dialog.Destroy();
 

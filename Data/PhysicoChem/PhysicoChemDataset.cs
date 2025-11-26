@@ -47,6 +47,12 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
     public SimulationParameters SimulationParams { get; set; } = new();
 
     [JsonProperty]
+    public bool EnableBTESMode { get; set; }
+
+    [JsonProperty]
+    public List<double> SeasonalEnergyCurve { get; set; } = new();
+
+    [JsonProperty]
     public ParameterSweepConfig ParameterSweep { get; set; }
 
     [JsonProperty]
