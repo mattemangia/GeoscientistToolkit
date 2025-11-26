@@ -488,6 +488,7 @@ public class MainGtkWindow : Gtk.Window
         renderGrid.Attach(new Label("Selection") { Xalign = 0 }, 0, 7, 1, 1);
         _selectionModeSelector.AppendText("Single");
         _selectionModeSelector.AppendText("Multiple");
+        _selectionModeSelector.AppendText("Rectangle");
         _selectionModeSelector.AppendText("Plane XY");
         _selectionModeSelector.AppendText("Plane XZ");
         _selectionModeSelector.AppendText("Plane YZ");
@@ -498,9 +499,10 @@ public class MainGtkWindow : Gtk.Window
             {
                 0 => SelectionMode.Single,
                 1 => SelectionMode.Multiple,
-                2 => SelectionMode.PlaneXY,
-                3 => SelectionMode.PlaneXZ,
-                4 => SelectionMode.PlaneYZ,
+                2 => SelectionMode.Rectangle,
+                3 => SelectionMode.PlaneXY,
+                4 => SelectionMode.PlaneXZ,
+                5 => SelectionMode.PlaneYZ,
                 _ => SelectionMode.Single
             };
         };

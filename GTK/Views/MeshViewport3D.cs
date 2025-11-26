@@ -32,6 +32,9 @@ public class MeshViewport3D : DrawingArea
     private bool _isDragging;
     private bool _isCameraRotating;
     private bool _isCameraPanning;
+    private bool _isRectangleSelecting;
+    private Vector2 _rectangleStart;
+    private Vector2 _rectangleEnd;
     private Matrix4x4 _lastRotation = Matrix4x4.Identity;
     private Vector3 _lastMin = Vector3.Zero;
     private float _lastScale = 1f;
@@ -114,9 +117,20 @@ public class MeshViewport3D : DrawingArea
                 return;
             }
 
-            // Left button: Try to select a cell first
+            // Left button: Handle based on selection mode
             if (args.Event.Button == 1)
             {
+                // Rectangle selection mode: Start rectangle selection
+                if (SelectionMode == SelectionMode.Rectangle)
+                {
+                    _isRectangleSelecting = true;
+                    _rectangleStart = _lastPointer;
+                    _rectangleEnd = _lastPointer;
+                    args.RetVal = true;
+                    return;
+                }
+
+                // Other modes: Try to select a cell first
                 var cellIdx = FindCellAtPosition(_lastPointer);
                 if (cellIdx.HasValue && cellIdx.Value < _cells.Count)
                 {
@@ -152,8 +166,11 @@ public class MeshViewport3D : DrawingArea
                     QueueDraw();
                 }
 
-                // Start camera rotation
-                _isCameraRotating = true;
+                // Start camera rotation (only if not in rectangle selection mode)
+                if (SelectionMode != SelectionMode.Rectangle)
+                {
+                    _isCameraRotating = true;
+                }
             }
         };
 
@@ -162,6 +179,15 @@ public class MeshViewport3D : DrawingArea
             var previousPointer = _lastPointer;
             _lastPointer = new Vector2((float)args.Event.X, (float)args.Event.Y);
             var delta = _lastPointer - previousPointer;
+
+            // Handle rectangle selection
+            if (_isRectangleSelecting)
+            {
+                _rectangleEnd = _lastPointer;
+                QueueDraw();
+                args.RetVal = true;
+                return;
+            }
 
             // Handle camera rotation
             if (_isCameraRotating)
@@ -197,6 +223,16 @@ public class MeshViewport3D : DrawingArea
 
         ButtonReleaseEvent += (_, args) =>
         {
+            // Handle rectangle selection completion
+            if (_isRectangleSelecting)
+            {
+                _isRectangleSelecting = false;
+                SelectCellsInRectangle(_rectangleStart, _rectangleEnd);
+                QueueDraw();
+                args.RetVal = true;
+                return;
+            }
+
             _isDragging = false;
             _isCameraRotating = false;
             _isCameraPanning = false;
@@ -687,6 +723,57 @@ public class MeshViewport3D : DrawingArea
         // Draw HUD
         DrawHUD(cr, width, height);
 
+        // Draw rectangle selection
+        if (_isRectangleSelecting)
+        {
+            float minX = MathF.Min(_rectangleStart.X, _rectangleEnd.X);
+            float maxX = MathF.Max(_rectangleStart.X, _rectangleEnd.X);
+            float minY = MathF.Min(_rectangleStart.Y, _rectangleEnd.Y);
+            float maxY = MathF.Max(_rectangleStart.Y, _rectangleEnd.Y);
+            float rectWidth = maxX - minX;
+            float rectHeight = maxY - minY;
+
+            // Draw semi-transparent fill
+            cr.SetSourceRGBA(0.3, 0.6, 1.0, 0.15);
+            cr.Rectangle(minX, minY, rectWidth, rectHeight);
+            cr.Fill();
+
+            // Draw border
+            cr.SetSourceRGBA(0.4, 0.7, 1.0, 0.8);
+            cr.LineWidth = 2.0;
+            cr.Rectangle(minX, minY, rectWidth, rectHeight);
+            cr.Stroke();
+
+            // Draw corner indicators
+            float cornerSize = 8f;
+            cr.SetSourceRGBA(0.5, 0.8, 1.0, 1.0);
+            cr.LineWidth = 2.5;
+
+            // Top-left corner
+            cr.MoveTo(minX, minY + cornerSize);
+            cr.LineTo(minX, minY);
+            cr.LineTo(minX + cornerSize, minY);
+            cr.Stroke();
+
+            // Top-right corner
+            cr.MoveTo(maxX - cornerSize, minY);
+            cr.LineTo(maxX, minY);
+            cr.LineTo(maxX, minY + cornerSize);
+            cr.Stroke();
+
+            // Bottom-left corner
+            cr.MoveTo(minX, maxY - cornerSize);
+            cr.LineTo(minX, maxY);
+            cr.LineTo(minX + cornerSize, maxY);
+            cr.Stroke();
+
+            // Bottom-right corner
+            cr.MoveTo(maxX - cornerSize, maxY);
+            cr.LineTo(maxX, maxY);
+            cr.LineTo(maxX, maxY - cornerSize);
+            cr.Stroke();
+        }
+
         return base.OnDrawn(cr);
     }
 
@@ -1151,6 +1238,94 @@ public class MeshViewport3D : DrawingArea
         CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
         QueueDraw();
     }
+
+    private void SelectCellsInRectangle(Vector2 start, Vector2 end)
+    {
+        if (_cells.Count == 0) return;
+
+        // Calculate rectangle bounds
+        float minX = MathF.Min(start.X, end.X);
+        float maxX = MathF.Max(start.X, end.X);
+        float minY = MathF.Min(start.Y, end.Y);
+        float maxY = MathF.Max(start.Y, end.Y);
+
+        // Get viewport dimensions
+        var allocation = Allocation;
+        var width = allocation.Width;
+        var height = allocation.Height;
+
+        // Create rotation matrix
+        var rotation = Matrix4x4.CreateFromYawPitchRoll(
+            MathF.PI / 180f * _yaw,
+            MathF.PI / 180f * _pitch,
+            0f);
+
+        // Calculate scale and min for projection
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        foreach (var point in _points)
+        {
+            var rotated = Vector3.Transform(point - _meshCenter, rotation);
+            min = Vector3.Min(min, rotated);
+            max = Vector3.Max(max, rotated);
+        }
+        var size = Vector3.Max(max - min, new Vector3(1, 1, 1));
+        var scale = MathF.Min(width / size.X, height / size.Y) * 0.45f * _zoom;
+
+        // Sort cells by Z-depth (front to back)
+        var cellsWithDepth = new List<(CellInfo cell, float depth, Vector2 screenPos)>();
+        foreach (var cellInfo in _cells)
+        {
+            // Transform cell center to view space
+            var rotatedCenter = Vector3.Transform(cellInfo.Center - _meshCenter, rotation);
+            var projectedCenter = new Vector2(rotatedCenter.X, rotatedCenter.Y);
+            var screenPos = Project(projectedCenter, min, scale, width, height);
+
+            // Check if within rectangle
+            if (screenPos.X >= minX && screenPos.X <= maxX && screenPos.Y >= minY && screenPos.Y <= maxY)
+            {
+                // Store cell with its Z-depth (rotatedCenter.Z is the depth)
+                cellsWithDepth.Add((cellInfo, rotatedCenter.Z, screenPos));
+            }
+        }
+
+        // Sort by depth (front to back - higher Z values are closer to camera)
+        cellsWithDepth.Sort((a, b) => b.depth.CompareTo(a.depth));
+
+        // Select only the frontmost cells (visible/surface cells)
+        // We use a spatial grid to determine which cells occlude others
+        var selectedCells = new HashSet<string>();
+        var occupiedPositions = new HashSet<(int, int)>();
+
+        // Grid cell size for occlusion detection (in screen pixels)
+        const float gridSize = 15f;
+
+        foreach (var (cellInfo, depth, screenPos) in cellsWithDepth)
+        {
+            // Calculate grid position
+            int gridX = (int)(screenPos.X / gridSize);
+            int gridY = (int)(screenPos.Y / gridSize);
+            var gridPos = (gridX, gridY);
+
+            // If this grid position is already occupied by a closer cell, skip
+            if (occupiedPositions.Contains(gridPos))
+                continue;
+
+            // This cell is visible - add it to selection
+            if (cellInfo.Cell.IsActive)
+            {
+                selectedCells.Add(cellInfo.ID);
+                occupiedPositions.Add(gridPos);
+            }
+        }
+
+        // Update selection
+        SelectedCellIDs.Clear();
+        foreach (var id in selectedCells)
+            SelectedCellIDs.Add(id);
+
+        CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
+    }
 }
 
 /// <summary>
@@ -1195,6 +1370,7 @@ public enum SelectionMode
 {
     Single,
     Multiple,
+    Rectangle,
     PlaneXY,
     PlaneXZ,
     PlaneYZ
