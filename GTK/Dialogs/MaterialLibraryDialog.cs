@@ -36,8 +36,8 @@ public class MaterialLibraryDialog : Dialog
         SetDefaultSize(900, 600);
         BorderWidth = 8;
 
-        // Store: Name, Category, Type (Physical/Chemical), Object
-        _materialStore = new ListStore(typeof(string), typeof(string), typeof(string), typeof(object));
+        // Store: Name, Formula, Category, Type (Physical/Chemical), Object
+        _materialStore = new ListStore(typeof(string), typeof(string), typeof(string), typeof(string), typeof(object));
         _materialTreeView = new TreeView(_materialStore);
         _searchEntry = new Entry { PlaceholderText = "Search materials and compounds..." };
         _categoryFilter = new ComboBoxText();
@@ -82,8 +82,9 @@ public class MaterialLibraryDialog : Dialog
         // Left: Material list
         var treeFrame = new Frame("Materials & Compounds");
         _materialTreeView.AppendColumn("Name", new CellRendererText(), "text", 0);
-        _materialTreeView.AppendColumn("Category", new CellRendererText(), "text", 1);
-        _materialTreeView.AppendColumn("Type", new CellRendererText(), "text", 2);
+        _materialTreeView.AppendColumn("Formula", new CellRendererText(), "text", 1);
+        _materialTreeView.AppendColumn("Category", new CellRendererText(), "text", 2);
+        _materialTreeView.AppendColumn("Type", new CellRendererText(), "text", 3);
         _materialTreeView.HeadersVisible = true;
         _materialTreeView.Selection.Changed += OnSelectionChanged;
 
@@ -114,14 +115,14 @@ public class MaterialLibraryDialog : Dialog
         foreach (var material in _materialLibrary.Materials.OrderBy(m => m.Name))
         {
             string category = DetermineCategory(material);
-            _materialStore.AppendValues(material.Name, category, "Physical", material);
+            _materialStore.AppendValues(material.Name, string.Empty, category, "Physical", material);
         }
 
         // Add chemical compounds
         foreach (var compound in _compoundLibrary.Compounds.OrderBy(c => c.Name))
         {
             string category = DetermineCompoundCategory(compound);
-            _materialStore.AppendValues(compound.Name, category, "Chemical", compound);
+            _materialStore.AppendValues(compound.Name, compound.ChemicalFormula ?? string.Empty, category, "Chemical", compound);
         }
     }
 
@@ -140,7 +141,7 @@ public class MaterialLibraryDialog : Dialog
 
         foreach (var material in filteredMaterials.OrderBy(m => m.Name))
         {
-            _materialStore.AppendValues(material.Name, DetermineCategory(material), "Physical", material);
+            _materialStore.AppendValues(material.Name, string.Empty, DetermineCategory(material), "Physical", material);
         }
 
         // Filter chemical compounds
@@ -151,7 +152,7 @@ public class MaterialLibraryDialog : Dialog
 
         foreach (var compound in filteredCompounds.OrderBy(c => c.Name))
         {
-            _materialStore.AppendValues(compound.Name, DetermineCompoundCategory(compound), "Chemical", compound);
+            _materialStore.AppendValues(compound.Name, compound.ChemicalFormula ?? string.Empty, DetermineCompoundCategory(compound), "Chemical", compound);
         }
     }
 
@@ -159,7 +160,7 @@ public class MaterialLibraryDialog : Dialog
     {
         if (_materialTreeView.Selection.GetSelected(out TreeIter iter))
         {
-            var obj = _materialStore.GetValue(iter, 3);
+            var obj = _materialStore.GetValue(iter, 4);
 
             if (obj is PhysicalMaterial material)
             {
