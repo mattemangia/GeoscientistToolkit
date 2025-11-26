@@ -398,22 +398,28 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
         if (visibleTracks.Count > 0)
         {
             ImGui.TextColored(_mutedText, "Tracks");
-            if (ImGui.BeginTable("tbl_tracks", 2, ImGuiTableFlags.SizingFixedFit))
+            var tableStarted = ImGui.BeginTable("tbl_tracks", 2, ImGuiTableFlags.SizingFixedFit);
+            if (tableStarted)
             {
-                ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
-                ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
-
-                foreach (var t in visibleTracks)
+                try
                 {
-                    ImGui.TableNextRow();
-                    ImGui.TableSetColumnIndex(0);
-                    DrawColorSwatch(t.Color);
-                    ImGui.TableSetColumnIndex(1);
-                    var label = string.IsNullOrWhiteSpace(t.Unit) ? t.Name : $"{t.Name} [{t.Unit}]";
-                    ImGui.TextUnformatted(label);
-                }
+                    ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
+                    ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
 
-                ImGui.EndTable();
+                    foreach (var t in visibleTracks)
+                    {
+                        ImGui.TableNextRow();
+                        ImGui.TableSetColumnIndex(0);
+                        DrawColorSwatch(t.Color);
+                        ImGui.TableSetColumnIndex(1);
+                        var label = string.IsNullOrWhiteSpace(t.Unit) ? t.Name : $"{t.Name} [{t.Unit}]";
+                        ImGui.TextUnformatted(label);
+                    }
+                }
+                finally
+                {
+                    ImGui.EndTable();
+                }
             }
         }
 
@@ -422,24 +428,30 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
             if (visibleTracks.Count > 0) ImGui.Separator();
             ImGui.TextColored(_mutedText, "Lithologies");
 
-            if (ImGui.BeginTable("tbl_litho", 2, ImGuiTableFlags.SizingFixedFit))
+            var tableStarted = ImGui.BeginTable("tbl_litho", 2, ImGuiTableFlags.SizingFixedFit);
+            if (tableStarted)
             {
-                ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
-                ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
-
-                foreach (var lt in lithoTypes)
+                try
                 {
-                    var first = _dataset.LithologyUnits.FirstOrDefault(u => u.LithologyType == lt);
-                    var col = first != null ? first.Color : GetDefaultLithologyColor(lt);
+                    ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
+                    ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
 
-                    ImGui.TableNextRow();
-                    ImGui.TableSetColumnIndex(0);
-                    DrawColorSwatch(col, true);
-                    ImGui.TableSetColumnIndex(1);
-                    ImGui.TextUnformatted(lt);
+                    foreach (var lt in lithoTypes)
+                    {
+                        var first = _dataset.LithologyUnits.FirstOrDefault(u => u.LithologyType == lt);
+                        var col = first != null ? first.Color : GetDefaultLithologyColor(lt);
+
+                        ImGui.TableNextRow();
+                        ImGui.TableSetColumnIndex(0);
+                        DrawColorSwatch(col, true);
+                        ImGui.TableSetColumnIndex(1);
+                        ImGui.TextUnformatted(lt);
+                    }
                 }
-
-                ImGui.EndTable();
+                finally
+                {
+                    ImGui.EndTable();
+                }
             }
         }
     }
