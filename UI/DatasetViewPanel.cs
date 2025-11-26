@@ -64,9 +64,19 @@ public class DatasetViewPanel : BasePanel
 
                     ImGui.TableNextRow();
                     ImGui.TableSetColumnIndex(0);
-                    ImGui.BeginChild("ViewerContent", new Vector2(0, contentSize.Y));
-                    _viewer.DrawContent(ref _zoom, ref _pan);
-                    ImGui.EndChild();
+
+                    var childStarted = ImGui.BeginChild("ViewerContent", new Vector2(0, contentSize.Y));
+                    if (childStarted)
+                    {
+                        try
+                        {
+                            _viewer.DrawContent(ref _zoom, ref _pan);
+                        }
+                        finally
+                        {
+                            ImGui.EndChild();
+                        }
+                    }
 
                     ImGui.TableSetColumnIndex(1);
                     boreholeViewer.DrawLegendPanel(new Vector2(0, contentSize.Y));
@@ -80,9 +90,18 @@ public class DatasetViewPanel : BasePanel
         }
         else
         {
-            ImGui.BeginChild("ViewerContent", contentSize);
-            _viewer.DrawContent(ref _zoom, ref _pan);
-            ImGui.EndChild();
+            var childStarted = ImGui.BeginChild("ViewerContent", contentSize);
+            if (childStarted)
+            {
+                try
+                {
+                    _viewer.DrawContent(ref _zoom, ref _pan);
+                }
+                finally
+                {
+                    ImGui.EndChild();
+                }
+            }
         }
     }
 
