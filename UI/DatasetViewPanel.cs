@@ -52,7 +52,7 @@ public class DatasetViewPanel : BasePanel
 
         var contentSize = ImGui.GetContentRegionAvail();
 
-        if (_viewer is BoreholeViewer boreholeViewer)
+        if (_viewer is BoreholeViewer boreholeViewer && boreholeViewer.ShowLegend)
         {
             if (ImGui.BeginTable("DatasetViewerLayout", 2, ImGuiTableFlags.SizingStretchProp))
             {
