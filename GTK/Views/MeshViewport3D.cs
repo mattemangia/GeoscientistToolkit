@@ -269,6 +269,26 @@ public class MeshViewport3D : DrawingArea
                 return;
             }
 
+            // Check if this was a click (no drag) on empty space in single selection mode
+            // If so, clear selection
+            if (args.Event.Button == 1 && _isCameraRotating)
+            {
+                var dragDistance = (_lastPointer - _clickStartPointer).Length();
+                const float clickThreshold = 5.0f; // pixels
+
+                if (dragDistance < clickThreshold && SelectionMode == SelectionMode.Single)
+                {
+                    // This was a click, not a drag - clear selection if not shift-clicking
+                    bool shiftHeld = (args.Event.State & Gdk.ModifierType.ShiftMask) != 0;
+                    if (!shiftHeld && SelectedCellIDs.Count > 0)
+                    {
+                        SelectedCellIDs.Clear();
+                        CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
+                        QueueDraw();
+                    }
+                }
+            }
+
             _isDragging = false;
             _isCameraRotating = false;
             _isCameraPanning = false;
