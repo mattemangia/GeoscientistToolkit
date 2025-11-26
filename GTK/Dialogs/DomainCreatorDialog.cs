@@ -100,6 +100,7 @@ public class DomainCreatorDialog : Dialog
         _geometrySelector.AppendText("Parallelepiped");
         _geometrySelector.AppendText("Custom 2D Extrusion");
         _geometrySelector.AppendText("Custom 3D Mesh");
+        _geometrySelector.AppendText("Voronoi");
         _geometrySelector.Active = 0;
     }
 
@@ -189,6 +190,13 @@ public class DomainCreatorDialog : Dialog
             case 7: // Custom 3D
                 AddLabel("Custom 3D mesh");
                 AddLabel("(Will need to load from file)");
+                break;
+
+            case 8: // Voronoi
+                AddParam("Number of Sites", 100);
+                AddParam("Width (m)", 10.0);
+                AddParam("Depth (m)", 10.0);
+                AddParam("Height (m)", 10.0);
                 break;
         }
 
@@ -330,6 +338,20 @@ public class DomainCreatorDialog : Dialog
                     (-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)
                 };
                 geometry.Center = (0, 0, 0);
+                break;
+
+            case 8: // Voronoi
+                geometry.Type = GeometryType.Box; // Treat as a box for bounding purposes
+                geometry.Center = (0,0,0);
+                geometry.Dimensions = (GetParamValue("Width (m)"), GetParamValue("Height (m)"), GetParamValue("Depth (m)"));
+                var mesh = new PhysicoChemMesh();
+                mesh.Generate2DExtrudedVoronoiMesh(
+                    (int)GetParamValue("Number of Sites"),
+                    GetParamValue("Width (m)"),
+                    GetParamValue("Height (m)"),
+                    GetParamValue("Depth (m)")
+                );
+                domain.VoronoiMesh = mesh;
                 break;
 
             default:

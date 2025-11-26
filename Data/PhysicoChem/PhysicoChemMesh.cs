@@ -50,6 +50,12 @@ namespace GeoscientistToolkit.Data.PhysicoChem
         /// </summary>
         [JsonProperty]
         public double Volume { get; set; }
+
+        /// <summary>
+        ///     The vertices of the Voronoi cell.
+        /// </summary>
+        [JsonIgnore]
+        public List<System.Numerics.Vector3> Vertices { get; set; } = new List<System.Numerics.Vector3>();
     }
 
     /// <summary>
@@ -321,6 +327,59 @@ namespace GeoscientistToolkit.Data.PhysicoChem
             }
 
             return Math.Abs(area) / 2.0;
+        }
+
+        public void Generate2DExtrudedVoronoiMesh(int numSites, double width, double depth, double height)
+        {
+            var sites = new List<VoronoiSite>();
+            var random = new System.Random();
+
+            for (int i = 0; i < numSites; i++)
+            {
+                sites.Add(new VoronoiSite(
+                    random.NextDouble() * width - width / 2.0,
+                    random.NextDouble() * depth - depth / 2.0
+                ));
+            }
+
+            VoronoiPlane.TessellateOnce(sites, -width / 2.0, -depth / 2.0, width / 2.0, depth / 2.0);
+
+            Cells.Clear();
+            Connections.Clear();
+
+            for (int i = 0; i < sites.Count; i++)
+            {
+                var site = sites[i];
+                var id = $"V_{i}";
+                var center = (site.X, site.Y, 0.0);
+
+                var newCell = new Cell
+                {
+                    ID = id,
+                    MaterialID = "Default",
+                    IsActive = true,
+                    InitialConditions = new InitialConditions(),
+                    Center = center,
+                };
+
+                var points2D = site.ClockwisePoints;
+
+                // Bottom face
+                foreach (var p in points2D)
+                {
+                    newCell.Vertices.Add(new System.Numerics.Vector3((float)p.X, (float)p.Y, (float)-height / 2.0f));
+                }
+
+                // Top face
+                foreach (var p in points2D)
+                {
+                    newCell.Vertices.Add(new System.Numerics.Vector3((float)p.X, (float)p.Y, (float)height / 2.0f));
+                }
+
+                newCell.Volume = CalculatePolygonArea(points2D.ToList()) * height;
+
+                Cells[id] = newCell;
+            }
         }
     }
 }
