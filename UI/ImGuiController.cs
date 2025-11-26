@@ -167,7 +167,7 @@ fragment float4 main0(VertexOut in [[stage_in]],
 
     private readonly IntPtr _fontID = 1;
     private readonly GraphicsDevice _gd;
-    private readonly Vector2 _scale = Vector2.One;
+    private Vector2 _scale = Vector2.One;
     private readonly Dictionary<IntPtr, ResourceSet> _setsById = new();
 
     private readonly Dictionary<TextureView, ResourceSet> _setsByView = new();
@@ -473,6 +473,15 @@ void main()
         // store the new size so SetPerFrameImGuiData() will publish it
         _winW = width;
         _winH = height;
+    }
+
+    /// <summary>
+    ///     Sets the UI scale factor for proper coordinate transformation.
+    ///     This affects the entire UI coordinate system including mouse input.
+    /// </summary>
+    public void SetUIScale(float scale)
+    {
+        _scale = new Vector2(scale, scale);
     }
 
     private void RecreateFontTexture(GraphicsDevice gd)

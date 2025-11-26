@@ -298,7 +298,7 @@ public class Application
 
         _loadingScreen.UpdateStatus("Applying theme...", 0.7f);
         ThemeManager.ApplyTheme(appSettings.Appearance);
-        io.FontGlobalScale = appSettings.Appearance.UIScale;
+        _imGuiController.SetUIScale(appSettings.Appearance.UIScale);
 
         _window.Resized += () =>
         {
@@ -456,7 +456,7 @@ public class Application
         if (_graphicsDevice != null) _graphicsDevice.SyncToVerticalBlank = settings.Hardware.EnableVSync;
 
         ThemeManager.ApplyTheme(settings.Appearance);
-        ImGui.GetIO().FontGlobalScale = settings.Appearance.UIScale;
+        _imGuiController.SetUIScale(settings.Appearance.UIScale);
 
         Logger.Log("Runtime settings applied");
     }
