@@ -191,9 +191,11 @@ public class MeshViewport3D : DrawingArea
                     return;
                 }
 
-                // No cell clicked - clear selection if not shift-clicking
+                // No cell clicked
+                // In Rectangle mode, clear selection if not shift-clicking
+                // In other modes, we're starting rotation so preserve selection
                 bool shiftHeld = (args.Event.State & Gdk.ModifierType.ShiftMask) != 0;
-                if (!shiftHeld && SelectedCellIDs.Count > 0)
+                if (!shiftHeld && SelectedCellIDs.Count > 0 && SelectionMode == SelectionMode.Rectangle)
                 {
                     SelectedCellIDs.Clear();
                     CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
