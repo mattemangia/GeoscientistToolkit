@@ -54,9 +54,9 @@ Quando l'applicazione si apre, vedrai:
 
 #### Passo 3: Visualizzare la Mesh 3D
 
-Il reattore di default è un cilindro con una griglia **3x3x3** di celle (27 celle totali):
+Il reattore di default è un cubo con una griglia **3x3x3** di celle (27 celle totali):
 
-- **Dimensioni**: Raggio 3.5m, Altezza 6.0m
+- **Dimensioni**: Larghezza 6.0m, Altezza 6.0m, Profondità 6.0m
 - **Reactanti iniziali**:
   - `ReactantA`: 5.0 mol/L
   - `ReactantB`: 3.0 mol/L
