@@ -159,7 +159,8 @@ public class MeshViewport3D : DrawingArea
                             default:
                                 return; // Should not happen
                         }
-                        SelectCellsInPlane(planeType, position);
+                        bool shiftPressed = (args.Event.State & Gdk.ModifierType.ShiftMask) != 0;
+                        SelectCellsInPlane(planeType, position, additive: shiftPressed);
                     }
                     return;
                 }
@@ -1215,9 +1216,10 @@ public class MeshViewport3D : DrawingArea
         return (r, g, b, 0.6);
     }
 
-    public void SelectCellsInPlane(PlaneType plane, double position, double tolerance = 0.1)
+    public void SelectCellsInPlane(PlaneType plane, double position, double tolerance = 0.1, bool additive = false)
     {
-        SelectedCellIDs.Clear();
+        if (!additive)
+            SelectedCellIDs.Clear();
 
         foreach (var cellInfo in _cells)
         {
