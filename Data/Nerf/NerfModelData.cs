@@ -320,14 +320,14 @@ public class NerfModelData
     {
         // Standard spatial hashing using prime numbers
         const int p1 = 1;
-        const int p2 = 2654435761;
+        const uint p2 = 2654435761;
         const int p3 = 805459861;
 
         int x = (int)pos.X;
         int y = (int)pos.Y;
         int z = (int)pos.Z;
 
-        return ((x * p1) ^ (y * p2) ^ (z * p3)) & (tableSize - 1);
+        return (int)(((x * p1) ^ (y * p2) ^ (z * p3)) & (tableSize - 1));
     }
 
     private static float[] RunMLP(float[] input, List<MLPLayer> layers)
