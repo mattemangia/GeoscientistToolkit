@@ -8,6 +8,7 @@ using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Data.Nerf;
 using GeoscientistToolkit.Data.PhysicoChem;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
@@ -81,6 +82,9 @@ CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
         // Text Datasets
         TextDataset textDataset => new TextViewer(textDataset),
 
+        // NeRF Datasets
+        NerfDataset nerfDataset => new NerfViewer(nerfDataset),
+
         // Dataset groups cannot be opened in a viewer
         DatasetGroup => throw new InvalidOperationException(
             "Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
@@ -130,6 +134,7 @@ public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset datase
         VideoDataset => new VideoDatasetProperties(),
         AudioDataset => new AudioDatasetProperties(),
         TextDataset => new TextPropertiesRenderer(),
+        NerfDataset => new NerfPropertiesRenderer(),
         _ => new DefaultPropertiesRenderer()
     };
 }
@@ -157,6 +162,7 @@ public static IDatasetTools CreateTools(Dataset dataset)
         VideoDataset => new VideoDatasetTools(),
         AudioDataset => new AudioDatasetTools(),
         TextDataset => new TextTools(),
+        NerfDataset => new NerfTools(),
         // --- MODIFIED: Changed .All to .Any to make tool appear even if non-borehole datasets are in the group ---
         DatasetGroup group when group.Datasets.Any(d => d is BoreholeDataset) => new MultiBoreholeTools(),
         _ => new DefaultTools(),
