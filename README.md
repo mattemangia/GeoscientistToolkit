@@ -5,6 +5,8 @@
 
   **A comprehensive desktop application for geoscientific data analysis, visualization, and simulation**
 
+  **Current GTK Version: 1.0.0**
+
   [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=.net)](https://dotnet.microsoft.com/)
   [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#installation)
   [![License](https://img.shields.io/badge/license-MIT-green)](#license)
@@ -65,7 +67,13 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 - 🧲 **NMR Simulation** - T2 relaxation time calculation
 - 🪨 **Geomechanical Analysis** - Stress/strain, Mohr circles, failure prediction
 - 💧 **Pore Network Modeling** - Permeability, tortuosity, flow simulation
+- 🧬 **Dual Pore Network Modeling** - Macro–micro pore coupling from CT + SEM with parallel/series/mass-transfer modes, micro-network extraction, and coupled permeability/reactive transport simulations
 - ♨️ **Geothermal Simulation** - Heat transfer and fluid flow in boreholes
+
+#### Thermodynamics & Geochemistry
+- 🧪 **Extended Compound Library** - 60+ additional silicates, carbonates, sulfates, chlorides, oxides, aqueous ions, and gases from Holland & Powell, PHREEQC, Robie & Hemingway, and SUPCRT92 datasets
+- 🧮 **GeoScript Thermo Commands** - `CALCULATE_PHASES` for phase-separated outputs, `CALCULATE_CARBONATE_ALKALINITY` for pH/alkalinity-driven carbonate speciation, and an enhanced `REACT` command with phase grouping and mineral identification
+- 🔁 **Equilibrium Workflow** - Gibbs energy minimization with element conservation, activity coefficients, and temperature-dependent constants for robust equilibrium calculations
 
 #### 3D Visualization
 - 🎮 Hardware-accelerated rendering via Veldrid (OpenGL/Vulkan/DirectX)
@@ -79,6 +87,26 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 - Multi-threaded processing for large datasets
 - Efficient memory management for CT stacks
 - Real-time rendering at 60+ FPS
+
+### 🛰️ Earthquake & GIS Integration
+- 3D earthquake simulation with corrected stress-tensor propagation
+- Generation of subsurface GIS volumes (PGA/PGV/PGD, stress, fracture density) from simulations
+- Depth-slice layers, per-location time series extraction, and 3D geology construction from 2D map selections with layered models
+
+### 🧭 Structural Geology & Restoration
+- Interactive 2D cross-section restoration with real-time overlays, opacity controls, and fault rendering
+- Slider-driven flexural slip unfolding/deformation with percentage controls to compare present-day vs restored geometry
+- Overlay indicators and visibility toggles to declutter original formations during restoration previews
+
+### ⚙️ PHYSICOCHEM Multiphysics Reactors
+- Dataset builder for complex reactors (box/sphere/cylinder/cone/custom) with 2D-to-3D extrusion and revolutions
+- Comprehensive boundary conditions, force fields (gravity, vortex, centrifugal), nucleation sites, and reactive transport coupling
+- Parameter sweeps with sensitivity analysis and optional geothermal coupling for TOUGH-like scenarios
+
+### 🧪 GeoScript Dataset Pipelines
+- Pipeline syntax (`|>`) for chaining dataset/image operations
+- Built-in filters (Gaussian, median, Sobel/Canny, bilateral, NLM, unsharp) and thresholding
+- Brightness/contrast, grayscale/inversion, and mask operations directly in scripts
 
 ---
 
