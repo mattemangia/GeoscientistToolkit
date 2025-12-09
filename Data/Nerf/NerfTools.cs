@@ -33,6 +33,16 @@ public class NerfTools : IDatasetTools
     private int _exportHeight = 1080;
     private int _exportFrameCount = 120;
     private bool _isExporting = false;
+    private float _exportProgress = 0f;
+
+    // Mesh/PointCloud export settings
+    private int _meshResolution = 128;
+    private float _densityThreshold = 10f;
+    private bool _bakeTexture = true;
+    private int _textureResolution = 1024;
+    private int _pointCloudResolution = 128;
+    private int _meshFormat = 0; // 0=OBJ, 1=PLY, 2=STL
+    private int _pointCloudFormat = 0; // 0=PLY, 1=XYZ, 2=OBJ
 
     // Live capture state
     private bool _isCapturing = false;
@@ -428,10 +438,10 @@ public class NerfTools : IDatasetTools
     {
         var hasModel = _currentDataset.ModelData != null;
 
-        ImGui.BeginDisabled(!hasModel);
+        ImGui.BeginDisabled(!hasModel || _isExporting);
 
-        // Save model
-        ImGui.Text("Save Model:");
+        // Export path
+        ImGui.Text("Export Path:");
         ImGui.SetNextItemWidth(-100);
         ImGui.InputText("##ExportPath", ref _exportPath, 512);
         ImGui.SameLine();
@@ -440,11 +450,15 @@ public class NerfTools : IDatasetTools
             Logger.Log("File browser not available - please enter path manually");
         }
 
-        if (ImGui.Button("Save NeRF Model", new Vector2(-1, 0)))
+        ImGui.Spacing();
+
+        // Save NeRF model
+        if (ImGui.Button("Save NeRF Model (.nerfmodel)", new Vector2(-1, 0)))
         {
             if (!string.IsNullOrWhiteSpace(_exportPath))
             {
-                _currentDataset.SaveModel(_exportPath);
+                var modelPath = Path.ChangeExtension(_exportPath, ".nerfmodel");
+                _currentDataset.SaveModel(modelPath);
             }
         }
 
@@ -452,8 +466,82 @@ public class NerfTools : IDatasetTools
         ImGui.Separator();
         ImGui.Spacing();
 
-        // Render video
-        ImGui.Text("Render Video:");
+        // === MESH EXPORT ===
+        ImGui.Text("3D Mesh Export:");
+
+        ImGui.SetNextItemWidth(100);
+        ImGui.InputInt("Resolution##Mesh", ref _meshResolution);
+        _meshResolution = Math.Clamp(_meshResolution, 32, 512);
+
+        ImGui.SetNextItemWidth(100);
+        ImGui.InputFloat("Density Threshold", ref _densityThreshold, 1f, 5f, "%.1f");
+        _densityThreshold = Math.Clamp(_densityThreshold, 0.1f, 100f);
+
+        ImGui.Checkbox("Bake Texture", ref _bakeTexture);
+        if (_bakeTexture)
+        {
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(80);
+            ImGui.InputInt("##TexRes", ref _textureResolution);
+            _textureResolution = Math.Clamp(_textureResolution, 256, 4096);
+            ImGui.SameLine();
+            ImGui.Text("px");
+        }
+
+        string[] meshFormats = { "OBJ", "PLY", "STL" };
+        ImGui.SetNextItemWidth(100);
+        ImGui.Combo("Format##Mesh", ref _meshFormat, meshFormats, meshFormats.Length);
+
+        if (ImGui.Button("Export Mesh", new Vector2(-1, 0)))
+        {
+            _ = ExportMeshAsync();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // === POINT CLOUD EXPORT ===
+        ImGui.Text("Point Cloud Export:");
+
+        ImGui.SetNextItemWidth(100);
+        ImGui.InputInt("Resolution##PC", ref _pointCloudResolution);
+        _pointCloudResolution = Math.Clamp(_pointCloudResolution, 32, 256);
+
+        string[] pcFormats = { "PLY", "XYZ", "OBJ" };
+        ImGui.SetNextItemWidth(100);
+        ImGui.Combo("Format##PC", ref _pointCloudFormat, pcFormats, pcFormats.Length);
+
+        if (ImGui.Button("Export Point Cloud", new Vector2(-1, 0)))
+        {
+            _ = ExportPointCloudAsync();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // === TEXTURE EXPORT ===
+        ImGui.Text("Texture Export:");
+
+        ImGui.SetNextItemWidth(100);
+        int texRes = _textureResolution;
+        if (ImGui.InputInt("Resolution##Tex", ref texRes))
+        {
+            _textureResolution = Math.Clamp(texRes, 256, 4096);
+        }
+
+        if (ImGui.Button("Export Spherical Texture", new Vector2(-1, 0)))
+        {
+            _ = ExportTextureAsync();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // === VIDEO EXPORT ===
+        ImGui.Text("Render 360° Video:");
         ImGui.SetNextItemWidth(100);
         ImGui.InputInt("Width##RV", ref _exportWidth);
         ImGui.SameLine();
@@ -467,7 +555,7 @@ public class NerfTools : IDatasetTools
         ImGui.InputInt("Frames##RV", ref _exportFrameCount);
         _exportFrameCount = Math.Clamp(_exportFrameCount, 1, 1000);
 
-        if (ImGui.Button("Render 360° Video", new Vector2(-1, 0)))
+        if (ImGui.Button("Render Video Frames", new Vector2(-1, 0)))
         {
             _ = Render360VideoAsync();
         }
@@ -482,7 +570,126 @@ public class NerfTools : IDatasetTools
         if (_isExporting)
         {
             ImGui.Spacing();
-            ImGui.ProgressBar(0.5f, new Vector2(-1, 20), "Rendering...");
+            ImGui.ProgressBar(_exportProgress, new Vector2(-1, 20), $"Exporting... {_exportProgress * 100:F0}%");
+        }
+    }
+
+    private async Task ExportMeshAsync()
+    {
+        if (_currentDataset.ModelData == null || string.IsNullOrWhiteSpace(_exportPath))
+        {
+            Logger.LogWarning("No model or export path specified");
+            return;
+        }
+
+        _isExporting = true;
+        _exportProgress = 0f;
+
+        try
+        {
+            string[] extensions = { ".obj", ".ply", ".stl" };
+            var meshPath = Path.ChangeExtension(_exportPath, extensions[_meshFormat]);
+
+            var settings = new MeshExportSettings
+            {
+                Resolution = _meshResolution,
+                DensityThreshold = _densityThreshold,
+                BakeTexture = _bakeTexture,
+                TextureResolution = _textureResolution
+            };
+
+            var exporter = new NerfExporter(_currentDataset);
+            var progress = new Progress<float>(p => _exportProgress = p);
+            await exporter.ExportMeshAsync(meshPath, settings, progress);
+
+            Logger.Log($"Mesh exported to: {meshPath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Mesh export failed: {ex.Message}");
+        }
+        finally
+        {
+            _isExporting = false;
+            _exportProgress = 0f;
+        }
+    }
+
+    private async Task ExportPointCloudAsync()
+    {
+        if (_currentDataset.ModelData == null || string.IsNullOrWhiteSpace(_exportPath))
+        {
+            Logger.LogWarning("No model or export path specified");
+            return;
+        }
+
+        _isExporting = true;
+        _exportProgress = 0f;
+
+        try
+        {
+            string[] extensions = { ".ply", ".xyz", ".obj" };
+            var pcPath = Path.ChangeExtension(_exportPath, extensions[_pointCloudFormat]);
+
+            var settings = new PointCloudExportSettings
+            {
+                ResolutionX = _pointCloudResolution,
+                ResolutionY = _pointCloudResolution,
+                ResolutionZ = _pointCloudResolution,
+                DensityThreshold = _densityThreshold
+            };
+
+            var exporter = new NerfExporter(_currentDataset);
+            var progress = new Progress<float>(p => _exportProgress = p);
+            await exporter.ExportPointCloudAsync(pcPath, settings, progress);
+
+            Logger.Log($"Point cloud exported to: {pcPath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Point cloud export failed: {ex.Message}");
+        }
+        finally
+        {
+            _isExporting = false;
+            _exportProgress = 0f;
+        }
+    }
+
+    private async Task ExportTextureAsync()
+    {
+        if (_currentDataset.ModelData == null || string.IsNullOrWhiteSpace(_exportPath))
+        {
+            Logger.LogWarning("No model or export path specified");
+            return;
+        }
+
+        _isExporting = true;
+        _exportProgress = 0f;
+
+        try
+        {
+            var texturePath = Path.ChangeExtension(_exportPath, ".png");
+
+            var settings = new TextureExportSettings
+            {
+                Resolution = _textureResolution
+            };
+
+            var exporter = new NerfExporter(_currentDataset);
+            var progress = new Progress<float>(p => _exportProgress = p);
+            await exporter.ExportTextureAsync(texturePath, settings, progress);
+
+            Logger.Log($"Texture exported to: {texturePath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Texture export failed: {ex.Message}");
+        }
+        finally
+        {
+            _isExporting = false;
+            _exportProgress = 0f;
         }
     }
 
