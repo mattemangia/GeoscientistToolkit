@@ -262,29 +262,39 @@ public class NerfTools : IDatasetTools
             // Hash grid settings
             ImGui.Text("Hash Grid:");
             ImGui.SetNextItemWidth(100);
-            if (ImGui.InputInt("Levels##HG", ref config.HashGridLevels))
+
+            int levels = config.HashGridLevels;
+            if (ImGui.InputInt("Levels##HG", ref levels))
             {
-                config.HashGridLevels = Math.Clamp(config.HashGridLevels, 4, 24);
+                config.HashGridLevels = Math.Clamp(levels, 4, 24);
             }
+
             ImGui.SameLine();
             ImGui.SetNextItemWidth(100);
-            if (ImGui.InputInt("Features##HG", ref config.HashGridFeatures))
+
+            int features = config.HashGridFeatures;
+            if (ImGui.InputInt("Features##HG", ref features))
             {
-                config.HashGridFeatures = Math.Clamp(config.HashGridFeatures, 1, 8);
+                config.HashGridFeatures = Math.Clamp(features, 1, 8);
             }
 
             // MLP settings
             ImGui.Text("MLP Network:");
             ImGui.SetNextItemWidth(100);
-            if (ImGui.InputInt("Hidden Layers##MLP", ref config.MlpHiddenLayers))
+
+            int hiddenLayers = config.MlpHiddenLayers;
+            if (ImGui.InputInt("Hidden Layers##MLP", ref hiddenLayers))
             {
-                config.MlpHiddenLayers = Math.Clamp(config.MlpHiddenLayers, 1, 8);
+                config.MlpHiddenLayers = Math.Clamp(hiddenLayers, 1, 8);
             }
+
             ImGui.SameLine();
             ImGui.SetNextItemWidth(100);
-            if (ImGui.InputInt("Width##MLP", ref config.MlpHiddenWidth))
+
+            int hiddenWidth = config.MlpHiddenWidth;
+            if (ImGui.InputInt("Width##MLP", ref hiddenWidth))
             {
-                config.MlpHiddenWidth = Math.Clamp(config.MlpHiddenWidth, 16, 256);
+                config.MlpHiddenWidth = Math.Clamp(hiddenWidth, 16, 256);
             }
 
             // Training settings
@@ -297,20 +307,34 @@ public class NerfTools : IDatasetTools
             }
 
             ImGui.SetNextItemWidth(100);
-            if (ImGui.InputInt("Batch Size##BS", ref config.BatchSize))
+
+            int batchSize = config.BatchSize;
+            if (ImGui.InputInt("Batch Size##BS", ref batchSize))
             {
-                config.BatchSize = Math.Clamp(config.BatchSize, 256, 16384);
+                config.BatchSize = Math.Clamp(batchSize, 256, 16384);
             }
 
             ImGui.SetNextItemWidth(100);
-            if (ImGui.InputInt("Samples/Ray##SPR", ref config.SamplesPerRay))
+
+            int samplesPerRay = config.SamplesPerRay;
+            if (ImGui.InputInt("Samples/Ray##SPR", ref samplesPerRay))
             {
-                config.SamplesPerRay = Math.Clamp(config.SamplesPerRay, 16, 256);
+                config.SamplesPerRay = Math.Clamp(samplesPerRay, 16, 256);
             }
 
-            ImGui.Checkbox("Use GPU", ref config.UseGPU);
+            bool useGpu = config.UseGPU;
+            if(ImGui.Checkbox("Use GPU", ref useGpu))
+            {
+                config.UseGPU = useGpu;
+            }
+
             ImGui.SameLine();
-            ImGui.Checkbox("Mixed Precision", ref config.UseMixedPrecision);
+
+            bool useMixedPrecision = config.UseMixedPrecision;
+            if(ImGui.Checkbox("Mixed Precision", ref useMixedPrecision))
+            {
+                config.UseMixedPrecision = useMixedPrecision;
+            }
 
             ImGui.Unindent();
         }

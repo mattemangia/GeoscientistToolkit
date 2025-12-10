@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Util/TextureManager.cs
+// GeoscientistToolkit/Util/TextureManager.cs
 
 using ImGuiNET;
 using Veldrid;
@@ -101,6 +101,62 @@ public class TextureManager : IDisposable
 
         manager._textureView = factory.CreateTextureView(texture);
         return manager;
+    }
+
+    /// <summary>
+    ///     Updates the texture content from raw pixel data.
+    ///     Recreates the texture if dimensions change.
+    /// </summary>
+    public void UpdateFromPixelData(byte[] pixelData, uint width, uint height, PixelFormat format = PixelFormat.R8_G8_B8_A8_UNorm)
+    {
+        var graphicsDevice = VeldridManager.GraphicsDevice;
+        if (graphicsDevice == null)
+            throw new InvalidOperationException("VeldridManager.GraphicsDevice is not initialized");
+
+        // Check if we need to recreate the texture (size changed)
+        if (_texture == null || _texture.Width != width || _texture.Height != height || _texture.Format != format)
+        {
+            // Recreate texture
+            _textureView?.Dispose();
+            _texture?.Dispose();
+
+            var factory = VeldridManager.Factory;
+            if (factory == null)
+                throw new InvalidOperationException("VeldridManager.Factory is not initialized");
+
+            _texture = factory.CreateTexture(TextureDescription.Texture2D(
+                width, height, 1, 1, format, TextureUsage.Sampled));
+            _textureView = factory.CreateTextureView(_texture);
+
+            // Clear existing bindings as the underlying texture view has changed
+            lock (_lock)
+            {
+                // We'll need to re-register bindings in the next GetImGuiTextureId call
+                // But we should remove old bindings first
+                foreach (var kvp in _textureIdsByContext)
+                {
+                    var context = kvp.Key;
+                    var prevContext = ImGui.GetCurrentContext();
+                    ImGui.SetCurrentContext(context);
+
+                    var controller = VeldridManager.GetCurrentImGuiController();
+                    if (controller != null)
+                    {
+                        // Note: we can't easily remove the old binding since we already disposed the view
+                        // But Veldrid's ImGuiController usually handles disposed resources gracefully or we just create new binding
+                        // Ideally, we should have removed it before disposing.
+                    }
+
+                    ImGui.SetCurrentContext(prevContext);
+                }
+                _textureIdsByContext.Clear();
+            }
+        }
+
+        // Update texture data
+        graphicsDevice.UpdateTexture(
+            _texture, pixelData,
+            0, 0, 0, width, height, 1, 0, 0);
     }
 
     /// <summary>

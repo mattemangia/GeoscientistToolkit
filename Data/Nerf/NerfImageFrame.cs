@@ -49,9 +49,11 @@ public class NerfImageFrame : IDisposable
         get => new Vector3(CameraToWorld.M41, CameraToWorld.M42, CameraToWorld.M43);
         set
         {
-            CameraToWorld.M41 = value.X;
-            CameraToWorld.M42 = value.Y;
-            CameraToWorld.M43 = value.Z;
+            var mat = CameraToWorld;
+            mat.M41 = value.X;
+            mat.M42 = value.Y;
+            mat.M43 = value.Z;
+            CameraToWorld = mat;
         }
     }
 

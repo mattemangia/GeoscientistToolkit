@@ -26,7 +26,7 @@ public class NerfViewer : IDatasetViewer
 
     // Render state
     private byte[] _renderedImage;
-    private IntPtr _renderedTexture = IntPtr.Zero;
+    private TextureManager _renderedTextureManager;
     private int _renderWidth = 512;
     private int _renderHeight = 512;
     private bool _needsRender = true;
@@ -35,9 +35,12 @@ public class NerfViewer : IDatasetViewer
 
     // Preview during training
     private byte[] _previewImage;
-    private IntPtr _previewTexture = IntPtr.Zero;
+    private TextureManager _previewTextureManager;
     private int _previewWidth = 256;
     private int _previewHeight = 256;
+
+    // Thumbnail textures cache
+    private Dictionary<Guid, TextureManager> _thumbnailTextures = new();
 
     // View modes
     private ViewMode _currentViewMode = ViewMode.NovelView;
@@ -69,6 +72,16 @@ public class NerfViewer : IDatasetViewer
         _trainer?.Dispose();
         _renderedImage = null;
         _previewImage = null;
+
+        _renderedTextureManager?.Dispose();
+        _previewTextureManager?.Dispose();
+
+        foreach (var tex in _thumbnailTextures.Values)
+        {
+            tex.Dispose();
+        }
+        _thumbnailTextures.Clear();
+
         GC.SuppressFinalize(this);
     }
 
@@ -193,7 +206,7 @@ public class NerfViewer : IDatasetViewer
         {
             // No trained model - show message or preview
             ImGui.SetCursorPos((contentRegion - new Vector2(300, 100)) * 0.5f);
-            ImGui.BeginChild("NoModel", new Vector2(300, 100), ImGuiChildFlags.Borders);
+            ImGui.BeginChild("NoModel", new Vector2(300, 100), ImGuiChildFlags.Border);
             ImGui.Text("No trained model available.");
             ImGui.Spacing();
 
@@ -204,11 +217,15 @@ public class NerfViewer : IDatasetViewer
                 ImGui.ProgressBar(progress, new Vector2(-1, 20));
 
                 // Show training preview if available
-                if (_previewImage != null && _previewTexture != IntPtr.Zero)
+                if (_previewImage != null && _previewTextureManager != null)
                 {
                     ImGui.Separator();
                     ImGui.Text("Preview:");
-                    ImGui.Image(_previewTexture, new Vector2(_previewWidth, _previewHeight));
+                    var texId = _previewTextureManager.GetImGuiTextureId();
+                    if (texId != IntPtr.Zero)
+                    {
+                        ImGui.Image(texId, new Vector2(_previewWidth, _previewHeight));
+                    }
                 }
             }
             else if (_dataset.ImageCollection?.FrameCount > 0)
@@ -238,18 +255,19 @@ public class NerfViewer : IDatasetViewer
         if (_renderedImage != null)
         {
             // Update or create texture
-            if (_renderedTexture == IntPtr.Zero)
-            {
-                _renderedTexture = CreateTextureFromData(_renderedImage, _renderWidth, _renderHeight, 3);
-            }
+            UpdateRenderedTexture();
 
-            if (_renderedTexture != IntPtr.Zero)
+            if (_renderedTextureManager != null)
             {
-                // Center the image
-                var imageSize = new Vector2(_renderWidth, _renderHeight) / _renderQuality;
-                var padding = (contentRegion - imageSize) * 0.5f;
-                ImGui.SetCursorPos(padding);
-                ImGui.Image(_renderedTexture, imageSize);
+                var texId = _renderedTextureManager.GetImGuiTextureId();
+                if (texId != IntPtr.Zero)
+                {
+                    // Center the image
+                    var imageSize = new Vector2(_renderWidth, _renderHeight) / _renderQuality;
+                    var padding = (contentRegion - imageSize) * 0.5f;
+                    ImGui.SetCursorPos(padding);
+                    ImGui.Image(texId, imageSize);
+                }
             }
         }
 
@@ -272,20 +290,53 @@ public class NerfViewer : IDatasetViewer
 
             _renderedImage = _trainer.RenderView(cameraMatrix, focalLength, _renderWidth, _renderHeight);
 
-            // Update texture
-            if (_renderedImage != null && _renderedTexture != IntPtr.Zero)
-            {
-                UpdateTextureData(_renderedTexture, _renderedImage, _renderWidth, _renderHeight, 3);
-            }
-            else if (_renderedImage != null)
-            {
-                _renderedTexture = CreateTextureFromData(_renderedImage, _renderWidth, _renderHeight, 3);
-            }
+            // Texture update is handled in DrawNovelView
         }
         catch (Exception ex)
         {
             Logger.LogError($"Failed to render novel view: {ex.Message}");
         }
+    }
+
+    private void UpdateRenderedTexture()
+    {
+        if (_renderedImage == null) return;
+
+        try
+        {
+            // Convert to RGBA if needed (Veldrid doesn't support RGB8)
+            byte[] pixelData = _renderedImage;
+            if (pixelData.Length == _renderWidth * _renderHeight * 3)
+            {
+                pixelData = ConvertToRgba(pixelData, _renderWidth, _renderHeight);
+            }
+
+            if (_renderedTextureManager == null)
+            {
+                _renderedTextureManager = TextureManager.CreateFromPixelData(pixelData, (uint)_renderWidth, (uint)_renderHeight, PixelFormat.R8_G8_B8_A8_UNorm);
+            }
+            else
+            {
+                _renderedTextureManager.UpdateFromPixelData(pixelData, (uint)_renderWidth, (uint)_renderHeight, PixelFormat.R8_G8_B8_A8_UNorm);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to update texture: {ex.Message}");
+        }
+    }
+
+    private byte[] ConvertToRgba(byte[] rgb, int width, int height)
+    {
+        byte[] rgba = new byte[width * height * 4];
+        for (int i = 0; i < width * height; i++)
+        {
+            rgba[i * 4 + 0] = rgb[i * 3 + 0];
+            rgba[i * 4 + 1] = rgb[i * 3 + 1];
+            rgba[i * 4 + 2] = rgb[i * 3 + 2];
+            rgba[i * 4 + 3] = 255;
+        }
+        return rgba;
     }
 
     private void DrawTrainingFrameView(Vector2 contentRegion)
@@ -336,8 +387,30 @@ public class NerfViewer : IDatasetViewer
         // Display thumbnail or full image
         if (frame.ThumbnailData != null)
         {
-            // Create texture from thumbnail
-            var texId = CreateTextureFromData(frame.ThumbnailData, frame.ThumbnailWidth, frame.ThumbnailHeight, frame.Channels);
+            // Get or create texture
+            IntPtr texId = IntPtr.Zero;
+            if (!_thumbnailTextures.TryGetValue(frame.Id, out var texManager))
+            {
+                try
+                {
+                    texManager = TextureManager.CreateFromPixelData(
+                        frame.ThumbnailData,
+                        (uint)frame.ThumbnailWidth,
+                        (uint)frame.ThumbnailHeight,
+                        frame.Channels == 4 ? PixelFormat.R8_G8_B8_A8_UNorm : PixelFormat.R8_G8_B8_A8_UNorm);
+                    _thumbnailTextures[frame.Id] = texManager;
+                }
+                catch
+                {
+                    // Ignore texture creation errors
+                }
+            }
+
+            if (texManager != null)
+            {
+                texId = texManager.GetImGuiTextureId();
+            }
+
             if (texId != IntPtr.Zero)
             {
                 // Scale to fit content area while maintaining aspect ratio
@@ -517,13 +590,26 @@ public class NerfViewer : IDatasetViewer
         _previewWidth = width;
         _previewHeight = height;
 
-        if (_previewTexture == IntPtr.Zero)
+        try
         {
-            _previewTexture = CreateTextureFromData(data, width, height, 3);
+            byte[] pixelData = data;
+            if (data.Length == width * height * 3)
+            {
+                pixelData = ConvertToRgba(data, width, height);
+            }
+
+            if (_previewTextureManager == null)
+            {
+                _previewTextureManager = TextureManager.CreateFromPixelData(pixelData, (uint)width, (uint)height, PixelFormat.R8_G8_B8_A8_UNorm);
+            }
+            else
+            {
+                _previewTextureManager.UpdateFromPixelData(pixelData, (uint)width, (uint)height, PixelFormat.R8_G8_B8_A8_UNorm);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            UpdateTextureData(_previewTexture, data, width, height, 3);
+            Logger.LogError($"Failed to update preview texture: {ex.Message}");
         }
     }
 
@@ -538,28 +624,6 @@ public class NerfViewer : IDatasetViewer
         {
             _needsRender = true;
         }
-    }
-
-    // Texture management helpers (simplified - actual implementation depends on graphics backend)
-    private static IntPtr CreateTextureFromData(byte[] data, int width, int height, int channels)
-    {
-        try
-        {
-            // Register with TextureManager
-            var textureName = $"nerf_view_{Guid.NewGuid()}";
-            var texture = TextureManager.Instance.CreateOrUpdateTexture(textureName, data, width, height, channels == 4);
-            return texture != IntPtr.Zero ? texture : IntPtr.Zero;
-        }
-        catch
-        {
-            return IntPtr.Zero;
-        }
-    }
-
-    private static void UpdateTextureData(IntPtr textureId, byte[] data, int width, int height, int channels)
-    {
-        // Texture update logic - depends on backend
-        // For now, we'll recreate the texture each time
     }
 
     // Access to trainer for external control
