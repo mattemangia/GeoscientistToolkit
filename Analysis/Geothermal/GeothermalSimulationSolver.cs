@@ -1569,9 +1569,12 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         }
 
         var zTaper = MathF.Max(2f * dz_c, 0.25f);
+        // FIX: Heat coupling extends to the full borehole depth (totalBoreDepth), not just HeatExchangerDepth.
+        // The fluid physically circulates through the entire borehole, so heat transfer occurs along the whole pipe.
+        // HeatExchangerDepth is used only for active/passive zone distinction in UpdateHeatExchanger().
         var depthFactor =
-            depth <= activeHeDepth ? 1f :
-            depth <= activeHeDepth + zTaper ? Smooth(1f - (depth - activeHeDepth) / zTaper) : 0f;
+            depth <= totalBoreDepth ? 1f :
+            depth <= totalBoreDepth + zTaper ? Smooth(1f - (depth - totalBoreDepth) / zTaper) : 0f;
 
         var taper = rTaper * depthFactor;
 

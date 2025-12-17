@@ -1036,10 +1036,12 @@ __kernel void btes_heat_transfer_kernel(
         rTaper = sstep(u);
     }
 
+    // FIX: Heat coupling extends to full borehole depth (totalBoreDepth), not just activeHeDepth.
+    // The fluid physically circulates through the entire borehole, so heat transfer occurs along the whole pipe.
     float depthFactor = 0.0f;
-    if      (depth <= activeHeDepth)                depthFactor = 1.0f;
-    else if (depth <= activeHeDepth + zTaperMeters) depthFactor = sstep(1.0f - (depth - activeHeDepth)/zTaperMeters);
-    else                                            depthFactor = 0.0f;
+    if      (depth <= totalBoreDepth)                depthFactor = 1.0f;
+    else if (depth <= totalBoreDepth + zTaperMeters) depthFactor = sstep(1.0f - (depth - totalBoreDepth)/zTaperMeters);
+    else                                             depthFactor = 0.0f;
 
     const float taper = rTaper * depthFactor;
 
