@@ -1117,7 +1117,9 @@ public class ProfileCorrelation3DViewer : IDisposable
                 if (expanded)
                 {
                     ImGui.Indent();
-                    ImGui.Checkbox("Visible##" + profile.ID, ref profile.IsVisible);
+                    var isVisible = profile.IsVisible;
+                    ImGui.Checkbox("Visible##" + profile.ID, ref isVisible);
+                    profile.IsVisible = isVisible;
                     ImGui.Text($"Boreholes: {profile.BoreholeOrder.Count}");
                     ImGui.Text($"Azimuth: {profile.Azimuth:F1}");
 
@@ -1402,14 +1404,20 @@ public class ProfileCorrelation3DViewer : IDisposable
 
             foreach (var horizon in _correlationData.Horizons)
             {
-                var layer = new GISVectorLayer(horizon.Name);
+                var layer = new GISLayer
+                {
+                    Name = horizon.Name,
+                    Type = LayerType.Vector
+                };
 
                 // Add control points as point features
                 foreach (var cp in horizon.ControlPoints)
                 {
-                    var feature = new GISFeature();
-                    feature.Type = GISFeatureType.Point;
-                    feature.Points.Add(new Vector2(cp.Position.X, cp.Position.Y));
+                    var feature = new GISFeature
+                    {
+                        Type = FeatureType.Point
+                    };
+                    feature.Coordinates.Add(new Vector2(cp.Position.X, cp.Position.Y));
                     feature.Properties["elevation"] = cp.Position.Z.ToString("F2");
                     feature.Properties["lithology_id"] = cp.LithologyID;
                     feature.Properties["borehole_id"] = cp.BoreholeID;
