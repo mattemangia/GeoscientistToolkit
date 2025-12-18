@@ -1571,3 +1571,564 @@ public class HorizonControlPointDTO
 }
 
 #endregion
+
+#region 2D Geological Section Export
+
+/// <summary>
+/// Represents a 2D geological cross-section generated from a correlation profile
+/// </summary>
+public class GeologicalSection
+{
+    public string ProfileID { get; set; }
+    public string ProfileName { get; set; }
+    public float TotalLength { get; set; }
+    public float MinElevation { get; set; }
+    public float MaxElevation { get; set; }
+    public float VerticalExaggeration { get; set; } = 1.0f;
+
+    /// <summary>Borehole columns in order along profile</summary>
+    public List<SectionBoreholeColumn> BoreholeColumns { get; set; } = new();
+
+    /// <summary>Interpolated formation boundaries</summary>
+    public List<SectionFormationBoundary> FormationBoundaries { get; set; } = new();
+
+    /// <summary>Correlation lines between boreholes</summary>
+    public List<SectionCorrelationLine> CorrelationLines { get; set; } = new();
+}
+
+/// <summary>
+/// A borehole column in the 2D section
+/// </summary>
+public class SectionBoreholeColumn
+{
+    public string BoreholeID { get; set; }
+    public string BoreholeDisplayName { get; set; }
+    public float DistanceAlongProfile { get; set; }
+    public float SurfaceElevation { get; set; }
+    public float TotalDepth { get; set; }
+    public List<SectionLithologyUnit> LithologyUnits { get; set; } = new();
+}
+
+/// <summary>
+/// A lithology unit in the 2D section
+/// </summary>
+public class SectionLithologyUnit
+{
+    public string LithologyID { get; set; }
+    public string Name { get; set; }
+    public string LithologyType { get; set; }
+    public float TopElevation { get; set; }
+    public float BottomElevation { get; set; }
+    public Vector4 Color { get; set; }
+}
+
+/// <summary>
+/// An interpolated formation boundary in the 2D section
+/// </summary>
+public class SectionFormationBoundary
+{
+    public string HorizonID { get; set; }
+    public string HorizonName { get; set; }
+    public string LithologyType { get; set; }
+    public Vector4 Color { get; set; }
+
+    /// <summary>Points along the boundary (distance, elevation)</summary>
+    public List<Vector2> Points { get; set; } = new();
+
+    /// <summary>Fill polygon for the formation (if closed)</summary>
+    public List<Vector2> FillPolygon { get; set; } = new();
+}
+
+/// <summary>
+/// A correlation line in the 2D section
+/// </summary>
+public class SectionCorrelationLine
+{
+    public string CorrelationID { get; set; }
+    public Vector2 StartPoint { get; set; } // (distance, elevation)
+    public Vector2 EndPoint { get; set; }
+    public Vector4 Color { get; set; }
+    public float Confidence { get; set; }
+    public bool IsCrossProfile { get; set; }
+}
+
+/// <summary>
+/// Generates 2D geological cross-sections from correlation profiles
+/// </summary>
+public static class GeologicalSectionGenerator
+{
+    /// <summary>
+    /// Generate a 2D geological section from a correlation profile
+    /// </summary>
+    public static GeologicalSection GenerateSection(
+        CorrelationProfile profile,
+        Dictionary<string, BoreholeDataset> boreholes,
+        Dictionary<string, BoreholeHeader> headers,
+        List<LithologyCorrelation> correlations,
+        List<InterpolatedHorizon> horizons = null,
+        float verticalExaggeration = 1.0f)
+    {
+        var section = new GeologicalSection
+        {
+            ProfileID = profile.ID,
+            ProfileName = profile.Name,
+            VerticalExaggeration = verticalExaggeration
+        };
+
+        float cumulativeDistance = 0;
+        float minElev = float.MaxValue;
+        float maxElev = float.MinValue;
+        Vector2? previousCoords = null;
+
+        // Build borehole columns
+        foreach (var bhID in profile.BoreholeOrder)
+        {
+            if (!boreholes.TryGetValue(bhID, out var borehole)) continue;
+            var header = headers.GetValueOrDefault(bhID);
+
+            // Calculate distance along profile
+            var coords = borehole.SurfaceCoordinates;
+            if (previousCoords.HasValue)
+            {
+                cumulativeDistance += Vector2.Distance(previousCoords.Value, coords);
+            }
+            previousCoords = coords;
+
+            var column = new SectionBoreholeColumn
+            {
+                BoreholeID = bhID,
+                BoreholeDisplayName = header?.DisplayName ?? borehole.WellName ?? borehole.Name,
+                DistanceAlongProfile = cumulativeDistance,
+                SurfaceElevation = borehole.Elevation,
+                TotalDepth = borehole.TotalDepth
+            };
+
+            // Add lithology units
+            foreach (var unit in borehole.LithologyUnits)
+            {
+                var sectionUnit = new SectionLithologyUnit
+                {
+                    LithologyID = unit.ID,
+                    Name = unit.Name,
+                    LithologyType = unit.LithologyType,
+                    TopElevation = borehole.Elevation - unit.DepthFrom,
+                    BottomElevation = borehole.Elevation - unit.DepthTo,
+                    Color = unit.Color
+                };
+                column.LithologyUnits.Add(sectionUnit);
+
+                minElev = Math.Min(minElev, sectionUnit.BottomElevation);
+                maxElev = Math.Max(maxElev, sectionUnit.TopElevation);
+            }
+
+            section.BoreholeColumns.Add(column);
+        }
+
+        section.TotalLength = cumulativeDistance;
+        section.MinElevation = minElev;
+        section.MaxElevation = maxElev;
+
+        // Build correlation lines
+        var profileCorrelations = correlations.Where(c =>
+            profile.BoreholeOrder.Contains(c.SourceBoreholeID) &&
+            profile.BoreholeOrder.Contains(c.TargetBoreholeID)).ToList();
+
+        foreach (var corr in profileCorrelations)
+        {
+            var sourceColumn = section.BoreholeColumns.FirstOrDefault(c => c.BoreholeID == corr.SourceBoreholeID);
+            var targetColumn = section.BoreholeColumns.FirstOrDefault(c => c.BoreholeID == corr.TargetBoreholeID);
+
+            if (sourceColumn == null || targetColumn == null) continue;
+
+            var sourceUnit = sourceColumn.LithologyUnits.FirstOrDefault(u => u.LithologyID == corr.SourceLithologyID);
+            var targetUnit = targetColumn.LithologyUnits.FirstOrDefault(u => u.LithologyID == corr.TargetLithologyID);
+
+            if (sourceUnit == null || targetUnit == null) continue;
+
+            var sourceMidElev = (sourceUnit.TopElevation + sourceUnit.BottomElevation) / 2;
+            var targetMidElev = (targetUnit.TopElevation + targetUnit.BottomElevation) / 2;
+
+            section.CorrelationLines.Add(new SectionCorrelationLine
+            {
+                CorrelationID = corr.ID,
+                StartPoint = new Vector2(sourceColumn.DistanceAlongProfile, sourceMidElev),
+                EndPoint = new Vector2(targetColumn.DistanceAlongProfile, targetMidElev),
+                Color = corr.Color,
+                Confidence = corr.Confidence,
+                IsCrossProfile = false
+            });
+        }
+
+        // Build formation boundaries from horizons
+        if (horizons != null)
+        {
+            foreach (var horizon in horizons)
+            {
+                var boundary = new SectionFormationBoundary
+                {
+                    HorizonID = horizon.ID,
+                    HorizonName = horizon.Name,
+                    LithologyType = horizon.LithologyType,
+                    Color = horizon.Color
+                };
+
+                // Get control points for this profile
+                var profilePoints = horizon.ControlPoints
+                    .Where(cp => cp.ProfileID == profile.ID)
+                    .OrderBy(cp =>
+                    {
+                        var column = section.BoreholeColumns.FirstOrDefault(c => c.BoreholeID == cp.BoreholeID);
+                        return column?.DistanceAlongProfile ?? 0;
+                    })
+                    .ToList();
+
+                foreach (var cp in profilePoints)
+                {
+                    var column = section.BoreholeColumns.FirstOrDefault(c => c.BoreholeID == cp.BoreholeID);
+                    if (column != null)
+                    {
+                        boundary.Points.Add(new Vector2(column.DistanceAlongProfile, cp.Position.Z));
+                    }
+                }
+
+                if (boundary.Points.Count >= 2)
+                {
+                    // Interpolate boundary between control points
+                    boundary.Points = InterpolateBoundary(boundary.Points, section.BoreholeColumns);
+                    section.FormationBoundaries.Add(boundary);
+                }
+            }
+
+            // Generate fill polygons for formations between boundaries
+            GenerateFormationFills(section);
+        }
+
+        return section;
+    }
+
+    /// <summary>
+    /// Interpolate boundary points between borehole control points
+    /// </summary>
+    private static List<Vector2> InterpolateBoundary(List<Vector2> controlPoints, List<SectionBoreholeColumn> columns)
+    {
+        if (controlPoints.Count < 2) return controlPoints;
+
+        var result = new List<Vector2>();
+        float minX = columns.Min(c => c.DistanceAlongProfile);
+        float maxX = columns.Max(c => c.DistanceAlongProfile);
+        int numSamples = Math.Max(20, (int)((maxX - minX) / 10)); // Sample every 10 units
+
+        for (int i = 0; i <= numSamples; i++)
+        {
+            float x = minX + (maxX - minX) * i / numSamples;
+
+            // Find surrounding control points
+            Vector2? before = null, after = null;
+            for (int j = 0; j < controlPoints.Count; j++)
+            {
+                if (controlPoints[j].X <= x)
+                    before = controlPoints[j];
+                if (controlPoints[j].X >= x && after == null)
+                    after = controlPoints[j];
+            }
+
+            float y;
+            if (before == null && after != null)
+                y = after.Value.Y;
+            else if (after == null && before != null)
+                y = before.Value.Y;
+            else if (before != null && after != null)
+            {
+                // Linear interpolation
+                float t = (x - before.Value.X) / (after.Value.X - before.Value.X);
+                y = before.Value.Y + t * (after.Value.Y - before.Value.Y);
+            }
+            else
+                continue;
+
+            result.Add(new Vector2(x, y));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Generate fill polygons for formations between boundaries
+    /// </summary>
+    private static void GenerateFormationFills(GeologicalSection section)
+    {
+        // Sort boundaries by average elevation (top to bottom)
+        var sortedBoundaries = section.FormationBoundaries
+            .OrderByDescending(b => b.Points.Average(p => p.Y))
+            .ToList();
+
+        for (int i = 0; i < sortedBoundaries.Count; i++)
+        {
+            var topBoundary = sortedBoundaries[i];
+
+            // Find bottom boundary (next one down, or section bottom)
+            List<Vector2> bottomPoints;
+            if (i + 1 < sortedBoundaries.Count)
+            {
+                bottomPoints = sortedBoundaries[i + 1].Points;
+            }
+            else
+            {
+                // Use section bottom
+                bottomPoints = topBoundary.Points
+                    .Select(p => new Vector2(p.X, section.MinElevation))
+                    .ToList();
+            }
+
+            // Create fill polygon
+            var fillPolygon = new List<Vector2>();
+            fillPolygon.AddRange(topBoundary.Points);
+
+            // Add bottom points in reverse order
+            var reversedBottom = new List<Vector2>(bottomPoints);
+            reversedBottom.Reverse();
+            fillPolygon.AddRange(reversedBottom);
+
+            topBoundary.FillPolygon = fillPolygon;
+        }
+    }
+
+    /// <summary>
+    /// Export section to SVG format
+    /// </summary>
+    public static string ExportToSVG(GeologicalSection section, int width = 1200, int height = 600)
+    {
+        var sb = new System.Text.StringBuilder();
+
+        float margin = 60;
+        float plotWidth = width - 2 * margin;
+        float plotHeight = height - 2 * margin;
+
+        float scaleX = plotWidth / Math.Max(section.TotalLength, 1);
+        float elevRange = section.MaxElevation - section.MinElevation;
+        float scaleY = plotHeight / Math.Max(elevRange, 1) * section.VerticalExaggeration;
+
+        Func<float, float> toX = (dist) => margin + dist * scaleX;
+        Func<float, float> toY = (elev) => margin + (section.MaxElevation - elev) * scaleY;
+
+        // SVG header
+        sb.AppendLine($"<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        sb.AppendLine($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">");
+
+        // Background
+        sb.AppendLine($"<rect width=\"{width}\" height=\"{height}\" fill=\"white\"/>");
+
+        // Title
+        sb.AppendLine($"<text x=\"{width / 2}\" y=\"25\" text-anchor=\"middle\" font-size=\"16\" font-weight=\"bold\">{section.ProfileName} - Geological Cross Section</text>");
+
+        // Formation fills
+        foreach (var boundary in section.FormationBoundaries.Where(b => b.FillPolygon.Count > 2))
+        {
+            var points = string.Join(" ", boundary.FillPolygon.Select(p => $"{toX(p.X):F1},{toY(p.Y):F1}"));
+            var color = $"rgb({(int)(boundary.Color.X * 255)},{(int)(boundary.Color.Y * 255)},{(int)(boundary.Color.Z * 255)})";
+            sb.AppendLine($"<polygon points=\"{points}\" fill=\"{color}\" fill-opacity=\"0.7\" stroke=\"none\"/>");
+        }
+
+        // Formation boundary lines
+        foreach (var boundary in section.FormationBoundaries.Where(b => b.Points.Count >= 2))
+        {
+            var points = string.Join(" ", boundary.Points.Select(p => $"{toX(p.X):F1},{toY(p.Y):F1}"));
+            sb.AppendLine($"<polyline points=\"{points}\" fill=\"none\" stroke=\"black\" stroke-width=\"1\"/>");
+        }
+
+        // Borehole columns
+        foreach (var column in section.BoreholeColumns)
+        {
+            float x = toX(column.DistanceAlongProfile);
+            float topY = toY(column.SurfaceElevation);
+            float bottomY = toY(column.SurfaceElevation - column.TotalDepth);
+            float colWidth = 30;
+
+            // Column background
+            sb.AppendLine($"<rect x=\"{x - colWidth / 2:F1}\" y=\"{topY:F1}\" width=\"{colWidth}\" height=\"{bottomY - topY:F1}\" fill=\"#f0f0f0\" stroke=\"#333\" stroke-width=\"1\"/>");
+
+            // Lithology units
+            foreach (var unit in column.LithologyUnits)
+            {
+                float unitTopY = toY(unit.TopElevation);
+                float unitBottomY = toY(unit.BottomElevation);
+                var color = $"rgb({(int)(unit.Color.X * 255)},{(int)(unit.Color.Y * 255)},{(int)(unit.Color.Z * 255)})";
+
+                sb.AppendLine($"<rect x=\"{x - colWidth / 2 + 2:F1}\" y=\"{unitTopY:F1}\" width=\"{colWidth - 4}\" height=\"{unitBottomY - unitTopY:F1}\" fill=\"{color}\" stroke=\"#333\" stroke-width=\"0.5\"/>");
+
+                // Unit label (if tall enough)
+                if (unitBottomY - unitTopY > 15)
+                {
+                    var label = unit.Name.Length > 8 ? unit.Name.Substring(0, 7) + ".." : unit.Name;
+                    sb.AppendLine($"<text x=\"{x:F1}\" y=\"{(unitTopY + unitBottomY) / 2:F1}\" text-anchor=\"middle\" dominant-baseline=\"middle\" font-size=\"8\" fill=\"white\">{label}</text>");
+                }
+            }
+
+            // Borehole name
+            sb.AppendLine($"<text x=\"{x:F1}\" y=\"{topY - 10:F1}\" text-anchor=\"middle\" font-size=\"10\" font-weight=\"bold\">{column.BoreholeDisplayName}</text>");
+        }
+
+        // Correlation lines
+        foreach (var line in section.CorrelationLines)
+        {
+            var color = line.IsCrossProfile ? "#e67300" : "#3366cc";
+            float x1 = toX(line.StartPoint.X);
+            float y1 = toY(line.StartPoint.Y);
+            float x2 = toX(line.EndPoint.X);
+            float y2 = toY(line.EndPoint.Y);
+
+            sb.AppendLine($"<line x1=\"{x1:F1}\" y1=\"{y1:F1}\" x2=\"{x2:F1}\" y2=\"{y2:F1}\" stroke=\"{color}\" stroke-width=\"2\" stroke-opacity=\"0.7\"/>");
+            sb.AppendLine($"<circle cx=\"{x1:F1}\" cy=\"{y1:F1}\" r=\"3\" fill=\"{color}\"/>");
+            sb.AppendLine($"<circle cx=\"{x2:F1}\" cy=\"{y2:F1}\" r=\"3\" fill=\"{color}\"/>");
+        }
+
+        // Axes
+        // Y axis (elevation)
+        sb.AppendLine($"<line x1=\"{margin}\" y1=\"{margin}\" x2=\"{margin}\" y2=\"{height - margin}\" stroke=\"black\" stroke-width=\"1\"/>");
+        float elevStep = GetAxisInterval(elevRange);
+        for (float elev = (float)(Math.Ceiling(section.MinElevation / elevStep) * elevStep); elev <= section.MaxElevation; elev += elevStep)
+        {
+            float y = toY(elev);
+            sb.AppendLine($"<line x1=\"{margin - 5}\" y1=\"{y:F1}\" x2=\"{margin}\" y2=\"{y:F1}\" stroke=\"black\"/>");
+            sb.AppendLine($"<text x=\"{margin - 8}\" y=\"{y:F1}\" text-anchor=\"end\" dominant-baseline=\"middle\" font-size=\"9\">{elev:F0}m</text>");
+        }
+        sb.AppendLine($"<text x=\"20\" y=\"{height / 2}\" text-anchor=\"middle\" font-size=\"10\" transform=\"rotate(-90 20 {height / 2})\">Elevation (m)</text>");
+
+        // X axis (distance)
+        sb.AppendLine($"<line x1=\"{margin}\" y1=\"{height - margin}\" x2=\"{width - margin}\" y2=\"{height - margin}\" stroke=\"black\" stroke-width=\"1\"/>");
+        float distStep = GetAxisInterval(section.TotalLength);
+        for (float dist = 0; dist <= section.TotalLength; dist += distStep)
+        {
+            float x = toX(dist);
+            sb.AppendLine($"<line x1=\"{x:F1}\" y1=\"{height - margin}\" x2=\"{x:F1}\" y2=\"{height - margin + 5}\" stroke=\"black\"/>");
+            sb.AppendLine($"<text x=\"{x:F1}\" y=\"{height - margin + 15}\" text-anchor=\"middle\" font-size=\"9\">{dist:F0}m</text>");
+        }
+        sb.AppendLine($"<text x=\"{width / 2}\" y=\"{height - 10}\" text-anchor=\"middle\" font-size=\"10\">Distance (m)</text>");
+
+        // Scale and vertical exaggeration
+        sb.AppendLine($"<text x=\"{width - margin}\" y=\"{height - 10}\" text-anchor=\"end\" font-size=\"9\">V.E. = {section.VerticalExaggeration:F1}x</text>");
+
+        sb.AppendLine("</svg>");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Export section to PNG using StbImageWrite
+    /// </summary>
+    public static void ExportToPNG(GeologicalSection section, string filePath, int width = 1200, int height = 600)
+    {
+        var pixels = new byte[width * height * 4];
+
+        // Clear to white
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] = 255;     // R
+            pixels[i + 1] = 255; // G
+            pixels[i + 2] = 255; // B
+            pixels[i + 3] = 255; // A
+        }
+
+        float margin = 60;
+        float plotWidth = width - 2 * margin;
+        float plotHeight = height - 2 * margin;
+
+        float scaleX = plotWidth / Math.Max(section.TotalLength, 1);
+        float elevRange = section.MaxElevation - section.MinElevation;
+        float scaleY = plotHeight / Math.Max(elevRange, 1) * section.VerticalExaggeration;
+
+        Func<float, int> toX = (dist) => (int)(margin + dist * scaleX);
+        Func<float, int> toY = (elev) => (int)(margin + (section.MaxElevation - elev) * scaleY);
+
+        Action<int, int, byte, byte, byte> setPixel = (x, y, r, g, b) =>
+        {
+            if (x >= 0 && x < width && y >= 0 && y < height)
+            {
+                int idx = (y * width + x) * 4;
+                pixels[idx] = r;
+                pixels[idx + 1] = g;
+                pixels[idx + 2] = b;
+                pixels[idx + 3] = 255;
+            }
+        };
+
+        Action<int, int, int, int, byte, byte, byte> fillRect = (rx, ry, rw, rh, r, g, b) =>
+        {
+            for (int dy = 0; dy < rh; dy++)
+                for (int dx = 0; dx < rw; dx++)
+                    setPixel(rx + dx, ry + dy, r, g, b);
+        };
+
+        Action<int, int, int, int, byte, byte, byte> drawLine = (x1, y1, x2, y2, r, g, b) =>
+        {
+            int dx = Math.Abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
+            int dy = -Math.Abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
+            int err = dx + dy, e2;
+            while (true)
+            {
+                setPixel(x1, y1, r, g, b);
+                if (x1 == x2 && y1 == y2) break;
+                e2 = 2 * err;
+                if (e2 >= dy) { err += dy; x1 += sx; }
+                if (e2 <= dx) { err += dx; y1 += sy; }
+            }
+        };
+
+        // Draw borehole columns
+        foreach (var column in section.BoreholeColumns)
+        {
+            int x = toX(column.DistanceAlongProfile);
+            int topY = toY(column.SurfaceElevation);
+            int bottomY = toY(column.SurfaceElevation - column.TotalDepth);
+            int colWidth = 25;
+
+            fillRect(x - colWidth / 2, topY, colWidth, bottomY - topY, 200, 200, 200);
+
+            foreach (var unit in column.LithologyUnits)
+            {
+                int unitTopY = toY(unit.TopElevation);
+                int unitBottomY = toY(unit.BottomElevation);
+                byte cr = (byte)(unit.Color.X * 255);
+                byte cg = (byte)(unit.Color.Y * 255);
+                byte cb = (byte)(unit.Color.Z * 255);
+
+                fillRect(x - colWidth / 2 + 2, unitTopY, colWidth - 4, unitBottomY - unitTopY, cr, cg, cb);
+            }
+        }
+
+        // Draw correlation lines
+        foreach (var line in section.CorrelationLines)
+        {
+            byte cr = line.IsCrossProfile ? (byte)230 : (byte)51;
+            byte cg = line.IsCrossProfile ? (byte)115 : (byte)102;
+            byte cb = line.IsCrossProfile ? (byte)0 : (byte)204;
+
+            int x1 = toX(line.StartPoint.X);
+            int y1 = toY(line.StartPoint.Y);
+            int x2 = toX(line.EndPoint.X);
+            int y2 = toY(line.EndPoint.Y);
+
+            drawLine(x1, y1, x2, y2, cr, cg, cb);
+        }
+
+        // Save using StbImageWrite
+        using var stream = new MemoryStream();
+        var writer = new StbImageWriteSharp.ImageWriter();
+        writer.WritePng(pixels, width, height, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
+        File.WriteAllBytes(filePath, stream.ToArray());
+
+        Logger.Log($"[GeologicalSectionGenerator] Exported section to {filePath}");
+    }
+
+    private static float GetAxisInterval(float range)
+    {
+        if (range <= 0) return 1;
+        var pow10 = (float)Math.Pow(10, Math.Floor(Math.Log10(range)));
+        var normalized = range / pow10;
+
+        if (normalized < 2) return pow10 / 5;
+        if (normalized < 5) return pow10 / 2;
+        return pow10;
+    }
+}
+
+#endregion

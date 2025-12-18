@@ -5,6 +5,7 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Business;
+using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 
@@ -72,6 +73,13 @@ public class ProfileCorrelationViewer : IDisposable
     private bool _showExportDialog;
     private string _exportPath = "";
 
+    // 2D Section Export
+    private readonly ImGuiExportFileDialog _sectionExportDialog;
+    private bool _showSectionExportOptions;
+    private float _sectionVerticalExaggeration = 1.0f;
+    private int _sectionExportWidth = 1200;
+    private int _sectionExportHeight = 600;
+
     // Colors
     private readonly Vector4 _backgroundColor = new(0.12f, 0.12f, 0.14f, 1.0f);
     private readonly Vector4 _headerBackgroundColor = new(0.18f, 0.18f, 0.22f, 1.0f);
@@ -91,11 +99,22 @@ public class ProfileCorrelationViewer : IDisposable
 
     public ProfileCorrelationViewer(List<BoreholeDataset> boreholes)
     {
+        _sectionExportDialog = new ImGuiExportFileDialog("SectionExportDialog", "Export 2D Section");
+        _sectionExportDialog.SetExtensions(
+            (".svg", "SVG Vector Image"),
+            (".png", "PNG Image")
+        );
         InitializeFromBoreholes(boreholes);
     }
 
     public ProfileCorrelationViewer(DatasetGroup boreholeGroup)
     {
+        _sectionExportDialog = new ImGuiExportFileDialog("SectionExportDialog", "Export 2D Section");
+        _sectionExportDialog.SetExtensions(
+            (".svg", "SVG Vector Image"),
+            (".png", "PNG Image")
+        );
+
         var boreholeList = boreholeGroup.Datasets
             .OfType<BoreholeDataset>()
             .OrderBy(b => b.SurfaceCoordinates.X)
@@ -203,6 +222,8 @@ public class ProfileCorrelationViewer : IDisposable
                 ImGui.Separator();
                 if (ImGui.MenuItem("Export to GIS..."))
                     ExportToGIS();
+                if (ImGui.MenuItem("Export 2D Section...", null, false, _selectedProfile != null))
+                    _showSectionExportOptions = true;
                 ImGui.Separator();
                 if (ImGui.MenuItem("Close"))
                     _isOpen = false;
@@ -1071,6 +1092,156 @@ public class ProfileCorrelationViewer : IDisposable
 
                 ImGui.EndPopup();
             }
+        }
+
+        // 2D Section Export Options Dialog
+        DrawSectionExportOptionsDialog();
+
+        // 2D Section Export File Dialog
+        DrawSectionExportFileDialog();
+    }
+
+    private void DrawSectionExportOptionsDialog()
+    {
+        if (!_showSectionExportOptions) return;
+
+        ImGui.SetNextWindowSize(new Vector2(400, 280), ImGuiCond.FirstUseEver);
+        var center = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(center, ImGuiCond.FirstUseEver, new Vector2(0.5f, 0.5f));
+
+        var pOpen = _showSectionExportOptions;
+        if (ImGui.Begin("Export 2D Section Options", ref pOpen,
+                ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking))
+        {
+            ImGui.Text("Select export options for the geological cross-section:");
+            ImGui.Spacing();
+
+            // Profile info
+            if (_selectedProfile != null)
+            {
+                ImGui.TextColored(new Vector4(0.3f, 0.7f, 1f, 1f),
+                    $"Profile: {_selectedProfile.Name} ({_selectedProfile.BoreholeOrder.Count} boreholes)");
+            }
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Vertical exaggeration
+            ImGui.Text("Vertical Exaggeration:");
+            ImGui.SetNextItemWidth(200);
+            ImGui.SliderFloat("##VE", ref _sectionVerticalExaggeration, 0.5f, 10f, "%.1fx");
+            ImGui.SameLine();
+            ImGui.TextDisabled("(?)");
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.BeginTooltip();
+                ImGui.Text("Exaggerate vertical scale for better visualization of thin layers");
+                ImGui.EndTooltip();
+            }
+
+            // Image dimensions
+            ImGui.Text("Export Dimensions:");
+            ImGui.SetNextItemWidth(100);
+            ImGui.InputInt("Width (px)##W", ref _sectionExportWidth);
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(100);
+            ImGui.InputInt("Height (px)##H", ref _sectionExportHeight);
+
+            _sectionExportWidth = Math.Clamp(_sectionExportWidth, 400, 4000);
+            _sectionExportHeight = Math.Clamp(_sectionExportHeight, 300, 3000);
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Summary
+            ImGui.Text("Export Options:");
+            ImGui.BulletText($"Vertical Exaggeration: {_sectionVerticalExaggeration:F1}x");
+            ImGui.BulletText($"Size: {_sectionExportWidth} x {_sectionExportHeight} pixels");
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Buttons
+            float buttonWidth = 100;
+            var spacing = ImGui.GetStyle().ItemSpacing.X;
+            var totalWidth = buttonWidth * 2 + spacing;
+            var startX = (ImGui.GetContentRegionAvail().X - totalWidth) * 0.5f;
+
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + startX);
+
+            if (ImGui.Button("Cancel", new Vector2(buttonWidth, 0)))
+                _showSectionExportOptions = false;
+
+            ImGui.SameLine();
+
+            if (ImGui.Button("Continue", new Vector2(buttonWidth, 0)))
+            {
+                _showSectionExportOptions = false;
+                var defaultName = $"{_selectedProfile?.Name ?? "Section"}_CrossSection";
+                _sectionExportDialog.Open(defaultName);
+            }
+
+            ImGui.End();
+        }
+
+        if (!pOpen) _showSectionExportOptions = false;
+    }
+
+    private void DrawSectionExportFileDialog()
+    {
+        if (_sectionExportDialog.Submit())
+        {
+            // Export the section
+            ExportGeologicalSection(_sectionExportDialog.SelectedPath);
+        }
+    }
+
+    private void ExportGeologicalSection(string filePath)
+    {
+        if (_selectedProfile == null)
+        {
+            ShowStatus("No profile selected for export", true);
+            return;
+        }
+
+        try
+        {
+            // Generate the section
+            var section = GeologicalSectionGenerator.GenerateSection(
+                _selectedProfile,
+                _boreholeMap,
+                _correlationData.Headers,
+                _correlationData.IntraProfileCorrelations,
+                _correlationData.Horizons,
+                _sectionVerticalExaggeration);
+
+            // Export based on file extension
+            var extension = Path.GetExtension(filePath).ToLowerInvariant();
+
+            if (extension == ".svg")
+            {
+                var svgContent = GeologicalSectionGenerator.ExportToSVG(section, _sectionExportWidth, _sectionExportHeight);
+                File.WriteAllText(filePath, svgContent);
+                ShowStatus($"Exported SVG section to {Path.GetFileName(filePath)}");
+            }
+            else if (extension == ".png")
+            {
+                GeologicalSectionGenerator.ExportToPNG(section, filePath, _sectionExportWidth, _sectionExportHeight);
+                ShowStatus($"Exported PNG section to {Path.GetFileName(filePath)}");
+            }
+            else
+            {
+                ShowStatus($"Unsupported export format: {extension}", true);
+            }
+
+            Logger.Log($"[ProfileCorrelationViewer] Exported 2D section to {filePath}");
+        }
+        catch (Exception ex)
+        {
+            ShowStatus($"Export failed: {ex.Message}", true);
+            Logger.LogError($"[ProfileCorrelationViewer] Export failed: {ex}");
         }
     }
 
