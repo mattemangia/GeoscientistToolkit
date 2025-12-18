@@ -12,6 +12,7 @@ using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.UI.AcousticVolume;
+using GeoscientistToolkit.UI.Borehole;
 using ImGuiNET;
 using System.Linq;
 using System.Collections.Generic;
@@ -38,6 +39,8 @@ public class DatasetPanel : BasePanel
 
     private PanoramaWizardPanel _panoramaWizard;
     private PhotogrammetryWizardPanel _photogrammetryWizard;
+    private BoreholeLogCorrelationViewer _boreholeCorrelationViewer;
+    private BoreholeCorrelation3DViewer _boreholeCorrelation3DViewer;
 
     public DatasetPanel() : base("Datasets", new Vector2(250, 400))
     {
@@ -70,6 +73,28 @@ public class DatasetPanel : BasePanel
             _photogrammetryWizard.Submit();
             if (!_photogrammetryWizard.IsOpen)
                 _photogrammetryWizard = null;
+        }
+
+        // Draw borehole correlation viewer if open
+        if (_boreholeCorrelationViewer != null)
+        {
+            _boreholeCorrelationViewer.Draw();
+            if (!_boreholeCorrelationViewer.IsOpen)
+            {
+                _boreholeCorrelationViewer.Dispose();
+                _boreholeCorrelationViewer = null;
+            }
+        }
+
+        // Draw 3D correlation viewer if open
+        if (_boreholeCorrelation3DViewer != null)
+        {
+            _boreholeCorrelation3DViewer.Draw();
+            if (!_boreholeCorrelation3DViewer.IsOpen)
+            {
+                _boreholeCorrelation3DViewer.Dispose();
+                _boreholeCorrelation3DViewer = null;
+            }
         }
     }
 
@@ -382,6 +407,21 @@ public class DatasetPanel : BasePanel
             else if (ImGui.IsItemHovered())
             {
                 ImGui.SetTooltip("Run individual geothermal simulations and create interpolated subsurface heat maps.");
+            }
+
+            // Borehole Log Correlation
+            bool hasMultipleBoreholes = group.Datasets.Count(d => d is BoreholeDataset) >= 2;
+            if (ImGui.MenuItem("Correlate Borehole Logs...", null, false, hasMultipleBoreholes))
+            {
+                OpenBoreholeCorrelationViewer(group);
+            }
+            if (ImGui.IsItemHovered() && !hasMultipleBoreholes)
+            {
+                ImGui.SetTooltip("This group must contain at least 2 borehole datasets for correlation.");
+            }
+            else if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Correlate lithology logs across multiple boreholes. Create stratigraphic correlations and 3D subsurface maps.");
             }
 
             ImGui.Separator();
@@ -698,6 +738,46 @@ public class DatasetPanel : BasePanel
         catch (Exception ex)
         {
             Util.Logger.LogError($"Failed to generate project report: {ex.Message}");
+        }
+    }
+
+    private void OpenBoreholeCorrelationViewer(DatasetGroup group)
+    {
+        try
+        {
+            // Close existing viewer if open
+            _boreholeCorrelationViewer?.Dispose();
+            _boreholeCorrelation3DViewer?.Dispose();
+
+            // Create new viewer
+            _boreholeCorrelationViewer = new BoreholeLogCorrelationViewer(group);
+
+            // Hook up the 3D view request
+            _boreholeCorrelationViewer.OnView3DRequested += (correlationData) =>
+            {
+                try
+                {
+                    var boreholes = group.Datasets
+                        .OfType<BoreholeDataset>()
+                        .ToList();
+
+                    _boreholeCorrelation3DViewer?.Dispose();
+                    _boreholeCorrelation3DViewer = new BoreholeCorrelation3DViewer(
+                        VeldridManager.GraphicsDevice,
+                        correlationData,
+                        boreholes);
+                }
+                catch (Exception ex)
+                {
+                    Util.Logger.LogError($"Failed to open 3D correlation view: {ex.Message}");
+                }
+            };
+
+            Util.Logger.Log($"[DatasetPanel] Opened borehole correlation viewer for group with {group.Datasets.Count(d => d is BoreholeDataset)} boreholes");
+        }
+        catch (Exception ex)
+        {
+            Util.Logger.LogError($"Failed to open borehole correlation viewer: {ex.Message}");
         }
     }
 }

@@ -484,6 +484,78 @@ public class ProjectManager
                 break;
             }
 
+            case BoreholeLogCorrelationDTO correlationDto:
+            {
+                var correlationDataset = new BoreholeLogCorrelationDataset(correlationDto.Name, correlationDto.FilePath)
+                {
+                    BoreholeOrder = correlationDto.BoreholeOrder ?? new List<string>(),
+                    Description = correlationDto.Description,
+                    Author = correlationDto.Author,
+                    CreatedDate = correlationDto.CreatedDate,
+                    ModifiedDate = correlationDto.ModifiedDate,
+                    DisplaySettings = correlationDto.DisplaySettings ?? new CorrelationDisplaySettings()
+                };
+
+                // Restore headers
+                if (correlationDto.Headers != null)
+                {
+                    foreach (var kvp in correlationDto.Headers)
+                    {
+                        correlationDataset.Headers[kvp.Key] = new BoreholeHeader
+                        {
+                            BoreholeID = kvp.Value.BoreholeID,
+                            DisplayName = kvp.Value.DisplayName,
+                            Coordinates = new System.Numerics.Vector2(kvp.Value.CoordinatesX, kvp.Value.CoordinatesY),
+                            Elevation = kvp.Value.Elevation,
+                            TotalDepth = kvp.Value.TotalDepth,
+                            PositionIndex = kvp.Value.PositionIndex,
+                            Field = kvp.Value.Field,
+                            CustomLabel = kvp.Value.CustomLabel
+                        };
+                    }
+                }
+
+                // Restore correlations
+                if (correlationDto.Correlations != null)
+                {
+                    foreach (var c in correlationDto.Correlations)
+                    {
+                        correlationDataset.Correlations.Add(new LithologyCorrelation
+                        {
+                            ID = c.ID,
+                            SourceLithologyID = c.SourceLithologyID,
+                            SourceBoreholeID = c.SourceBoreholeID,
+                            TargetLithologyID = c.TargetLithologyID,
+                            TargetBoreholeID = c.TargetBoreholeID,
+                            Confidence = c.Confidence,
+                            IsAutoCorrelated = c.IsAutoCorrelated,
+                            Color = new System.Numerics.Vector4(c.ColorR, c.ColorG, c.ColorB, c.ColorA),
+                            Notes = c.Notes,
+                            CreatedAt = c.CreatedAt
+                        });
+                    }
+                }
+
+                // Restore horizons
+                if (correlationDto.Horizons != null)
+                {
+                    foreach (var h in correlationDto.Horizons)
+                    {
+                        correlationDataset.Horizons.Add(new CorrelatedHorizon
+                        {
+                            ID = h.ID,
+                            Name = h.Name,
+                            LithologyType = h.LithologyType,
+                            Color = new System.Numerics.Vector4(h.ColorR, h.ColorG, h.ColorB, h.ColorA),
+                            LithologyUnits = h.LithologyUnits ?? new Dictionary<string, string>()
+                        });
+                    }
+                }
+
+                dataset = correlationDataset;
+                break;
+            }
+
             case Mesh3DDatasetDTO mesh3DDto:
                 var mesh3DDataset = new Mesh3DDataset(mesh3DDto.Name, mesh3DDto.FilePath)
                 {

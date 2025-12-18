@@ -204,6 +204,7 @@ public class DatasetDTOConverter : JsonConverter<DatasetDTO>
                         options),
                     nameof(PNMDataset) => JsonSerializer.Deserialize<PNMDatasetDTO>(rawText, options),
                     nameof(BoreholeDataset) => JsonSerializer.Deserialize<Data.Borehole.BoreholeDatasetDTO>(rawText, options),
+                    "BoreholeLogCorrelation" => JsonSerializer.Deserialize<Data.Borehole.BoreholeLogCorrelationDTO>(rawText, options),
                     nameof(SubsurfaceGISDataset) => JsonSerializer.Deserialize<SubsurfaceGISDatasetDTO>(rawText, options),
                     nameof(GISDataset) => JsonSerializer.Deserialize<GISDatasetDTO>(rawText, options),
                     nameof(TwoDGeologyDataset) => JsonSerializer.Deserialize<TwoDGeologyDatasetDTO>(rawText, options),
