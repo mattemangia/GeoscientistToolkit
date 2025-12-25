@@ -46,15 +46,26 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         private string _simulationStatus = "";
         private Task _simulationTask = null;
 
+        // 2D Viewer
+        private SlopeStability2DViewer _2dViewer = null;
+        private bool _show2DViewer = false;
+
         public SlopeStabilityTools(SlopeStabilityDataset dataset)
         {
             _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
+            _2dViewer = new SlopeStability2DViewer(_dataset);
         }
 
         public void Draw(Dataset dataset)
         {
             if (dataset is not SlopeStabilityDataset slopeDataset)
                 return;
+
+            // Render 2D viewer if open
+            if (_show2DViewer && _2dViewer != null)
+            {
+                _2dViewer.Render();
+            }
 
             // Tab bar
             string[] tabNames = new[] {
@@ -63,7 +74,8 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 "Parameters",
                 "Earthquakes",
                 "Blocks",
-                "Simulation"
+                "Simulation",
+                "Views"
             };
 
             if (ImGui.BeginTabBar("SlopeStabilityTabs"))
@@ -82,6 +94,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                             case 3: DrawEarthquakesTab(); break;
                             case 4: DrawBlocksTab(); break;
                             case 5: DrawSimulationTab(); break;
+                            case 6: DrawViewsTab(); break;
                         }
 
                         ImGui.EndTabItem();
@@ -884,6 +897,81 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             else
             {
                 _simulationStatus = "Setup is valid. Ready to run simulation.";
+            }
+        }
+
+        private void DrawViewsTab()
+        {
+            ImGui.Text("Visualization Options");
+            ImGui.Separator();
+
+            ImGui.TextWrapped("This panel provides access to different visualization modes for analyzing slope stability results.");
+
+            ImGui.Spacing();
+            ImGui.Spacing();
+
+            // 3D Viewer info
+            if (ImGui.CollapsingHeader("3D Viewer", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.TextWrapped("The 3D viewer shows the complete slope geometry with blocks, joint planes, and simulation results in three dimensions.");
+                ImGui.Text("The 3D viewer is always available in the main viewport.");
+            }
+
+            ImGui.Spacing();
+
+            // 2D Section Viewer
+            if (ImGui.CollapsingHeader("2D Section Viewer", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.TextWrapped("The 2D section viewer provides cross-sectional views through the slope, similar to professional software like RocFall and Slide.");
+
+                ImGui.Spacing();
+
+                ImGui.Text("Features:");
+                ImGui.BulletText("Multiple predefined section planes (along-strike, along-dip, plan view)");
+                ImGui.BulletText("Custom section plane definition");
+                ImGui.BulletText("Joint trace visualization");
+                ImGui.BulletText("Displacement vector display");
+                ImGui.BulletText("Color-coded stability factors");
+                ImGui.BulletText("Water table visualization");
+
+                ImGui.Spacing();
+                ImGui.Separator();
+
+                bool isEnabled = _dataset.Blocks.Count > 0;
+
+                if (!isEnabled)
+                {
+                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.5f, 0.0f, 1.0f));
+                    ImGui.Text("Generate blocks first to enable 2D section view");
+                    ImGui.PopStyleColor();
+                }
+
+                ImGui.BeginDisabled(!isEnabled);
+
+                if (ImGui.Button(_show2DViewer ? "Close 2D Section Viewer" : "Open 2D Section Viewer"))
+                {
+                    _show2DViewer = !_show2DViewer;
+                }
+
+                ImGui.EndDisabled();
+
+                if (_show2DViewer)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.0f, 1.0f), "(Active)");
+                }
+            }
+
+            ImGui.Spacing();
+
+            // Future viewers
+            if (ImGui.CollapsingHeader("Additional Views"))
+            {
+                ImGui.TextWrapped("Future visualization options may include:");
+                ImGui.BulletText("Stereonet analysis for joint orientation");
+                ImGui.BulletText("Time-series graphs for monitoring points");
+                ImGui.BulletText("Force chain visualization");
+                ImGui.BulletText("Principal stress trajectories");
             }
         }
     }

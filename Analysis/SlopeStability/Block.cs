@@ -114,48 +114,92 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             // Calculate mass
             Mass = Volume * Density;
 
-            // Calculate inertia tensor (simplified box approximation for performance)
+            // Calculate inertia tensor using tetrahedral decomposition
             CalculateInertiaTensor();
         }
 
         /// <summary>
-        /// Calculates the inertia tensor for the block.
-        /// Uses a simplified bounding box approximation for computational efficiency.
-        /// For more accuracy, use tetrahedral decomposition (not implemented for performance).
+        /// Calculates the inertia tensor for the block using tetrahedral decomposition.
+        /// This provides accurate inertia calculation for arbitrary polyhedra.
+        /// Uses the divergence theorem and parallel axis theorem.
         /// </summary>
         private void CalculateInertiaTensor()
         {
-            if (Vertices.Count == 0)
+            if (Vertices.Count == 0 || Faces.Count == 0)
             {
                 InertiaTensor = Matrix4x4.Identity;
                 return;
             }
 
-            // Calculate bounding box dimensions
-            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-            Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+            // Initialize inertia components (in local coordinate system at centroid)
+            float Ixx = 0.0f, Iyy = 0.0f, Izz = 0.0f;
+            float Ixy = 0.0f, Ixz = 0.0f, Iyz = 0.0f;
 
-            foreach (var v in Vertices)
+            // Decompose polyhedron into tetrahedra and sum inertia contributions
+            foreach (var face in Faces)
             {
-                min = Vector3.Min(min, v);
-                max = Vector3.Max(max, v);
+                if (face.Length < 3) continue;
+
+                // Triangulate the face (fan triangulation from first vertex)
+                for (int i = 1; i < face.Length - 1; i++)
+                {
+                    Vector3 v0 = Vertices[face[0]] - Centroid;
+                    Vector3 v1 = Vertices[face[i]] - Centroid;
+                    Vector3 v2 = Vertices[face[i + 1]] - Centroid;
+
+                    // Calculate signed volume of tetrahedron
+                    float tetraVolume = Vector3.Dot(v0, Vector3.Cross(v1, v2)) / 6.0f;
+
+                    // Calculate inertia tensor contribution from this tetrahedron
+                    // Using the formula for inertia of a tetrahedron with vertices at origin and v0, v1, v2
+
+                    // Inertia tensor components for tetrahedron (relative to origin)
+                    float Ixx_tetra = (v0.Y * v0.Y + v0.Y * v1.Y + v1.Y * v1.Y + v0.Y * v2.Y + v1.Y * v2.Y + v2.Y * v2.Y +
+                                       v0.Z * v0.Z + v0.Z * v1.Z + v1.Z * v1.Z + v0.Z * v2.Z + v1.Z * v2.Z + v2.Z * v2.Z) * tetraVolume / 10.0f;
+
+                    float Iyy_tetra = (v0.X * v0.X + v0.X * v1.X + v1.X * v1.X + v0.X * v2.X + v1.X * v2.X + v2.X * v2.X +
+                                       v0.Z * v0.Z + v0.Z * v1.Z + v1.Z * v1.Z + v0.Z * v2.Z + v1.Z * v2.Z + v2.Z * v2.Z) * tetraVolume / 10.0f;
+
+                    float Izz_tetra = (v0.X * v0.X + v0.X * v1.X + v1.X * v1.X + v0.X * v2.X + v1.X * v2.X + v2.X * v2.X +
+                                       v0.Y * v0.Y + v0.Y * v1.Y + v1.Y * v1.Y + v0.Y * v2.Y + v1.Y * v2.Y + v2.Y * v2.Y) * tetraVolume / 10.0f;
+
+                    float Ixy_tetra = -(v0.X * v0.Y + v1.X * v1.Y + v2.X * v2.Y +
+                                        (v0.X * v1.Y + v1.X * v0.Y + v0.X * v2.Y + v2.X * v0.Y + v1.X * v2.Y + v2.X * v1.Y) / 2.0f) * tetraVolume / 10.0f;
+
+                    float Ixz_tetra = -(v0.X * v0.Z + v1.X * v1.Z + v2.X * v2.Z +
+                                        (v0.X * v1.Z + v1.X * v0.Z + v0.X * v2.Z + v2.X * v0.Z + v1.X * v2.Z + v2.X * v1.Z) / 2.0f) * tetraVolume / 10.0f;
+
+                    float Iyz_tetra = -(v0.Y * v0.Z + v1.Y * v1.Z + v2.Y * v2.Z +
+                                        (v0.Y * v1.Z + v1.Y * v0.Z + v0.Y * v2.Z + v2.Y * v0.Z + v1.Y * v2.Z + v2.Y * v1.Z) / 2.0f) * tetraVolume / 10.0f;
+
+                    // Accumulate contributions
+                    Ixx += Ixx_tetra;
+                    Iyy += Iyy_tetra;
+                    Izz += Izz_tetra;
+                    Ixy += Ixy_tetra;
+                    Ixz += Ixz_tetra;
+                    Iyz += Iyz_tetra;
+                }
             }
 
-            Vector3 size = max - min;
-            float dx = size.X;
-            float dy = size.Y;
-            float dz = size.Z;
+            // Scale by density to convert from volume moments to mass moments
+            if (Volume > 1e-10f)
+            {
+                float scale = Density;
+                Ixx *= scale;
+                Iyy *= scale;
+                Izz *= scale;
+                Ixy *= scale;
+                Ixz *= scale;
+                Iyz *= scale;
+            }
 
-            // Inertia tensor for a box with mass M and dimensions (dx, dy, dz)
-            float Ixx = Mass * (dy * dy + dz * dz) / 12.0f;
-            float Iyy = Mass * (dx * dx + dz * dz) / 12.0f;
-            float Izz = Mass * (dx * dx + dy * dy) / 12.0f;
-
+            // Construct the symmetric inertia tensor matrix
             InertiaTensor = new Matrix4x4(
-                Ixx, 0, 0, 0,
-                0, Iyy, 0, 0,
-                0, 0, Izz, 0,
-                0, 0, 0, 1
+                Ixx, Ixy, Ixz, 0,
+                Ixy, Iyy, Iyz, 0,
+                Ixz, Iyz, Izz, 0,
+                0,   0,   0,   1
             );
         }
 

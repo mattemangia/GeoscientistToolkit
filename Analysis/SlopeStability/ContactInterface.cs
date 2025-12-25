@@ -41,6 +41,12 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         public float TensileStrength { get; set; }
         public float DilationAngle { get; set; }
 
+        // Water pressure parameters
+        public float PorePressure { get; set; }     // u (Pa) - fluid pressure at contact
+        public float WaterElevation { get; set; }   // Water table elevation at this contact
+        public bool IsSubmerged { get; set; }       // Whether contact is below water table
+        public float EffectiveNormalStress { get; set; }  // σ'_n = σ_n - u
+
         // Contact history (for incremental calculations)
         public Vector3 ShearDisplacementIncrement { get; set; }
         public Vector3 AccumulatedShearDisplacement { get; set; }
@@ -73,6 +79,10 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             Cohesion = 0.0f;
             TensileStrength = 0.0f;
             DilationAngle = 0.0f;
+            PorePressure = 0.0f;
+            WaterElevation = 0.0f;
+            IsSubmerged = false;
+            EffectiveNormalStress = 0.0f;
             ShearDisplacementIncrement = Vector3.Zero;
             AccumulatedShearDisplacement = Vector3.Zero;
             HasSlipped = false;
@@ -114,6 +124,23 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
             NormalForce = normalForceMagnitude * ContactNormal;
 
+            // Calculate effective normal stress accounting for pore water pressure
+            // Effective stress principle: σ'_n = σ_n - u
+            // This reduces frictional resistance when joints are saturated
+            float effectiveNormalForceMagnitude = normalForceMagnitude;
+
+            if (IsSubmerged && PorePressure > 0.0f)
+            {
+                // Reduce normal force by pore pressure
+                float pressureForce = PorePressure * ContactArea;
+                effectiveNormalForceMagnitude = Math.Max(0.0f, normalForceMagnitude - pressureForce);
+                EffectiveNormalStress = effectiveNormalForceMagnitude / Math.Max(ContactArea, 1e-10f);
+            }
+            else
+            {
+                EffectiveNormalStress = normalForceMagnitude / Math.Max(ContactArea, 1e-10f);
+            }
+
             // Shear force calculation (incremental)
             // Accumulate shear displacement
             AccumulatedShearDisplacement += ShearDisplacementIncrement;
@@ -121,8 +148,9 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             // Calculate trial shear force
             Vector3 trialShearForce = -ShearStiffness * ContactArea * AccumulatedShearDisplacement;
 
-            // Mohr-Coulomb criterion: τ_max = c + σ_n * tan(φ)
-            float maxShearForce = Cohesion * ContactArea + normalForceMagnitude * FrictionCoefficient;
+            // Mohr-Coulomb criterion: τ_max = c + σ'_n * tan(φ)
+            // Note: Uses EFFECTIVE normal stress when water is present
+            float maxShearForce = Cohesion * ContactArea + effectiveNormalForceMagnitude * FrictionCoefficient;
 
             float trialShearMagnitude = trialShearForce.Length();
 
@@ -157,6 +185,45 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 Vector3.Dot(relativeVelocity, ContactNormal) * ContactNormal;
 
             ShearDisplacementIncrement = relativeVelocityTangential * deltaTime;
+        }
+
+        /// <summary>
+        /// Calculates pore water pressure at the contact point based on water table elevation.
+        /// Uses hydrostatic pressure: u = γ_w * h, where h is depth below water table.
+        /// </summary>
+        /// <param name="waterTableZ">Elevation of water table (m)</param>
+        /// <param name="waterDensity">Density of water (kg/m³), default 1000</param>
+        public void CalculatePorePressure(float waterTableZ, float waterDensity = 1000.0f)
+        {
+            WaterElevation = waterTableZ;
+
+            // Check if contact is below water table
+            if (ContactPoint.Z < waterTableZ)
+            {
+                IsSubmerged = true;
+
+                // Calculate depth below water table
+                float depth = waterTableZ - ContactPoint.Z;
+
+                // Hydrostatic pressure: u = ρ_w * g * h
+                float gravity = 9.81f;  // m/s²
+                PorePressure = waterDensity * gravity * depth;
+            }
+            else
+            {
+                IsSubmerged = false;
+                PorePressure = 0.0f;
+            }
+        }
+
+        /// <summary>
+        /// Sets a custom pore pressure value directly (for imported data or special conditions).
+        /// </summary>
+        /// <param name="pressure">Pore pressure in Pascals</param>
+        public void SetPorePressure(float pressure)
+        {
+            PorePressure = Math.Max(0.0f, pressure);
+            IsSubmerged = PorePressure > 0.0f;
         }
 
         /// <summary>

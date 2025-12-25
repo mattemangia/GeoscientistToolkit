@@ -614,6 +614,12 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                     // Update shear displacement
                     contact.UpdateShearDisplacement(relVel, deltaTime);
 
+                    // Calculate pore water pressure if fluid pressure is enabled
+                    if (_parameters.IncludeFluidPressure)
+                    {
+                        contact.CalculatePorePressure(_parameters.WaterTableZ, _parameters.WaterDensity);
+                    }
+
                     // Calculate contact forces
                     contact.CalculateContactForces(deltaTime);
 
@@ -641,6 +647,13 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
                     Vector3 relVel = blockB.Velocity - blockA.Velocity;
                     contact.UpdateShearDisplacement(relVel, deltaTime);
+
+                    // Calculate pore water pressure if fluid pressure is enabled
+                    if (_parameters.IncludeFluidPressure)
+                    {
+                        contact.CalculatePorePressure(_parameters.WaterTableZ, _parameters.WaterDensity);
+                    }
+
                     contact.CalculateContactForces(deltaTime);
 
                     blockA.ApplyForce(-contact.TotalForce, contact.ContactPoint);

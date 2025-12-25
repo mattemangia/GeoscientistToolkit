@@ -14,7 +14,9 @@ Complete 3D slope stability analysis system based on Discrete Element Method (DE
 - **Failure Criteria**: Mohr-Coulomb, Hoek-Brown, Drucker-Prager, Griffith, Von Mises, and Tresca
 - **Earthquake Loading**: Realistic seismic wave propagation with epicenter and intensity control
 - **Physics Simulation**: SIMD-optimized multithreaded DEM with ARM NEON support
-- **Advanced Visualization**: 3D viewer with color mapping, displacement vectors, and animation
+- **Advanced Visualization**:
+  - 3D viewer with color mapping, displacement vectors, and animation
+  - 2D section viewer with cross-sectional views (along-strike, along-dip, plan view, custom)
 - **GeoScript Integration**: Full programmatic control via scripting language
 - **Import/Export**: Import external simulation results and export in multiple formats
 
@@ -72,8 +74,35 @@ Based on 3DEC methodology:
 5. **Configure Simulation**: Set time parameters, boundary conditions, damping
 6. **Optional - Add Earthquake**: Define seismic loading with magnitude and epicenter
 7. **Run Simulation**: Execute DEM simulation with progress monitoring
-8. **Visualize Results**: View displacement, velocity, failure zones with color mapping
+8. **Visualize Results**:
+   - **3D View**: Complete slope geometry with blocks, joints, and simulation results
+   - **2D Section View**: Cross-sectional views for detailed analysis
 9. **Export Results**: Save to CSV, VTK, or JSON for further analysis
+
+### 2D Section Viewer
+
+The 2D section viewer provides professional cross-sectional analysis similar to RocFall and Slide:
+
+**Features:**
+- Multiple predefined section planes:
+  - Along-Strike: Perpendicular to slope dip direction
+  - Along-Dip: Parallel to slope dip direction
+  - Plan View: Horizontal section through slope
+  - Custom: User-defined orientation
+- Joint trace visualization showing discontinuity intersections with section plane
+- Displacement vector display projected onto section
+- Color mapping (displacement, velocity, material, safety factor, stress)
+- Water table visualization
+- Interactive navigation (pan, zoom)
+- Grid and axis display
+
+**Usage:**
+1. Navigate to the "Views" tab in the tools panel
+2. Click "Open 2D Section Viewer"
+3. Select section plane from dropdown
+4. Configure display options (show blocks, joints, vectors, etc.)
+5. Use mouse wheel to zoom, right-click to pan
+6. Edit custom section plane with origin and normal vector
 
 ### GeoScript Examples
 
