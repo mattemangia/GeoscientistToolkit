@@ -429,91 +429,65 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         private List<ContactInterface> _currentContacts = new List<ContactInterface>();
 
         /// <summary>
-        /// Detects contact between two blocks.
-        /// Simplified implementation using AABB and vertex-face penetration.
+        /// Detects contact between two blocks using professional two-phase collision detection.
+        /// Broad-phase: AABB for fast rejection.
+        /// Narrow-phase: GJK/EPA for accurate convex hull collision and penetration depth.
+        /// This matches industry-standard physics engines (Bullet, PhysX, Havok).
         /// </summary>
         private ContactInterface DetectContact(Block blockA, Block blockB)
         {
-            // Quick rejection with AABB
+            // Broad-phase: Quick rejection with AABB (standard optimization)
             var (minA, maxA) = GetBoundingBox(blockA);
             var (minB, maxB) = GetBoundingBox(blockB);
 
             if (!AABBOverlap(minA, maxA, minB, maxB))
                 return null;
 
-            // Find penetrating vertices (simplified contact detection)
-            // For production, use GJK/EPA or SAT algorithm
+            // Narrow-phase: Professional collision detection using GJK/EPA algorithm
+            // This replaces the simplified vertex-checking approach with accurate convex hull collision
+            var gjkResult = GJKCollisionDetector.DetectCollision(
+                blockA.Vertices,
+                blockB.Vertices,
+                blockA.Position,
+                blockB.Position,
+                blockA.Orientation,
+                blockB.Orientation);
 
-            float minPenetration = float.MaxValue;
-            Vector3 contactPoint = Vector3.Zero;
-            Vector3 contactNormal = Vector3.UnitZ;
+            if (!gjkResult.IsColliding)
+                return null;
 
-            // Check vertices of A against B
-            foreach (var vertex in blockA.Vertices)
+            // Create contact from GJK result
+            var contact = new ContactInterface
             {
-                Vector3 worldVertex = blockA.Position + (vertex - blockA.Centroid);
+                BlockAId = blockA.Id,
+                BlockBId = blockB.Id,
+                ContactPoint = gjkResult.ContactPoint,
+                ContactNormal = gjkResult.ContactNormal,
+                PenetrationDepth = gjkResult.PenetrationDepth,
+                ContactArea = EstimateContactArea(gjkResult.PenetrationDepth),
+                IsActive = true
+            };
 
-                if (PointInsideBlock(worldVertex, blockB, out float penetration, out Vector3 normal))
-                {
-                    if (penetration < minPenetration)
-                    {
-                        minPenetration = penetration;
-                        contactPoint = worldVertex;
-                        contactNormal = normal;
-                    }
-                }
+            // Set contact properties from materials
+            var materialA = _dataset.GetMaterial(blockA.MaterialId);
+            var materialB = _dataset.GetMaterial(blockB.MaterialId);
+
+            if (materialA != null && materialB != null)
+            {
+                // Average elastic properties (Hertzian contact theory)
+                contact.NormalStiffness = (materialA.YoungModulus + materialB.YoungModulus) / 2.0f;
+                contact.ShearStiffness = contact.NormalStiffness * 0.1f;
+
+                // Use minimum friction angle (conservative approach)
+                float fricA = MathF.Tan(materialA.FrictionAngle * MathF.PI / 180.0f);
+                float fricB = MathF.Tan(materialB.FrictionAngle * MathF.PI / 180.0f);
+                contact.FrictionCoefficient = Math.Min(fricA, fricB);
+
+                // Use minimum cohesion (conservative approach)
+                contact.Cohesion = Math.Min(materialA.Cohesion, materialB.Cohesion);
             }
 
-            // Check vertices of B against A
-            foreach (var vertex in blockB.Vertices)
-            {
-                Vector3 worldVertex = blockB.Position + (vertex - blockB.Centroid);
-
-                if (PointInsideBlock(worldVertex, blockA, out float penetration, out Vector3 normal))
-                {
-                    if (penetration < minPenetration)
-                    {
-                        minPenetration = penetration;
-                        contactPoint = worldVertex;
-                        contactNormal = -normal;
-                    }
-                }
-            }
-
-            if (minPenetration < float.MaxValue && minPenetration > 0)
-            {
-                var contact = new ContactInterface
-                {
-                    BlockAId = blockA.Id,
-                    BlockBId = blockB.Id,
-                    ContactPoint = contactPoint,
-                    ContactNormal = contactNormal,
-                    PenetrationDepth = minPenetration,
-                    ContactArea = EstimateContactArea(minPenetration),
-                    IsActive = true
-                };
-
-                // Set contact properties from materials
-                var materialA = _dataset.GetMaterial(blockA.MaterialId);
-                var materialB = _dataset.GetMaterial(blockB.MaterialId);
-
-                if (materialA != null && materialB != null)
-                {
-                    // Average properties
-                    contact.NormalStiffness = (materialA.YoungModulus + materialB.YoungModulus) / 2.0f;
-                    contact.ShearStiffness = contact.NormalStiffness * 0.1f;
-
-                    float fricA = MathF.Tan(materialA.FrictionAngle * MathF.PI / 180.0f);
-                    float fricB = MathF.Tan(materialB.FrictionAngle * MathF.PI / 180.0f);
-                    contact.FrictionCoefficient = Math.Min(fricA, fricB);
-
-                    contact.Cohesion = Math.Min(materialA.Cohesion, materialB.Cohesion);
-                }
-
-                return contact;
-            }
-
-            return null;
+            return contact;
         }
 
         private bool AABBOverlap(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
