@@ -23,6 +23,7 @@ using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Tools;
 using ImGuiNET;
 using GeoscientistToolkit.Analysis.Geothermal;
+using GeoscientistToolkit.Analysis.SlopeStability;
 
 namespace GeoscientistToolkit.UI;
 
@@ -85,6 +86,9 @@ CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
         // NeRF Datasets
         NerfDataset nerfDataset => new NerfViewer(nerfDataset),
 
+        // Slope Stability Dataset
+        SlopeStabilityDataset slopeDataset => new SlopeStabilityViewer(slopeDataset),
+
         // Dataset groups cannot be opened in a viewer
         DatasetGroup => throw new InvalidOperationException(
             "Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
@@ -135,6 +139,7 @@ public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset datase
         AudioDataset => new AudioDatasetProperties(),
         TextDataset => new TextPropertiesRenderer(),
         NerfDataset => new NerfPropertiesRenderer(),
+        SlopeStabilityDataset => new DefaultPropertiesRenderer(),
         _ => new DefaultPropertiesRenderer()
     };
 }
@@ -143,6 +148,9 @@ public static IDatasetTools CreateTools(Dataset dataset)
 {
     return dataset switch
     {
+        // Slope Stability
+        SlopeStabilityDataset slopeDataset => new SlopeStabilityTools(slopeDataset),
+
         // --- MODIFIED: Use the composite tool for all CT-related tools ---
         CtImageStackDataset => new CtImageStackCompositeTool(),
         StreamingCtVolumeDataset sds when sds.EditablePartner != null => new CtImageStackCompositeTool(),

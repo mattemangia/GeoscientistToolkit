@@ -25,7 +25,8 @@ public enum DatasetType
     Video,
     Audio,
     Text,
-    Nerf
+    Nerf,
+    SlopeStability
 }
 
 public abstract class Dataset
