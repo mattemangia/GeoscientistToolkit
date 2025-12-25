@@ -172,8 +172,14 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 case FailureCriterionType.DruckerPrager:
                     return EvaluateDruckerPrager(sigma1, sigma2, sigma3);
 
+                case FailureCriterionType.Griffith:
+                    return EvaluateGriffith(sigma1, sigma3);
+
                 case FailureCriterionType.VonMises:
                     return EvaluateVonMises(sigma1, sigma2, sigma3);
+
+                case FailureCriterionType.Tresca:
+                    return EvaluateTresca(sigma1, sigma2, sigma3);
 
                 default:
                     return 0.0f;
@@ -262,6 +268,88 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                                                  (s2 - s3) * (s2 - s3) +
                                                  (s3 - s1) * (s3 - s1)));
             return vonMises / yieldStress;
+        }
+
+        /// <summary>
+        /// Griffith criterion for brittle tensile failure.
+        /// Critical for rocks with low tensile strength.
+        /// Parabolic envelope: (σ1 - σ3)² = 8σt(σ1 + σ3) for compression
+        /// σ1 = σt for pure tension
+        /// </summary>
+        private float EvaluateGriffith(float s1, float s3)
+        {
+            float st = TensileStrength * (1.0f - CurrentDamage * (ApplyDamageToStrength ? 1.0f : 0.0f));
+
+            // Pure tension failure
+            if (s1 > 0 || s3 > 0)
+            {
+                float maxTension = Math.Max(s1, s3);
+                if (maxTension > st)
+                    return maxTension / st;
+            }
+
+            // Compression with potential tensile cracking
+            // Griffith parabolic envelope
+            if (s3 < 0)  // Compression (negative convention)
+            {
+                float sigma1Abs = Math.Abs(s1);
+                float sigma3Abs = Math.Abs(s3);
+
+                // Check if in tension zone
+                if (s1 + 3.0f * s3 > 0)
+                {
+                    // Tensile failure mode
+                    return Math.Max(s1, s3) / st;
+                }
+                else
+                {
+                    // Compression-shear failure mode
+                    // (σ1 - σ3)² = 8σt(σ1 + σ3)
+                    float leftSide = (s1 - s3) * (s1 - s3);
+                    float rightSide = 8.0f * st * (s1 + s3);
+
+                    if (rightSide > 0)
+                    {
+                        return leftSide / rightSide;
+                    }
+                }
+            }
+
+            return 0.0f;
+        }
+
+        /// <summary>
+        /// Tresca criterion (maximum shear stress criterion).
+        /// Useful for soil mechanics and some geotechnical applications.
+        /// Failure occurs when: τmax = (σ1 - σ3)/2 ≥ τyield
+        /// where τyield = c (cohesion) for cohesive soils
+        /// </summary>
+        private float EvaluateTresca(float s1, float s2, float s3)
+        {
+            // Sort principal stresses to ensure σ1 ≥ σ2 ≥ σ3
+            float sigmaMax = Math.Max(s1, Math.Max(s2, s3));
+            float sigmaMin = Math.Min(s1, Math.Min(s2, s3));
+
+            // Maximum shear stress
+            float tauMax = (sigmaMax - sigmaMin) / 2.0f;
+
+            // Yield shear stress (using cohesion as approximation)
+            float c = Cohesion * (1.0f - CurrentDamage * (ApplyDamageToStrength ? 1.0f : 0.0f));
+            float tauYield = c;
+
+            // For frictional materials, add friction contribution
+            if (FrictionAngle > 0.01f)
+            {
+                // Modified Tresca including friction effect
+                float phi = FrictionAngle * MathF.PI / 180.0f;
+                float meanStress = (s1 + s2 + s3) / 3.0f;
+                tauYield = c + meanStress * MathF.Tan(phi) / 2.0f;
+            }
+
+            if (tauYield < 1e-6f)
+                tauYield = 1e6f;  // Default yield stress if not specified
+
+            return tauMax / tauYield;
         }
 
         /// <summary>

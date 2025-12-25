@@ -297,6 +297,10 @@ public static class CommandRegistry
             new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSetMaterialCommand(),
             new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSetAngleCommand(),
             new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeAddEarthquakeCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSetWaterCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeFilterBlocksCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeTrackBlocksCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeCalculateFOSCommand(),
             new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSimulateCommand(),
             new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeExportCommand()
         };
