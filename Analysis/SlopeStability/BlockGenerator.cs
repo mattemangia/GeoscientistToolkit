@@ -494,6 +494,12 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                     continue;
                 }
 
+                // Remove very large blocks
+                if (_settings.RemoveLargeBlocks && block.Volume > _settings.MaximumBlockVolume)
+                {
+                    continue;
+                }
+
                 // Check for degenerate geometry
                 if (block.Vertices.Count < 4 || block.Faces.Count < 4)
                 {

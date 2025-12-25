@@ -197,7 +197,9 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         public int NumVoronoiSeeds { get; set; }
         public bool RespectMeshBoundaries { get; set; }
         public float MinimumBlockVolume { get; set; }      // m³
+        public float MaximumBlockVolume { get; set; }      // m³
         public bool RemoveSmallBlocks { get; set; }
+        public bool RemoveLargeBlocks { get; set; }
         public bool MergeSliverBlocks { get; set; }
 
         public BlockGenerationSettings()
@@ -208,7 +210,9 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             NumVoronoiSeeds = 100;
             RespectMeshBoundaries = true;
             MinimumBlockVolume = 0.001f;  // 1 liter
+            MaximumBlockVolume = 1000.0f; // 1000 m³
             RemoveSmallBlocks = true;
+            RemoveLargeBlocks = false;
             MergeSliverBlocks = true;
         }
     }

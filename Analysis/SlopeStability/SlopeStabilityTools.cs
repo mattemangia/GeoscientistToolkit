@@ -678,15 +678,58 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
                 var settings = _dataset.BlockGenSettings;
 
+                // Quality/Coarseness presets for quick testing
+                ImGui.Text("Quality Preset:");
+                ImGui.SameLine();
+                if (ImGui.Button("Very Coarse (Fast)"))
+                {
+                    settings.TargetBlockSize = 5.0f;
+                    settings.MinimumBlockVolume = 10.0f;
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Coarse"))
+                {
+                    settings.TargetBlockSize = 3.0f;
+                    settings.MinimumBlockVolume = 2.0f;
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Medium"))
+                {
+                    settings.TargetBlockSize = 1.5f;
+                    settings.MinimumBlockVolume = 0.5f;
+                }
+                if (ImGui.Button("Fine"))
+                {
+                    settings.TargetBlockSize = 1.0f;
+                    settings.MinimumBlockVolume = 0.1f;
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Very Fine (Slow)"))
+                {
+                    settings.TargetBlockSize = 0.5f;
+                    settings.MinimumBlockVolume = 0.01f;
+                }
+
+                ImGui.Separator();
+
                 float targetSize = settings.TargetBlockSize;
                 if (ImGui.InputFloat("Target Block Size (m)", ref targetSize))
                     settings.TargetBlockSize = Math.Max(targetSize, 0.1f);
+
+                ImGui.TextWrapped("Tip: Use 'Very Coarse' or 'Coarse' for quick testing and debugging");
+
+                ImGui.Separator();
 
                 float minVolume = settings.MinimumBlockVolume;
                 if (ImGui.InputFloat("Minimum Volume (m³)", ref minVolume))
                     settings.MinimumBlockVolume = Math.Max(minVolume, 0.0001f);
 
+                float maxVolume = settings.MaximumBlockVolume;
+                if (ImGui.InputFloat("Maximum Volume (m³)", ref maxVolume))
+                    settings.MaximumBlockVolume = Math.Max(maxVolume, minVolume);
+
                 ImGui.Checkbox("Remove Small Blocks", ref settings.RemoveSmallBlocks);
+                ImGui.Checkbox("Remove Large Blocks", ref settings.RemoveLargeBlocks);
                 ImGui.Checkbox("Merge Sliver Blocks", ref settings.MergeSliverBlocks);
 
                 if (ImGui.Button("Generate") && !string.IsNullOrEmpty(_meshPath))
@@ -749,6 +792,68 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
                 ImGui.Columns(1);
                 ImGui.EndChild();
+            }
+
+            ImGui.Separator();
+
+            // Block filtering section
+            if (ImGui.CollapsingHeader("Filter Blocks"))
+            {
+                ImGui.TextWrapped("Clean up the mesh by removing unwanted blocks before simulation to prevent messy results.");
+
+                ImGui.Spacing();
+
+                // Show statistics first
+                if (_dataset.Blocks.Count > 0 && ImGui.Button("Show Block Statistics"))
+                {
+                    var stats = BlockFilter.GetStatistics(_dataset.Blocks);
+                    Console.WriteLine(stats.GetSummary());
+                    _simulationStatus = stats.GetSummary();
+                }
+
+                ImGui.Spacing();
+                ImGui.Separator();
+
+                // Quick filters
+                ImGui.Text("Quick Filters:");
+
+                if (ImGui.Button("Remove Small Blocks (<0.001 m³)"))
+                {
+                    _dataset.Blocks = BlockFilter.FilterByVolume(_dataset.Blocks, 0.001f, float.MaxValue, true, false);
+                }
+                ImGui.SameLine();
+
+                if (ImGui.Button("Remove Large Blocks (>100 m³)"))
+                {
+                    _dataset.Blocks = BlockFilter.FilterByVolume(_dataset.Blocks, 0.0f, 100.0f, false, true);
+                }
+
+                if (ImGui.Button("Remove Slivers (Aspect Ratio >10)"))
+                {
+                    _dataset.Blocks = BlockFilter.FilterByAspectRatio(_dataset.Blocks, 10.0f);
+                }
+                ImGui.SameLine();
+
+                if (ImGui.Button("Remove Degenerate Blocks"))
+                {
+                    _dataset.Blocks = BlockFilter.FilterDegenerateGeometry(_dataset.Blocks);
+                }
+
+                ImGui.Spacing();
+                ImGui.Separator();
+
+                // Custom filter
+                ImGui.Text("Custom Volume Filter:");
+
+                float filterMinVol = 0.001f;
+                float filterMaxVol = 1000.0f;
+                ImGui.InputFloat("Min Volume (m³)##filter", ref filterMinVol);
+                ImGui.InputFloat("Max Volume (m³)##filter", ref filterMaxVol);
+
+                if (ImGui.Button("Apply Custom Filter"))
+                {
+                    _dataset.Blocks = BlockFilter.FilterByVolume(_dataset.Blocks, filterMinVol, filterMaxVol, true, true);
+                }
             }
         }
 
