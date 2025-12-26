@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.UI.Interfaces;
@@ -49,6 +50,8 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         // 2D Viewer
         private SlopeStability2DViewer _2dViewer = null;
         private bool _show2DViewer = false;
+        private float _sectionViewZoom = 1.0f;
+        private Vector2 _sectionViewPan = Vector2.Zero;
 
         public SlopeStabilityTools(SlopeStabilityDataset dataset)
         {
@@ -64,7 +67,13 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             // Render 2D viewer if open
             if (_show2DViewer && _2dViewer != null)
             {
-                _2dViewer.Render();
+                if (ImGui.Begin("2D Section View", ref _show2DViewer))
+                {
+                    _2dViewer.DrawToolbarControls();
+                    ImGui.Separator();
+                    _2dViewer.DrawContent(ref _sectionViewZoom, ref _sectionViewPan);
+                }
+                ImGui.End();
             }
 
             // Tab bar
@@ -111,7 +120,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             ImGui.Separator();
 
             // List of joint sets
-            if (ImGui.BeginChild("JointSetsList", new Vector2(200, 0), true))
+            if (ImGui.BeginChild("JointSetsList", new Vector2(200, 0), ImGuiChildFlags.Border))
             {
                 for (int i = 0; i < _dataset.JointSets.Count; i++)
                 {
@@ -130,7 +139,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             ImGui.SameLine();
 
             // Joint set editor
-            if (ImGui.BeginChild("JointSetEditor"))
+            if (ImGui.BeginChild("JointSetEditor", Vector2.Zero, ImGuiChildFlags.Border))
             {
                 if (ImGui.Button("Add New Joint Set"))
                 {
@@ -149,7 +158,11 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
                     ImGui.Separator();
 
-                    ImGui.InputText("Name", ref jointSet.Name, 100);
+                    var jointSetName = jointSet.Name;
+                    if (ImGui.InputText("Name", ref jointSetName, 100))
+                    {
+                        jointSet.Name = jointSetName;
+                    }
 
                     // Orientation
                     if (ImGui.TreeNode("Orientation"))
@@ -251,7 +264,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             ImGui.Separator();
 
             // List of materials
-            if (ImGui.BeginChild("MaterialsList", new Vector2(200, 0), true))
+            if (ImGui.BeginChild("MaterialsList", new Vector2(200, 0), ImGuiChildFlags.Border))
             {
                 for (int i = 0; i < _dataset.Materials.Count; i++)
                 {
@@ -270,7 +283,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             ImGui.SameLine();
 
             // Material editor
-            if (ImGui.BeginChild("MaterialEditor"))
+            if (ImGui.BeginChild("MaterialEditor", Vector2.Zero, ImGuiChildFlags.Border))
             {
                 if (ImGui.Button("Add New Material"))
                 {
@@ -309,7 +322,11 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
                     ImGui.Separator();
 
-                    ImGui.InputText("Name", ref material.Name, 100);
+                    var materialName = material.Name;
+                    if (ImGui.InputText("Name", ref materialName, 100))
+                    {
+                        material.Name = materialName;
+                    }
 
                     // Physical properties
                     if (ImGui.TreeNode("Physical Properties"))
@@ -389,8 +406,17 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                         if (ImGui.Combo("Failure Criterion", ref failureCrit, failureCriteria, failureCriteria.Length))
                             material.ConstitutiveModel.FailureCriterion = (FailureCriterionType)failureCrit;
 
-                        ImGui.Checkbox("Enable Plasticity", ref material.ConstitutiveModel.EnablePlasticity);
-                        ImGui.Checkbox("Enable Brittle Failure", ref material.ConstitutiveModel.EnableBrittleFailure);
+                        var enablePlasticity = material.ConstitutiveModel.EnablePlasticity;
+                        if (ImGui.Checkbox("Enable Plasticity", ref enablePlasticity))
+                        {
+                            material.ConstitutiveModel.EnablePlasticity = enablePlasticity;
+                        }
+
+                        var enableBrittleFailure = material.ConstitutiveModel.EnableBrittleFailure;
+                        if (ImGui.Checkbox("Enable Brittle Failure", ref enableBrittleFailure))
+                        {
+                            material.ConstitutiveModel.EnableBrittleFailure = enableBrittleFailure;
+                        }
 
                         ImGui.TreePop();
                     }
@@ -436,7 +462,11 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             // Gravity and Slope Angle
             if (ImGui.CollapsingHeader("Gravity & Slope Angle", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                ImGui.Checkbox("Use Custom Gravity Direction", ref param.UseCustomGravityDirection);
+                var useCustomGravity = param.UseCustomGravityDirection;
+                if (ImGui.Checkbox("Use Custom Gravity Direction", ref useCustomGravity))
+                {
+                    param.UseCustomGravityDirection = useCustomGravity;
+                }
 
                 if (param.UseCustomGravityDirection)
                 {
@@ -475,7 +505,11 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 if (ImGui.SliderFloat("Local Damping", ref localDamping, 0.0f, 1.0f))
                     param.LocalDamping = localDamping;
 
-                ImGui.Checkbox("Adaptive Damping", ref param.UseAdaptiveDamping);
+                var useAdaptiveDamping = param.UseAdaptiveDamping;
+                if (ImGui.Checkbox("Adaptive Damping", ref useAdaptiveDamping))
+                {
+                    param.UseAdaptiveDamping = useAdaptiveDamping;
+                }
 
                 float viscousDamping = param.ViscousDamping;
                 if (ImGui.InputFloat("Viscous Damping", ref viscousDamping))
@@ -507,7 +541,11 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             // Advanced options
             if (ImGui.CollapsingHeader("Advanced Options"))
             {
-                ImGui.Checkbox("Use Multithreading", ref param.UseMultithreading);
+                var useMultithreading = param.UseMultithreading;
+                if (ImGui.Checkbox("Use Multithreading", ref useMultithreading))
+                {
+                    param.UseMultithreading = useMultithreading;
+                }
 
                 if (param.UseMultithreading)
                 {
@@ -516,9 +554,23 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                         param.NumThreads = Math.Max(numThreads, 0);
                 }
 
-                ImGui.Checkbox("Use SIMD", ref param.UseSIMD);
-                ImGui.Checkbox("Include Rotation", ref param.IncludeRotation);
-                ImGui.Checkbox("Include Fluid Pressure", ref param.IncludeFluidPressure);
+                var useSimd = param.UseSIMD;
+                if (ImGui.Checkbox("Use SIMD", ref useSimd))
+                {
+                    param.UseSIMD = useSimd;
+                }
+
+                var includeRotation = param.IncludeRotation;
+                if (ImGui.Checkbox("Include Rotation", ref includeRotation))
+                {
+                    param.IncludeRotation = includeRotation;
+                }
+
+                var includeFluidPressure = param.IncludeFluidPressure;
+                if (ImGui.Checkbox("Include Fluid Pressure", ref includeFluidPressure))
+                {
+                    param.IncludeFluidPressure = includeFluidPressure;
+                }
 
                 if (param.IncludeFluidPressure)
                 {
@@ -535,8 +587,17 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 if (ImGui.InputInt("Output Frequency", ref outputFreq))
                     param.OutputFrequency = Math.Max(outputFreq, 1);
 
-                ImGui.Checkbox("Save Intermediate States", ref param.SaveIntermediateStates);
-                ImGui.Checkbox("Compute Final State", ref param.ComputeFinalState);
+                var saveIntermediate = param.SaveIntermediateStates;
+                if (ImGui.Checkbox("Save Intermediate States", ref saveIntermediate))
+                {
+                    param.SaveIntermediateStates = saveIntermediate;
+                }
+
+                var computeFinal = param.ComputeFinalState;
+                if (ImGui.Checkbox("Compute Final State", ref computeFinal))
+                {
+                    param.ComputeFinalState = computeFinal;
+                }
             }
         }
 
@@ -545,13 +606,17 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             ImGui.Text("Earthquake Loading");
             ImGui.Separator();
 
-            ImGui.Checkbox("Enable Earthquake Loading", ref _dataset.Parameters.EnableEarthquakeLoading);
+            var enableEarthquakeLoading = _dataset.Parameters.EnableEarthquakeLoading;
+            if (ImGui.Checkbox("Enable Earthquake Loading", ref enableEarthquakeLoading))
+            {
+                _dataset.Parameters.EnableEarthquakeLoading = enableEarthquakeLoading;
+            }
 
             if (!_dataset.Parameters.EnableEarthquakeLoading)
                 return;
 
             // List of earthquakes
-            if (ImGui.BeginChild("EarthquakesList", new Vector2(200, 0), true))
+            if (ImGui.BeginChild("EarthquakesList", new Vector2(200, 0), ImGuiChildFlags.Border))
             {
                 for (int i = 0; i < _dataset.Parameters.EarthquakeLoads.Count; i++)
                 {
@@ -570,7 +635,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             ImGui.SameLine();
 
             // Earthquake editor
-            if (ImGui.BeginChild("EarthquakeEditor"))
+            if (ImGui.BeginChild("EarthquakeEditor", Vector2.Zero, ImGuiChildFlags.Border))
             {
                 if (ImGui.Button("Add New Earthquake"))
                 {
@@ -622,7 +687,11 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                     // Advanced
                     if (ImGui.TreeNode("Advanced"))
                     {
-                        ImGui.Checkbox("Radial Propagation", ref eq.UseRadialPropagation);
+                        var useRadialPropagation = eq.UseRadialPropagation;
+                        if (ImGui.Checkbox("Radial Propagation", ref useRadialPropagation))
+                        {
+                            eq.UseRadialPropagation = useRadialPropagation;
+                        }
 
                         int timeFunc = (int)eq.TimeFunction;
                         string[] timeFuncs = Enum.GetNames(typeof(EarthquakeTimeFunction));
@@ -728,9 +797,23 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 if (ImGui.InputFloat("Maximum Volume (m³)", ref maxVolume))
                     settings.MaximumBlockVolume = Math.Max(maxVolume, minVolume);
 
-                ImGui.Checkbox("Remove Small Blocks", ref settings.RemoveSmallBlocks);
-                ImGui.Checkbox("Remove Large Blocks", ref settings.RemoveLargeBlocks);
-                ImGui.Checkbox("Merge Sliver Blocks", ref settings.MergeSliverBlocks);
+                var removeSmallBlocks = settings.RemoveSmallBlocks;
+                if (ImGui.Checkbox("Remove Small Blocks", ref removeSmallBlocks))
+                {
+                    settings.RemoveSmallBlocks = removeSmallBlocks;
+                }
+
+                var removeLargeBlocks = settings.RemoveLargeBlocks;
+                if (ImGui.Checkbox("Remove Large Blocks", ref removeLargeBlocks))
+                {
+                    settings.RemoveLargeBlocks = removeLargeBlocks;
+                }
+
+                var mergeSliverBlocks = settings.MergeSliverBlocks;
+                if (ImGui.Checkbox("Merge Sliver Blocks", ref mergeSliverBlocks))
+                {
+                    settings.MergeSliverBlocks = mergeSliverBlocks;
+                }
 
                 if (ImGui.Button("Generate") && !string.IsNullOrEmpty(_meshPath))
                 {
@@ -751,7 +834,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             ImGui.Text("Block Assignment:");
 
             // Show blocks with material assignment
-            if (ImGui.BeginChild("BlocksList", new Vector2(0, 200), true))
+            if (ImGui.BeginChild("BlocksList", new Vector2(0, 200), ImGuiChildFlags.Border))
             {
                 ImGui.Columns(3, "BlockColumns");
                 ImGui.Separator();
@@ -920,7 +1003,8 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             try
             {
                 // Load mesh
-                var mesh = new Mesh3DDataset(meshPath);
+                var meshName = Path.GetFileNameWithoutExtension(meshPath);
+                var mesh = new Mesh3DDataset(meshName, meshPath);
                 mesh.Load();
 
                 // Generate blocks

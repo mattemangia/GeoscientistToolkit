@@ -26,7 +26,7 @@ Example:
 
         public async Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
         {
-            if (context.CurrentDataset is not SlopeStabilityDataset slopeDataset)
+            if (context.InputDataset is not SlopeStabilityDataset slopeDataset)
                 throw new ArgumentException("Input must be a SlopeStability dataset");
 
             float elevation = 0.0f;

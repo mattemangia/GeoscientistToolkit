@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Analysis.SlopeStability;
 using GeoscientistToolkit.Business.GeoScript;
@@ -28,7 +29,7 @@ Example:
 
         public async Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
         {
-            var inputDataset = context.CurrentDataset;
+            var inputDataset = context.InputDataset;
 
             if (inputDataset is Mesh3DDataset mesh3D)
             {
@@ -82,11 +83,12 @@ Example:
                 if (string.IsNullOrEmpty(slopeExisting.SourceMeshPath))
                     throw new InvalidOperationException("No source mesh available");
 
-                var mesh3D = new Mesh3DDataset(slopeExisting.SourceMeshPath);
-                mesh3D.Load();
+                var meshName = Path.GetFileNameWithoutExtension(slopeExisting.SourceMeshPath);
+                var meshFromFile = new Mesh3DDataset(meshName, slopeExisting.SourceMeshPath);
+                meshFromFile.Load();
 
                 var generator = new BlockGenerator(slopeExisting.BlockGenSettings);
-                slopeExisting.Blocks = generator.GenerateBlocks(mesh3D, slopeExisting.JointSets);
+                slopeExisting.Blocks = generator.GenerateBlocks(meshFromFile, slopeExisting.JointSets);
 
                 Console.WriteLine($"Regenerated {slopeExisting.Blocks.Count} blocks");
 
