@@ -214,6 +214,7 @@ public class DatasetDTOConverter : JsonConverter<DatasetDTO>
                     nameof(VideoDataset) => JsonSerializer.Deserialize<VideoDatasetDTO>(rawText, options),
                     nameof(AudioDataset) => JsonSerializer.Deserialize<AudioDatasetDTO>(rawText, options),
                     nameof(SlopeStabilityDataset) => JsonSerializer.Deserialize<SlopeStabilityDatasetDTO>(rawText, options),
+                    nameof(SlopeStability2DDataset) => JsonSerializer.Deserialize<SlopeStability2DDatasetDTO>(rawText, options),
 
                     _ => throw new JsonException($"Unknown dataset type: {typeName}")
                 };
