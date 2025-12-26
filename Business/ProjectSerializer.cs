@@ -16,6 +16,7 @@ using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Data.Media;
 using GeoscientistToolkit.Util;
+using GeoscientistToolkit.Analysis.SlopeStability;
 using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
 using SubsurfaceGISDatasetDTO = GeoscientistToolkit.Data.GIS.SubsurfaceGISDatasetDTO;
 
@@ -30,7 +31,8 @@ public static class ProjectSerializer
         {
             new DatasetDTOConverter(),
             new Vector4JsonConverter(),
-            new Vector3JsonConverter()
+            new Vector3JsonConverter(),
+            new QuaternionJsonConverter()
         }
     };
 
@@ -211,6 +213,7 @@ public class DatasetDTOConverter : JsonConverter<DatasetDTO>
                     nameof(PhysicoChemDataset) => JsonSerializer.Deserialize<PhysicoChemDatasetDTO>(rawText, options),
                     nameof(VideoDataset) => JsonSerializer.Deserialize<VideoDatasetDTO>(rawText, options),
                     nameof(AudioDataset) => JsonSerializer.Deserialize<AudioDatasetDTO>(rawText, options),
+                    nameof(SlopeStabilityDataset) => JsonSerializer.Deserialize<SlopeStabilityDatasetDTO>(rawText, options),
 
                     _ => throw new JsonException($"Unknown dataset type: {typeName}")
                 };

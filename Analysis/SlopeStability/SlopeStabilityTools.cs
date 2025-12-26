@@ -4,10 +4,12 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.UI.Interfaces;
+using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Mesh3D;
 using ImGuiNET;
 using System.Threading.Tasks;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.SlopeStability
 {
@@ -47,6 +49,9 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         private string _simulationStatus = "";
         private Task _simulationTask = null;
 
+        // Export
+        private readonly ImGuiExportFileDialog _resultsExportDialog;
+
         // 2D Viewer
         private SlopeStability2DViewer _2dViewer = null;
         private bool _show2DViewer = false;
@@ -57,6 +62,13 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         {
             _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
             _2dViewer = new SlopeStability2DViewer(_dataset);
+            _resultsExportDialog = new ImGuiExportFileDialog("SlopeStabilityResultsExport", "Export Results");
+            _resultsExportDialog.SetExtensions(
+                new ImGuiExportFileDialog.ExtensionOption(".csv", "CSV (Comma-separated values)"),
+                new ImGuiExportFileDialog.ExtensionOption(".vtk", "VTK (Visualization Toolkit)"),
+                new ImGuiExportFileDialog.ExtensionOption(".json", "JSON Results"),
+                new ImGuiExportFileDialog.ExtensionOption(".ssr", "Slope Stability Results (Binary)")
+            );
         }
 
         public void Draw(Dataset dataset)
@@ -112,6 +124,8 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
                 ImGui.EndTabBar();
             }
+
+            HandleResultsExportDialog();
         }
 
         private void DrawJointSetsTab()
@@ -993,9 +1007,114 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
                 if (ImGui.Button("Export Results"))
                 {
-                    // Open export dialog
+                    var defaultName = $"{_dataset.Name}_results";
+                    _resultsExportDialog.Open(defaultName);
                 }
             }
+        }
+
+        private void HandleResultsExportDialog()
+        {
+            if (_resultsExportDialog.Submit())
+            {
+                try
+                {
+                    ExportResults(_resultsExportDialog.SelectedPath);
+                    _simulationStatus = $"Exported results to {_resultsExportDialog.SelectedPath}";
+                }
+                catch (Exception ex)
+                {
+                    _simulationStatus = $"Export failed: {ex.Message}";
+                    Logger.LogError($"[SlopeStabilityTools] Export failed: {ex}");
+                }
+            }
+        }
+
+        private void ExportResults(string path)
+        {
+            if (!_dataset.HasResults || _dataset.Results == null)
+                throw new InvalidOperationException("No results available to export.");
+
+            var extension = Path.GetExtension(path).ToLowerInvariant();
+            switch (extension)
+            {
+                case ".csv":
+                    ExportResultsCsv(path);
+                    break;
+                case ".vtk":
+                    ExportResultsVtk(path);
+                    break;
+                case ".json":
+                    ExportResultsJson(path);
+                    break;
+                case ".ssr":
+                    SlopeStabilityResultsBinarySerializer.Write(path, _dataset.Results);
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unsupported export format: {extension}");
+            }
+        }
+
+        private void ExportResultsCsv(string path)
+        {
+            using var writer = new StreamWriter(path);
+
+            writer.WriteLine("BlockID,InitialX,InitialY,InitialZ,FinalX,FinalY,FinalZ," +
+                             "DisplacementX,DisplacementY,DisplacementZ,DisplacementMag," +
+                             "VelocityX,VelocityY,VelocityZ,VelocityMag,Mass,IsFixed,HasFailed");
+
+            foreach (var blockResult in _dataset.Results.BlockResults)
+            {
+                writer.WriteLine($"{blockResult.BlockId}," +
+                                 $"{blockResult.InitialPosition.X},{blockResult.InitialPosition.Y},{blockResult.InitialPosition.Z}," +
+                                 $"{blockResult.FinalPosition.X},{blockResult.FinalPosition.Y},{blockResult.FinalPosition.Z}," +
+                                 $"{blockResult.Displacement.X},{blockResult.Displacement.Y},{blockResult.Displacement.Z}," +
+                                 $"{blockResult.Displacement.Length()}," +
+                                 $"{blockResult.Velocity.X},{blockResult.Velocity.Y},{blockResult.Velocity.Z}," +
+                                 $"{blockResult.Velocity.Length()}," +
+                                 $"{blockResult.Mass},{blockResult.IsFixed},{blockResult.HasFailed}");
+            }
+        }
+
+        private void ExportResultsVtk(string path)
+        {
+            using var writer = new StreamWriter(path);
+
+            writer.WriteLine("# vtk DataFile Version 3.0");
+            writer.WriteLine("Slope Stability Results");
+            writer.WriteLine("ASCII");
+            writer.WriteLine("DATASET POLYDATA");
+
+            writer.WriteLine($"POINTS {_dataset.Results.BlockResults.Count} float");
+            foreach (var blockResult in _dataset.Results.BlockResults)
+            {
+                writer.WriteLine($"{blockResult.FinalPosition.X} {blockResult.FinalPosition.Y} {blockResult.FinalPosition.Z}");
+            }
+
+            writer.WriteLine($"POINT_DATA {_dataset.Results.BlockResults.Count}");
+            writer.WriteLine("SCALARS DisplacementMagnitude float 1");
+            writer.WriteLine("LOOKUP_TABLE default");
+            foreach (var blockResult in _dataset.Results.BlockResults)
+            {
+                writer.WriteLine($"{blockResult.Displacement.Length()}");
+            }
+
+            writer.WriteLine("VECTORS Displacement float");
+            foreach (var blockResult in _dataset.Results.BlockResults)
+            {
+                writer.WriteLine($"{blockResult.Displacement.X} {blockResult.Displacement.Y} {blockResult.Displacement.Z}");
+            }
+        }
+
+        private void ExportResultsJson(string path)
+        {
+            var dto = _dataset.ToDTO();
+            var json = System.Text.Json.JsonSerializer.Serialize(dto, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+            File.WriteAllText(path, json);
         }
 
         private void GenerateBlocksFromMesh(string meshPath)

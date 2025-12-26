@@ -39,7 +39,8 @@ public class ImportDataModal
         "TOUGH2 Input File",
         "Video File (MP4/AVI/MOV)",
         "Audio File (WAV/MP3/OGG)",
-        "Text Document (TXT/RTF)"
+        "Text Document (TXT/RTF)",
+        "Slope Stability Results (Binary)"
     };
 
     private readonly ImGuiFileDialog _fileDialog;
@@ -86,6 +87,8 @@ public class ImportDataModal
     private readonly ImGuiFileDialog _audioDialog;
     private readonly TextLoader _textLoader;
     private readonly ImGuiFileDialog _textDialog;
+    private readonly SlopeStabilityResultsBinaryLoader _slopeResultsLoader;
+    private readonly ImGuiFileDialog _slopeResultsDialog;
     private ImportState _currentState = ImportState.Idle;
     private Task<Dataset> _importTask;
     private Dataset _pendingDataset;
@@ -122,6 +125,8 @@ public class ImportDataModal
         _videoDialog = new ImGuiFileDialog("ImportVideoDialog", FileDialogType.OpenFile, "Select Video File");
         _audioDialog = new ImGuiFileDialog("ImportAudioDialog", FileDialogType.OpenFile, "Select Audio File");
         _textDialog = new ImGuiFileDialog("ImportTextDialog", FileDialogType.OpenFile, "Select Text File");
+        _slopeResultsDialog = new ImGuiFileDialog("ImportSlopeResultsDialog", FileDialogType.OpenFile,
+            "Select Slope Stability Results");
         _organizerDialog = new ImageStackOrganizerDialog();
 
         // Initialize loaders
@@ -146,6 +151,7 @@ public class ImportDataModal
         _videoLoader = new VideoLoader();
         _audioLoader = new AudioLoader();
         _textLoader = new TextLoader();
+        _slopeResultsLoader = new SlopeStabilityResultsBinaryLoader();
     }
 
     public void Open()
@@ -269,6 +275,7 @@ public class ImportDataModal
         // Added for Audio
         if (_audioDialog.Submit()) _audioLoader.AudioPath = _audioDialog.SelectedPath;
         if (_textDialog.Submit()) _textLoader.TextPath = _textDialog.SelectedPath;
+        if (_slopeResultsDialog.Submit()) _slopeResultsLoader.FilePath = _slopeResultsDialog.SelectedPath;
     }
 
     private void DrawOptions()
@@ -348,6 +355,9 @@ public class ImportDataModal
                 break;
             case 21: // Text Document
                 DrawTextOptions();
+                break;
+            case 22: // Slope Stability Results
+                DrawSlopeStabilityResultsOptions();
                 break;
         }
 
@@ -813,6 +823,38 @@ public class ImportDataModal
             ImGui.BulletText($"Format: {Path.GetExtension(_textLoader.TextPath).TrimStart('.').ToUpperInvariant()}");
             ImGui.BulletText($"File Size: {fileInfo.Length / 1024.0:F2} KB");
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import text document");
+        }
+    }
+
+    private void DrawSlopeStabilityResultsOptions()
+    {
+        ImGui.TextWrapped("Import slope stability simulation results from a binary file (.ssr). " +
+                          "This lets you reopen previously exported results without rerunning the simulation.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("Slope Stability Results File (.ssr):");
+        var path = _slopeResultsLoader.FilePath ?? "";
+        ImGui.InputText("##SlopeResultsPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##SlopeResultsFile"))
+        {
+            string[] extensions = { ".ssr" };
+            _slopeResultsDialog.Open(null, extensions);
+        }
+
+        if (!string.IsNullOrEmpty(_slopeResultsLoader.FilePath) && File.Exists(_slopeResultsLoader.FilePath))
+        {
+            var info = new FileInfo(_slopeResultsLoader.FilePath);
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.Text("File Information:");
+            ImGui.BulletText($"File: {info.Name}");
+            ImGui.BulletText($"Size: {info.Length / 1024} KB");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import slope stability results");
         }
     }
 
@@ -1493,6 +1535,8 @@ public class ImportDataModal
             18 => _tough2Loader, // Added for TOUGH2
             19 => _videoLoader, // Added for Video
             20 => _audioLoader, // Added for Audio
+            21 => _textLoader,
+            22 => _slopeResultsLoader,
             _ => null
         };
     }
@@ -1569,6 +1613,8 @@ public class ImportDataModal
         _physicoChemLoader.Reset();
         _videoLoader.Reset(); // Added for Video
         _audioLoader.Reset(); // Added for Audio
+        _textLoader.Reset();
+        _slopeResultsLoader.Reset();
 
         // Reset state
         _importTask = null;

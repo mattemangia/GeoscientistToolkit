@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Numerics;
 using GeoscientistToolkit.Analysis.NMR;
 using GeoscientistToolkit.Analysis.ThermalConductivity;
+using GeoscientistToolkit.Analysis.SlopeStability;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.Borehole;
@@ -864,6 +865,14 @@ public class ProjectManager
 
                 dataset = new DatasetGroup(groupDto.Name, childDatasets);
                 break;
+
+            case SlopeStabilityDatasetDTO slopeDto:
+            {
+                var slopeDataset = new SlopeStabilityDataset();
+                slopeDataset.FromDTO(slopeDto);
+                dataset = slopeDataset;
+                break;
+            }
 
             case VideoDatasetDTO videoDto:
                 var videoDataset = new VideoDataset(videoDto.Name, videoDto.FilePath)
