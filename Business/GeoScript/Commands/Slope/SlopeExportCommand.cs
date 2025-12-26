@@ -78,12 +78,12 @@ Example:
         {
             var sb = new StringBuilder();
 
-            // Header
+            // ===== Block Results =====
+            sb.AppendLine("# Block Results");
             sb.AppendLine("BlockID,InitialX,InitialY,InitialZ,FinalX,FinalY,FinalZ," +
                          "DisplacementX,DisplacementY,DisplacementZ,DisplacementMag," +
                          "VelocityX,VelocityY,VelocityZ,VelocityMag,Mass,IsFixed,HasFailed");
 
-            // Data
             foreach (var blockResult in dataset.Results.BlockResults)
             {
                 sb.AppendLine($"{blockResult.BlockId}," +
@@ -95,6 +95,59 @@ Example:
                     $"{blockResult.Velocity.Length()}," +
                     $"{blockResult.Mass},{blockResult.IsFixed},{blockResult.HasFailed}");
             }
+
+            // ===== Contact Results =====
+            sb.AppendLine();
+            sb.AppendLine("# Contact Results");
+            sb.AppendLine("BlockAId,BlockBId,ContactX,ContactY,ContactZ,NormalX,NormalY,NormalZ," +
+                         "MaxNormalForce,MaxShearForce,HasSlipped,HasOpened,IsJointContact,JointSetId");
+
+            foreach (var contact in dataset.Results.ContactResults)
+            {
+                sb.AppendLine($"{contact.BlockAId},{contact.BlockBId}," +
+                    $"{contact.ContactPoint.X},{contact.ContactPoint.Y},{contact.ContactPoint.Z}," +
+                    $"{contact.ContactNormal.X},{contact.ContactNormal.Y},{contact.ContactNormal.Z}," +
+                    $"{contact.MaxNormalForce},{contact.MaxShearForce}," +
+                    $"{contact.HasSlipped},{contact.HasOpened}," +
+                    $"{contact.IsJointContact},{contact.JointSetId}");
+            }
+
+            // ===== Joint Set Statistics =====
+            if (dataset.Results.JointSetStats != null && dataset.Results.JointSetStats.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("# Per-Joint-Set Statistics");
+                sb.AppendLine("JointSetId,JointSetName,TotalContacts,SlidingContacts,OpenedContacts," +
+                             "SlidingRatio,OpeningRatio,MaxNormalForce,MaxShearForce," +
+                             "MeanNormalForce,MeanShearForce,TotalSlipDisplacement");
+
+                foreach (var jointStat in dataset.Results.JointSetStats)
+                {
+                    // Find joint set name
+                    var jointSet = dataset.JointSets.Find(js => js.Id == jointStat.JointSetId);
+                    string name = jointSet?.Name ?? $"Joint Set {jointStat.JointSetId}";
+
+                    sb.AppendLine($"{jointStat.JointSetId},{name}," +
+                        $"{jointStat.TotalContacts},{jointStat.SlidingContacts},{jointStat.OpenedContacts}," +
+                        $"{jointStat.SlidingRatio:F3},{jointStat.OpeningRatio:F3}," +
+                        $"{jointStat.MaxNormalForce},{jointStat.MaxShearForce}," +
+                        $"{jointStat.MeanNormalForce},{jointStat.MeanShearForce}," +
+                        $"{jointStat.TotalSlipDisplacement}");
+                }
+            }
+
+            // ===== Summary =====
+            sb.AppendLine();
+            sb.AppendLine("# Summary");
+            sb.AppendLine($"Total Blocks,{dataset.Results.BlockResults.Count}");
+            sb.AppendLine($"Failed Blocks,{dataset.Results.NumFailedBlocks}");
+            sb.AppendLine($"Max Displacement,{dataset.Results.MaxDisplacement}");
+            sb.AppendLine($"Mean Displacement,{dataset.Results.MeanDisplacement}");
+            sb.AppendLine($"Total Contacts,{dataset.Results.ContactResults.Count}");
+            sb.AppendLine($"Sliding Contacts,{dataset.Results.NumSlidingContacts}");
+            sb.AppendLine($"Opened Joints,{dataset.Results.NumOpenedJoints}");
+            sb.AppendLine($"Converged,{dataset.Results.Converged}");
+            sb.AppendLine($"Computation Time (s),{dataset.Results.ComputationTimeSeconds}");
 
             await File.WriteAllTextAsync(path, sb.ToString());
         }

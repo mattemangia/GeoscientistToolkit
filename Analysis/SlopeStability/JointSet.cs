@@ -6,6 +6,29 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// Represents a set of parallel discontinuities (joints) in the rock mass.
     /// Based on 3DEC joint set methodology.
+    ///
+    /// <para><b>Academic References:</b></para>
+    ///
+    /// <para>Joint set characterization and orientation:</para>
+    /// <para>Priest, S. D. (1993). Discontinuity analysis for rock engineering. Chapman &amp; Hall.
+    /// ISBN: 978-0412476006</para>
+    ///
+    /// <para>Joint Roughness Coefficient (JRC):</para>
+    /// <para>Barton, N. (1973). Review of a new shear-strength criterion for rock joints.
+    /// Engineering Geology, 7(4), 287-332. https://doi.org/10.1016/0013-7952(73)90013-6</para>
+    ///
+    /// <para>Barton, N., &amp; Choubey, V. (1977). The shear strength of rock joints in theory and
+    /// practice. Rock Mechanics, 10(1-2), 1-54. https://doi.org/10.1007/BF01261801</para>
+    ///
+    /// <para>Joint persistence and trace length:</para>
+    /// <para>Dershowitz, W. S., &amp; Einstein, H. H. (1988). Characterizing rock joint geometry with
+    /// joint system models. Rock Mechanics and Rock Engineering, 21(1), 21-51.
+    /// https://doi.org/10.1007/BF01019674</para>
+    ///
+    /// <para>Joint stiffness parameters:</para>
+    /// <para>Bandis, S. C., Lumsden, A. C., &amp; Barton, N. R. (1983). Fundamentals of rock joint
+    /// deformation. International Journal of Rock Mechanics and Mining Sciences &amp; Geomechanics
+    /// Abstracts, 20(6), 249-268. https://doi.org/10.1016/0148-9062(83)90595-8</para>
     /// </summary>
     public class JointSet
     {

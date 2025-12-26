@@ -6,6 +6,24 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// Represents a contact interface between two blocks or a block and a boundary.
     /// Handles contact detection, force calculation, and friction/cohesion.
+    ///
+    /// <para><b>Academic References:</b></para>
+    ///
+    /// <para>Mohr-Coulomb failure criterion:</para>
+    /// <para>Coulomb, C. A. (1776). Essai sur une application des règles de maximis et minimis à
+    /// quelques problèmes de statique relatifs à l'architecture. Mémoires de Mathématique et de
+    /// Physique, Académie Royale des Sciences, 7, 343-382.</para>
+    ///
+    /// <para>Effective stress principle for pore pressure:</para>
+    /// <para>Terzaghi, K. (1943). Theoretical soil mechanics. John Wiley &amp; Sons.</para>
+    ///
+    /// <para>Joint shear strength and roughness:</para>
+    /// <para>Barton, N., &amp; Choubey, V. (1977). The shear strength of rock joints in theory and
+    /// practice. Rock Mechanics, 10(1-2), 1-54. https://doi.org/10.1007/BF01261801</para>
+    ///
+    /// <para>Contact stiffness formulation:</para>
+    /// <para>Itasca Consulting Group. (2016). 3DEC—Three-dimensional distinct element code,
+    /// Version 5.2, Theory and background. Minneapolis: Itasca.</para>
     /// </summary>
     public class ContactInterface
     {
@@ -258,6 +276,61 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
             TensileStrength = jointSet.TensileStrength;
             DilationAngle = jointSet.Dilation;
+        }
+
+        /// <summary>
+        /// Checks if this contact lies on a specific joint set's plane.
+        /// Compares the contact normal with the joint set's normal vector.
+        /// </summary>
+        /// <param name="jointSet">The joint set to check against</param>
+        /// <param name="toleranceDegrees">Angular tolerance in degrees (default 5°)</param>
+        /// <returns>True if the contact is on the joint plane, false otherwise</returns>
+        public bool IsOnJointPlane(JointSet jointSet, float toleranceDegrees = 5.0f)
+        {
+            if (jointSet == null)
+                return false;
+
+            Vector3 jointNormal = jointSet.GetNormal();
+
+            // Calculate the absolute value of the dot product (handles both orientations)
+            float dot = Math.Abs(Vector3.Dot(ContactNormal, jointNormal));
+
+            // Convert tolerance to cosine value
+            float toleranceRad = toleranceDegrees * MathF.PI / 180.0f;
+            float minDot = MathF.Cos(toleranceRad);
+
+            return dot >= minDot;
+        }
+
+        /// <summary>
+        /// Finds which joint set this contact belongs to, if any.
+        /// </summary>
+        /// <param name="jointSets">List of joint sets to check</param>
+        /// <param name="toleranceDegrees">Angular tolerance in degrees</param>
+        /// <returns>The matching JointSet, or null if no match found</returns>
+        public JointSet FindMatchingJointSet(IList<JointSet> jointSets, float toleranceDegrees = 5.0f)
+        {
+            if (jointSets == null || jointSets.Count == 0)
+                return null;
+
+            // Find the joint set with the best (highest) normal alignment
+            JointSet bestMatch = null;
+            float bestDot = 0.0f;
+            float minDot = MathF.Cos(toleranceDegrees * MathF.PI / 180.0f);
+
+            foreach (var jointSet in jointSets)
+            {
+                Vector3 jointNormal = jointSet.GetNormal();
+                float dot = Math.Abs(Vector3.Dot(ContactNormal, jointNormal));
+
+                if (dot >= minDot && dot > bestDot)
+                {
+                    bestDot = dot;
+                    bestMatch = jointSet;
+                }
+            }
+
+            return bestMatch;
         }
     }
 

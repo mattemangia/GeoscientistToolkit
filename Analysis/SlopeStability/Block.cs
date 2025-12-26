@@ -7,6 +7,22 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// Represents a rigid block in the discrete element simulation.
     /// Each block has geometric properties, physical properties, and state variables.
+    ///
+    /// <para><b>Academic References:</b></para>
+    ///
+    /// <para>Block mechanics in DEM:</para>
+    /// <para>Cundall, P. A. (1988). Formulation of a three-dimensional distinct element model—Part I.
+    /// A scheme to detect and represent contacts in a system composed of many polyhedral blocks.
+    /// International Journal of Rock Mechanics and Mining Sciences &amp; Geomechanics Abstracts, 25(3),
+    /// 107-116. https://doi.org/10.1016/0148-9062(88)92293-0</para>
+    ///
+    /// <para>Inertia tensor calculation for polyhedra (divergence theorem):</para>
+    /// <para>Mirtich, B. (1996). Fast and accurate computation of polyhedral mass properties.
+    /// Journal of Graphics Tools, 1(2), 31-50. https://doi.org/10.1080/10867651.1996.10487458</para>
+    ///
+    /// <para>Block theory fundamentals:</para>
+    /// <para>Goodman, R. E., &amp; Shi, G. H. (1985). Block theory and its application to rock
+    /// engineering. Prentice-Hall. ISBN: 978-0131782013</para>
     /// </summary>
     public class Block
     {
@@ -25,6 +41,10 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         public float Density { get; set; }  // kg/m³
         public float Mass { get; set; }     // kg
         public int MaterialId { get; set; }
+
+        // Joint set tracking - stores which joint sets created each face
+        public List<int> BoundingJointSetIds { get; set; }  // Joint set IDs that bound this block
+        public Dictionary<int, int> FaceToJointSetId { get; set; }  // Maps face index to joint set ID (-1 = original mesh face)
 
         // State variables (current)
         public Vector3 Position { get; set; }           // m
@@ -73,6 +93,8 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             ContactingBlockIds = new List<int>();
             Color = new Vector4(0.7f, 0.7f, 0.7f, 1.0f);
             InertiaTensor = Matrix4x4.Identity;
+            BoundingJointSetIds = new List<int>();
+            FaceToJointSetId = new Dictionary<int, int>();
         }
 
         /// <summary>

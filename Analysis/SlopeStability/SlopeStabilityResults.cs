@@ -23,8 +23,15 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         public List<TimeSnapshot> TimeHistory { get; set; }
         public bool HasTimeHistory { get; set; }
 
+        // Convergence history for plotting
+        public List<ConvergencePoint> ConvergenceHistory { get; set; }
+        public bool HasConvergenceHistory { get; set; }
+
         // Contact results
         public List<ContactResult> ContactResults { get; set; }
+
+        // Per-joint-set statistics
+        public List<JointSetStatistics> JointSetStats { get; set; }
 
         // Global statistics
         public float MaxDisplacement { get; set; }
@@ -56,7 +63,10 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             BlockResults = new List<BlockResult>();
             TimeHistory = new List<TimeSnapshot>();
             HasTimeHistory = false;
+            ConvergenceHistory = new List<ConvergencePoint>();
+            HasConvergenceHistory = false;
             ContactResults = new List<ContactResult>();
+            JointSetStats = new List<JointSetStatistics>();
             MaxDisplacement = 0.0f;
             MeanDisplacement = 0.0f;
             NumFailedBlocks = 0;
@@ -105,12 +115,55 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             NumSlidingContacts = 0;
             NumOpenedJoints = 0;
 
+            // Per-joint-set statistics
+            var jointStats = new Dictionary<int, JointSetStatistics>();
+
             foreach (var contact in ContactResults)
             {
                 if (contact.HasSlipped)
                     NumSlidingContacts++;
                 if (contact.HasOpened)
                     NumOpenedJoints++;
+
+                // Aggregate joint set statistics
+                if (contact.IsJointContact && contact.JointSetId >= 0)
+                {
+                    if (!jointStats.ContainsKey(contact.JointSetId))
+                    {
+                        jointStats[contact.JointSetId] = new JointSetStatistics
+                        {
+                            JointSetId = contact.JointSetId
+                        };
+                    }
+
+                    var stats = jointStats[contact.JointSetId];
+                    stats.TotalContacts++;
+
+                    if (contact.HasSlipped)
+                        stats.SlidingContacts++;
+                    if (contact.HasOpened)
+                        stats.OpenedContacts++;
+
+                    stats.TotalNormalForce += contact.MaxNormalForce;
+                    stats.TotalShearForce += contact.MaxShearForce;
+                    stats.MaxNormalForce = Math.Max(stats.MaxNormalForce, contact.MaxNormalForce);
+                    stats.MaxShearForce = Math.Max(stats.MaxShearForce, contact.MaxShearForce);
+                    stats.TotalSlipDisplacement += contact.TotalSlipDisplacement;
+                }
+            }
+
+            // Calculate averages and store results
+            JointSetStats.Clear();
+            foreach (var stats in jointStats.Values)
+            {
+                if (stats.TotalContacts > 0)
+                {
+                    stats.MeanNormalForce = stats.TotalNormalForce / stats.TotalContacts;
+                    stats.MeanShearForce = stats.TotalShearForce / stats.TotalContacts;
+                    stats.SlidingRatio = (float)stats.SlidingContacts / stats.TotalContacts;
+                    stats.OpeningRatio = (float)stats.OpenedContacts / stats.TotalContacts;
+                }
+                JointSetStats.Add(stats);
             }
 
             // Performance
@@ -233,6 +286,86 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             TotalSlipDisplacement = 0.0f;
             IsJointContact = false;
             JointSetId = -1;
+        }
+    }
+
+    /// <summary>
+    /// Statistics for a specific joint set.
+    /// </summary>
+    public class JointSetStatistics
+    {
+        public int JointSetId { get; set; }
+        public string JointSetName { get; set; }
+
+        // Contact counts
+        public int TotalContacts { get; set; }
+        public int SlidingContacts { get; set; }
+        public int OpenedContacts { get; set; }
+
+        // Ratios
+        public float SlidingRatio { get; set; }   // Fraction of contacts that are sliding
+        public float OpeningRatio { get; set; }   // Fraction of contacts that have opened
+
+        // Force statistics
+        public float TotalNormalForce { get; set; }
+        public float TotalShearForce { get; set; }
+        public float MaxNormalForce { get; set; }
+        public float MaxShearForce { get; set; }
+        public float MeanNormalForce { get; set; }
+        public float MeanShearForce { get; set; }
+
+        // Displacement
+        public float TotalSlipDisplacement { get; set; }
+
+        // Safety factor for this joint set (if computed via strength reduction)
+        public float JointSetSafetyFactor { get; set; }
+        public bool SafetyFactorComputed { get; set; }
+
+        public JointSetStatistics()
+        {
+            JointSetId = -1;
+            JointSetName = "";
+            TotalContacts = 0;
+            SlidingContacts = 0;
+            OpenedContacts = 0;
+            SlidingRatio = 0.0f;
+            OpeningRatio = 0.0f;
+            TotalNormalForce = 0.0f;
+            TotalShearForce = 0.0f;
+            MaxNormalForce = 0.0f;
+            MaxShearForce = 0.0f;
+            MeanNormalForce = 0.0f;
+            MeanShearForce = 0.0f;
+            TotalSlipDisplacement = 0.0f;
+            JointSetSafetyFactor = 0.0f;
+            SafetyFactorComputed = false;
+        }
+    }
+
+    /// <summary>
+    /// A single convergence data point for convergence graphs.
+    /// </summary>
+    public class ConvergencePoint
+    {
+        public int Step { get; set; }
+        public float Time { get; set; }
+        public float MaxVelocity { get; set; }          // Maximum block velocity
+        public float MeanVelocity { get; set; }         // Mean block velocity
+        public float MaxUnbalancedForce { get; set; }   // Maximum unbalanced force ratio
+        public float KineticEnergy { get; set; }        // Total kinetic energy
+        public float MaxDisplacement { get; set; }      // Maximum displacement so far
+        public int NumSlidingContacts { get; set; }     // Number of sliding contacts
+
+        public ConvergencePoint()
+        {
+            Step = 0;
+            Time = 0.0f;
+            MaxVelocity = 0.0f;
+            MeanVelocity = 0.0f;
+            MaxUnbalancedForce = 0.0f;
+            KineticEnergy = 0.0f;
+            MaxDisplacement = 0.0f;
+            NumSlidingContacts = 0;
         }
     }
 }

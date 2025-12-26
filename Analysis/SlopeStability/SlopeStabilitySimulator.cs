@@ -13,6 +13,28 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// Physics simulator for slope stability analysis using Discrete Element Method (DEM).
     /// Implements SIMD-optimized multithreaded simulation with support for x86 (AVX/SSE) and ARM (NEON).
+    ///
+    /// <para><b>Academic References:</b></para>
+    ///
+    /// <para>Discrete Element Method (DEM) foundation:</para>
+    /// <para>Cundall, P. A., &amp; Strack, O. D. L. (1979). A discrete numerical model for granular
+    /// assemblies. Géotechnique, 29(1), 47-65. https://doi.org/10.1680/geot.1979.29.1.47</para>
+    ///
+    /// <para>3DEC block modeling methodology:</para>
+    /// <para>Cundall, P. A. (1988). Formulation of a three-dimensional distinct element model—Part I.
+    /// A scheme to detect and represent contacts in a system composed of many polyhedral blocks.
+    /// International Journal of Rock Mechanics and Mining Sciences &amp; Geomechanics Abstracts, 25(3),
+    /// 107-116. https://doi.org/10.1016/0148-9062(88)92293-0</para>
+    ///
+    /// <para>Velocity Verlet integration scheme:</para>
+    /// <para>Verlet, L. (1967). Computer "experiments" on classical fluids. I. Thermodynamical
+    /// properties of Lennard-Jones molecules. Physical Review, 159(1), 98-103.
+    /// https://doi.org/10.1103/PhysRev.159.98</para>
+    ///
+    /// <para>Spatial hashing for collision detection:</para>
+    /// <para>Teschner, M., Heidelberger, B., Müller, M., Pomerantes, D., &amp; Gross, M. H. (2003).
+    /// Optimized spatial hashing for collision detection of deformable objects.
+    /// Proceedings of Vision, Modeling, Visualization (VMV), 3, 47-54.</para>
     /// </summary>
     public class SlopeStabilitySimulator
     {
@@ -82,6 +104,10 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 results.HasTimeHistory = true;
             }
 
+            // Always track convergence history for graphs
+            results.ConvergenceHistory = new List<ConvergencePoint>();
+            results.HasConvergenceHistory = true;
+
             for (int step = 0; step < numSteps; step++)
             {
                 float currentTime = step * deltaTime;
@@ -124,6 +150,12 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                     step % _parameters.OutputFrequency == 0)
                 {
                     SaveTimeSnapshot(results, currentTime);
+                }
+
+                // Save convergence data (every OutputFrequency steps)
+                if (step % _parameters.OutputFrequency == 0)
+                {
+                    SaveConvergencePoint(results, step, currentTime);
                 }
 
                 // Check convergence for quasi-static mode
@@ -468,23 +500,69 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 IsActive = true
             };
 
-            // Set contact properties from materials
-            var materialA = _dataset.GetMaterial(blockA.MaterialId);
-            var materialB = _dataset.GetMaterial(blockB.MaterialId);
+            // First, try to identify if this contact is on a joint plane
+            // Use shared joint sets between the two blocks for efficient matching
+            bool jointPropertiesApplied = false;
 
-            if (materialA != null && materialB != null)
+            if (_dataset.JointSets != null && _dataset.JointSets.Count > 0)
             {
-                // Average elastic properties (Hertzian contact theory)
-                contact.NormalStiffness = (materialA.YoungModulus + materialB.YoungModulus) / 2.0f;
-                contact.ShearStiffness = contact.NormalStiffness * 0.1f;
+                // Get joint sets that bound both blocks (highest priority - definite joint contact)
+                var sharedJointSets = new List<JointSet>();
+                foreach (var jointSetId in blockA.BoundingJointSetIds)
+                {
+                    if (blockB.BoundingJointSetIds.Contains(jointSetId))
+                    {
+                        var jointSet = _dataset.JointSets.FirstOrDefault(js => js.Id == jointSetId);
+                        if (jointSet != null)
+                        {
+                            sharedJointSets.Add(jointSet);
+                        }
+                    }
+                }
 
-                // Use minimum friction angle (conservative approach)
-                float fricA = MathF.Tan(materialA.FrictionAngle * MathF.PI / 180.0f);
-                float fricB = MathF.Tan(materialB.FrictionAngle * MathF.PI / 180.0f);
-                contact.FrictionCoefficient = Math.Min(fricA, fricB);
+                // Check if contact normal aligns with any shared joint set
+                if (sharedJointSets.Count > 0)
+                {
+                    var matchingJoint = contact.FindMatchingJointSet(sharedJointSets, _parameters.JointOrientationTolerance);
+                    if (matchingJoint != null)
+                    {
+                        contact.SetJointProperties(matchingJoint);
+                        jointPropertiesApplied = true;
+                    }
+                }
 
-                // Use minimum cohesion (conservative approach)
-                contact.Cohesion = Math.Min(materialA.Cohesion, materialB.Cohesion);
+                // If no shared joint found, check all joint sets (for edge cases)
+                if (!jointPropertiesApplied)
+                {
+                    var matchingJoint = contact.FindMatchingJointSet(_dataset.JointSets, _parameters.JointOrientationTolerance);
+                    if (matchingJoint != null)
+                    {
+                        contact.SetJointProperties(matchingJoint);
+                        jointPropertiesApplied = true;
+                    }
+                }
+            }
+
+            // Fall back to material properties if no joint match found
+            if (!jointPropertiesApplied)
+            {
+                var materialA = _dataset.GetMaterial(blockA.MaterialId);
+                var materialB = _dataset.GetMaterial(blockB.MaterialId);
+
+                if (materialA != null && materialB != null)
+                {
+                    // Average elastic properties (Hertzian contact theory)
+                    contact.NormalStiffness = (materialA.YoungModulus + materialB.YoungModulus) / 2.0f;
+                    contact.ShearStiffness = contact.NormalStiffness * 0.1f;
+
+                    // Use minimum friction angle (conservative approach)
+                    float fricA = MathF.Tan(materialA.FrictionAngle * MathF.PI / 180.0f);
+                    float fricB = MathF.Tan(materialB.FrictionAngle * MathF.PI / 180.0f);
+                    contact.FrictionCoefficient = Math.Min(fricA, fricB);
+
+                    // Use minimum cohesion (conservative approach)
+                    contact.Cohesion = Math.Min(materialA.Cohesion, materialB.Cohesion);
+                }
             }
 
             return contact;
@@ -814,6 +892,60 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             snapshot.PotentialEnergy = pe;
 
             results.TimeHistory.Add(snapshot);
+        }
+
+        /// <summary>
+        /// Saves a convergence data point for plotting.
+        /// </summary>
+        private void SaveConvergencePoint(SlopeStabilityResults results, int step, float time)
+        {
+            var point = new ConvergencePoint
+            {
+                Step = step,
+                Time = time
+            };
+
+            float maxVel = 0.0f;
+            float totalVel = 0.0f;
+            float ke = 0.0f;
+            float maxDisp = 0.0f;
+            float maxUnbalForce = 0.0f;
+            int movingBlocks = 0;
+
+            foreach (var block in _dataset.Blocks)
+            {
+                if (!block.IsFixed)
+                {
+                    float vel = block.Velocity.Length();
+                    maxVel = Math.Max(maxVel, vel);
+                    totalVel += vel;
+                    movingBlocks++;
+
+                    ke += 0.5f * block.Mass * vel * vel;
+                    maxDisp = Math.Max(maxDisp, block.TotalDisplacement.Length());
+
+                    // Calculate unbalanced force ratio
+                    float forceRatio = block.ForceAccumulator.Length() / (block.Mass * 9.81f + 1e-10f);
+                    maxUnbalForce = Math.Max(maxUnbalForce, forceRatio);
+                }
+            }
+
+            point.MaxVelocity = maxVel;
+            point.MeanVelocity = movingBlocks > 0 ? totalVel / movingBlocks : 0.0f;
+            point.KineticEnergy = ke;
+            point.MaxDisplacement = maxDisp;
+            point.MaxUnbalancedForce = maxUnbalForce;
+
+            // Count sliding contacts
+            int slidingCount = 0;
+            foreach (var contact in _currentContacts)
+            {
+                if (contact.HasSlipped)
+                    slidingCount++;
+            }
+            point.NumSlidingContacts = slidingCount;
+
+            results.ConvergenceHistory.Add(point);
         }
 
         /// <summary>

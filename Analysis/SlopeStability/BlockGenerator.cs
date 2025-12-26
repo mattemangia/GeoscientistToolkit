@@ -9,6 +9,28 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// Generates blocks from a 3D mesh using Discrete Fracture Network (DFN) approach.
     /// Based on 3DEC methodology: joints split blocks completely.
+    ///
+    /// <para><b>Academic References:</b></para>
+    ///
+    /// <para>Block theory and rock engineering:</para>
+    /// <para>Goodman, R. E., &amp; Shi, G. H. (1985). Block theory and its application to rock
+    /// engineering. Prentice-Hall. ISBN: 978-0131782013</para>
+    ///
+    /// <para>Discrete Fracture Network (DFN) modeling:</para>
+    /// <para>Dershowitz, W. S., &amp; Einstein, H. H. (1988). Characterizing rock joint geometry with
+    /// joint system models. Rock Mechanics and Rock Engineering, 21(1), 21-51.
+    /// https://doi.org/10.1007/BF01019674</para>
+    ///
+    /// <para>3DEC block generation methodology:</para>
+    /// <para>Cundall, P. A. (1988). Formulation of a three-dimensional distinct element model—Part I.
+    /// A scheme to detect and represent contacts in a system composed of many polyhedral blocks.
+    /// International Journal of Rock Mechanics and Mining Sciences &amp; Geomechanics Abstracts, 25(3),
+    /// 107-116. https://doi.org/10.1016/0148-9062(88)92293-0</para>
+    ///
+    /// <para>Convex hull algorithms for block geometry:</para>
+    /// <para>Barber, C. B., Dobkin, D. P., &amp; Huhdanpaa, H. (1996). The quickhull algorithm for
+    /// convex hulls. ACM Transactions on Mathematical Software, 22(4), 469-483.
+    /// https://doi.org/10.1145/235815.235821</para>
     /// </summary>
     public class BlockGenerator
     {
@@ -149,10 +171,19 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                         continue;
                     }
 
-                    // Cut the block
-                    var cutResults = CutBlockWithPlane(currentBlock, jointSet.GetNormal(), planePoint);
+                    // Cut the block and track which joint set created the new faces
+                    var cutResults = CutBlockWithPlane(currentBlock, jointSet.GetNormal(), planePoint, jointSet.Id);
 
-                    // Add resulting blocks
+                    // Add resulting blocks and track joint set
+                    foreach (var resultBlock in cutResults)
+                    {
+                        // Record that this joint set bounds this block
+                        if (!resultBlock.BoundingJointSetIds.Contains(jointSet.Id))
+                        {
+                            resultBlock.BoundingJointSetIds.Add(jointSet.Id);
+                        }
+                    }
+
                     nextBlocks.AddRange(cutResults);
                 }
 
@@ -165,7 +196,11 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         /// <summary>
         /// Cuts a single block with a plane, creating two (or one if no intersection).
         /// </summary>
-        private List<Block> CutBlockWithPlane(Block block, Vector3 planeNormal, Vector3 planePoint)
+        /// <param name="block">The block to cut</param>
+        /// <param name="planeNormal">Normal vector of the cutting plane</param>
+        /// <param name="planePoint">A point on the cutting plane</param>
+        /// <param name="jointSetId">ID of the joint set that created this cut (-1 if not from joint set)</param>
+        private List<Block> CutBlockWithPlane(Block block, Vector3 planeNormal, Vector3 planePoint, int jointSetId = -1)
         {
             var results = new List<Block>();
 
@@ -200,8 +235,8 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             // Perform actual cutting (simplified implementation)
             // For production, use proper mesh boolean operations (e.g., from NetTopologySuite or custom BSP)
 
-            var positiveBlock = SplitBlockSimplified(block, vertexSides, distances, true, planeNormal, planePoint);
-            var negativeBlock = SplitBlockSimplified(block, vertexSides, distances, false, planeNormal, planePoint);
+            var positiveBlock = SplitBlockSimplified(block, vertexSides, distances, true, planeNormal, planePoint, jointSetId);
+            var negativeBlock = SplitBlockSimplified(block, vertexSides, distances, false, planeNormal, planePoint, jointSetId);
 
             if (positiveBlock != null)
                 results.Add(positiveBlock);
@@ -215,13 +250,15 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         /// Simplified block splitting using convex hull approximation.
         /// For production use, implement proper CSG or use libraries like MIConvexHull.
         /// </summary>
+        /// <param name="jointSetId">ID of the joint set that created this cut (-1 if not from joint set)</param>
         private Block SplitBlockSimplified(
             Block originalBlock,
             List<int> vertexSides,
             List<float> distances,
             bool keepPositiveSide,
             Vector3 planeNormal,
-            Vector3 planePoint)
+            Vector3 planePoint,
+            int jointSetId = -1)
         {
             var newBlock = new Block
             {
@@ -231,7 +268,9 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 Faces = new List<int[]>(),
                 Density = originalBlock.Density,
                 MaterialId = originalBlock.MaterialId,
-                Orientation = originalBlock.Orientation
+                Orientation = originalBlock.Orientation,
+                BoundingJointSetIds = new List<int>(originalBlock.BoundingJointSetIds),
+                FaceToJointSetId = new Dictionary<int, int>()
             };
 
             var vertexMapping = new Dictionary<int, int>(); // old index -> new index
@@ -283,6 +322,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             }
 
             // Step 3: Reconstruct faces (simplified - keeps original faces that are entirely on correct side)
+            int originalFaceIndex = 0;
             foreach (var face in originalBlock.Faces)
             {
                 var newFaceIndices = new List<int>();
@@ -303,8 +343,20 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
                 if (allVerticesIncluded && newFaceIndices.Count >= 3)
                 {
+                    int newFaceIndex = newBlock.Faces.Count;
                     newBlock.Faces.Add(newFaceIndices.ToArray());
+
+                    // Copy joint set ID from original face if it exists
+                    if (originalBlock.FaceToJointSetId.TryGetValue(originalFaceIndex, out int origJointSetId))
+                    {
+                        newBlock.FaceToJointSetId[newFaceIndex] = origJointSetId;
+                    }
+                    else
+                    {
+                        newBlock.FaceToJointSetId[newFaceIndex] = -1; // Original mesh face
+                    }
                 }
+                originalFaceIndex++;
             }
 
             // Step 4: Add cutting plane face (if intersection points exist)
@@ -323,7 +375,11 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                         capFaceIndices.Add(baseIndex + idx);
                     }
 
+                    int capFaceIndex = newBlock.Faces.Count;
                     newBlock.Faces.Add(capFaceIndices.ToArray());
+
+                    // This cap face was created by the current joint set
+                    newBlock.FaceToJointSetId[capFaceIndex] = jointSetId;
                 }
             }
 
