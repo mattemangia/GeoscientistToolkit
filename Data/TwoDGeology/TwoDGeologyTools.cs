@@ -18,6 +18,8 @@ public class TwoDGeologyTools
 {
     private readonly TwoDGeologyViewer _viewer;
     private readonly TwoDGeologyDataset _dataset;
+    private Interactive2DProfileDrawingTool _drawingTool;
+    private bool _showDrawingTool = false;
 
     // Edit modes
     public enum EditMode
@@ -81,6 +83,7 @@ public class TwoDGeologyTools
     {
         _viewer = viewer ?? throw new ArgumentNullException(nameof(viewer));
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
+        _drawingTool = new Interactive2DProfileDrawingTool(_dataset);
     }
 
     /// <summary>
@@ -195,7 +198,16 @@ public class TwoDGeologyTools
         ImGui.Separator();
 
         ImGui.Text("Modification Tools:");
-        
+
+        // Interactive Drawing Tool button
+        if (ImGui.Button("🎨 Interactive Drawing Tool", buttonSize))
+        {
+            _showDrawingTool = !_showDrawingTool;
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Open advanced drawing tool with snapping\nDraw topography and layers by hand");
+
         if (ImGui.Button("Edit Topography (T)", buttonSize))
         {
             CurrentEditMode = EditMode.EditTopography;
@@ -1240,6 +1252,18 @@ public class TwoDGeologyTools
         catch (Exception ex)
         {
             Logger.LogError($"Failed to start interactive restoration: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Render the interactive drawing tool if active.
+    /// Call this from the main update loop.
+    /// </summary>
+    public void RenderInteractiveDrawingTool()
+    {
+        if (_showDrawingTool && _drawingTool != null)
+        {
+            _drawingTool.Draw();
         }
     }
 

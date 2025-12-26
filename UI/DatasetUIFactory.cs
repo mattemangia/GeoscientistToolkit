@@ -527,6 +527,7 @@ private class TwoDGeologyToolsWrapper : IDatasetTools
         if (_tools != null)
         {
             _tools.RenderToolsPanel();
+            _tools.RenderInteractiveDrawingTool();
         }
         else
         {
