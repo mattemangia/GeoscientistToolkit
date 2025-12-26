@@ -20,7 +20,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <para>Cundall, P. A., &amp; Strack, O. D. L. (1979). A discrete numerical model for granular
     /// assemblies. Géotechnique, 29(1), 47-65. https://doi.org/10.1680/geot.1979.29.1.47</para>
     ///
-    /// <para>3DEC block modeling methodology:</para>
+    /// <para>Distinct-element block modeling methodology:</para>
     /// <para>Cundall, P. A. (1988). Formulation of a three-dimensional distinct element model—Part I.
     /// A scheme to detect and represent contacts in a system composed of many polyhedral blocks.
     /// International Journal of Rock Mechanics and Mining Sciences &amp; Geomechanics Abstracts, 25(3),

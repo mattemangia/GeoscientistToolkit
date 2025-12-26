@@ -10,7 +10,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// Calculates and tracks trajectories of selected blocks during simulation.
     /// This is essential for hazard analysis, runout distance prediction, and impact zone mapping.
-    /// Similar to trajectory tracking in RocFall and other rockfall analysis software.
+    /// Similar to trajectory tracking in rockfall analysis workflows.
     /// </summary>
     public class TrajectoryCalculator
     {
