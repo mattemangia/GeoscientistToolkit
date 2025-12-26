@@ -26,6 +26,10 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         public float Mass { get; set; }     // kg
         public int MaterialId { get; set; }
 
+        // Joint set tracking - stores which joint sets created each face
+        public List<int> BoundingJointSetIds { get; set; }  // Joint set IDs that bound this block
+        public Dictionary<int, int> FaceToJointSetId { get; set; }  // Maps face index to joint set ID (-1 = original mesh face)
+
         // State variables (current)
         public Vector3 Position { get; set; }           // m
         public Vector3 Velocity { get; set; }           // m/s
@@ -73,6 +77,8 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             ContactingBlockIds = new List<int>();
             Color = new Vector4(0.7f, 0.7f, 0.7f, 1.0f);
             InertiaTensor = Matrix4x4.Identity;
+            BoundingJointSetIds = new List<int>();
+            FaceToJointSetId = new Dictionary<int, int>();
         }
 
         /// <summary>

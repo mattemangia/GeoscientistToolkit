@@ -259,6 +259,61 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             TensileStrength = jointSet.TensileStrength;
             DilationAngle = jointSet.Dilation;
         }
+
+        /// <summary>
+        /// Checks if this contact lies on a specific joint set's plane.
+        /// Compares the contact normal with the joint set's normal vector.
+        /// </summary>
+        /// <param name="jointSet">The joint set to check against</param>
+        /// <param name="toleranceDegrees">Angular tolerance in degrees (default 5°)</param>
+        /// <returns>True if the contact is on the joint plane, false otherwise</returns>
+        public bool IsOnJointPlane(JointSet jointSet, float toleranceDegrees = 5.0f)
+        {
+            if (jointSet == null)
+                return false;
+
+            Vector3 jointNormal = jointSet.GetNormal();
+
+            // Calculate the absolute value of the dot product (handles both orientations)
+            float dot = Math.Abs(Vector3.Dot(ContactNormal, jointNormal));
+
+            // Convert tolerance to cosine value
+            float toleranceRad = toleranceDegrees * MathF.PI / 180.0f;
+            float minDot = MathF.Cos(toleranceRad);
+
+            return dot >= minDot;
+        }
+
+        /// <summary>
+        /// Finds which joint set this contact belongs to, if any.
+        /// </summary>
+        /// <param name="jointSets">List of joint sets to check</param>
+        /// <param name="toleranceDegrees">Angular tolerance in degrees</param>
+        /// <returns>The matching JointSet, or null if no match found</returns>
+        public JointSet FindMatchingJointSet(IList<JointSet> jointSets, float toleranceDegrees = 5.0f)
+        {
+            if (jointSets == null || jointSets.Count == 0)
+                return null;
+
+            // Find the joint set with the best (highest) normal alignment
+            JointSet bestMatch = null;
+            float bestDot = 0.0f;
+            float minDot = MathF.Cos(toleranceDegrees * MathF.PI / 180.0f);
+
+            foreach (var jointSet in jointSets)
+            {
+                Vector3 jointNormal = jointSet.GetNormal();
+                float dot = Math.Abs(Vector3.Dot(ContactNormal, jointNormal));
+
+                if (dot >= minDot && dot > bestDot)
+                {
+                    bestDot = dot;
+                    bestMatch = jointSet;
+                }
+            }
+
+            return bestMatch;
+        }
     }
 
     /// <summary>

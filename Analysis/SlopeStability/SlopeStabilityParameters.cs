@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 
 namespace GeoscientistToolkit.Analysis.SlopeStability
@@ -51,6 +52,9 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         public float WaterTableZ { get; set; }          // elevation of water table
         public float WaterDensity { get; set; }         // kg/m³
 
+        // Joint set identification
+        public float JointOrientationTolerance { get; set; }  // degrees, tolerance for matching contact normal to joint set
+
         // Earthquake loading
         public List<EarthquakeLoad> EarthquakeLoads { get; set; }
         public bool EnableEarthquakeLoading { get; set; }
@@ -88,6 +92,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             IncludeFluidPressure = false;
             WaterTableZ = 0.0f;
             WaterDensity = 1000.0f;
+            JointOrientationTolerance = 5.0f;  // 5 degrees default
             EarthquakeLoads = new List<EarthquakeLoad>();
             EnableEarthquakeLoading = false;
             ExternalStressFieldPath = "";
