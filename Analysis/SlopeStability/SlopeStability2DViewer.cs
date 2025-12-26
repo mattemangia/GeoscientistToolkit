@@ -35,7 +35,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         private Vector3 _customSectionNormal = Vector3.UnitX;
 
         // Rendering cache
-        private List<Block2D> _sectionBlocks = new List<Block2D>();
+        private List<Block2DView> _sectionBlocks = new List<Block2DView>();
         private List<JointTrace2D> _jointTraces = new List<JointTrace2D>();
         private bool _needsRebuild = true;
 
@@ -291,7 +291,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             }
         }
 
-        private Block2D ProjectBlockToSection(Block block)
+        private Block2DView ProjectBlockToSection(Block block)
         {
             // Get block position (use final position if results available)
             Vector3 blockPos = _dataset.HasResults
@@ -336,7 +336,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 }
             }
 
-            return new Block2D
+            return new Block2DView
             {
                 BlockId = block.Id,
                 Position = pos2D,
@@ -637,7 +637,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// 2D representation of a block in the section view.
     /// </summary>
-    public class Block2D
+    public class Block2DView
     {
         public int BlockId { get; set; }
         public Vector2 Position { get; set; }

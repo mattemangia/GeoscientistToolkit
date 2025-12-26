@@ -51,7 +51,6 @@ namespace GeoscientistToolkit.Data.TwoDGeology
         // Interaction
         private int _selectedPointIndex = -1;
         private string _selectedPointType = "none";
-        private int _selectedLayerIndex = -1;
         private bool _isDraggingPoint = false;
         private Vector2 _dragStartPos = Vector2.Zero;
 

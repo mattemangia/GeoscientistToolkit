@@ -652,6 +652,7 @@ public static class GeologicalMapping
         public class ProjectedFormation
         {
             public string Name { get; set; }
+            public string LithologyType { get; set; }
             public Vector4 Color { get; set; }
             public List<Vector2> TopBoundary { get; set; } = new();
             public List<Vector2> BottomBoundary { get; set; } = new();
@@ -716,6 +717,7 @@ public static class GeologicalMapping
             var projected = new ProjectedFormation
             {
                 Name = formation.FormationName ?? "Unnamed Formation",
+                LithologyType = formation.LithologyCode ?? formation.FormationName ?? "Unknown",
                 Color = LithologyPatterns.StandardColors.GetValueOrDefault(formation.LithologyCode ?? "", new Vector4(0.5f, 0.5f, 0.5f, 1f))
             };
 

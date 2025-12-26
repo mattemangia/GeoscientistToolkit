@@ -58,11 +58,21 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
         // Simulation mode
         public SimulationMode Mode { get; set; }
+        public SimulationMode SimulationMode
+        {
+            get => Mode;
+            set => Mode = value;
+        }
 
         // Output control
         public int OutputFrequency { get; set; }        // save results every N steps
         public bool SaveIntermediateStates { get; set; }
         public bool ComputeFinalState { get; set; }     // run until blocks settle
+        public bool RecordTimeHistory
+        {
+            get => SaveIntermediateStates;
+            set => SaveIntermediateStates = value;
+        }
 
         // Solver options
         public bool UseMultithreading { get; set; }
@@ -81,6 +91,12 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         // Earthquake loading
         public List<EarthquakeLoad> EarthquakeLoads { get; set; }
         public bool EnableEarthquakeLoading { get; set; }
+        public bool UseEarthquakeLoading
+        {
+            get => EnableEarthquakeLoading;
+            set => EnableEarthquakeLoading = value;
+        }
+        public float EarthquakeIntensity { get; set; }
 
         // External results import
         public string ExternalStressFieldPath { get; set; }
@@ -118,6 +134,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             JointOrientationTolerance = 5.0f;  // 5 degrees default
             EarthquakeLoads = new List<EarthquakeLoad>();
             EnableEarthquakeLoading = false;
+            EarthquakeIntensity = 0.0f;
             ExternalStressFieldPath = "";
             ExternalDisplacementFieldPath = "";
             ExternalVelocityFieldPath = "";
