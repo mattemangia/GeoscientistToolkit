@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.UI;
+using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 
 namespace GeoscientistToolkit.Analysis.SlopeStability
@@ -46,29 +46,37 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             _currentSection = _predefinedSections[0];
         }
 
-        public void Render()
+        public void DrawToolbarControls()
         {
-            if (ImGui.Begin("2D Section View"))
+            RenderToolbar();
+        }
+
+        public void DrawContent(ref float zoom, ref Vector2 pan)
+        {
+            _zoom = zoom;
+            _viewOffset = pan;
+
+            // Split view: controls on left, viewport on right
+            if (ImGui.BeginChild("LeftPanel", new System.Numerics.Vector2(250, 0), ImGuiChildFlags.Border))
             {
-                RenderToolbar();
-                ImGui.Separator();
-
-                // Split view: controls on left, viewport on right
-                if (ImGui.BeginChild("LeftPanel", new System.Numerics.Vector2(250, 0), true))
-                {
-                    RenderControlPanel();
-                }
-                ImGui.EndChild();
-
-                ImGui.SameLine();
-
-                if (ImGui.BeginChild("Viewport", new System.Numerics.Vector2(0, 0), true))
-                {
-                    RenderViewport();
-                }
-                ImGui.EndChild();
+                RenderControlPanel();
             }
-            ImGui.End();
+            ImGui.EndChild();
+
+            ImGui.SameLine();
+
+            if (ImGui.BeginChild("Viewport", new System.Numerics.Vector2(0, 0), ImGuiChildFlags.Border))
+            {
+                RenderViewport();
+            }
+            ImGui.EndChild();
+
+            zoom = _zoom;
+            pan = _viewOffset;
+        }
+
+        public void Dispose()
+        {
         }
 
         private void InitializePredefinedSections()

@@ -30,7 +30,7 @@ Example:
 
         public async Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
         {
-            if (context.CurrentDataset is not SlopeStabilityDataset slopeDataset)
+            if (context.InputDataset is not SlopeStabilityDataset slopeDataset)
                 throw new ArgumentException("Input must be a SlopeStability dataset");
 
             // Parse parameters
@@ -42,29 +42,32 @@ Example:
 
             if (node is CommandNode cmdNode)
             {
-                foreach (var param in cmdNode.Parameters)
+                if (cmdNode.Parameters.TryGetValue("magnitude", out string magnitudeValue))
                 {
-                    switch (param.Key.ToLower())
-                    {
-                        case "magnitude":
-                            magnitude = float.Parse(param.Value);
-                            break;
-                        case "epicenter_x":
-                        case "x":
-                            x = float.Parse(param.Value);
-                            break;
-                        case "epicenter_y":
-                        case "y":
-                            y = float.Parse(param.Value);
-                            break;
-                        case "epicenter_z":
-                        case "z":
-                            z = float.Parse(param.Value);
-                            break;
-                        case "start_time":
-                            startTime = float.Parse(param.Value);
-                            break;
-                    }
+                    magnitude = float.Parse(magnitudeValue);
+                }
+
+                if (cmdNode.Parameters.TryGetValue("epicenter_x", out string xValue)
+                    || cmdNode.Parameters.TryGetValue("x", out xValue))
+                {
+                    x = float.Parse(xValue);
+                }
+
+                if (cmdNode.Parameters.TryGetValue("epicenter_y", out string yValue)
+                    || cmdNode.Parameters.TryGetValue("y", out yValue))
+                {
+                    y = float.Parse(yValue);
+                }
+
+                if (cmdNode.Parameters.TryGetValue("epicenter_z", out string zValue)
+                    || cmdNode.Parameters.TryGetValue("z", out zValue))
+                {
+                    z = float.Parse(zValue);
+                }
+
+                if (cmdNode.Parameters.TryGetValue("start_time", out string startValue))
+                {
+                    startTime = float.Parse(startValue);
                 }
             }
 

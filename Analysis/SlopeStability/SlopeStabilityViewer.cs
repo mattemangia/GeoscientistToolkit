@@ -267,7 +267,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             // For now, we show a placeholder
 
             // Create a child window for 3D rendering
-            ImGui.BeginChild("3DView", availableSize, true);
+            ImGui.BeginChild("3DView", availableSize, ImGuiChildFlags.Border);
 
             // Draw placeholder text (actual rendering would use Veldrid)
             var drawList = ImGui.GetWindowDrawList();

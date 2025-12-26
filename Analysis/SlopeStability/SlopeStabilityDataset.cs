@@ -30,10 +30,9 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         // Block generation settings
         public BlockGenerationSettings BlockGenSettings { get; set; }
 
-        public SlopeStabilityDataset()
+        public SlopeStabilityDataset() : base("Slope Stability Analysis", string.Empty)
         {
             Type = DatasetType.SlopeStability;
-            Name = "Slope Stability Analysis";
             Blocks = new List<Block>();
             JointSets = new List<JointSet>();
             Materials = new List<SlopeStabilityMaterial>();
@@ -101,6 +100,11 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             }
 
             return size;
+        }
+
+        public object ToSerializableObject()
+        {
+            return ToDTO();
         }
 
         public void Save(string path)

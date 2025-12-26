@@ -113,10 +113,28 @@ public class GeoScriptParser
         if (!commandMatch.Success)
             throw new ArgumentException("Invalid command syntax. Must start with a command word.");
 
+        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var argsText = commandText.Substring(commandMatch.Length).Trim();
+        if (!string.IsNullOrWhiteSpace(argsText))
+        {
+            var paramMatches = Regex.Matches(argsText, @"(\w+)\s*=\s*(\""[^\""]*\""|\S+)");
+            foreach (Match match in paramMatches)
+            {
+                var key = match.Groups[1].Value;
+                var value = match.Groups[2].Value.Trim();
+                if (value.Length >= 2 && value.StartsWith("\"") && value.EndsWith("\""))
+                {
+                    value = value.Substring(1, value.Length - 2);
+                }
+                parameters[key] = value;
+            }
+        }
+
         return new CommandNode
         {
             CommandName = commandMatch.Value,
-            FullText = commandText
+            FullText = commandText,
+            Parameters = parameters
         };
     }
 }
@@ -331,6 +349,7 @@ public class CommandNode : AstNode
 {
     public string CommandName { get; set; }
     public string FullText { get; set; }
+    public Dictionary<string, string> Parameters { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public class PipelineNode : AstNode
