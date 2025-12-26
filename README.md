@@ -66,6 +66,7 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 - 🔊 **Acoustic Properties** - P-wave and S-wave velocity simulation
 - 🧲 **NMR Simulation** - T2 relaxation time calculation
 - 🪨 **Geomechanical Analysis** - Stress/strain, Mohr circles, failure prediction
+- 🧱 **Slope Stability (3D/2D)** - DEM-based block simulation and 2D cross-section stability analysis ([docs](docs/SLOPE_STABILITY_SIMULATION.md))
 - 💧 **Pore Network Modeling** - Permeability, tortuosity, flow simulation
 - 🧬 **Dual Pore Network Modeling** - Macro–micro pore coupling from CT + SEM with parallel/series/mass-transfer modes, micro-network extraction, and coupled permeability/reactive transport simulations
 - ♨️ **Geothermal Simulation** - Heat transfer and fluid flow in boreholes
