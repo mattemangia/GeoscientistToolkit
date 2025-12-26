@@ -8,7 +8,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 {
     /// <summary>
     /// Generates blocks from a 3D mesh using Discrete Fracture Network (DFN) approach.
-    /// Based on 3DEC methodology: joints split blocks completely.
+    /// Based on distinct-element methodology: joints split blocks completely.
     ///
     /// <para><b>Academic References:</b></para>
     ///
@@ -21,7 +21,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// joint system models. Rock Mechanics and Rock Engineering, 21(1), 21-51.
     /// https://doi.org/10.1007/BF01019674</para>
     ///
-    /// <para>3DEC block generation methodology:</para>
+    /// <para>Distinct-element block generation methodology:</para>
     /// <para>Cundall, P. A. (1988). Formulation of a three-dimensional distinct element model—Part I.
     /// A scheme to detect and represent contacts in a system composed of many polyhedral blocks.
     /// International Journal of Rock Mechanics and Mining Sciences &amp; Geomechanics Abstracts, 25(3),
@@ -44,7 +44,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
         /// <summary>
         /// Generates blocks from a mesh using joint sets.
-        /// Implements the DFN cutting algorithm similar to 3DEC.
+        /// Implements the DFN cutting algorithm similar to distinct-element workflows.
         /// </summary>
         public List<Block> GenerateBlocks(
             Mesh3DDataset mesh,

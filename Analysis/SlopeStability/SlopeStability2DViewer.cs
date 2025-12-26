@@ -9,7 +9,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 {
     /// <summary>
     /// 2D cross-section viewer for slope stability analysis.
-    /// Provides geological section views similar to professional software like RocFall and Slide.
+    /// Provides geological section views similar to professional analysis tools.
     /// Shows blocks, joint traces, displacement vectors, and color-coded stability factors.
     /// </summary>
     public class SlopeStability2DViewer : IDatasetViewer

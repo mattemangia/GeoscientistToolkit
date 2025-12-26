@@ -8,7 +8,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// Calculates factor of safety using strength reduction method.
     /// This is a critical component for professional slope stability analysis.
-    /// Based on 3DEC and RocFall methodologies.
+    /// Based on distinct-element and rockfall analysis methodologies.
     /// </summary>
     public class SafetyFactorCalculator
     {

@@ -5,7 +5,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 {
     /// <summary>
     /// Represents a set of parallel discontinuities (joints) in the rock mass.
-    /// Based on 3DEC joint set methodology.
+    /// Based on distinct-element joint set methodology.
     ///
     /// <para><b>Academic References:</b></para>
     ///

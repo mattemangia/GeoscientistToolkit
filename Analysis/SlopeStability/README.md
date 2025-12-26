@@ -2,7 +2,7 @@
 
 ## Overview
 
-Complete 3D slope stability analysis system based on Discrete Element Method (DEM), similar to 3DEC. This system provides advanced capabilities for analyzing landslides and rock slope failures on LIDAR-scanned terrain.
+Complete 3D slope stability analysis system based on the Discrete Element Method (DEM). This system provides advanced capabilities for analyzing landslides and rock slope failures on LIDAR-scanned terrain.
 
 ## Features
 
@@ -20,9 +20,9 @@ Complete 3D slope stability analysis system based on Discrete Element Method (DE
 - **GeoScript Integration**: Full programmatic control via scripting language
 - **Import/Export**: Import external simulation results and export in multiple formats
 
-### Key Differentiators from 3DEC
+### Key Differentiators from commercial DEM tools
 
-1. **Final State Visualization**: Unlike 3DEC, this system can show where blocks actually fall and settle
+1. **Final State Visualization**: Shows where blocks actually fall and settle
 2. **Real-time Animation**: Interactive timeline to visualize progressive failure
 3. **Color Mapping**: Advanced visualization of displacement, velocity, stress, and other parameters
 4. **Modern Architecture**: Built on .NET 8 with cross-platform support (Windows, Linux, macOS)
@@ -55,7 +55,7 @@ The simulator implements a full Discrete Element Method:
 
 ### Block Generation Algorithm
 
-Based on 3DEC methodology:
+Based on distinct-element block modeling methodology:
 
 1. **Input**: 3D mesh (OBJ, STL) + Joint sets
 2. **DFN Application**: Joint planes split mesh into discrete blocks
@@ -81,7 +81,7 @@ Based on 3DEC methodology:
 
 ### 2D Section Viewer
 
-The 2D section viewer provides professional cross-sectional analysis similar to RocFall and Slide:
+The 2D section viewer provides professional cross-sectional analysis similar to specialized commercial tools:
 
 **Features:**
 - Multiple predefined section planes:
@@ -281,11 +281,9 @@ Complete dataset serialization including blocks, materials, parameters, and resu
 
 ## References
 
-### 3DEC Documentation
+### Distinct-Element Method Documentation
 
-- [3DEC Official Documentation](https://docs.itascacg.com/3dec700/3dec/docproject/source/index.html)
-- [Cutting Blocks in 3DEC](https://docs.itascacg.com/3dec700/3dec/docproject/source/modeling/problemsolving/cuttingblocks.html)
-- [Joint Constitutive Models](https://www.itascacg.com/software/3dec-joint-constitutive-models)
+- Standard DEM references and block-modeling theory (see academic papers below)
 
 ### Academic Papers
 
@@ -295,10 +293,7 @@ Complete dataset serialization including blocks, materials, parameters, and resu
 
 ### Related Software
 
-- 3DEC (Itasca)
-- UDEC (Itasca)
-- PFC3D (Itasca)
-- ELFEN (Rockfield)
+- Commercial and academic DEM/rock mechanics tools
 
 ## License
 

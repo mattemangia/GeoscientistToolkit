@@ -113,7 +113,8 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 ## Installation
 
 ### Prerequisites
-- **Runtime**: .NET 8.0 SDK or later
+- **Build system**: Install the .NET 8.0 SDK or later (used for compilation)
+- **Runtime**: .NET 8.0 runtime (included with the SDK)
 - **OS**: Windows 10/11, Linux (x64), or macOS (ARM64/x86_64)
 - **GPU**: OpenGL 3.3+ or Vulkan support (for 3D visualization)
 - **RAM**: 8 GB minimum, 16 GB+ recommended

@@ -22,8 +22,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// practice. Rock Mechanics, 10(1-2), 1-54. https://doi.org/10.1007/BF01261801</para>
     ///
     /// <para>Contact stiffness formulation:</para>
-    /// <para>Itasca Consulting Group. (2016). 3DEC—Three-dimensional distinct element code,
-    /// Version 5.2, Theory and background. Minneapolis: Itasca.</para>
+    /// <para>Reference: Distinct-element method theory and background for 3D block modeling.</para>
     /// </summary>
     public class ContactInterface
     {
