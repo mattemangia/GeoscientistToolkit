@@ -6,6 +6,24 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// Represents a contact interface between two blocks or a block and a boundary.
     /// Handles contact detection, force calculation, and friction/cohesion.
+    ///
+    /// <para><b>Academic References:</b></para>
+    ///
+    /// <para>Mohr-Coulomb failure criterion:</para>
+    /// <para>Coulomb, C. A. (1776). Essai sur une application des règles de maximis et minimis à
+    /// quelques problèmes de statique relatifs à l'architecture. Mémoires de Mathématique et de
+    /// Physique, Académie Royale des Sciences, 7, 343-382.</para>
+    ///
+    /// <para>Effective stress principle for pore pressure:</para>
+    /// <para>Terzaghi, K. (1943). Theoretical soil mechanics. John Wiley &amp; Sons.</para>
+    ///
+    /// <para>Joint shear strength and roughness:</para>
+    /// <para>Barton, N., &amp; Choubey, V. (1977). The shear strength of rock joints in theory and
+    /// practice. Rock Mechanics, 10(1-2), 1-54. https://doi.org/10.1007/BF01261801</para>
+    ///
+    /// <para>Contact stiffness formulation:</para>
+    /// <para>Itasca Consulting Group. (2016). 3DEC—Three-dimensional distinct element code,
+    /// Version 5.2, Theory and background. Minneapolis: Itasca.</para>
     /// </summary>
     public class ContactInterface
     {

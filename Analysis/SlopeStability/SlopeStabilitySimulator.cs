@@ -13,6 +13,28 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// Physics simulator for slope stability analysis using Discrete Element Method (DEM).
     /// Implements SIMD-optimized multithreaded simulation with support for x86 (AVX/SSE) and ARM (NEON).
+    ///
+    /// <para><b>Academic References:</b></para>
+    ///
+    /// <para>Discrete Element Method (DEM) foundation:</para>
+    /// <para>Cundall, P. A., &amp; Strack, O. D. L. (1979). A discrete numerical model for granular
+    /// assemblies. Géotechnique, 29(1), 47-65. https://doi.org/10.1680/geot.1979.29.1.47</para>
+    ///
+    /// <para>3DEC block modeling methodology:</para>
+    /// <para>Cundall, P. A. (1988). Formulation of a three-dimensional distinct element model—Part I.
+    /// A scheme to detect and represent contacts in a system composed of many polyhedral blocks.
+    /// International Journal of Rock Mechanics and Mining Sciences &amp; Geomechanics Abstracts, 25(3),
+    /// 107-116. https://doi.org/10.1016/0148-9062(88)92293-0</para>
+    ///
+    /// <para>Velocity Verlet integration scheme:</para>
+    /// <para>Verlet, L. (1967). Computer "experiments" on classical fluids. I. Thermodynamical
+    /// properties of Lennard-Jones molecules. Physical Review, 159(1), 98-103.
+    /// https://doi.org/10.1103/PhysRev.159.98</para>
+    ///
+    /// <para>Spatial hashing for collision detection:</para>
+    /// <para>Teschner, M., Heidelberger, B., Müller, M., Pomerantes, D., &amp; Gross, M. H. (2003).
+    /// Optimized spatial hashing for collision detection of deformable objects.
+    /// Proceedings of Vision, Modeling, Visualization (VMV), 3, 47-54.</para>
     /// </summary>
     public class SlopeStabilitySimulator
     {

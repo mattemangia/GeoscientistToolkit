@@ -9,6 +9,28 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// Generates blocks from a 3D mesh using Discrete Fracture Network (DFN) approach.
     /// Based on 3DEC methodology: joints split blocks completely.
+    ///
+    /// <para><b>Academic References:</b></para>
+    ///
+    /// <para>Block theory and rock engineering:</para>
+    /// <para>Goodman, R. E., &amp; Shi, G. H. (1985). Block theory and its application to rock
+    /// engineering. Prentice-Hall. ISBN: 978-0131782013</para>
+    ///
+    /// <para>Discrete Fracture Network (DFN) modeling:</para>
+    /// <para>Dershowitz, W. S., &amp; Einstein, H. H. (1988). Characterizing rock joint geometry with
+    /// joint system models. Rock Mechanics and Rock Engineering, 21(1), 21-51.
+    /// https://doi.org/10.1007/BF01019674</para>
+    ///
+    /// <para>3DEC block generation methodology:</para>
+    /// <para>Cundall, P. A. (1988). Formulation of a three-dimensional distinct element model—Part I.
+    /// A scheme to detect and represent contacts in a system composed of many polyhedral blocks.
+    /// International Journal of Rock Mechanics and Mining Sciences &amp; Geomechanics Abstracts, 25(3),
+    /// 107-116. https://doi.org/10.1016/0148-9062(88)92293-0</para>
+    ///
+    /// <para>Convex hull algorithms for block geometry:</para>
+    /// <para>Barber, C. B., Dobkin, D. P., &amp; Huhdanpaa, H. (1996). The quickhull algorithm for
+    /// convex hulls. ACM Transactions on Mathematical Software, 22(4), 469-483.
+    /// https://doi.org/10.1145/235815.235821</para>
     /// </summary>
     public class BlockGenerator
     {

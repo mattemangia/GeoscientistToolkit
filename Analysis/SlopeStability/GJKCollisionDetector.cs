@@ -9,6 +9,26 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// Professional collision detection using GJK (Gilbert-Johnson-Keerthi) algorithm.
     /// This replaces the simplified AABB approach with accurate convex hull collision detection.
     /// GJK is the industry standard used in physics engines like Bullet, PhysX, and Havok.
+    ///
+    /// <para><b>Academic References:</b></para>
+    ///
+    /// <para>GJK Algorithm (original paper):</para>
+    /// <para>Gilbert, E. G., Johnson, D. W., &amp; Keerthi, S. S. (1988). A fast procedure for
+    /// computing the distance between complex objects in three-dimensional space.
+    /// IEEE Journal on Robotics and Automation, 4(2), 193-203.
+    /// https://doi.org/10.1109/56.2083</para>
+    ///
+    /// <para>Expanding Polytope Algorithm (EPA) for penetration depth:</para>
+    /// <para>Van den Bergen, G. (2001). Proximity queries and penetration depth computation on
+    /// 3D game objects. Game Developers Conference 2001.</para>
+    ///
+    /// <para>Van den Bergen, G. (2003). Collision detection in interactive 3D environments.
+    /// Morgan Kaufmann Publishers. ISBN: 978-1558608016</para>
+    ///
+    /// <para>Minkowski difference for collision detection:</para>
+    /// <para>Cameron, S. (1997). Enhancing GJK: Computing minimum and penetration distances
+    /// between convex polyhedra. Proceedings of IEEE International Conference on Robotics
+    /// and Automation, 3, 3112-3117. https://doi.org/10.1109/ROBOT.1997.606761</para>
     /// </summary>
     public static class GJKCollisionDetector
     {

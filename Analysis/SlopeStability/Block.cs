@@ -7,6 +7,22 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// Represents a rigid block in the discrete element simulation.
     /// Each block has geometric properties, physical properties, and state variables.
+    ///
+    /// <para><b>Academic References:</b></para>
+    ///
+    /// <para>Block mechanics in DEM:</para>
+    /// <para>Cundall, P. A. (1988). Formulation of a three-dimensional distinct element model—Part I.
+    /// A scheme to detect and represent contacts in a system composed of many polyhedral blocks.
+    /// International Journal of Rock Mechanics and Mining Sciences &amp; Geomechanics Abstracts, 25(3),
+    /// 107-116. https://doi.org/10.1016/0148-9062(88)92293-0</para>
+    ///
+    /// <para>Inertia tensor calculation for polyhedra (divergence theorem):</para>
+    /// <para>Mirtich, B. (1996). Fast and accurate computation of polyhedral mass properties.
+    /// Journal of Graphics Tools, 1(2), 31-50. https://doi.org/10.1080/10867651.1996.10487458</para>
+    ///
+    /// <para>Block theory fundamentals:</para>
+    /// <para>Goodman, R. E., &amp; Shi, G. H. (1985). Block theory and its application to rock
+    /// engineering. Prentice-Hall. ISBN: 978-0131782013</para>
     /// </summary>
     public class Block
     {

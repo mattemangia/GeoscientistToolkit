@@ -6,6 +6,29 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 {
     /// <summary>
     /// Parameters for slope stability simulation.
+    ///
+    /// <para><b>Academic References:</b></para>
+    ///
+    /// <para>DEM time step stability (critical time step):</para>
+    /// <para>O'Sullivan, C., &amp; Bray, J. D. (2004). Selecting a suitable time step for discrete
+    /// element simulations that use the central difference time integration scheme.
+    /// Engineering Computations, 21(2/3/4), 278-303.
+    /// https://doi.org/10.1108/02644400410519794</para>
+    ///
+    /// <para>Damping in DEM simulations:</para>
+    /// <para>Cundall, P. A., &amp; Hart, R. D. (1992). Numerical modelling of discontinua.
+    /// Engineering Computations, 9(2), 101-113.
+    /// https://doi.org/10.1108/eb023851</para>
+    ///
+    /// <para>Seismic slope stability (pseudo-static method):</para>
+    /// <para>Seed, H. B. (1979). Considerations in the earthquake-resistant design of earth and
+    /// rockfill dams. Géotechnique, 29(3), 215-263.
+    /// https://doi.org/10.1680/geot.1979.29.3.215</para>
+    ///
+    /// <para>Factor of safety by strength reduction:</para>
+    /// <para>Dawson, E. M., Roth, W. H., &amp; Drescher, A. (1999). Slope stability analysis by
+    /// strength reduction. Géotechnique, 49(6), 835-840.
+    /// https://doi.org/10.1680/geot.1999.49.6.835</para>
     /// </summary>
     public class SlopeStabilityParameters
     {
