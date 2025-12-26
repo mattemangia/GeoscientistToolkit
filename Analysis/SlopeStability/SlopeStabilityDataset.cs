@@ -121,6 +121,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         {
             return new SlopeStabilityDatasetDTO
             {
+                TypeName = nameof(SlopeStabilityDataset),
                 Name = this.Name,
                 FilePath = this.FilePath,
                 Blocks = this.Blocks,
@@ -176,10 +177,8 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
     /// <summary>
     /// DTO for JSON serialization.
     /// </summary>
-    public class SlopeStabilityDatasetDTO
+    public class SlopeStabilityDatasetDTO : DatasetDTO
     {
-        public string Name { get; set; }
-        public string FilePath { get; set; }
         public List<Block> Blocks { get; set; }
         public List<JointSet> JointSets { get; set; }
         public List<SlopeStabilityMaterial> Materials { get; set; }

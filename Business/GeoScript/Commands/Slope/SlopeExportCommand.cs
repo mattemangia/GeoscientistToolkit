@@ -19,9 +19,9 @@ namespace GeoscientistToolkit.Business.GeoScript.Commands.Slope
 
         public string HelpText => "Exports slope stability analysis results";
 
-        public string Usage => @"SLOPE_EXPORT path=<filename> [format=<csv|vtk|json>]
+        public string Usage => @"SLOPE_EXPORT path=<filename> [format=<csv|vtk|json|binary>]
     path: Output file path
-    format: Export format - csv, vtk, or json (default: csv)
+    format: Export format - csv, vtk, json, or binary (default: csv)
 
 Example:
     slope_dataset |> SLOPE_EXPORT path=""results.csv"" format=csv";
@@ -59,6 +59,11 @@ Example:
                     break;
                 case "json":
                     await ExportJSON(slopeDataset, path);
+                    break;
+                case "binary":
+                case "bin":
+                case "ssr":
+                    ExportBinary(slopeDataset, path);
                     break;
                 default:
                     throw new ArgumentException($"Unknown format: {format}");
@@ -141,6 +146,11 @@ Example:
             });
 
             await File.WriteAllTextAsync(path, json);
+        }
+
+        private void ExportBinary(SlopeStabilityDataset dataset, string path)
+        {
+            SlopeStabilityResultsBinarySerializer.Write(path, dataset.Results);
         }
     }
 }
