@@ -9,4 +9,5 @@ This folder contains all project documentation.
 - **EARTHQUAKE_SIM_QUICKSTART.md** - Quick start guide for earthquake simulation
 - **ONNX_MODELS.md** - Information about ONNX AI models
 - **PETROLOGY_SYSTEM.md** - Documentation for the petrology system
+- **SLOPE_STABILITY_SIMULATION.md** - 3D and 2D slope stability simulation workflows
 - **THERMODYNAMICS_ENHANCEMENTS.md** - Thermodynamics features and enhancements
