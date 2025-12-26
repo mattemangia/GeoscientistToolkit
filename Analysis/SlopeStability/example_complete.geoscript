@@ -1,0 +1,89 @@
+# Complete Slope Stability Analysis Example
+# This script demonstrates all features implemented in the system
+
+# Step 1: Generate blocks from 3D mesh with quality preset
+mesh.obj
+|> SLOPE_GENERATE_BLOCKS target_size=2.0 remove_small=true
+   # Using "Coarse" quality for faster testing
+
+# Step 2: Filter blocks to clean up the mesh
+|> SLOPE_FILTER_BLOCKS min_volume=0.01 max_volume=100 max_aspect=10 remove_degenerate=true
+   # This removes very small blocks and slivers that could cause instability
+
+# Step 3: Add geological discontinuities (joint sets)
+|> SLOPE_ADD_JOINT_SET dip=45 dip_dir=90 spacing=1.5 friction=30 cohesion=0.5 name="Main Fracture"
+|> SLOPE_ADD_JOINT_SET dip=60 dip_dir=270 spacing=2.0 friction=35 cohesion=1.0 name="Secondary"
+|> SLOPE_ADD_JOINT_SET dip=30 dip_dir=180 spacing=3.0 friction=32 cohesion=0.8 name="Bedding"
+
+# Step 4: Set material properties with failure criterion
+# Available criteria: MohrCoulomb, HoekBrown, DruckerPrager, Griffith, VonMises, Tresca
+|> SLOPE_SET_MATERIAL preset=granite criterion=MohrCoulomb
+   # Granite with Mohr-Coulomb failure criterion (classic geomechanics)
+
+# Step 5: Set slope angle for natural instability
+|> SLOPE_SET_ANGLE angle=35
+   # This tilts gravity to simulate a 35° slope
+
+# Step 6: Set water table for pore pressure effects
+|> SLOPE_SET_WATER elevation=20.0 density=1000
+   # Water table at 20m elevation
+   # Reduces effective stress on submerged joints
+
+# Step 7: Add earthquake loading (optional)
+|> SLOPE_ADD_EARTHQUAKE magnitude=6.0 epicenter_x=100 epicenter_y=50 epicenter_z=0 start_time=2.0 duration=5.0
+   # Magnitude 6.0 earthquake starting at t=2.0s
+
+# Step 8: Enable trajectory tracking for critical blocks
+|> SLOPE_TRACK_BLOCKS blocks=5,12,23,45 interval=0.01 export="trajectories.csv"
+   # Track blocks 5, 12, 23, 45 at 10ms intervals
+   # Export trajectories for runout analysis
+
+# Step 9: Calculate factor of safety (optional, before dynamic simulation)
+|> SLOPE_CALCULATE_FOS tolerance=0.01 min_fos=0.5 max_fos=5.0 max_iterations=20
+   # Strength Reduction Method to find critical FOS
+   # FOS < 1.0 = unstable, FOS > 1.5 = safe for permanent slopes
+
+# Step 10: Run full dynamic simulation
+|> SLOPE_SIMULATE time=20.0 timestep=0.0005 mode=dynamic threads=8
+   # 20 second simulation with 0.5ms timestep
+   # Dynamic mode includes full inertial effects
+   # Uses 8 threads for parallel computation
+
+# Step 11: Export results for analysis
+|> SLOPE_EXPORT path="landslide_results.csv" format=csv
+
+# Alternative workflow: Quasi-static analysis without earthquake
+# mesh.obj
+# |> SLOPE_GENERATE_BLOCKS target_size=1.5 remove_small=true
+# |> SLOPE_FILTER_BLOCKS min_volume=0.01 max_volume=50
+# |> SLOPE_ADD_JOINT_SET dip=45 dip_dir=90 spacing=1.5 friction=30 cohesion=0.5
+# |> SLOPE_SET_MATERIAL preset=limestone criterion=HoekBrown
+# |> SLOPE_SET_ANGLE angle=40
+# |> SLOPE_SET_WATER elevation=15.0
+# |> SLOPE_SIMULATE time=10.0 timestep=0.001 mode=quasistatic threads=4
+# |> SLOPE_EXPORT path="quasi_static_results.vtk" format=vtk
+
+# Alternative failure criteria examples:
+# For weathered rock with tensile cracks:
+# |> SLOPE_SET_MATERIAL preset=weathered_rock criterion=Griffith
+
+# For rock masses with GSI assessment:
+# |> SLOPE_SET_MATERIAL preset=fractured_rock criterion=HoekBrown
+
+# For clayey soils:
+# |> SLOPE_SET_MATERIAL preset=clay criterion=Tresca
+
+# For smooth yield surface (numerical stability):
+# |> SLOPE_SET_MATERIAL preset=sandstone criterion=DruckerPrager
+
+# Features demonstrated:
+# ✓ Quality presets (Very Coarse to Very Fine)
+# ✓ Block filtering (volume, aspect ratio, degenerate)
+# ✓ All 6 failure criteria (Mohr-Coulomb, Hoek-Brown, Drucker-Prager, Griffith, Von Mises, Tresca)
+# ✓ Water pressure / pore pressure (effective stress)
+# ✓ Slope angle control
+# ✓ Earthquake loading
+# ✓ Trajectory tracking for selected blocks
+# ✓ Factor of safety calculation (SRM)
+# ✓ Multiple simulation modes (dynamic, quasi-static, static)
+# ✓ Export in multiple formats (CSV, VTK, JSON)

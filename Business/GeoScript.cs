@@ -289,7 +289,20 @@ public static class CommandRegistry
             // Text Commands
             new TextSearchCommand(),
             new TextReplaceCommand(),
-            new TextStatisticsCommand()
+            new TextStatisticsCommand(),
+
+            // Slope Stability Commands
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeGenerateBlocksCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeAddJointSetCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSetMaterialCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSetAngleCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeAddEarthquakeCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSetWaterCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeFilterBlocksCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeTrackBlocksCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeCalculateFOSCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSimulateCommand(),
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeExportCommand()
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }
