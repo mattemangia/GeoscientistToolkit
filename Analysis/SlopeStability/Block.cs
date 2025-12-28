@@ -36,6 +36,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         public float Volume { get; set; }
         public Vector3 Centroid { get; set; }
         public Matrix4x4 InertiaTensor { get; set; }
+        public Matrix4x4 InverseInertiaTensor { get; set; }
 
         // Physical properties
         public float Density { get; set; }  // kg/m³
@@ -223,6 +224,10 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 Ixz, Iyz, Izz, 0,
                 0,   0,   0,   1
             );
+
+            // Calculate inverse inertia tensor for dynamics
+            Matrix4x4.Invert(InertiaTensor, out Matrix4x4 invInertia);
+            InverseInertiaTensor = invInertia;
         }
 
         /// <summary>
