@@ -319,8 +319,8 @@ The Acoustic Simulation module is functional and compiles correctly. The core FD
 # Data Loader Verification Report
 
 ## Test Summary
-**Test Case:** "Borehole, Seismic, Mesh, and Table Loaders"
-**Objective:** Verify that the primary data loaders (`LASLoader`, `SeismicLoader`, `Mesh3DLoader`, `TableLoader`) correctly import external files from industry-standard formats.
+**Test Case:** "Comprehensive Data Loader Verification"
+**Objective:** Verify that all available data loaders (`LASLoader`, `SeismicLoader`, `Mesh3DLoader`, `TableLoader`, `GISLoader`, `Tough2Loader`, `TextLoader`, `SingleImageLoader`, `AudioLoader`) correctly import external files from industry-standard formats.
 **Date:** 2025-12-29
 **Status:** **PASS**
 
@@ -329,7 +329,7 @@ A temporary test project `LoaderTests` was created to run verification against t
 
 1.  **LAS (Log ASCII Standard):**
     *   **Source:** `4771-36-SESE.las` (Minnelusa Sample Data)
-    *   **Verification:** Loaded `BoreholeDataset` with 4 curves and 235 data points. Lithology estimation produced 10 units.
+    *   **Verification:** Loaded `BoreholeDataset` with 4 curves and 235 data points.
 2.  **SEG-Y (Seismic):**
     *   **Source:** `small.sgy` (Equinor segyio test data)
     *   **Verification:** Loaded `SeismicDataset` with 25 traces. Sample interval 4000 microseconds confirmed.
@@ -339,12 +339,32 @@ A temporary test project `LoaderTests` was created to run verification against t
 4.  **CSV (Table):**
     *   **Source:** Generated local CSV file.
     *   **Verification:** Loaded `TableDataset` with 4 rows and 3 columns.
+5.  **GIS (GeoJSON & KML):**
+    *   **Source:** Generated valid GeoJSON and KML samples.
+    *   **Verification:** Loaded `GISDataset` with 1 feature each.
+6.  **TOUGH2 (Multiphysics Input):**
+    *   **Source:** Generated sample TOUGH2 input file with ROCKS, ELEME, CONNE, INCON blocks.
+    *   **Verification:** Loaded `PhysicoChemDataset` with 2 cells and 1 material.
+7.  **Text (TXT):**
+    *   **Source:** Generated sample TXT file.
+    *   **Verification:** Loaded `TextDataset` with 5 lines.
+8.  **Image (PNG):**
+    *   **Source:** `sample.png` (Wikimedia Commons).
+    *   **Verification:** Loaded `ImageDataset` with 800x600 resolution.
+9.  **Audio (WAV):**
+    *   **Source:** `sample.wav` (NCH Software sample).
+    *   **Verification:** Loaded `AudioDataset` with duration 13.81s.
 
 ## Results
 *   **LASLoader:** **PASS** - Correctly parsed header, curves, and data section.
 *   **SeismicLoader:** **PASS** - Correctly parsed binary header and trace data.
 *   **Mesh3DLoader:** **PASS** - Correctly parsed vertices and faces.
 *   **TableLoader:** **PASS** - Correctly parsed delimiter and rows.
+*   **GISLoader:** **PASS** - Correctly parsed GeoJSON and KML features.
+*   **Tough2Loader:** **PASS** - Correctly parsed block structure (ELEME/CONNE/ROCKS).
+*   **TextLoader:** **PASS** - Correctly loaded text content.
+*   **SingleImageLoader:** **PASS** - Correctly loaded image dimensions.
+*   **AudioLoader:** **PASS** - Correctly loaded audio metadata and duration.
 
 ## Cleanup
 *   The `LoaderTests` project and all downloaded sample files have been deleted.
