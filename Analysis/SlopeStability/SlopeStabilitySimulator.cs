@@ -200,6 +200,15 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         {
             foreach (var block in _dataset.Blocks)
             {
+                // Ensure inverse inertia tensor is valid (for backward compatibility with old datasets)
+                if (block.InverseInertiaTensor == default)
+                {
+                    if (Matrix4x4.Invert(block.InertiaTensor, out Matrix4x4 inv))
+                        block.InverseInertiaTensor = inv;
+                    else
+                        block.InverseInertiaTensor = Matrix4x4.Identity; // Fallback
+                }
+
                 block.Position = block.Centroid;
                 block.InitialPosition = block.Centroid;
                 block.Velocity = Vector3.Zero;
@@ -774,13 +783,38 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             // Rotational dynamics (if enabled)
             if (_parameters.IncludeRotation)
             {
-                // Simplified rotational integration
-                Vector3 angularAcceleration = block.TorqueAccumulator /
-                    (block.InertiaTensor.M11 + block.InertiaTensor.M22 + block.InertiaTensor.M33);
+                // Full rigid body rotational dynamics
+                // 1. Convert inertia tensor to world space: I_world_inv = R * I_body_inv * R_transpose
+                Matrix4x4 R = Matrix4x4.CreateFromQuaternion(block.Orientation);
+                Matrix4x4 R_transpose = Matrix4x4.Transpose(R);
+                Matrix4x4 I_world_inv = Matrix4x4.Multiply(Matrix4x4.Multiply(R, block.InverseInertiaTensor), R_transpose);
 
+                // 2. Compute gyroscopic term: tau_gyro = omega x (I_world * omega)
+                // Note: I_world = R * I_body * R_transpose
+                // Or simpler: L = I_world * omega
+                Matrix4x4 I_world = Matrix4x4.Multiply(Matrix4x4.Multiply(R, block.InertiaTensor), R_transpose);
+                Vector3 L = Vector3.Transform(block.AngularVelocity, I_world); // L = I * w
+                Vector3 gyroTorque = Vector3.Cross(block.AngularVelocity, L);  // w x L
+
+                // 3. Solve Euler equation: alpha = I_world_inv * (torque - gyroTorque)
+                Vector3 netTorque = block.TorqueAccumulator - gyroTorque;
+
+                // System.Numerics Vector3.Transform(v, M) computes v * M (row vector convention)
+                // But for symmetric matrices, row vs column multiplication is equivalent if M is symmetric.
+                // However, Vector3.Transform treats the vector as a point (w=1) or normal (w=0)?
+                // Actually Vector3.Transform(v, M4x4) computes (v.X, v.Y, v.Z, 1) * M and returns (X,Y,Z).
+                // We should ensure the translation part of matrix doesn't affect it, or use 3x3 transform.
+                // Since I_world_inv comes from rotation matrices (pure rotation), the translation part should be zero/identity.
+
+                Vector3 angularAcceleration = Vector3.Transform(netTorque, I_world_inv);
+
+                // Update angular velocity
                 block.AngularVelocity += angularAcceleration * dt;
 
                 // Update orientation (using quaternion integration)
+                // q_dot = 0.5 * w * q
+                // q(t+dt) = q(t) + q_dot * dt
+                // Or using axis-angle for stability
                 float angularSpeed = block.AngularVelocity.Length();
                 if (angularSpeed > 1e-8f)
                 {
