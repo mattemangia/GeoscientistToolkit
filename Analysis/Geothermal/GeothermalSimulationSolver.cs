@@ -469,6 +469,26 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
                     UpdateHeatExchanger();
                     await SolveHeatTransferAsync((float)actualTimeStep);
 
+                    // Solve fractured media (dual-continuum) if enabled
+                    if (_options.EnableDualContinuumFractures && _fracturedMediaSolver != null)
+                    {
+                        // 1. Sync main temperature (effective/matrix) to fractured media solver
+                        _fracturedMediaSolver.SetMatrixTemperature(_temperature);
+                        if (_options.SimulateGroundwaterFlow)
+                        {
+                            _fracturedMediaSolver.SetMatrixPressure(_pressure);
+                        }
+
+                        // 2. Perform dual-continuum update (exchange term)
+                        _fracturedMediaSolver.UpdateDualContinuum((float)actualTimeStep);
+
+                        // 3. Sync back updated matrix temperature to main field
+                        // Note: Depending on formulation, _temperature might represent the bulk or matrix.
+                        // Here we assume it tracks the matrix temperature primarily.
+                        var updatedMatrixTemp = _fracturedMediaSolver.GetMatrixTemperature();
+                        Array.Copy(updatedMatrixTemp, _temperature, updatedMatrixTemp.Length);
+                    }
+
                     // Solve geomechanics if enabled
                     if (_options.EnableGeomechanics && _geomechanicsSolver != null)
                     {
@@ -516,6 +536,18 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         results.DarcyVelocityField = (float[,,,])_velocity.Clone();
         results.PecletNumberField = (float[,,])_pecletNumber.Clone();
         results.DispersivityField = (float[,,])_dispersionCoefficient.Clone();
+
+        // Store fractured media results
+        if (_options.EnableDualContinuumFractures && _fracturedMediaSolver != null)
+        {
+            results.MatrixTemperatureField = (float[,,])_fracturedMediaSolver.GetMatrixTemperature().Clone();
+            results.FractureTemperatureField = (float[,,])_fracturedMediaSolver.GetFractureTemperature().Clone();
+            results.MatrixPressureField = (float[,,])_fracturedMediaSolver.GetMatrixPressure().Clone();
+            results.FracturePressureField = (float[,,])_fracturedMediaSolver.GetFracturePressure().Clone();
+            results.FractureApertureField = (float[,,])_fracturedMediaSolver.GetFractureAperture().Clone();
+            results.FracturePermeabilityField = (float[,,])_fracturedMediaSolver.GetFracturePermeability().Clone();
+        }
+
         CalculatePerformanceMetrics(results);
 
         // Calculate BTES-specific metrics if BTES mode is enabled

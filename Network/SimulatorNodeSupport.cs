@@ -22,8 +22,8 @@ public class SimulatorNodeSupport
         }
         else
         {
-            var settings = SettingsManager.Instance.Settings.NodeManager;
-            _useNodes = settings.EnableNodeManager && settings.UseNodesForSimulators;
+            var settings = SettingsManager.Instance?.Settings?.NodeManager;
+            _useNodes = settings != null && settings.EnableNodeManager && settings.UseNodesForSimulators;
         }
 
         if (_useNodes)
@@ -31,9 +31,14 @@ public class SimulatorNodeSupport
             _nodeManager = NodeManager.Instance;
 
             // Check if node manager is running
-            if (!_nodeManager.IsRunning)
+            if (_nodeManager != null && !_nodeManager.IsRunning)
             {
                 Logger.LogWarning("Node Manager is not running. Falling back to local computation.");
+                _useNodes = false;
+            }
+            else if (_nodeManager == null)
+            {
+                // Should not happen if instance is singleton, but safety check
                 _useNodes = false;
             }
         }

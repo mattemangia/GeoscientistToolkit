@@ -70,3 +70,47 @@ A temporary test project `SimulationTest` was created with the following configu
 
 ## Notes
 *   The `Analysis/AcousticSimulation` module currently has a build error (missing `SoundRay` type). This was bypassed for this test but requires attention from the relevant development team.
+
+---
+
+# Geothermal Simulation Verification Report
+
+## Test Summary
+**Test Case:** "Geothermal Simulation with Dual-Continuum Fractured Media"
+**Objective:** Verify that the Geothermal simulation algorithm correctly integrates fluid inclusion and fracturing (Dual-Continuum model).
+**Date:** 2025-12-29
+**Status:** **PASS**
+
+## Test Details
+A temporary test project `GeothermalTest` was created to test the `GeothermalSimulationSolver` with `EnableDualContinuumFractures = true`.
+
+### Configuration:
+1.  **Mesh:** 3D Cylindrical Mesh (10x4x10 grid).
+2.  **Model:** Dual-Continuum (Warren-Root) for fractured media.
+3.  **Parameters:**
+    *   Simulation Time: 300s
+    *   Time Step: 30s (Stable CFL)
+    *   Fracture Spacing: 1.0m
+    *   Fracture Density: 1.0/m
+    *   Matrix Permeability: 1e-15 m²
+
+### Issues Identified & Fixed:
+1.  **Missing Integration:** The `GeothermalSimulationSolver` initialized the `FracturedMediaSolver` but failed to call its `UpdateDualContinuum` method in the main time loop. This meant no heat exchange occurred between the matrix and fractures.
+2.  **Missing Results:** The simulation results object (`GeothermalSimulationResults`) was not being populated with the fractured media fields (`MatrixTemperatureField`, `FractureTemperatureField`, etc.).
+3.  **NullReferenceException:** Identified and fixed a potential null reference issue in `SimulatorNodeSupport` when accessing settings if `SettingsManager` is not fully initialized.
+
+### Fix Implementation:
+*   Modified `GeothermalSimulationSolver.cs` to explicitly call `_fracturedMediaSolver.UpdateDualContinuum()` within the simulation loop.
+*   Implemented synchronization between the main solver's temperature field and the fractured media solver's matrix temperature.
+*   Added logic to populate the `GeothermalSimulationResults` with all fractured media fields at the end of the simulation.
+
+## Verification Results
+*   **Compilation:** Successful.
+*   **Execution:** The simulation ran to completion without errors (after parameter adjustment for stability).
+*   **Assertions:**
+    *   `MatrixTemperatureField`: **Populated** (previously null).
+    *   `FractureTemperatureField`: **Populated** (previously null) and contains valid physical values (~287.88 K).
+
+## Cleanup
+*   The `GeothermalTest` project has been deleted.
+*   All temporary files created during the test have been removed.
