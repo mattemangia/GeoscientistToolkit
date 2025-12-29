@@ -1,9 +1,12 @@
 // GeoscientistToolkit/UI/GIS/Tools/HydrologicalAnalysisTool.cs
 
+using System.IO;
 using System.Numerics;
+using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.UI.Interfaces;
+using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 using GISOperations = GeoscientistToolkit.Business.GIS.GISOperationsImpl;
@@ -47,6 +50,15 @@ public class HydrologicalAnalysisTool : IDatasetTools
     private Vector4 _flowPathColor = new Vector4(0.2f, 0.6f, 1.0f, 1.0f);
     private Vector4 _watershedColor = new Vector4(0.3f, 0.8f, 0.3f, 0.3f);
     private Vector4 _floodColor = new Vector4(0.1f, 0.3f, 0.8f, 0.5f);
+    private readonly ImGuiExportFileDialog _geoTiffDialog;
+
+    public HydrologicalAnalysisTool()
+    {
+        _geoTiffDialog = new ImGuiExportFileDialog("HydrologyGeoTiffOpen", "Select Elevation GeoTIFF");
+        _geoTiffDialog.SetExtensions(
+            new ImGuiExportFileDialog.ExtensionOption(".tif", "GeoTIFF"),
+            new ImGuiExportFileDialog.ExtensionOption(".tiff", "GeoTIFF"));
+    }
 
     public void Draw(Dataset dataset)
     {
@@ -126,8 +138,15 @@ public class HydrologicalAnalysisTool : IDatasetTools
 
             if (ImGui.Button("Load Elevation GeoTIFF..."))
             {
-                // TODO: Open file dialog to load GeoTIFF
-                Logger.Log("GeoTIFF loading dialog would open here");
+                var startDir = !string.IsNullOrEmpty(gisDataset.FilePath)
+                    ? Path.GetDirectoryName(gisDataset.FilePath)
+                    : null;
+                _geoTiffDialog.Open("", startDir);
+            }
+
+            if (_geoTiffDialog.Submit())
+            {
+                LoadElevationGeoTiff(gisDataset, _geoTiffDialog.SelectedPath);
             }
 
             return;
@@ -154,6 +173,74 @@ public class HydrologicalAnalysisTool : IDatasetTools
             {
                 ImGui.SetItemDefaultFocus();
             }
+        }
+    }
+
+    private void LoadElevationGeoTiff(GISDataset gisDataset, string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return;
+
+        if (!File.Exists(path))
+        {
+            _statusMessage = "GeoTIFF file not found.";
+            Logger.LogError($"GeoTIFF file not found: {path}");
+            return;
+        }
+
+        try
+        {
+            var geoTiffData = BasemapManager.Instance.LoadGeoTiff(path);
+            if (geoTiffData == null)
+            {
+                _statusMessage = "Failed to load GeoTIFF.";
+                Logger.LogError($"Failed to load GeoTIFF data from {path}");
+                return;
+            }
+
+            var width = geoTiffData.Width;
+            var height = geoTiffData.Height;
+            var pixelData = new float[width, height];
+            for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+            {
+                var index = (y * width + x) * 4;
+                pixelData[x, y] = geoTiffData.Data[index];
+            }
+
+            var bounds = new BoundingBox
+            {
+                Min = new Vector2((float)geoTiffData.OriginX,
+                    (float)(geoTiffData.OriginY + geoTiffData.PixelHeight * height)),
+                Max = new Vector2((float)(geoTiffData.OriginX + geoTiffData.PixelWidth * width),
+                    (float)geoTiffData.OriginY)
+            };
+
+            var layer = new GISRasterLayer(pixelData, bounds)
+            {
+                Name = Path.GetFileNameWithoutExtension(path),
+                IsVisible = true,
+                RasterPath = path
+            };
+
+            gisDataset.Layers.Add(layer);
+            gisDataset.AddTag(GISTag.GeoTIFF);
+            gisDataset.AddTag(GISTag.RasterData);
+            gisDataset.UpdateBounds();
+            ProjectManager.Instance.NotifyDatasetDataChanged(gisDataset);
+
+            _elevationLayer = layer;
+            _flowDirection = null;
+            _flowAccumulation = null;
+            _currentFlowPath = null;
+            _currentWatershed = null;
+            _statusMessage = $"Loaded elevation GeoTIFF: {layer.Name}";
+            Logger.Log($"Loaded elevation GeoTIFF layer: {layer.Name}");
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Error loading GeoTIFF: {ex.Message}";
+            Logger.LogError($"Failed to load GeoTIFF for hydrology tool: {ex.Message}");
         }
     }
 

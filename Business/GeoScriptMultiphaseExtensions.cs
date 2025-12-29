@@ -299,7 +299,7 @@ public class RunMultiphaseCommand : IGeoScriptCommand
     public string HelpText => "Runs a multiphase reactive transport simulation";
     public string Usage => "RUN_MULTIPHASE [time_seconds] [output_interval_seconds]";
 
-    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    public async Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
         if (context.InputDataset is not PhysicoChemDataset dataset)
             throw new InvalidOperationException("RUN_MULTIPHASE requires a PhysicoChem dataset");
@@ -325,12 +325,148 @@ public class RunMultiphaseCommand : IGeoScriptCommand
         Logger.Log($"[RUN_MULTIPHASE]   EOS type: {dataset.SimulationParams.MultiphaseEOSType}");
         Logger.Log($"[RUN_MULTIPHASE]   Reactive transport: {dataset.SimulationParams.EnableReactiveTransport}");
 
-        // TODO: Actually run the simulation here
-        // This would call the MultiphaseReactiveTransportSolver
+        await Task.Run(() =>
+        {
+            var eosType = ParseEosType(dataset.SimulationParams.MultiphaseEOSType);
+            var flowParams = BuildFlowParameters(dataset);
+            var state = CreateInitialState(dataset);
+            var dt = Math.Max(dataset.SimulationParams.TimeStep, 1e-6);
+            var nextOutputTime = 0.0;
 
-        Logger.Log($"[RUN_MULTIPHASE] Simulation would run here (not yet implemented in GeoScript executor)");
-        Logger.Log($"[RUN_MULTIPHASE] Use the simulator tool directly to run multiphase simulations");
+            Logger.Log($"[RUN_MULTIPHASE] Running solver with dt={dt} s");
 
-        return Task.FromResult<Dataset>(dataset);
+            var solver = new MultiphaseReactiveTransportSolver(eosType);
+            while (state.CurrentTime < totalTime)
+            {
+                state = solver.SolveTimeStep(state, dt, flowParams);
+
+                if (state.CurrentTime + 1e-9 >= nextOutputTime)
+                {
+                    var snapshot = ConvertToPhysicoChemState(state);
+                    dataset.ResultHistory.Add(snapshot);
+                    dataset.CurrentState = snapshot;
+                    nextOutputTime += outputInterval;
+                }
+            }
+        });
+
+        ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+        Logger.Log($"[RUN_MULTIPHASE] Simulation completed at t={dataset.CurrentState?.CurrentTime:F2} s");
+
+        return dataset;
+    }
+
+    private static MultiphaseFlowSolver.EOSType ParseEosType(string eosType)
+    {
+        if (Enum.TryParse(eosType, true, out MultiphaseFlowSolver.EOSType parsed))
+            return parsed;
+
+        Logger.LogWarning($"[RUN_MULTIPHASE] Unknown EOS type '{eosType}', defaulting to WaterCO2");
+        return MultiphaseFlowSolver.EOSType.WaterCO2;
+    }
+
+    private static MultiphaseParameters BuildFlowParameters(PhysicoChemDataset dataset)
+    {
+        var simParams = dataset.SimulationParams;
+        var spacing = dataset.GeneratedMesh?.Spacing ?? (1.0, 1.0, 1.0);
+
+        return new MultiphaseParameters
+        {
+            GridSpacing = spacing,
+            S_lr = simParams.ResidualLiquidSaturation,
+            S_gr = simParams.ResidualGasSaturation,
+            m_vG = simParams.VanGenuchten_m,
+            alpha_vG = simParams.VanGenuchten_alpha
+        };
+    }
+
+    private static MultiphaseReactiveState CreateInitialState(PhysicoChemDataset dataset)
+    {
+        if (dataset.CurrentState == null)
+            dataset.InitializeState();
+
+        var baseState = dataset.CurrentState;
+        var gridSize = (baseState.Temperature.GetLength(0),
+            baseState.Temperature.GetLength(1),
+            baseState.Temperature.GetLength(2));
+
+        var state = new MultiphaseReactiveState(gridSize)
+        {
+            CurrentTime = baseState.CurrentTime,
+            Pressure = (float[,,])baseState.Pressure.Clone(),
+            Temperature = (float[,,])baseState.Temperature.Clone(),
+            LiquidSaturation = (float[,,])baseState.LiquidSaturation.Clone(),
+            VaporSaturation = (float[,,])baseState.VaporSaturation.Clone(),
+            GasSaturation = (float[,,])baseState.GasSaturation.Clone(),
+            Porosity = (float[,,])baseState.Porosity.Clone(),
+            Permeability = (float[,,])baseState.Permeability.Clone(),
+            InitialPorosity = (float[,,])baseState.Porosity.Clone(),
+            InitialPermeability = (float[,,])baseState.Permeability.Clone()
+        };
+
+        foreach (var (species, field) in baseState.Concentrations)
+        {
+            state.Concentrations[species] = (float[,,])field.Clone();
+        }
+
+        foreach (var (mineral, field) in baseState.Minerals)
+        {
+            state.MineralVolumeFractions[mineral] = (float[,,])field.Clone();
+            state.InitialMineralVolumeFractions[mineral] = (float[,,])field.Clone();
+        }
+
+        EnsureDefaultSaturation(state);
+        return state;
+    }
+
+    private static void EnsureDefaultSaturation(MultiphaseReactiveState state)
+    {
+        var nx = state.GridDimensions.X;
+        var ny = state.GridDimensions.Y;
+        var nz = state.GridDimensions.Z;
+
+        for (int i = 0; i < nx; i++)
+        for (int j = 0; j < ny; j++)
+        for (int k = 0; k < nz; k++)
+        {
+            var sum = state.LiquidSaturation[i, j, k] +
+                      state.VaporSaturation[i, j, k] +
+                      state.GasSaturation[i, j, k];
+            if (sum <= 0.0f)
+            {
+                state.LiquidSaturation[i, j, k] = 1.0f;
+                state.VaporSaturation[i, j, k] = 0.0f;
+                state.GasSaturation[i, j, k] = 0.0f;
+            }
+        }
+    }
+
+    private static PhysicoChemState ConvertToPhysicoChemState(MultiphaseReactiveState state)
+    {
+        var converted = new PhysicoChemState((state.GridDimensions.X,
+            state.GridDimensions.Y,
+            state.GridDimensions.Z))
+        {
+            CurrentTime = state.CurrentTime,
+            Pressure = (float[,,])state.Pressure.Clone(),
+            Temperature = (float[,,])state.Temperature.Clone(),
+            LiquidSaturation = (float[,,])state.LiquidSaturation.Clone(),
+            VaporSaturation = (float[,,])state.VaporSaturation.Clone(),
+            GasSaturation = (float[,,])state.GasSaturation.Clone(),
+            Porosity = (float[,,])state.Porosity.Clone(),
+            Permeability = (float[,,])state.Permeability.Clone()
+        };
+
+        foreach (var (species, field) in state.Concentrations)
+        {
+            converted.Concentrations[species] = (float[,,])field.Clone();
+        }
+
+        foreach (var (mineral, field) in state.MineralVolumeFractions)
+        {
+            converted.Minerals[mineral] = (float[,,])field.Clone();
+        }
+
+        return converted;
     }
 }
