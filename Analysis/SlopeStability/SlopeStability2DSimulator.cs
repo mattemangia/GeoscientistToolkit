@@ -587,7 +587,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                     FinalVelocity = block.Velocity,
                     HasFailed = block.HasFailed,
                     SafetyFactor = CalculateSafetyFactor(block),
-                    MaxStress = 0 // TODO: Calculate stress
+                    MaxStress = CalculateMaxStress(block)
                 };
 
                 results.BlockResults.Add(blockResult);
@@ -623,6 +623,38 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 return float.PositiveInfinity;
 
             return 1.0f / (1.0f + block.MaxDisplacement);
+        }
+
+        /// <summary>
+        /// Calculate an approximate maximum stress for a block (plane stress).
+        /// </summary>
+        private float CalculateMaxStress(Block2D block)
+        {
+            var material = _dataset.GetMaterial(block.MaterialId);
+            if (material == null)
+                return 0.0f;
+
+            float contactNormal = 0.0f;
+            float contactShear = 0.0f;
+
+            foreach (var contact in _activeContacts)
+            {
+                if (contact.Block1Id != block.Id && contact.Block2Id != block.Id)
+                    continue;
+
+                contactNormal += contact.NormalForce;
+                contactShear += contact.ShearForce;
+            }
+
+            float area = Math.Max(block.Area * _sectionThickness, 1e-6f);
+            float sigmaX = contactNormal / area;
+            float sigmaY = block.GetMass(material.Density) * _sectionThickness * 9.81f / area;
+            float tauXY = contactShear / area;
+
+            float vonMises = MathF.Sqrt(
+                sigmaX * sigmaX - sigmaX * sigmaY + sigmaY * sigmaY + 3.0f * tauXY * tauXY);
+
+            return vonMises;
         }
 
         #endregion

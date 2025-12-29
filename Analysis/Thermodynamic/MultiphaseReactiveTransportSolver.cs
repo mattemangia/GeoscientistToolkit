@@ -74,7 +74,7 @@ public class MultiphaseReactiveTransportSolver : SimulatorNodeSupport
 
             // Step 2: Solve reactive transport (species transport + reactions)
             Logger.Log($"[MultiphaseReactiveTransport] Iteration {outerIter + 1}: Solving reactive transport");
-            SolveReactiveTransport(newState, dt);
+            SolveReactiveTransport(newState, dt, flowParams);
 
             // Step 3: Update porosity and permeability from mineral precipitation/dissolution
             Logger.Log($"[MultiphaseReactiveTransport] Iteration {outerIter + 1}: Updating rock properties");
@@ -119,13 +119,13 @@ public class MultiphaseReactiveTransportSolver : SimulatorNodeSupport
     /// <summary>
     /// Solve reactive transport (advection + dispersion + reactions)
     /// </summary>
-    private void SolveReactiveTransport(MultiphaseReactiveState state, double dt)
+    private void SolveReactiveTransport(MultiphaseReactiveState state, double dt, MultiphaseParameters flowParams)
     {
         // Create ReactiveTransportState from current state
         var reactiveState = ConvertToReactiveTransportState(state);
 
         // Create flow field data from multiphase velocities
-        var flowData = CreateFlowFieldData(state);
+        var flowData = CreateFlowFieldData(state, flowParams);
 
         // Solve reactive transport
         var newReactiveState = _reactiveTransport.SolveTimeStep(reactiveState, dt, flowData);
@@ -263,7 +263,7 @@ public class MultiphaseReactiveTransportSolver : SimulatorNodeSupport
     /// <summary>
     /// Create FlowFieldData from multiphase state
     /// </summary>
-    private FlowFieldData CreateFlowFieldData(MultiphaseReactiveState state)
+    private FlowFieldData CreateFlowFieldData(MultiphaseReactiveState state, MultiphaseParameters flowParams)
     {
         int nx = state.GridDimensions.X;
         int ny = state.GridDimensions.Y;
@@ -271,7 +271,7 @@ public class MultiphaseReactiveTransportSolver : SimulatorNodeSupport
 
         var flowData = new FlowFieldData
         {
-            GridSpacing = (1.0, 1.0, 1.0), // TODO: Get from parameters
+            GridSpacing = flowParams.GridSpacing,
             VelocityX = new float[nx, ny, nz],
             VelocityY = new float[nx, ny, nz],
             VelocityZ = new float[nx, ny, nz],
