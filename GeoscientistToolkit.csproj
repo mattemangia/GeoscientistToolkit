@@ -13,7 +13,6 @@
         <ApplicationIcon>image.ico</ApplicationIcon>
         <!-- Fix for duplicate files warning -->
         <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
-    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     </PropertyGroup>
 
     <!--
