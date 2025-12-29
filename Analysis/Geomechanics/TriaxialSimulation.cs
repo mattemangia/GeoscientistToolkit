@@ -132,7 +132,7 @@ public unsafe class TriaxialSimulation : IDisposable
 
     public TriaxialSimulation()
     {
-        _cl = CL.GetApi();
+        try { _cl = CL.GetApi(); } catch { Util.Logger.LogWarning("OpenCL not available"); }
     }
 
     public void Dispose()
