@@ -614,21 +614,97 @@ public class DualPNMGeneratorTool
             SEMImagePosition = Vector2.Zero
         };
 
-        // Placeholder: Create simple micro-network
-        // TODO: Implement actual PNM extraction from SEM image
-        int microPoreCount = 100; // Placeholder
-        for (int i = 0; i < microPoreCount; i++)
+        // Implement threshold-based PNM extraction from SEM image
+
+        // 1. Get pixel data
+        byte[] pixels = imageDataset.ImageData;
+        if (pixels == null)
         {
-            microNet.MicroPores.Add(new Pore
+             // Try to reload if missing (Lazy loading might have cleared it)
+             imageDataset.Load();
+             pixels = imageDataset.ImageData;
+
+             if (pixels == null)
+             {
+                 Logger.LogError($"Could not load image data for {imageDataset.Name}");
+                 return microNet; // Return empty
+             }
+        }
+
+        int width = imageDataset.Width;
+        int height = imageDataset.Height;
+
+        // 2. Thresholding (Simple heuristic: Darker = Pore, Lighter = Solid)
+        // Assume grayscale or use luminance
+        // Calculate Otsu's threshold or use fixed value for now
+        float threshold = 100f; // Typical for pores in SEM
+
+        var poreMap = new bool[width, height];
+        int porePixelCount = 0;
+
+        // Process only a subset if image is huge to save time, or full image
+        for(int y=0; y<height; y++)
+        {
+            for(int x=0; x<width; x++)
             {
-                ID = i,
-                Position = new Vector3(i * 10, 0, 0),
-                Radius = 0.5f + (float)(i % 10) * 0.1f,
-                Area = 1.0f,
-                VolumeVoxels = 4.0f,
-                VolumePhysical = 4.0f * imageDataset.PixelSize * imageDataset.PixelSize * imageDataset.PixelSize,
-                Connections = 2
-            });
+                int idx = (y * width + x) * 4; // RGBA
+                float lum = 0.299f * pixels[idx] + 0.587f * pixels[idx+1] + 0.114f * pixels[idx+2];
+
+                if (lum < threshold)
+                {
+                    poreMap[x, y] = true;
+                    porePixelCount++;
+                }
+            }
+        }
+
+        // 3. Grid-based node generation
+        // Place nodes in pore centers
+        int gridSize = 20; // Sampling grid size in pixels
+        int nodeId = 0;
+
+        for(int y=gridSize/2; y<height; y+=gridSize)
+        {
+            for(int x=gridSize/2; x<width; x+=gridSize)
+            {
+                // Check if this block has enough pore pixels
+                if (poreMap[x, y])
+                {
+                    // Create a pore node
+                    // Estimate radius based on local clearance
+                    float radius = CalculateLocalPoreRadius(poreMap, x, y, width, height, maxSearch: gridSize);
+
+                    float pixelSizeUM = imageDataset.PixelSize > 0 ? imageDataset.PixelSize : 1.0f;
+
+                    microNet.MicroPores.Add(new Pore
+                    {
+                        ID = nodeId++,
+                        Position = new Vector3(x * pixelSizeUM, y * pixelSizeUM, 0), // 2D position in micro coordinates
+                        Radius = radius * pixelSizeUM,
+                        Area = MathF.PI * (radius * pixelSizeUM) * (radius * pixelSizeUM),
+                        VolumeVoxels = radius * radius * radius, // Simplified sphere approx
+                        VolumePhysical = (4f/3f) * MathF.PI * MathF.Pow(radius * pixelSizeUM, 3),
+                        Connections = 0
+                    });
+                }
+            }
+        }
+
+        // 4. Link nodes (Simple distance-based connectivity)
+        // In a real extraction, we would check if the path is clear of solid pixels
+        // Here we use a proximity heuristic
+        float maxLinkDist = gridSize * 1.5f * (imageDataset.PixelSize > 0 ? imageDataset.PixelSize : 1.0f);
+
+        foreach(var pore in microNet.MicroPores)
+        {
+            // Find neighbors
+            var neighbors = microNet.MicroPores
+                .Where(p => p.ID != pore.ID && Vector3.Distance(p.Position, pore.Position) < maxLinkDist)
+                .ToList();
+
+            pore.Connections = neighbors.Count;
+            // Note: We don't store explicit throat objects in this simplified micro-model structure,
+            // but the connectivity count is used for permeability estimation.
         }
 
         // Calculate micro-network properties
@@ -740,6 +816,21 @@ public class DualPNMGeneratorTool
         {
             ImGui.TextColored(new Vector4(0.4f, 0.8f, 1.0f, 1.0f), $"Status: {_statusMessage}");
         }
+    }
+
+    private float CalculateLocalPoreRadius(bool[,] poreMap, int x, int y, int width, int height, int maxSearch)
+    {
+        // Simple implementation: check distance to nearest solid in 4 directions
+        int dist = 1;
+        while(dist < maxSearch)
+        {
+            if (x - dist < 0 || !poreMap[x - dist, y]) return dist;
+            if (x + dist >= width || !poreMap[x + dist, y]) return dist;
+            if (y - dist < 0 || !poreMap[x, y - dist]) return dist;
+            if (y + dist >= height || !poreMap[x, y + dist]) return dist;
+            dist++;
+        }
+        return dist;
     }
 
     private void Reset()

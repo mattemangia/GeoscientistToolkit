@@ -179,6 +179,12 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
 
         // Apply initial conditions from domains
         ApplyInitialConditions();
+
+        // Initialize InitialPermeability with the starting Permeability values
+        if (CurrentState.InitialPermeability != null && CurrentState.Permeability != null)
+        {
+            Array.Copy(CurrentState.Permeability, CurrentState.InitialPermeability, CurrentState.Permeability.Length);
+        }
     }
 
     private void ApplyInitialConditions()
@@ -605,6 +611,7 @@ public class PhysicoChemState
     public float[,,] Pressure { get; set; } // Pa
     public float[,,] Porosity { get; set; } // fraction
     public float[,,] Permeability { get; set; } // m²
+    public float[,,] InitialPermeability { get; set; } // m² (Tracked for evolution)
 
     // Velocity field
     public float[,,] VelocityX { get; set; } // m/s
@@ -646,6 +653,7 @@ public class PhysicoChemState
         Pressure = new float[nx, ny, nz];
         Porosity = new float[nx, ny, nz];
         Permeability = new float[nx, ny, nz];
+        InitialPermeability = new float[nx, ny, nz];
 
         VelocityX = new float[nx, ny, nz];
         VelocityY = new float[nx, ny, nz];
@@ -671,6 +679,7 @@ public class PhysicoChemState
             Pressure = (float[,,])Pressure.Clone(),
             Porosity = (float[,,])Porosity.Clone(),
             Permeability = (float[,,])Permeability.Clone(),
+            InitialPermeability = (float[,,])InitialPermeability.Clone(),
             VelocityX = (float[,,])VelocityX.Clone(),
             VelocityY = (float[,,])VelocityY.Clone(),
             VelocityZ = (float[,,])VelocityZ.Clone(),

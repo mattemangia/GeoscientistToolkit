@@ -382,14 +382,170 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         private static List<(List<Vector2>, List<int>, int)> ExtractPolygonsFromGraph(
             SegmentGraph graph, GeologicalSection section)
         {
-            // Simplified implementation:
-            // In production, use proper DCEL or planar subdivision algorithm
-            // For now, return empty - will be enhanced in next iteration
+            // Implementation of polygon extraction using "Left-Turning Walk" (simplest cycle finding for planar graphs)
 
             var polygons = new List<(List<Vector2>, List<int>, int)>();
+            var visitedDirectedEdges = new HashSet<(Vector2 from, Vector2 to)>();
 
-            // TODO: Implement proper polygon extraction
-            // This is a placeholder
+            foreach (var startNode in graph.PointToSegments.Keys)
+            {
+                // Get all connected segments (neighbors)
+                var connectedSegments = graph.GetConnectedPoints(startNode);
+
+                foreach (var nextNode in connectedSegments)
+                {
+                    if (visitedDirectedEdges.Contains((startNode, nextNode))) continue;
+
+                    // Start a walk
+                    var currentPolygon = new List<Vector2>();
+                    var currentJointSets = new HashSet<int>();
+                    var currentWalkEdges = new HashSet<(Vector2, Vector2)>();
+
+                    Vector2 curr = startNode;
+                    Vector2 next = nextNode;
+                    Vector2 startOfWalk = startNode;
+                    Vector2 secondOfWalk = nextNode; // To check full closure
+
+                    bool closed = false;
+                    int steps = 0;
+
+                    while (steps < 100) // Safety break
+                    {
+                        currentPolygon.Add(curr);
+                        visitedDirectedEdges.Add((curr, next));
+                        currentWalkEdges.Add((curr, next));
+
+                        // Collect joint set info from the edge
+                        int edgeJsId = graph.GetSegmentId(curr, next);
+                        if (edgeJsId >= 0) currentJointSets.Add(edgeJsId);
+
+                        if (Vector2.DistanceSquared(next, startOfWalk) < 1e-5f)
+                        {
+                            closed = true;
+                            break;
+                        }
+
+                        // Find next edge: choose the one with the smallest angle relative to current direction (sharpest left turn)
+                        // Current direction: next - curr
+                        // We want to turn "left" (counter-clockwise) as much as possible to trace minimal cycles
+
+                        Vector2 currentDir = Vector2.Normalize(next - curr);
+                        var candidates = graph.GetConnectedPoints(next);
+
+                        Vector2 bestNext = Vector2.Zero;
+                        float bestAngle = -1000f; // Maximize angle (closest to "left" / backwards)
+                        bool found = false;
+
+                        foreach (var candidate in candidates)
+                        {
+                            if (Vector2.DistanceSquared(candidate, curr) < 1e-5f) continue; // Don't go back immediately
+
+                            Vector2 newDir = Vector2.Normalize(candidate - next);
+
+                            // Calculate angle.
+                            // Cross product (2D) tells us relative orientation
+                            // Dot product tells us forward/backward
+                            // Angle from currentDir to newDir should be minimal positive CCW angle
+
+                            // Let's use atan2 relative to current direction
+                            // Rotate everything so currentDir is (1,0)
+                            // Angle of newDir relative to currentDir
+                            float angle = MathF.Atan2(newDir.Y, newDir.X) - MathF.Atan2(currentDir.Y, currentDir.X);
+
+                            // Normalize to [-PI, PI]
+                            if (angle <= -MathF.PI) angle += 2 * MathF.PI;
+                            if (angle > MathF.PI) angle -= 2 * MathF.PI;
+
+                            // We want the smallest turn to the *left*.
+                            // Left turns are positive angles (0 to PI). Right turns are negative.
+                            // However, we want the "sharpest left" which corresponds to the smallest positive angle
+                            // if we treat "straight back" as PI.
+                            // Actually, standard "always turn left" means maximize the CCW angle.
+                            // Let's normalize angle to [0, 2PI) relative to "backwards" vector?
+                            // No, simpler:
+                            // We want the edge that is "most left" relative to forward.
+                            // That means maximizing the signed angle in [0, 2PI) range?
+
+                            // Let's normalize to [0, 2*PI) where 0 is straight ahead?
+                            // No, usually best to find the edge that has the smallest *clockwise* angle from the "backward" vector
+                            // OR just smallest angle diff from current vector in CCW direction.
+
+                            // Let's use simple heuristic: Minimize turning angle to the left
+                            // We normalize angle to (0, 2PI) from currentDir
+                            if (angle < 0) angle += 2 * MathF.PI;
+
+                            // We want smallest angle (sharpest left turn relative to straight ahead is PI/2??)
+                            // Actually, for minimal cycles (faces), we want to turn *left* as much as possible at every vertex.
+                            // That corresponds to picking the edge with the *largest* angle relative to incoming edge?
+                            // Wait, if we are walking the perimeter CCW, we turn Left.
+                            // So we pick the edge that is "most left".
+                            // Relative to currentDir, "left" is +90 deg. "Right" is -90 deg.
+                            // We want the neighbor that has the largest signed angle (closest to +PI)?
+                            // No, closest to "folding back" on the left side.
+
+                            // Let's use the property: Order neighbors by angle, pick next one in CCW order from incoming.
+                            // Since we don't have sorted neighbors pre-calculated, we do it here.
+
+                            // We want the candidate that minimizes the angle *change* in the CW direction?
+                            // No, for CCW faces, we turn Left.
+                            // We want the candidate that has the SMALLEST angle in the "Right-hand side" (CW) direction
+                            // so that we hug the wall on the left.
+                            // Actually, let's stick to standard: "rightmost turn" traverses outer boundary CW, "leftmost turn" traverses faces CCW.
+                            // Let's perform "leftmost turn" (smallest angle relative to "backwards" vector in CW direction?).
+
+                            // Simplest robust method:
+                            // Normalize angle so it represents a turn from current heading [0..2PI)
+                            // We want the turn that is "most left" -> largest angle < PI?
+                            // Actually, best is: find neighbor such that angle(back_vector, neighbor_vector) is minimal positive?
+
+                            // Let's use this:
+                            // Angle relative to current segment vector.
+                            // We want the candidate that is "most to the left".
+                            // This minimizes the angle if we measure from "right" to "left"?
+
+                            // Let's try: select candidate with smallest angle difference in (0, 2PI) range relative to *reverse* of current edge?
+                            // Standard algorithm: Sort neighbors CCW. Pick next neighbor in list after the one we came from.
+                            // Since we don't have list, we find the one "after" the incoming edge (from curr to next).
+                            // Incoming edge direction (next->curr) is -currentDir.
+                            // We want the first neighbor CCW from (next->curr).
+
+                            // Vector pointing back: -currentDir
+                            float backAngle = MathF.Atan2(-currentDir.Y, -currentDir.X);
+                            float candAngle = MathF.Atan2(newDir.Y, newDir.X);
+
+                            float diff = candAngle - backAngle;
+                            if (diff <= 0) diff += 2 * MathF.PI;
+
+                            // We want the SMALLEST diff (first ray CCW from backward ray)
+                            if (!found || diff < bestAngle)
+                            {
+                                bestAngle = diff;
+                                bestNext = candidate;
+                                found = true;
+                            }
+                        }
+
+                        if (!found) break; // Dead end
+
+                        curr = next;
+                        next = bestNext;
+                        steps++;
+                    }
+
+                    if (closed && currentPolygon.Count > 2)
+                    {
+                        // Identify material (sample center point)
+                        Vector2 center = Vector2.Zero;
+                        foreach (var v in currentPolygon) center += v;
+                        center /= currentPolygon.Count;
+
+                        // Default material 0, could sample geological section here
+                        int matId = 0;
+
+                        polygons.Add((currentPolygon, currentJointSets.ToList(), matId));
+                    }
+                }
+            }
 
             return polygons;
         }
@@ -483,8 +639,14 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             Intersections[seg2].Add((seg1, point));
         }
 
+        // Cache segments for lookup
+        private Dictionary<int, LineSegment2D> _segmentsCache = new();
+
         public void BuildAdjacency(List<LineSegment2D> segments)
         {
+            // Cache segments
+            for(int i=0; i<segments.Count; i++) _segmentsCache[i] = segments[i];
+
             // Build point-to-segment mapping
             for (int i = 0; i < segments.Count; i++)
             {
@@ -501,13 +663,71 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             }
         }
 
+        public List<Vector2> GetConnectedPoints(Vector2 point)
+        {
+            var connected = new HashSet<Vector2>();
+            var rounded = Round(point);
+            if (PointToSegments.TryGetValue(rounded, out var segIds))
+            {
+                foreach(var segId in segIds)
+                {
+                    // For a segment, its endpoints and any intersections on it are connected to 'point'
+                    // Find immediate neighbors on this segment
+                    var seg = _segmentsCache[segId];
+                    var pointsOnSeg = new List<Vector2> { seg.P1, seg.P2 };
+                    if (Intersections.ContainsKey(segId))
+                        pointsOnSeg.AddRange(Intersections[segId].Select(x => x.point));
+
+                    // Sort points along segment to find immediate neighbors
+                    Vector2 dir = seg.P2 - seg.P1;
+                    pointsOnSeg.Sort((a, b) => Vector2.Dot(a, dir).CompareTo(Vector2.Dot(b, dir)));
+
+                    // Find 'point' in this sorted list
+                    // Use fuzzy comparison
+                    int idx = pointsOnSeg.FindIndex(p => Vector2.DistanceSquared(p, point) < 1e-6f);
+                    if (idx >= 0)
+                    {
+                        if (idx > 0) connected.Add(pointsOnSeg[idx - 1]);
+                        if (idx < pointsOnSeg.Count - 1) connected.Add(pointsOnSeg[idx + 1]);
+                    }
+                }
+            }
+            return connected.ToList();
+        }
+
+        public int GetSegmentId(Vector2 p1, Vector2 p2)
+        {
+            // Find segment that contains both points
+            // This is a bit inefficient but works
+            // Need intersection of segments at p1 and segments at p2
+            var r1 = Round(p1);
+            var r2 = Round(p2);
+            if (PointToSegments.TryGetValue(r1, out var s1) && PointToSegments.TryGetValue(r2, out var s2))
+            {
+                foreach(var id in s1)
+                {
+                    if (s2.Contains(id))
+                    {
+                         // Check if it's the right joint set ID we need
+                         return _segmentsCache[id].JointSetId;
+                    }
+                }
+            }
+            return -1;
+        }
+
+        private Vector2 Round(Vector2 v)
+        {
+            return new Vector2(
+                MathF.Round(v.X * 1000f) / 1000f,
+                MathF.Round(v.Y * 1000f) / 1000f
+            );
+        }
+
         private void AddPointSegmentMapping(Vector2 point, int segmentIndex)
         {
             // Round point to avoid floating point precision issues
-            var roundedPoint = new Vector2(
-                MathF.Round(point.X * 1000f) / 1000f,
-                MathF.Round(point.Y * 1000f) / 1000f
-            );
+            var roundedPoint = Round(point);
 
             if (!PointToSegments.ContainsKey(roundedPoint))
                 PointToSegments[roundedPoint] = new List<int>();

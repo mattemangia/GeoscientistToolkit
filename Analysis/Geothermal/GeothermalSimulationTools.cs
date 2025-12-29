@@ -2108,8 +2108,58 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 ImGui.BulletText($"Max concentration: {maxConc:E3} mol/m³");
                 ImGui.BulletText($"Total precipitated: {totalPrecip:E3} mol");
 
-                // TODO: Add actual 2D slice visualization here
-                ImGui.TextDisabled("  [2D slice visualization will be rendered here]");
+                // Visualizing the 2D Slice
+                // Render a simple heatmap of the precipitation field
+                if (nr > 0 && ntheta > 0)
+                {
+                    ImGui.Spacing();
+                    var drawList = ImGui.GetWindowDrawList();
+                    var pMin = ImGui.GetCursorScreenPos();
+                    var cellSize = 5.0f; // Size of each cell in pixels
+                    var plotWidth = nr * cellSize;
+                    var plotHeight = ntheta * cellSize;
+
+                    // Reserve space
+                    ImGui.Dummy(new Vector2(plotWidth, plotHeight));
+
+                    // Find max value for normalization
+                    float localMax = 0f;
+                    // Visualize the middle Z slice
+                    int zSlice = nz / 2;
+                    for (int r = 0; r < nr; r++)
+                    for (int t = 0; t < ntheta; t++)
+                        localMax = Math.Max(localMax, field[r, t, zSlice]);
+
+                    if (localMax > 0)
+                    {
+                        for (int r = 0; r < nr; r++)
+                        {
+                            for (int t = 0; t < ntheta; t++)
+                            {
+                                float val = field[r, t, zSlice];
+                                float intensity = val / localMax;
+
+                                // Color map: Blue (low) -> Red (high)
+                                uint color = ImGui.ColorConvertFloat4ToU32(new Vector4(intensity, 0, 1.0f - intensity, 1.0f));
+
+                                drawList.AddRectFilled(
+                                    new Vector2(pMin.X + r * cellSize, pMin.Y + t * cellSize),
+                                    new Vector2(pMin.X + (r + 1) * cellSize, pMin.Y + (t + 1) * cellSize),
+                                    color
+                                );
+                            }
+                        }
+
+                        // Add label
+                        ImGui.SetCursorScreenPos(new Vector2(pMin.X + plotWidth + 10, pMin.Y));
+                        ImGui.Text($"Slice at Z-index {zSlice}");
+                        ImGui.SetCursorScreenPos(new Vector2(pMin.X, pMin.Y + plotHeight + 5));
+                    }
+                    else
+                    {
+                        ImGui.TextDisabled("(No precipitation in this slice)");
+                    }
+                }
             }
         }
         else
@@ -2138,30 +2188,33 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         {
             try
             {
-                // Note: GraphicsDeviceManager not available in this context
-                // ORC visualization will use fallback text-based display
-                _orcVisualization = null;
+                // Try to get GraphicsDevice from VeldridManager
+                var graphicsDevice = VeldridManager.GraphicsDevice;
 
-                // TODO: Implement graphics device access when available
-                // var graphicsDevice = GraphicsDeviceManager.Instance?.GraphicsDevice;
-                // if (graphicsDevice != null)
-                // {
-                //     _orcVisualization = new ORCVisualization(graphicsDevice);
-                //
-                //     // Extract temperature range from results
-                //     float[] temps = new float[_orcResults.Length];
-                //     for (int i = 0; i < _orcResults.Length; i++)
-                //     {
-                //         temps[i] = _orcResults[i].GeothermalFluidInletTemp;
-                //     }
-                //
-                //     _orcVisualization.UpdateResults(_orcResults, temps);
-                //
-                //     if (_economicResults != null)
-                //     {
-                //         _orcVisualization.UpdateEconomics(_economicResults);
-                //     }
-                // }
+                if (graphicsDevice != null)
+                {
+                    _orcVisualization = new ORCVisualization(graphicsDevice);
+
+                    // Extract temperature range from results
+                    float[] temps = new float[_orcResults.Length];
+                    for (int i = 0; i < _orcResults.Length; i++)
+                    {
+                        temps[i] = _orcResults[i].GeothermalFluidInletTemp;
+                    }
+
+                    _orcVisualization.UpdateResults(_orcResults, temps);
+
+                    if (_economicResults != null)
+                    {
+                        _orcVisualization.UpdateEconomics(_economicResults);
+                    }
+                }
+                else
+                {
+                    // Fallback handled by null _orcVisualization in Render logic below
+                    Logger.LogWarning("GraphicsDevice not available for ORC visualization. Using text fallback.");
+                    _orcVisualization = null;
+                }
             }
             catch (Exception ex)
             {
