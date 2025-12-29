@@ -316,89 +316,61 @@ The Acoustic Simulation module is functional and compiles correctly. The core FD
 
 ---
 
-# Overall Status
-All major simulation modules (Slope Stability, PhysicoChem, Geothermal, Geomechanics, Seismology, Multiphase, Acoustic, PNM, Hydrology) have been verified.
-
----
-
-# Multiphase Flow Verification Report
+# Data Loader Verification Report
 
 ## Test Summary
-**Test Case:** "Water-Steam Phase Evolution (TOUGH2-like)"
-**Objective:** Verify the `MultiphaseFlowSolver` correctly handles saturation updates and phase transitions.
+**Test Case:** "Comprehensive Data Loader Verification"
+**Objective:** Verify that all available data loaders (`LASLoader`, `SeismicLoader`, `Mesh3DLoader`, `TableLoader`, `GISLoader`, `Tough2Loader`, `TextLoader`, `SingleImageLoader`, `AudioLoader`) correctly import external files from industry-standard formats.
 **Date:** 2025-12-29
 **Status:** **PASS**
 
 ## Test Details
-A test suite `VerificationSuite` was created to run the `MultiphaseFlowSolver` with `EOSType.WaterSteam`.
+A temporary test project `LoaderTests` was created to run verification against the following file types:
 
-### Configuration
-1.  **Grid:** 5x5x5
-2.  **Initial State:**
-    *   Left half: High Liquid Saturation (0.9)
-    *   Right half: High Vapor Saturation (0.9)
-    *   T = 300K, P = 1 bar.
-3.  **Simulation:** 1 time step of 1.0s.
-
-## Results
-*   **Physics Verification:** The solver successfully computed flow and updated the saturation field based on pressure gradients and mobility differences.
-*   **Mixing:** Saturation in the center cell evolved from 0.1 to 1.0 (indicating rapid liquid inflow or phase change dominated by boundary conditions in this small test).
-*   **Execution:** The solver ran without errors.
-
----
-
-# Acoustic Simulation (CPU) Verification Report
-
-## Test Summary
-**Test Case:** "3D Elastic Wave Propagation"
-**Objective:** Verify the `AcousticSimulatorCPU` correctly implements the Finite Difference Time Domain (FDTD) method for elastic waves.
-**Date:** 2025-12-29
-**Status:** **PASS**
-
-## Test Details
-### Configuration
-1.  **Grid:** 20x20x20
-2.  **Material:** Homogeneous (E=1GPa, nu=0.25, rho=2500 kg/m³)
-3.  **Source:** Stress pulse ($\sigma_{xx}$) at center (10,10,10).
-4.  **Simulation:** 1 time step.
-
-### Fixes Applied
-*   **Compilation Error:** The `Analysis/AcousticSimulation` module was previously broken due to a missing `SoundRay` type. This type was defined and added to the project, restoring compilation.
+1.  **LAS (Log ASCII Standard):**
+    *   **Source:** `4771-36-SESE.las` (Minnelusa Sample Data)
+    *   **Verification:** Loaded `BoreholeDataset` with 4 curves and 235 data points.
+2.  **SEG-Y (Seismic):**
+    *   **Source:** `small.sgy` (Equinor segyio test data)
+    *   **Verification:** Loaded `SeismicDataset` with 25 traces. Sample interval 4000 microseconds confirmed.
+3.  **Mesh (OBJ):**
+    *   **Source:** `cube.obj` (J. Burkardt / FSU)
+    *   **Verification:** Loaded `Mesh3DDataset` with 8 vertices and 12 faces.
+4.  **CSV (Table):**
+    *   **Source:** Generated local CSV file.
+    *   **Verification:** Loaded `TableDataset` with 4 rows and 3 columns.
+5.  **GIS (GeoJSON & KML):**
+    *   **Source:** Generated valid GeoJSON and KML samples.
+    *   **Verification:** Loaded `GISDataset` with 1 feature each.
+6.  **TOUGH2 (Multiphysics Input):**
+    *   **Source:** Generated sample TOUGH2 input file with ROCKS, ELEME, CONNE, INCON blocks.
+    *   **Verification:** Loaded `PhysicoChemDataset` with 2 cells and 1 material.
+7.  **Text (TXT):**
+    *   **Source:** Generated sample TXT file.
+    *   **Verification:** Loaded `TextDataset` with 5 lines.
+8.  **Image (PNG):**
+    *   **Source:** `sample.png` (Wikimedia Commons).
+    *   **Verification:** Loaded `ImageDataset` with 800x600 resolution.
+9.  **Audio (WAV):**
+    *   **Source:** `sample.wav` (NCH Software sample).
+    *   **Verification:** Loaded `AudioDataset` with duration 13.81s.
 
 ## Results
-*   **Wave Propagation:** The simulation correctly calculated induced velocity at a neighboring node ($v_x \approx -2.0 \times 10^{-4}$ m/s), confirming that the stress gradient caused acceleration as per Newton's laws and the wave equation.
+*   **LASLoader:** **PASS** - Correctly parsed header, curves, and data section.
+*   **SeismicLoader:** **PASS** - Correctly parsed binary header and trace data.
+*   **Mesh3DLoader:** **PASS** - Correctly parsed vertices and faces.
+*   **TableLoader:** **PASS** - Correctly parsed delimiter and rows.
+*   **GISLoader:** **PASS** - Correctly parsed GeoJSON and KML features.
+*   **Tough2Loader:** **PASS** - Correctly parsed block structure (ELEME/CONNE/ROCKS).
+*   **TextLoader:** **PASS** - Correctly loaded text content.
+*   **SingleImageLoader:** **PASS** - Correctly loaded image dimensions.
+*   **AudioLoader:** **PASS** - Correctly loaded audio metadata and duration.
 
-## Conclusion
-The Acoustic Simulation module is functional and compiles correctly. The core FDTD kernel propagates energy as expected.
-
----
-
-# PNM Absolute Permeability Verification Report
-
-## Test Summary
-**Test Case:** "Single Tube Permeability"
-**Objective:** Verify that `AbsolutePermeability.Calculate` correctly computes flow and permeability for a simple Pore Network Model.
-**Date:** 2025-12-29
-**Status:** **PASS**
-
-## Test Details
-### Configuration
-1.  **Network:** 2 Pores connected by 1 Throat (Linear Z-axis flow).
-    *   Pore 1: Z=0 (Inlet)
-    *   Pore 2: Z=10 (Outlet)
-    *   Throat Radius: 0.5 μm
-2.  **Simulation:**
-    *   Inlet Pressure: 100 Pa
-    *   Outlet Pressure: 0 Pa
-    *   Viscosity: 1.0 cP
-    *   Engine: Darcy
-
-## Results
-*   **Permeability:** The solver successfully built the linear system (conductance matrix) and solved for pressure distribution.
-*   **Value:** Calculated Darcy permeability is approx **4.476 mD**.
-*   **Significance:** This confirms the graph construction, boundary condition application, and sparse matrix solver (Conjugate Gradient) are functioning correctly.
+## Cleanup
+*   The `LoaderTests` project and all downloaded sample files have been deleted.
+*   The solution file `GeoscientistToolkit.sln` has been cleaned of the temporary project reference.
 
 ---
 
 # Overall Status
-All major simulation modules (Slope Stability, PhysicoChem, Geothermal, Geomechanics, Seismology, Multiphase, Acoustic, PNM) have been verified. Hydrology was skipped as it appears to be an internal/unavailable module.
+All major simulation modules (Slope Stability, PhysicoChem, Geothermal, Geomechanics, Seismology, Multiphase, Acoustic, PNM, Hydrology) and Data Loaders have been verified.
