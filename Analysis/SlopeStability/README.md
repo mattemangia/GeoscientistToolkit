@@ -43,13 +43,15 @@ Complete 3D slope stability analysis system based on the Discrete Element Method
 
 The simulator implements a full Discrete Element Method:
 
-1. **Contact Detection**: Spatial hash grid for O(n log n) contact detection
+1. **Contact Detection**:
+   - Broad-phase: Spatial hash grid for O(n log n) contact detection
+   - Narrow-phase: GJK (Gilbert-Johnson-Keerthi) and EPA (Expanding Polytope Algorithm) for accurate convex hull collision detection
 2. **Force Calculation**:
    - Gravity
    - Normal and shear contact forces
    - Earthquake loading
    - Fluid pressure (pore pressure)
-3. **Time Integration**: Velocity Verlet scheme for stable integration
+3. **Time Integration**: Velocity Verlet scheme for stable integration with full rigid body dynamics (including rotational dynamics with inertia tensor inversion)
 4. **Constitutive Models**: Elastic, plastic, and brittle behavior with damage evolution
 5. **Optimization**: SIMD vectorization and multithreading for maximum performance
 
@@ -266,10 +268,9 @@ Complete dataset serialization including blocks, materials, parameters, and resu
 
 ### Current Limitations
 
-1. **Contact Detection**: Simplified AABB-based detection (GJK/EPA would be more accurate)
-2. **Block Geometry**: Convex hull approximation during splitting (full CSG would be better)
-3. **Fluid Flow**: Simplified pore pressure (no full hydro-mechanical coupling)
-4. **Deformability**: Blocks are rigid (could add FEM for deformable blocks)
+1. **Block Geometry**: Convex hull approximation during splitting (full CSG would be better)
+2. **Fluid Flow**: Simplified pore pressure (no full hydro-mechanical coupling)
+3. **Deformability**: Blocks are rigid (could add FEM for deformable blocks)
 
 ### Future Enhancements
 
