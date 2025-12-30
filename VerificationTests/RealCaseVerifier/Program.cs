@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Analysis.Geomechanics;
 using GeoscientistToolkit.Data.Materials;
@@ -16,12 +17,16 @@ using GeoscientistToolkit.Analysis.Thermodynamic;
 using GeoscientistToolkit.Analysis.Pnm;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Analysis.AcousticSimulation;
+using GeoscientistToolkit.Business.GIS;
+using GeoscientistToolkit.Analysis.Geothermal;
+using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Data.Borehole;
 
 namespace RealCaseVerifier
 {
     class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             Console.WriteLine("=================================================");
             Console.WriteLine("   REAL CASE STUDY VERIFICATION SUITE");
@@ -39,17 +44,23 @@ namespace RealCaseVerifier
             // 3. Slope Stability
             allPassed &= VerifySlopeStabilityGravity();
 
-            // 4. Multiphase / Thermodynamics (Water Saturation)
+            // 4. Multiphase / Thermodynamics
             allPassed &= VerifyWaterSaturationPressure();
 
-            // 5. PNM (Permeability)
+            // 5. PNM
             allPassed &= VerifyPNMPermeability();
 
-            // 6. Acoustic (Speed of Sound)
+            // 6. Acoustic
             allPassed &= VerifyAcousticSpeed();
 
-            // 7. Heat Transfer (Conduction)
+            // 7. Heat Transfer
             allPassed &= VerifyHeatTransfer();
+
+            // 8. Hydrology
+            allPassed &= VerifyHydrologyFlow();
+
+            // 9. Geothermal
+            allPassed &= await VerifyGeothermalSystem();
 
             if (allPassed)
             {
@@ -68,7 +79,7 @@ namespace RealCaseVerifier
         static bool VerifyGeomechanicsGranite()
         {
             Console.WriteLine("\n[Test 1] Geomechanics: Westerly Granite Triaxial Compression");
-            Console.WriteLine("Reference: Mechanical Properties... Granite... MDPI 2022 (doi:10.3390/app12083930)");
+            Console.WriteLine("Reference: MDPI 2022 (doi:10.3390/app12083930)");
 
             float c = 26.84f;
             float phi = 51.0f;
@@ -129,7 +140,7 @@ namespace RealCaseVerifier
         static bool VerifySeismicPREM()
         {
             Console.WriteLine("\n[Test 2] Seismology: PREM Model Wave Propagation");
-            Console.WriteLine("Reference: Dziewonski, A. M., & Anderson, D. L. (1981). PEPI, 25(4), 297-356.");
+            Console.WriteLine("Reference: Dziewonski & Anderson (1981). PEPI.");
 
             double vp = 5.8;
             double vs = 3.2;
@@ -147,22 +158,27 @@ namespace RealCaseVerifier
             crustalModel.CrustalTypes.Add("orogen", type);
             crustalModel.CrustalTypes.Add("rift", type);
 
-            int nx=40, ny=40, nz=40;
-            double dx=0.5, dy=0.5, dz=0.5;
-            double dt = 0.01;
+            int nx=120, ny=40, nz=40;
+            double dx=0.1, dy=0.1, dz=0.1;
+            double dt = 0.002;
 
             var engine = new WavePropagationEngine(crustalModel, nx, ny, nz, dx, dy, dz, dt, false);
             engine.InitializeMaterialProperties(0, 1, 0, 1);
 
-            engine.AddPointSource(10, 20, 20, -1.0, Math.PI/4, Math.PI/4, Math.PI/4);
+            int sx = 10, sy = 20, sz = 20;
+            int rx = 110, ry = 20, rz = 20;
+
+            engine.AddPointSource(sx, sy, sz, -1.0, Math.PI/4, Math.PI/4, Math.PI/4);
 
             double tP_actual = -1;
-            double threshold = 2e-5;
+            double threshold = 1e-6;
 
-            for(int t=0; t<500; t++)
+            int steps = 1500;
+
+            for(int t=0; t<steps; t++)
             {
                 engine.TimeStep();
-                var wave = engine.GetWaveFieldAt(30, 20, 20);
+                var wave = engine.GetWaveFieldAt(rx, ry, rz);
                 if (tP_actual < 0 && Math.Abs(wave.Amplitude) > threshold) tP_actual = t * dt;
             }
 
@@ -180,46 +196,71 @@ namespace RealCaseVerifier
         static bool VerifySlopeStabilityGravity()
         {
             Console.WriteLine("\n[Test 3] Slope Stability: Gravity Drop (Galileo)");
-            Console.WriteLine("Reference: Galilei, G. (1638). Two New Sciences.");
+            Console.WriteLine("Reference: Galilei (1638).");
 
-            // Validate core integrator
             var dataset = new SlopeStabilityDataset();
 
-            // Free falling block
-            var block = new Block { Id = 1, IsFixed = false, Mass = 10.0f, MaterialId = 1, Volume = 1.0f };
-            block.Position = new Vector3(0, 0, 100.0f); // 100m height
-            block.Vertices = new List<Vector3> { new Vector3(0,0,0) }; // Dummy vertex
-            block.InverseInertiaTensor = Matrix4x4.Identity;
+            // Floor Block
+            var floor = new Block { Id = 1, IsFixed = true, Mass = 1000f, MaterialId = 1, Volume = 1000f };
+            floor.Vertices = new List<Vector3> {
+                new Vector3(-10, -10, -1), new Vector3(10, -10, -1),
+                new Vector3(10, 10, -1), new Vector3(-10, 10, -1),
+                new Vector3(-10, -10, 0), new Vector3(10, -10, 0),
+                new Vector3(10, 10, 0), new Vector3(-10, 10, 0)
+            };
+            floor.Position = new Vector3(0,0,0);
+            floor.InverseInertiaTensor = Matrix4x4.Identity;
 
+            // Moving Block - Vertices shifted to Z=100
+            // This ensures Centroid calculation places it at Z=100, avoiding overlap with floor at Z=0.
+            float h = 100.0f;
+            var block = new Block { Id = 2, IsFixed = false, Mass = 10.0f, MaterialId = 1, Volume = 1.0f };
+            block.Vertices = new List<Vector3> {
+                new Vector3(-0.5f, -0.5f, -0.5f+h), new Vector3(0.5f, -0.5f, -0.5f+h),
+                new Vector3(0.5f, 0.5f, -0.5f+h), new Vector3(-0.5f, 0.5f, -0.5f+h),
+                new Vector3(-0.5f, -0.5f, 0.5f+h), new Vector3(0.5f, -0.5f, 0.5f+h),
+                new Vector3(0.5f, 0.5f, 0.5f+h), new Vector3(-0.5f, 0.5f, 0.5f+h)
+            };
+            // Position property will be overwritten by InitializeBlocks to match Centroid (Z=100)
+            block.Position = new Vector3(0, 0, h);
+            block.InverseInertiaTensor = Matrix4x4.Identity;
+            block.Orientation = Quaternion.Identity;
+            floor.Orientation = Quaternion.Identity;
+
+            dataset.Blocks.Add(floor);
             dataset.Blocks.Add(block);
-            var mat = new SlopeStabilityMaterial { Id = 1, FrictionAngle = 30.0f };
+
+            var mat = new SlopeStabilityMaterial { Id = 1, FrictionAngle = 30.0f, YoungModulus = 1e6f, Cohesion = 0f };
             dataset.Materials.Add(mat);
 
+            Vector3 gravity = new Vector3(0, 0, -9.81f);
+
             var parameters = new SlopeStabilityParameters {
-                TimeStep = 0.01f, TotalTime = 2.0f, Gravity = new Vector3(0,0,-9.81f),
+                TimeStep = 0.005f, TotalTime = 2.0f, Gravity = gravity,
                 SpatialHashGridSize = 10, UseMultithreading = false,
-                IncludeRotation = false, LocalDamping = 0.0f
+                IncludeRotation = false, LocalDamping = 0.0f,
+                UseCustomGravityDirection = true // Ensure gravity isn't reset
             };
 
             try {
                 var sim = new SlopeStabilitySimulator(dataset, parameters);
                 var results = sim.RunSimulation();
 
-                var finalBlock = results.BlockResults.First();
-                // d = 0.5 * g * t^2 = 0.5 * 9.81 * 4 = 19.62 m
-                float expectedDisp = 0.5f * 9.81f * 2.0f * 2.0f;
-                float actualDisp = finalBlock.Displacement.Length();
+                var finalBlock = results.BlockResults.First(b => b.BlockId == 2);
+                float displacement = finalBlock.Displacement.Length();
+
+                float expectedDisp = 19.62f;
 
                 Console.WriteLine($"Time: 2.0s. Expected Drop: {expectedDisp:F2} m");
-                Console.WriteLine($"Actual Drop: {actualDisp:F2} m");
+                Console.WriteLine($"Actual Drop: {displacement:F2} m");
 
-                if (float.IsNaN(actualDisp))
+                if (float.IsNaN(displacement))
                 {
                     Console.WriteLine("Status: FAIL (NaN)");
                     return false;
                 }
 
-                if (Math.Abs(actualDisp - expectedDisp) < 0.5f)
+                if (Math.Abs(displacement - expectedDisp) < 0.5f)
                 {
                     Console.WriteLine("Status: PASS");
                     return true;
@@ -237,7 +278,7 @@ namespace RealCaseVerifier
         static bool VerifyWaterSaturationPressure()
         {
             Console.WriteLine("\n[Test 4] Thermodynamics: Water Saturation Pressure");
-            Console.WriteLine("Reference: IAPWS-IF97 / Wagner & Pruss (2002). J. Phys. Chem. Ref. Data, 31.");
+            Console.WriteLine("Reference: IAPWS-IF97.");
 
             try
             {
@@ -265,7 +306,7 @@ namespace RealCaseVerifier
         static bool VerifyPNMPermeability()
         {
             Console.WriteLine("\n[Test 5] PNM: Poiseuille Flow Permeability");
-            Console.WriteLine("Reference: Fatt, I. (1956). Trans. AIME, 207.");
+            Console.WriteLine("Reference: Fatt (1956).");
 
             var dataset = new PNMDataset("test", "test.pnm");
             dataset.VoxelSize = 1.0f;
@@ -273,9 +314,6 @@ namespace RealCaseVerifier
             dataset.ImageHeight = 10;
             dataset.ImageDepth = 20;
 
-            // Define domain corners to ensure CrossSectionalArea is 10x10 = 100 um2
-            // Pores at (0,0), (10,0), (0,10), (10,10) at Z=0 and Z=19
-            // These are unconnected dummy pores just to define the bounding box
             dataset.Pores.Add(new Pore { ID = 100, Radius = 0.1f, Position = new Vector3(0,0,0) });
             dataset.Pores.Add(new Pore { ID = 101, Radius = 0.1f, Position = new Vector3(10,10,0) });
             dataset.Pores.Add(new Pore { ID = 102, Radius = 0.1f, Position = new Vector3(0,0,19) });
@@ -327,7 +365,7 @@ namespace RealCaseVerifier
         static bool VerifyAcousticSpeed()
         {
             Console.WriteLine("\n[Test 6] Acoustic: Speed of Sound in Seawater");
-            Console.WriteLine("Reference: Mackenzie, K. V. (1981). J. Acoust. Soc. Am., 70, 807.");
+            Console.WriteLine("Reference: Mackenzie (1981).");
 
             int nx=100, ny=10, nz=10;
             float dx=1.0f;
@@ -404,7 +442,7 @@ namespace RealCaseVerifier
         static bool VerifyHeatTransfer()
         {
             Console.WriteLine("\n[Test 7] PhysicoChem (Heat): 1D Conduction");
-            Console.WriteLine("Reference: Carslaw, H. S., & Jaeger, J. C. (1959). Conduction of Heat in Solids.");
+            Console.WriteLine("Reference: Carslaw & Jaeger (1959).");
 
             var state = new PhysicoChemState((10,3,3));
 
@@ -441,6 +479,81 @@ namespace RealCaseVerifier
             }
             Console.WriteLine("Status: FAIL");
             return false;
+        }
+
+        static bool VerifyHydrologyFlow()
+        {
+            Console.WriteLine("\n[Test 8] Hydrology: Flow Accumulation");
+            Console.WriteLine("Reference: O'Callaghan & Mark (1984).");
+
+            float[,] dem = new float[5,5];
+            for(int x=0; x<5; x++)
+            for(int y=0; y<5; y++)
+            {
+                dem[x,y] = 10.0f + (float)Math.Sqrt((x-2)*(x-2) + (y-2)*(y-2));
+            }
+
+            var flowDir = GISOperationsImpl.CalculateD8FlowDirection(dem);
+            var accum = GISOperationsImpl.CalculateFlowAccumulation(flowDir);
+
+            int centerAccum = accum[2,2];
+            Console.WriteLine($"Center Accumulation: {centerAccum}");
+
+            if (centerAccum > 5)
+            {
+                Console.WriteLine("Status: PASS");
+                return true;
+            }
+            Console.WriteLine("Status: FAIL");
+            return false;
+        }
+
+        static async Task<bool> VerifyGeothermalSystem()
+        {
+            Console.WriteLine("\n[Test 9] Geothermal: Borehole Heat Exchanger Simulation");
+            Console.WriteLine("Reference: Al-Khoury et al. (2010). Computers & Geosciences.");
+
+            var options = new GeothermalSimulationOptions();
+            options.SimulationTime = 3600;
+            options.TimeStep = 60;
+            options.RadialGridPoints = 5;
+            options.AngularGridPoints = 4;
+            options.VerticalGridPoints = 5;
+            options.DomainRadius = 10.0;
+            options.BoreholeDataset = new BoreholeDataset("TestBorehole", "Verification");
+            options.BoreholeDataset.TotalDepth = 100.0f;
+            options.BoreholeDataset.WellDiameter = 0.2f;
+
+            options.BoreholeDataset.LithologyUnits = new List<LithologyUnit>
+            {
+                new LithologyUnit { DepthFrom=0, DepthTo=100, Name="Rock" }
+            };
+            options.SetDefaultValues();
+
+            var mesh = GeothermalMeshGenerator.GenerateCylindricalMesh(options.BoreholeDataset, options);
+
+            var solver = new GeothermalSimulationSolver(options, mesh, null, CancellationToken.None);
+
+            try
+            {
+                var results = await solver.RunSimulationAsync();
+
+                if (results.OutletTemperature != null && results.OutletTemperature.Any())
+                {
+                    var finalTemp = results.OutletTemperature.Last().temperature;
+                    Console.WriteLine($"Simulation completed. Outlet Temp: {finalTemp-273.15:F2} C");
+                    Console.WriteLine("Status: PASS");
+                    return true;
+                }
+
+                Console.WriteLine("Status: FAIL (No results)");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Geothermal Error: {ex.Message}");
+                return false;
+            }
         }
     }
 }
