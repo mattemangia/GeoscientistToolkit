@@ -11,6 +11,7 @@
     <RootNamespace>GeoscientistToolkit.NodeEndpoint</RootNamespace>
     <AssemblyName>NodeEndpoint</AssemblyName>
     <ApplicationIcon>image.ico</ApplicationIcon>
+    <NoWarn>CS8604;CS8618;CS0612;CS8622;CS8602;CS0414;CS8603;CS8600;CS8601;CS8625;CS8619;NETSDK1206;CS0618;CS9191</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
