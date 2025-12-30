@@ -773,8 +773,8 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             block.Position += displacement;
             block.TotalDisplacement += displacement;
 
-            // Update velocity (full step) - will be corrected in next iteration
-            block.Velocity = velocityHalf;
+            // Update velocity (full step)
+            block.Velocity = velocityHalf + acceleration * (dt * 0.5f);
 
             // Track maximum displacement
             float dispMag = block.TotalDisplacement.Length();

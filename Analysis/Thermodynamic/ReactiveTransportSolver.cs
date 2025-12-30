@@ -256,6 +256,12 @@ public class ReactiveTransportSolver : SimulatorNodeSupport
                 // 2. Aqueous equilibrium (fast)
                 var equilibriumResult = _thermoSolver.SolveEquilibrium(thermoState);
 
+                if (equilibriumResult.SpeciesMoles.Count == 0 ||
+                    equilibriumResult.SpeciesMoles.Values.All(value => Math.Abs(value) < 1e-20))
+                {
+                    continue;
+                }
+
                 // 3. Update concentrations from equilibrium
                 foreach (var kvp in equilibriumResult.SpeciesMoles)
                 {

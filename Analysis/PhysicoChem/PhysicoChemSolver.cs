@@ -364,6 +364,9 @@ public class PhysicoChemSolver : SimulatorNodeSupport
             case BoundaryLocation.ZMax:
                 ApplyBCToFace(state, bc, -1, -1, nz - 1, false, false, true);
                 break;
+            case BoundaryLocation.Custom:
+                ApplyBCToCustomRegion(state, bc, mesh, domainSize);
+                break;
         }
     }
 
@@ -415,6 +418,97 @@ public class PhysicoChemSolver : SimulatorNodeSupport
                     break;
             }
         }
+    }
+
+    private void ApplyBCToCustomRegion(PhysicoChemState state, BoundaryCondition bc, GridMesh3D mesh,
+        (double X, double Y, double Z) domainSize)
+    {
+        int nx = state.Temperature.GetLength(0);
+        int ny = state.Temperature.GetLength(1);
+        int nz = state.Temperature.GetLength(2);
+
+        double dx = mesh.Spacing.X;
+        double dy = mesh.Spacing.Y;
+        double dz = mesh.Spacing.Z;
+
+        for (int i = 0; i < nx; i++)
+        for (int j = 0; j < ny; j++)
+        for (int k = 0; k < nz; k++)
+        {
+            double x = mesh.Origin.X + (i + 0.5) * dx;
+            double y = mesh.Origin.Y + (j + 0.5) * dy;
+            double z = mesh.Origin.Z + (k + 0.5) * dz;
+
+            if (!bc.IsOnBoundary(x, y, z, domainSize))
+                continue;
+
+            double value = bc.EvaluateAtTime(state.CurrentTime);
+
+            switch (bc.Variable)
+            {
+                case BoundaryVariable.Temperature:
+                    if (bc.Type == BoundaryType.FixedValue)
+                        state.Temperature[i, j, k] = (float)value;
+                    break;
+
+                case BoundaryVariable.Pressure:
+                    if (bc.Type == BoundaryType.FixedValue)
+                        state.Pressure[i, j, k] = (float)value;
+                    break;
+
+                case BoundaryVariable.Concentration:
+                    if (bc.Type == BoundaryType.Interactive)
+                    {
+                        if (bc.SpeciesName != null && state.Concentrations.ContainsKey(bc.SpeciesName))
+                        {
+                            state.Concentrations[bc.SpeciesName][i, j, k] =
+                                ComputeNeighborhoodAverage(state.Concentrations[bc.SpeciesName], i, j, k);
+                        }
+                        else
+                        {
+                            foreach (var species in state.Concentrations.Keys)
+                            {
+                                state.Concentrations[species][i, j, k] =
+                                    ComputeNeighborhoodAverage(state.Concentrations[species], i, j, k);
+                            }
+                        }
+                    }
+                    else if (bc.Type == BoundaryType.FixedValue || bc.Type == BoundaryType.Inlet)
+                    {
+                        if (bc.SpeciesName != null && state.Concentrations.ContainsKey(bc.SpeciesName))
+                            state.Concentrations[bc.SpeciesName][i, j, k] = (float)value;
+                    }
+
+                    break;
+            }
+        }
+    }
+
+    private static float ComputeNeighborhoodAverage(float[,,] field, int i, int j, int k)
+    {
+        int nx = field.GetLength(0);
+        int ny = field.GetLength(1);
+        int nz = field.GetLength(2);
+
+        double sum = 0.0;
+        int count = 0;
+
+        for (int di = -1; di <= 1; di++)
+        for (int dj = -1; dj <= 1; dj++)
+        for (int dk = -1; dk <= 1; dk++)
+        {
+            int ii = i + di;
+            int jj = j + dj;
+            int kk = k + dk;
+
+            if (ii < 0 || ii >= nx || jj < 0 || jj >= ny || kk < 0 || kk >= nz)
+                continue;
+
+            sum += field[ii, jj, kk];
+            count++;
+        }
+
+        return count > 0 ? (float)(sum / count) : field[i, j, k];
     }
 
     private FlowFieldData CreateFlowData(PhysicoChemState state)
