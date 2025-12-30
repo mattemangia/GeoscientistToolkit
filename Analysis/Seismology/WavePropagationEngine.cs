@@ -187,17 +187,37 @@ namespace GeoscientistToolkit.Analysis.Seismology
                 {
                     for (int k = 1; k < _nz - 1; k++)
                     {
-                        // Spatial derivatives of displacement (2nd order finite difference)
-                        double dux_dx = (_ux[i + 1, j, k] - _ux[i - 1, j, k]) / (2.0 * _dx);
-                        double duy_dy = (_uy[i, j + 1, k] - _uy[i, j - 1, k]) / (2.0 * _dy);
-                        double duz_dz = (_uz[i, j, k + 1] - _uz[i, j, k - 1]) / (2.0 * _dz);
+                        // Convert grid spacing to meters for derivatives
+                        double dx_m = _dx * 1000.0;
+                        double dy_m = _dy * 1000.0;
+                        double dz_m = _dz * 1000.0;
 
-                        double dux_dy = (_ux[i, j + 1, k] - _ux[i, j - 1, k]) / (2.0 * _dy);
-                        double dux_dz = (_ux[i, j, k + 1] - _ux[i, j, k - 1]) / (2.0 * _dz);
-                        double duy_dx = (_uy[i + 1, j, k] - _uy[i - 1, j, k]) / (2.0 * _dx);
-                        double duy_dz = (_uy[i, j, k + 1] - _uy[i, j, k - 1]) / (2.0 * _dz);
-                        double duz_dx = (_uz[i + 1, j, k] - _uz[i - 1, j, k]) / (2.0 * _dx);
-                        double duz_dy = (_uz[i, j + 1, k] - _uz[i, j - 1, k]) / (2.0 * _dy);
+                        // Second order derivatives for Navier equation
+                        // d2u/dx2 = (u[i+1] - 2u[i] + u[i-1]) / dx^2
+                        double d2ux_dx2 = (_ux[i+1, j, k] - 2.0*_ux[i, j, k] + _ux[i-1, j, k]) / (dx_m * dx_m);
+                        double d2ux_dy2 = (_ux[i, j+1, k] - 2.0*_ux[i, j, k] + _ux[i, j-1, k]) / (dy_m * dy_m);
+                        double d2ux_dz2 = (_ux[i, j, k+1] - 2.0*_ux[i, j, k] + _ux[i, j, k-1]) / (dz_m * dz_m);
+
+                        double d2uy_dx2 = (_uy[i+1, j, k] - 2.0*_uy[i, j, k] + _uy[i-1, j, k]) / (dx_m * dx_m);
+                        double d2uy_dy2 = (_uy[i, j+1, k] - 2.0*_uy[i, j, k] + _uy[i, j-1, k]) / (dy_m * dy_m);
+                        double d2uy_dz2 = (_uy[i, j, k+1] - 2.0*_uy[i, j, k] + _uy[i, j, k-1]) / (dz_m * dz_m);
+
+                        double d2uz_dx2 = (_uz[i+1, j, k] - 2.0*_uz[i, j, k] + _uz[i-1, j, k]) / (dx_m * dx_m);
+                        double d2uz_dy2 = (_uz[i, j+1, k] - 2.0*_uz[i, j, k] + _uz[i, j-1, k]) / (dy_m * dy_m);
+                        double d2uz_dz2 = (_uz[i, j, k+1] - 2.0*_uz[i, j, k] + _uz[i, j, k-1]) / (dz_m * dz_m);
+
+                        // Mixed derivatives (d2u/dxdy)
+                        // (u[i+1,j+1] - u[i-1,j+1] - u[i+1,j-1] + u[i-1,j-1]) / (4*dx*dy)
+                        double d2ux_dydz = (_ux[i, j+1, k+1] - _ux[i, j-1, k+1] - _ux[i, j+1, k-1] + _ux[i, j-1, k-1]) / (4.0 * dy_m * dz_m);
+                        double d2uy_dxdz = (_uy[i+1, j, k+1] - _uy[i-1, j, k+1] - _uy[i+1, j, k-1] + _uy[i-1, j, k-1]) / (4.0 * dx_m * dz_m);
+                        double d2uz_dxdy = (_uz[i+1, j+1, k] - _uz[i-1, j+1, k] - _uz[i+1, j-1, k] + _uz[i-1, j-1, k]) / (4.0 * dx_m * dy_m);
+
+                        double d2uy_dxdy = (_uy[i+1, j+1, k] - _uy[i-1, j+1, k] - _uy[i+1, j-1, k] + _uy[i-1, j-1, k]) / (4.0 * dx_m * dy_m);
+                        double d2uz_dxdz = (_uz[i+1, j, k+1] - _uz[i-1, j, k+1] - _uz[i+1, j, k-1] + _uz[i-1, j, k-1]) / (4.0 * dx_m * dz_m);
+                        double d2ux_dxdy = (_ux[i+1, j+1, k] - _ux[i-1, j+1, k] - _ux[i+1, j-1, k] + _ux[i-1, j-1, k]) / (4.0 * dx_m * dy_m);
+                        double d2uz_dydz = (_uz[i, j+1, k+1] - _uz[i, j-1, k+1] - _uz[i, j+1, k-1] + _uz[i, j-1, k-1]) / (4.0 * dy_m * dz_m);
+                        double d2ux_dxdz = (_ux[i+1, j, k+1] - _ux[i-1, j, k+1] - _ux[i+1, j, k-1] + _ux[i-1, j, k-1]) / (4.0 * dx_m * dz_m);
+                        double d2uy_dydz = (_uy[i, j+1, k+1] - _uy[i, j-1, k+1] - _uy[i, j+1, k-1] + _uy[i, j-1, k-1]) / (4.0 * dy_m * dz_m);
 
                         // Elastic moduli (convert to SI units)
                         double rho = _rho[i, j, k] * 1000.0; // kg/m^3
@@ -207,24 +227,22 @@ namespace GeoscientistToolkit.Analysis.Seismology
                         double mu = rho * vs * vs;
                         double lambda = rho * vp * vp - 2.0 * mu;
 
-                        // Stress components
-                        double strain_vol = dux_dx + duy_dy + duz_dz;
-                        double sigma_xx = lambda * strain_vol + 2.0 * mu * dux_dx;
-                        double sigma_yy = lambda * strain_vol + 2.0 * mu * duy_dy;
-                        double sigma_zz = lambda * strain_vol + 2.0 * mu * duz_dz;
-                        double sigma_xy = mu * (dux_dy + duy_dx);
-                        double sigma_xz = mu * (dux_dz + duz_dx);
-                        double sigma_yz = mu * (duy_dz + duz_dy);
+                        // Navier Equation for Homogeneous Isotropic Elastic Media
+                        // rho * a_x = (lambda + mu) * d(div(u))/dx + mu * laplacian(u_x)
+                        //           = (lambda + mu) * (d2ux/dx2 + d2uy/dxdy + d2uz/dxdz) + mu * (d2ux/dx2 + d2ux/dy2 + d2ux/dz2)
+                        //           = (lambda + 2mu) * d2ux/dx2 + mu * (d2ux/dy2 + d2ux/dz2) + (lambda + mu) * (d2uy/dxdy + d2uz/dxdz)
 
-                        // Stress divergence (acceleration) - properly compute derivatives
-                        // Need to compute stress at neighboring points for finite differences
-                        // Simplified approach: use centered differences on strain rates
-                        double acc_x = (dux_dx * (lambda + 2.0 * mu) + duy_dy * lambda + duz_dz * lambda +
-                                       mu * (dux_dy + duy_dx) + mu * (dux_dz + duz_dx)) / (rho * _dx);
-                        double acc_y = (duy_dy * (lambda + 2.0 * mu) + dux_dx * lambda + duz_dz * lambda +
-                                       mu * (dux_dy + duy_dx) + mu * (duy_dz + duz_dy)) / (rho * _dy);
-                        double acc_z = (duz_dz * (lambda + 2.0 * mu) + dux_dx * lambda + duy_dy * lambda +
-                                       mu * (dux_dz + duz_dx) + mu * (duy_dz + duz_dy)) / (rho * _dz);
+                        double acc_x = ((lambda + 2.0*mu) * d2ux_dx2 +
+                                       mu * (d2ux_dy2 + d2ux_dz2) +
+                                       (lambda + mu) * (d2uy_dxdy + d2uz_dxdz)) / rho;
+
+                        double acc_y = ((lambda + 2.0*mu) * d2uy_dy2 +
+                                       mu * (d2uy_dx2 + d2uy_dz2) +
+                                       (lambda + mu) * (d2ux_dxdy + d2uz_dydz)) / rho;
+
+                        double acc_z = ((lambda + 2.0*mu) * d2uz_dz2 +
+                                       mu * (d2uz_dx2 + d2uz_dy2) +
+                                       (lambda + mu) * (d2ux_dxdz + d2uy_dydz)) / rho;
 
                         // Update velocities
                         vxNew[i, j, k] = _vx[i, j, k] + _dt * acc_x;
