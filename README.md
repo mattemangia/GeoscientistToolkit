@@ -450,8 +450,6 @@ This project builds upon excellent open-source libraries:
 
 **Current Version**: 1.0.0
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes and version history.
-
 ---
 
 <div align="center">
