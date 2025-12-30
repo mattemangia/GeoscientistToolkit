@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Data/ImageStackOrganizerDialog.cs
+// GeoscientistToolkit/Data/ImageStackOrganizerDialog.cs
 
 using System.Numerics;
 using System.Text.RegularExpressions;
@@ -24,6 +24,12 @@ public class ImageStackOrganizerDialog
     private string _selectedGroup;
     private string _singleGroupName = "Image Stack";
     private string _sourceFolderPath = "";
+
+    // Rename state
+    private bool _showRenamePopup;
+    private string _renameGroupKey;
+    private string _renameBuffer = "";
+
     public bool IsOpen { get; set; }
 
     // --- ADDED: Fields for asynchronous loading ---
@@ -195,6 +201,42 @@ public class ImageStackOrganizerDialog
                 ImGui.Separator();
 
                 DrawBottomButtons();
+
+                // Handle Rename Popup
+                if (_showRenamePopup)
+                {
+                    ImGui.OpenPopup("Rename Group");
+                }
+
+                if (ImGui.BeginPopupModal("Rename Group", ref _showRenamePopup, ImGuiWindowFlags.AlwaysAutoResize))
+                {
+                    ImGui.Text("Enter new name for the group:");
+                    ImGui.InputText("##rename", ref _renameBuffer, 100);
+
+                    if (ImGui.Button("Rename", new Vector2(120, 0)))
+                    {
+                        if (!string.IsNullOrWhiteSpace(_renameBuffer) && !_groups.ContainsKey(_renameBuffer))
+                        {
+                            // Rename logic: Move items to new key, remove old key
+                            if (_groups.TryGetValue(_renameGroupKey, out var items))
+                            {
+                                _groups[_renameBuffer] = items;
+                                _groups.Remove(_renameGroupKey);
+
+                                if (_selectedGroup == _renameGroupKey)
+                                    _selectedGroup = _renameBuffer;
+                            }
+                            _showRenamePopup = false;
+                        }
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Cancel", new Vector2(120, 0)))
+                    {
+                        _showRenamePopup = false;
+                    }
+
+                    ImGui.EndPopup();
+                }
             }
             ImGui.End();
         }
@@ -364,7 +406,9 @@ public class ImageStackOrganizerDialog
                 {
                     if (ImGui.MenuItem("Rename"))
                     {
-                        // TODO: Implement rename
+                        _renameGroupKey = group.Key;
+                        _renameBuffer = group.Key;
+                        _showRenamePopup = true;
                     }
 
                     if (ImGui.MenuItem("Delete"))

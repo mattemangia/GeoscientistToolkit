@@ -428,7 +428,7 @@ public class PhysicoChemSolver : SimulatorNodeSupport
             VelocityY = state.VelocityY,
             VelocityZ = state.VelocityZ,
             Permeability = state.Permeability,
-            InitialPermeability = state.Permeability, // TODO: track initial
+            InitialPermeability = state.InitialPermeability,
             Dispersivity = 0.1
         };
     }
