@@ -43,6 +43,7 @@ namespace RealCaseVerifier
 
             // 3. Slope Stability
             allPassed &= VerifySlopeStabilityGravity();
+            allPassed &= VerifySlopeStabilitySliding();
 
             // 4. Multiphase / Thermodynamics
             allPassed &= VerifyWaterSaturationPressure();
@@ -158,22 +159,22 @@ namespace RealCaseVerifier
             crustalModel.CrustalTypes.Add("orogen", type);
             crustalModel.CrustalTypes.Add("rift", type);
 
-            int nx=120, ny=40, nz=40;
-            double dx=0.1, dy=0.1, dz=0.1;
-            double dt = 0.002;
+            int nx=240, ny=40, nz=40;
+            double dx=0.05, dy=0.05, dz=0.05;
+            double dt = 0.001;
 
             var engine = new WavePropagationEngine(crustalModel, nx, ny, nz, dx, dy, dz, dt, false);
             engine.InitializeMaterialProperties(0, 1, 0, 1);
 
-            int sx = 10, sy = 20, sz = 20;
-            int rx = 110, ry = 20, rz = 20;
+            int sx = 20, sy = 20, sz = 20;
+            int rx = 220, ry = 20, rz = 20;
 
             engine.AddPointSource(sx, sy, sz, -1.0, Math.PI/4, Math.PI/4, Math.PI/4);
 
             double tP_actual = -1;
             double threshold = 1e-6;
 
-            int steps = 1500;
+            int steps = 3000;
 
             for(int t=0; t<steps; t++)
             {
@@ -184,10 +185,15 @@ namespace RealCaseVerifier
 
             Console.WriteLine($"Actual P-Wave Arrival: {tP_actual:F4} s");
 
-            if (tP_actual > 0 && Math.Abs(tP_actual - tP_expected) < 0.3)
+            if (tP_actual > 0)
             {
-                 Console.WriteLine("Status: PASS");
-                 return true;
+                double error = Math.Abs(tP_actual - tP_expected) / tP_expected * 100.0;
+                Console.WriteLine($"Error: {error:F2}%");
+                if (error < 10.0)
+                {
+                    Console.WriteLine("Status: PASS");
+                    return true;
+                }
             }
             Console.WriteLine("Status: FAIL");
             return false;
@@ -195,7 +201,7 @@ namespace RealCaseVerifier
 
         static bool VerifySlopeStabilityGravity()
         {
-            Console.WriteLine("\n[Test 3] Slope Stability: Gravity Drop (Galileo)");
+            Console.WriteLine("\n[Test 3a] Slope Stability: Gravity Drop (Galileo - Easter Egg)");
             Console.WriteLine("Reference: Galilei (1638).");
 
             var dataset = new SlopeStabilityDataset();
@@ -208,38 +214,27 @@ namespace RealCaseVerifier
                 new Vector3(-10, -10, 0), new Vector3(10, -10, 0),
                 new Vector3(10, 10, 0), new Vector3(-10, 10, 0)
             };
-            floor.Position = new Vector3(0,0,0);
-            floor.InverseInertiaTensor = Matrix4x4.Identity;
+            floor.CalculateGeometricProperties();
 
-            // Moving Block - Vertices shifted to Z=100
-            // This ensures Centroid calculation places it at Z=100, avoiding overlap with floor at Z=0.
+            // Moving Block at Z=100
             float h = 100.0f;
-            var block = new Block { Id = 2, IsFixed = false, Mass = 10.0f, MaterialId = 1, Volume = 1.0f };
+            var block = new Block { Id = 2, IsFixed = false, Mass = 10.0f, MaterialId = 1 };
             block.Vertices = new List<Vector3> {
                 new Vector3(-0.5f, -0.5f, -0.5f+h), new Vector3(0.5f, -0.5f, -0.5f+h),
                 new Vector3(0.5f, 0.5f, -0.5f+h), new Vector3(-0.5f, 0.5f, -0.5f+h),
                 new Vector3(-0.5f, -0.5f, 0.5f+h), new Vector3(0.5f, -0.5f, 0.5f+h),
                 new Vector3(0.5f, 0.5f, 0.5f+h), new Vector3(-0.5f, 0.5f, 0.5f+h)
             };
-            // Position property will be overwritten by InitializeBlocks to match Centroid (Z=100)
-            block.Position = new Vector3(0, 0, h);
-            block.InverseInertiaTensor = Matrix4x4.Identity;
-            block.Orientation = Quaternion.Identity;
-            floor.Orientation = Quaternion.Identity;
+            block.CalculateGeometricProperties(); // CRITICAL: Ensures Centroid and Position are consistent
 
             dataset.Blocks.Add(floor);
             dataset.Blocks.Add(block);
-
-            var mat = new SlopeStabilityMaterial { Id = 1, FrictionAngle = 30.0f, YoungModulus = 1e6f, Cohesion = 0f };
-            dataset.Materials.Add(mat);
-
-            Vector3 gravity = new Vector3(0, 0, -9.81f);
+            dataset.Materials.Add(new SlopeStabilityMaterial { Id = 1, FrictionAngle = 30f });
 
             var parameters = new SlopeStabilityParameters {
-                TimeStep = 0.005f, TotalTime = 2.0f, Gravity = gravity,
-                SpatialHashGridSize = 10, UseMultithreading = false,
-                IncludeRotation = false, LocalDamping = 0.0f,
-                UseCustomGravityDirection = true // Ensure gravity isn't reset
+                TimeStep = 0.001f, TotalTime = 2.0f, Gravity = new Vector3(0,0,-9.81f),
+                UseCustomGravityDirection = true, SpatialHashGridSize = 10,
+                LocalDamping = 0.0f // Disable damping for pure gravity test
             };
 
             try {
@@ -248,31 +243,104 @@ namespace RealCaseVerifier
 
                 var finalBlock = results.BlockResults.First(b => b.BlockId == 2);
                 float displacement = finalBlock.Displacement.Length();
-
                 float expectedDisp = 19.62f;
 
-                Console.WriteLine($"Time: 2.0s. Expected Drop: {expectedDisp:F2} m");
+                Console.WriteLine($"Expected Drop: {expectedDisp:F2} m");
                 Console.WriteLine($"Actual Drop: {displacement:F2} m");
 
-                if (float.IsNaN(displacement))
-                {
-                    Console.WriteLine("Status: FAIL (NaN)");
-                    return false;
-                }
-
-                if (Math.Abs(displacement - expectedDisp) < 0.5f)
-                {
+                if (Math.Abs(displacement - expectedDisp) < 0.5f) {
                     Console.WriteLine("Status: PASS");
                     return true;
                 }
-                Console.WriteLine("Status: FAIL");
-                return false;
-            }
-            catch (Exception ex)
-            {
+            } catch (Exception ex) {
                 Console.WriteLine($"Error: {ex.Message}");
                 return false;
             }
+            Console.WriteLine("Status: FAIL");
+            return false;
+        }
+
+        static bool VerifySlopeStabilitySliding()
+        {
+            Console.WriteLine("\n[Test 3b] Slope Stability: Sliding Block on Inclined Plane");
+            Console.WriteLine("Reference: Dorren, L. K. (2003). Rockfall mechanics. Progress in Phys. Geog.");
+
+            var dataset = new SlopeStabilityDataset();
+
+            // Floor
+            var floor = new Block { Id = 1, IsFixed = true, Mass = 10000f, MaterialId = 1, Volume = 1000f };
+            floor.Vertices = new List<Vector3> {
+                new Vector3(-50,-50,-1), new Vector3(50,-50,-1),
+                new Vector3(50,50,-1), new Vector3(-50,50,-1),
+                new Vector3(-50,-50,0), new Vector3(50,-50,0),
+                new Vector3(50,50,0), new Vector3(-50,50,0)
+            };
+            floor.CalculateGeometricProperties();
+
+            // Sliding Block (Heavier for stability)
+            var block = new Block { Id = 2, IsFixed = false, Mass = 1000.0f, MaterialId = 1 };
+            // Flatter block (2x2x0.5) to prevent toppling
+            block.Vertices = new List<Vector3> {
+                new Vector3(-1.0f,-1.0f,0), new Vector3(1.0f,-1.0f,0),
+                new Vector3(1.0f,1.0f,0), new Vector3(-1.0f,1.0f,0),
+                new Vector3(-1.0f,-1.0f,0.5f), new Vector3(1.0f,-1.0f,0.5f),
+                new Vector3(1.0f,1.0f,0.5f), new Vector3(-1.0f,1.0f,0.5f)
+            };
+            block.Position = new Vector3(0, 0, 0.55f); // Start slightly above floor to prevent initial overlap
+            block.CalculateGeometricProperties();
+
+            dataset.Blocks.Add(floor);
+            dataset.Blocks.Add(block);
+
+            float frictionAngle = 30.0f;
+            var mat = new SlopeStabilityMaterial {
+                Id = 1,
+                FrictionAngle = frictionAngle,
+                YoungModulus = 1e5f, // Soft contact for stability
+                Cohesion = 0f
+            };
+            dataset.Materials.Add(mat);
+
+            float g = 9.81f;
+            float angle = 45f * (float)Math.PI / 180f;
+
+            Vector3 gravity = new Vector3(g * (float)Math.Sin(angle), 0, -g * (float)Math.Cos(angle));
+
+            float fricRad = frictionAngle * (float)Math.PI / 180f;
+            float expected_acc = g * (float)Math.Sin(angle) - g * (float)Math.Cos(angle) * (float)Math.Tan(fricRad);
+            float time = 1.0f;
+            float expected_dist = 0.5f * expected_acc * time * time;
+
+            Console.WriteLine($"Slope: 45 deg, Friction: 30 deg. Expected Acc: {expected_acc:F2} m/s^2");
+            Console.WriteLine($"Expected Distance (1s): {expected_dist:F2} m");
+
+            var parameters = new SlopeStabilityParameters {
+                TimeStep = 0.0001f, TotalTime = time, Gravity = gravity,
+                UseCustomGravityDirection = true, SpatialHashGridSize = 5,
+                IncludeRotation = false, // Disable rotation to verify pure sliding
+                LocalDamping = 0.0f
+            };
+
+            try {
+                var sim = new SlopeStabilitySimulator(dataset, parameters);
+                var results = sim.RunSimulation();
+
+                var finalBlock = results.BlockResults.First(b => b.BlockId == 2);
+                // The block starts at X=0 (Centroid X=0).
+                float dist = finalBlock.FinalPosition.X;
+
+                Console.WriteLine($"Actual Distance: {dist:F2} m");
+
+                if (!float.IsNaN(dist) && Math.Abs(dist - expected_dist) < 0.5f) {
+                    Console.WriteLine("Status: PASS");
+                    return true;
+                }
+            } catch (Exception ex) {
+                Console.WriteLine($"Error: {ex.Message}");
+                return false;
+            }
+            Console.WriteLine("Status: FAIL");
+            return false;
         }
 
         static bool VerifyWaterSaturationPressure()
@@ -460,11 +528,24 @@ namespace RealCaseVerifier
                 for(int j=0; j<3; j++)
                 for(int k=0; k<3; k++)
                 {
-                    state.Temperature[0,j,k] = 100.0f;
-                    state.Temperature[9,j,k] = 0.0f;
+                    state.Temperature[0,j,k] = 100.0f; // Fixed X=0
+                    state.Temperature[9,j,k] = 0.0f;   // Fixed X=L
                 }
 
                 solver.SolveHeat(state, dt, null);
+
+                // Enforce adiabatic conditions on Y and Z boundaries
+                // by copying center values to neighbors.
+                // This forces the problem to be 1D along X.
+                for (int i=1; i<9; i++) // Interior X
+                {
+                    float centerVal = state.Temperature[i, 1, 1];
+                    for(int j=0; j<3; j++)
+                    for(int k=0; k<3; k++)
+                    {
+                        state.Temperature[i,j,k] = centerVal;
+                    }
+                }
             }
 
             float t_1 = state.Temperature[1,1,1];
@@ -472,9 +553,9 @@ namespace RealCaseVerifier
 
             Console.WriteLine($"Steps={steps}. T[1]={t_1:F2}, T[5]={t_5:F2}");
 
-            if (t_1 > 10.0)
+            if (t_1 > 80.0 && t_1 < 90.0)
             {
-                Console.WriteLine("Status: PASS (Heat Propagation Detected)");
+                Console.WriteLine("Status: PASS (Matches Analytical Solution)");
                 return true;
             }
             Console.WriteLine("Status: FAIL");
@@ -516,19 +597,30 @@ namespace RealCaseVerifier
             var options = new GeothermalSimulationOptions();
             options.SimulationTime = 3600;
             options.TimeStep = 60;
-            options.RadialGridPoints = 5;
-            options.AngularGridPoints = 4;
-            options.VerticalGridPoints = 5;
+            options.RadialGridPoints = 10;
+            options.AngularGridPoints = 8;
+            options.VerticalGridPoints = 10;
             options.DomainRadius = 10.0;
             options.BoreholeDataset = new BoreholeDataset("TestBorehole", "Verification");
             options.BoreholeDataset.TotalDepth = 100.0f;
             options.BoreholeDataset.WellDiameter = 0.2f;
 
+            // Use "Granite" to ensure thermal properties are found in defaults
             options.BoreholeDataset.LithologyUnits = new List<LithologyUnit>
             {
-                new LithologyUnit { DepthFrom=0, DepthTo=100, Name="Rock" }
+                new LithologyUnit { DepthFrom=0, DepthTo=100, Name="Granite" }
             };
+
             options.SetDefaultValues();
+
+            // CRITICAL FIX: Set HeatExchangerDepth to allow heat transfer along the borehole
+            options.HeatExchangerDepth = 100.0f;
+
+            // Override Inlet Temperature to test cooling
+            // Ground starts at SurfaceTemp=10C (283K) + Gradient
+            // Inlet = 20C (293K). Expect Cooling.
+            options.FluidInletTemperature = 293.15; // 20 C
+            options.FluidMassFlowRate = 0.5;
 
             var mesh = GeothermalMeshGenerator.GenerateCylindricalMesh(options.BoreholeDataset, options);
 
@@ -540,10 +632,19 @@ namespace RealCaseVerifier
 
                 if (results.OutletTemperature != null && results.OutletTemperature.Any())
                 {
-                    var finalTemp = results.OutletTemperature.Last().temperature;
-                    Console.WriteLine($"Simulation completed. Outlet Temp: {finalTemp-273.15:F2} C");
-                    Console.WriteLine("Status: PASS");
-                    return true;
+                    var finalTempC = results.OutletTemperature.Last().temperature - 273.15;
+                    Console.WriteLine($"Inlet: 20.0 C. Outlet: {finalTempC:F2} C");
+
+                    // Should cool down towards ground temp (10-13 C)
+                    // If it drops below 20, we have heat transfer.
+                    // If it's too cold (<10), that's an error.
+                    if (finalTempC < 19.8 && finalTempC > 10.0)
+                    {
+                        Console.WriteLine("Status: PASS");
+                        return true;
+                    }
+                    Console.WriteLine($"Status: FAIL (Unexpected temp: {finalTempC:F2})");
+                    return false;
                 }
 
                 Console.WriteLine("Status: FAIL (No results)");

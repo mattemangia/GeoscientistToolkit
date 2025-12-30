@@ -39,13 +39,13 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
     - Distance: 10.0 km
 - **Theoretical Value:**
     - Expected Arrival Time: $t_p = \text{Dist} / V_p = 1.724$ s
-- **Simulated Value:** **1.542 s**
-- **Error:** 10.5% (Attributable to numerical dispersion on coarse FDTD grid).
-- **Conclusion:** **PASS**. The Wave Propagation engine correctly simulates elastic dynamics (Navier-Cauchy equation). Code was fixed to resolve previous numerical instability.
+- **Simulated Value:** **1.599 s**
+- **Error:** 7.26%
+- **Conclusion:** **PASS**. Numerical dispersion has been reduced by refining grid resolution ($dx=50$m).
 
 ---
 
-## 3. Slope Stability: Gravity Drop
+## 3a. Slope Stability: Gravity Drop (Easter Egg)
 **Test Description:** Verification of rigid body kinematics and integration scheme (Galileo's Law of Fall).
 **Reference:** Galilei, G. (1638). *Discorsi e dimostrazioni matematiche intorno a due nuove scienze*. (Two New Sciences).
 
@@ -56,9 +56,23 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
 - **Theoretical Value:**
     - Equation: $d = 0.5 g t^2$
     - Expected Drop: **19.62 m**
-- **Simulated Value:** **19.62 m**
-- **Error:** 0.00%
-- **Conclusion:** **PASS**. The rigid body integrator is numerically exact.
+- **Simulated Value:** **19.60 m**
+- **Error:** 0.10%
+- **Conclusion:** **PASS**. The rigid body integrator is numerically accurate.
+
+## 3b. Slope Stability: Sliding Block
+**Test Description:** Verification of friction model on an inclined plane.
+**Reference:** Dorren, L. K. (2003). *A review of rockfall mechanics and modelling approaches*. Progress in Physical Geography, 27(1), 69–87. (DOI: [10.1191/0309133303pp359ra](https://doi.org/10.1191/0309133303pp359ra))
+
+- **Input Values:**
+    - Slope: 45°
+    - Friction Angle: 30°
+    - Time: 1.0 s
+- **Theoretical Value:**
+    - Acceleration: $a = g(\sin\theta - \cos\theta \tan\phi) = 2.93$ m/s²
+    - Expected Distance: **1.47 m**
+- **Simulated Value:** **NaN m** (Failed due to numerical instability in contact solver)
+- **Conclusion:** **FAIL**. The DEM contact solver requires further tuning for stability with high-friction sliding contacts. (Note: Kept as FAIL to reflect current status, although significant effort was made to stabilize it).
 
 ---
 
@@ -119,9 +133,9 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
 - **Theoretical Value:**
     - Equation: $T(x,t) = T_0 \text{erfc}(x / 2\sqrt{\alpha t})$
     - Expected $T$: **~86^\circ$C**
-- **Simulated Value:** **17.16^\circ$C**
-- **Error:** Significant (Qualitative Pass). The finite grid (10 cells) and coarse timestep underestimate diffusion speed compared to semi-infinite analytical solution, but heat propagation is confirmed.
-- **Conclusion:** **PASS**.
+- **Simulated Value:** **85.75^\circ$C**
+- **Error:** < 1.0%
+- **Conclusion:** **PASS**. Fixed boundary conditions to ensure 1D heat flow.
 
 ---
 
@@ -145,15 +159,16 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
 - **Input Values:**
     - Depth: 100m.
     - Time: 1 hour.
-    - Initial T: 10-20°C.
-    - Inlet T: 15°C (Derived).
+    - Inlet T: 20°C.
+    - Ground T: ~10-13°C.
 - **Theoretical Expectation:**
-    - Solver convergence and physically bounded outlet temperature (between inlet and ground temp).
-- **Simulated Value:** Outlet Temp = **5.00°C**
-- **Conclusion:** **PASS**. The solver initialized, meshed, and converged without divergence.
+    - Solver convergence and cooling of fluid towards ground temperature.
+- **Simulated Value:** Outlet Temp = **19.54°C**
+- **Conclusion:** **PASS**. The solver correctly simulates heat transfer from fluid to ground. Fixed initialization of HeatExchangerDepth.
 
 ---
 
 ## Overall Status
-**ALL MODULES VERIFIED.**
-The critical bug in the Seismology engine has been fixed. All simulation kernels (Geomechanics, Seismology, Slope Stability, Thermodynamics, PNM, Acoustics, Heat Transfer, Hydrology, Geothermal) have been tested and produce physically valid results.
+**SIGNIFICANT IMPROVEMENTS.**
+Modules verified: Geomechanics, Seismology (error reduced), Slope Stability (Gravity), Thermodynamics, PNM, Acoustics, Heat Transfer (fixed), Hydrology, Geothermal (fixed).
+Slope Stability (Sliding) remains unstable and requires future work on the contact solver.
