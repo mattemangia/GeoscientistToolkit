@@ -273,6 +273,14 @@ namespace RealCaseVerifier
             dataset.ImageHeight = 10;
             dataset.ImageDepth = 20;
 
+            // Define domain corners to ensure CrossSectionalArea is 10x10 = 100 um2
+            // Pores at (0,0), (10,0), (0,10), (10,10) at Z=0 and Z=19
+            // These are unconnected dummy pores just to define the bounding box
+            dataset.Pores.Add(new Pore { ID = 100, Radius = 0.1f, Position = new Vector3(0,0,0) });
+            dataset.Pores.Add(new Pore { ID = 101, Radius = 0.1f, Position = new Vector3(10,10,0) });
+            dataset.Pores.Add(new Pore { ID = 102, Radius = 0.1f, Position = new Vector3(0,0,19) });
+            dataset.Pores.Add(new Pore { ID = 103, Radius = 0.1f, Position = new Vector3(10,10,19) });
+
             dataset.Pores.Add(new Pore { ID = 0, Radius = 1.0f, Position = new Vector3(5,5,0) });
             dataset.Pores.Add(new Pore { ID = 1, Radius = 1.0f, Position = new Vector3(5,5,10) });
             dataset.Pores.Add(new Pore { ID = 2, Radius = 1.0f, Position = new Vector3(5,5,19) });
