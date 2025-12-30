@@ -502,7 +502,7 @@ public static class GISOperationsImpl
         byte[] dirCodes = { 1, 2, 4, 8, 16, 32, 64, 128 };
 
         for (var row = 1; row < rows - 1; row++)
-        for (var col = 1; row < cols - 1; col++)
+        for (var col = 1; col < cols - 1; col++)
         {
             float maxSlope = 0;
             byte direction = 0;

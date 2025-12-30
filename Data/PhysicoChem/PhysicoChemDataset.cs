@@ -189,12 +189,65 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
 
     private void ApplyInitialConditions()
     {
-        foreach (var cell in Mesh.Cells.Values)
-        {
-            if (cell.InitialConditions == null) continue;
+        if (GeneratedMesh == null || CurrentState == null)
+            return;
 
-            // Apply ICs to the cell
-            // (Further implementation will be needed in the solver)
+        if (!GeneratedMesh.Metadata.TryGetValue("MaterialIds", out var materialIdsObj))
+            return;
+
+        var materialIds = materialIdsObj as int[,,];
+        if (materialIds == null)
+            return;
+
+        var (nx, ny, nz) = GeneratedMesh.GridSize;
+        var state = CurrentState;
+
+        var species = new HashSet<string>();
+        foreach (var domain in Domains)
+        {
+            if (domain?.InitialConditions?.Concentrations == null) continue;
+            foreach (var name in domain.InitialConditions.Concentrations.Keys)
+                species.Add(name);
+        }
+
+        foreach (var name in species)
+            state.Concentrations[name] = new float[nx, ny, nz];
+
+        for (var i = 0; i < nx; i++)
+        for (var j = 0; j < ny; j++)
+        for (var k = 0; k < nz; k++)
+        {
+            var domainIndex = materialIds[i, j, k];
+            ReactorDomain domain = domainIndex >= 0 && domainIndex < Domains.Count ? Domains[domainIndex] : null;
+
+            var initial = domain?.InitialConditions;
+            var material = domain?.Material;
+
+            state.Temperature[i, j, k] = (float)(initial?.Temperature ?? 298.15);
+            state.Pressure[i, j, k] = (float)(initial?.Pressure ?? 101325.0);
+            state.Porosity[i, j, k] = (float)(material?.Porosity ?? 0.3);
+            state.Permeability[i, j, k] = (float)(material?.Permeability ?? 1e-12);
+            state.InitialPermeability[i, j, k] = state.Permeability[i, j, k];
+
+            state.VelocityX[i, j, k] = (float)(initial?.InitialVelocity.Vx ?? 0.0);
+            state.VelocityY[i, j, k] = (float)(initial?.InitialVelocity.Vy ?? 0.0);
+            state.VelocityZ[i, j, k] = (float)(initial?.InitialVelocity.Vz ?? 0.0);
+
+            state.LiquidSaturation[i, j, k] = (float)(initial?.LiquidSaturation ?? 1.0);
+            state.VaporSaturation[i, j, k] = 0.0f;
+            state.GasSaturation[i, j, k] = 0.0f;
+
+            foreach (var entry in state.Concentrations)
+            {
+                float value = 0.0f;
+                if (initial?.Concentrations != null &&
+                    initial.Concentrations.TryGetValue(entry.Key, out var concentration))
+                {
+                    value = (float)concentration;
+                }
+
+                entry.Value[i, j, k] = value;
+            }
         }
     }
 
