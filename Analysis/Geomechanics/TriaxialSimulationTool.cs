@@ -68,6 +68,7 @@ public class TriaxialSimulationTool : IDisposable
     private bool _simulationComplete;
     private float _simulationProgress;
     private string _statusMessage = "Ready";
+    private CancellationTokenSource _cancellationTokenSource;
 
     // Visualization
     private TriaxialVisualization3D _visualization3D;
@@ -80,6 +81,7 @@ public class TriaxialSimulationTool : IDisposable
     private List<PhysicalMaterial> _filteredMaterials = new();
 
     // Presets
+    private string _selectedPresetName = "Select Preset...";
     private readonly Dictionary<string, (float confining, float axialRate, float maxStrain)> _loadingPresets = new()
     {
         { "Standard UCS (Unconfined)", (0.0f, 0.5f, 5.0f) },
@@ -133,6 +135,17 @@ public class TriaxialSimulationTool : IDisposable
 
         // Load default material
         LoadDefaultMaterial();
+
+        // Select default preset
+        _selectedPresetName = "Standard UCS (Unconfined)";
+        if (_loadingPresets.TryGetValue(_selectedPresetName, out var preset))
+        {
+            _loadParams.ConfiningPressure_MPa = preset.confining;
+            _loadParams.AxialStressRate_MPa_per_s = preset.axialRate;
+            _loadParams.MaxAxialStrain_percent = preset.maxStrain;
+            _loadParams.TotalTime_s = 1000.0f;
+            _loadParams.TimeStep_s = 0.1f;
+        }
     }
 
     public void Dispose()
@@ -157,7 +170,7 @@ public class TriaxialSimulationTool : IDisposable
         var availWidth = ImGui.GetContentRegionAvail().X;
         var leftWidth = Math.Min(500, availWidth * 0.35f);
 
-        ImGui.BeginChild("ControlsPanel", new Vector2(leftWidth, 0), ImGuiChildFlags.Border);
+        ImGui.BeginChild("ControlsPanel", new Vector2(leftWidth, 0), ImGuiChildFlags.Border, ImGuiWindowFlags.AlwaysVerticalScrollbar);
         DrawControlsPanel();
         ImGui.EndChild();
 
@@ -396,16 +409,40 @@ public class TriaxialSimulationTool : IDisposable
     private void DrawLoadingSection()
     {
         ImGui.Text("Loading Presets:");
-        if (ImGui.BeginCombo("##LoadingPreset", "Select Preset..."))
+        if (ImGui.BeginCombo("##LoadingPreset", _selectedPresetName))
         {
             foreach (var preset in _loadingPresets)
             {
-                if (ImGui.Selectable(preset.Key))
+                bool isSelected = _selectedPresetName == preset.Key;
+                if (ImGui.Selectable(preset.Key, isSelected))
                 {
+                    _selectedPresetName = preset.Key;
                     _loadParams.ConfiningPressure_MPa = preset.Value.confining;
+                    // The preset defines axialRate. If we are in Strain Controlled mode,
+                    // this rate is likely too high if interpreted as strain rate if the values are like 0.5 (50%).
+                    // However, if we assume the presets are for Stress Controlled tests, we should switch mode.
+                    // Or we interpret the value differently.
+                    // Given values like 0.5, 1.0, 2.0 -> these look like Stress Rates (MPa/s).
+                    // If we want to support Strain Controlled, we should calculate a reasonable strain rate.
+
                     _loadParams.AxialStressRate_MPa_per_s = preset.Value.axialRate;
                     _loadParams.MaxAxialStrain_percent = preset.Value.maxStrain;
+
+                    // Ensure TotalTime is sufficient
+                    // If Stress Controlled: Time = MaxStress / Rate.
+                    // But MaxStress isn't in preset, MaxStrain is.
+                    // We can estimate time based on MaxStrain and an assumed Modulus (e.g. 50GPa) if needed,
+                    // or just set a long enough time.
+
+                    // Let's set a generous TotalTime so it doesn't timeout prematurely
+                    _loadParams.TotalTime_s = 1000.0f;
+
+                    // Also adjust time step for stability/speed trade-off
+                    _loadParams.TimeStep_s = 0.1f;
                 }
+
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
             }
             ImGui.EndCombo();
         }
@@ -974,46 +1011,72 @@ public class TriaxialSimulationTool : IDisposable
         _simulationComplete = false;
         _statusMessage = "Running simulation...";
         _simulationProgress = 0f;
+        _cancellationTokenSource = new CancellationTokenSource();
 
-        await Task.Run(() =>
+        Util.Logger.Log("[TriaxialTool] Starting simulation...");
+        Util.Logger.Log($"[TriaxialTool] Mode: {_loadParams.LoadingMode}, Rate: {_loadParams.AxialStrainRate_per_s}/s or {_loadParams.AxialStressRate_MPa_per_s} MPa/s");
+        Util.Logger.Log($"[TriaxialTool] Total Time: {_loadParams.TotalTime_s}s");
+
+        var progress = new Progress<TriaxialResults>(results =>
         {
-            try
+            _results = results;
+            // Approximate progress based on time
+            if (results.Time_s.Length > 0 && _loadParams.TotalTime_s > 0)
             {
-                // Apply curves if enabled
-                if (_useConfiningPressureCurve)
-                    _loadParams.ConfiningPressureCurve = _confiningPressureCurve.GetPoints()
-                        .Select(p => p.Point).ToList();
-
-                if (_useAxialLoadCurve)
-                    _loadParams.AxialLoadCurve = _axialLoadCurve.GetPoints()
-                        .Select(p => p.Point).ToList();
-
-                // Run simulation (CPU for now, GPU version can be added later)
-                _results = _simulation.RunSimulationCPU(
-                    _mesh,
-                    _selectedMaterial,
-                    _loadParams,
-                    _failureCriterion);
-
-                _simulationProgress = 1.0f;
-                _statusMessage = "Simulation complete";
-                _simulationComplete = true;
-            }
-            catch (Exception ex)
-            {
-                _statusMessage = $"Simulation error: {ex.Message}";
-            }
-            finally
-            {
-                _isRunning = false;
+                _simulationProgress = results.Time_s.Last() / _loadParams.TotalTime_s;
             }
         });
+
+        try
+        {
+            // Apply curves if enabled
+            if (_useConfiningPressureCurve)
+                _loadParams.ConfiningPressureCurve = _confiningPressureCurve.GetPoints()
+                    .Select(p => p.Point).ToList();
+
+            if (_useAxialLoadCurve)
+                _loadParams.AxialLoadCurve = _axialLoadCurve.GetPoints()
+                    .Select(p => p.Point).ToList();
+
+            // Run simulation on background thread with progress reporting
+            _results = await Task.Run(() => _simulation.RunSimulationCPU(
+                _mesh,
+                _selectedMaterial,
+                _loadParams,
+                _failureCriterion,
+                progress,
+                _cancellationTokenSource.Token), _cancellationTokenSource.Token);
+
+            _simulationProgress = 1.0f;
+            _statusMessage = "Simulation complete";
+            _simulationComplete = true;
+            Util.Logger.Log("[TriaxialTool] Simulation completed successfully.");
+        }
+        catch (OperationCanceledException)
+        {
+            _statusMessage = "Simulation cancelled";
+            Util.Logger.Log("[TriaxialTool] Simulation cancelled by user.");
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Simulation error: {ex.Message}";
+            Util.Logger.LogError($"[TriaxialTool] Simulation error: {ex.Message}");
+        }
+        finally
+        {
+            _isRunning = false;
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = null;
+        }
     }
 
     private void StopSimulation()
     {
-        _isRunning = false;
-        _statusMessage = "Simulation stopped";
+        if (_cancellationTokenSource != null && !_cancellationTokenSource.IsCancellationRequested)
+        {
+            _cancellationTokenSource.Cancel();
+            _statusMessage = "Stopping...";
+        }
     }
 
     private void ResetSimulation()

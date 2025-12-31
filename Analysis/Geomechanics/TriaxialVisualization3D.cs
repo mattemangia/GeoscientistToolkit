@@ -74,7 +74,7 @@ public class TriaxialVisualization3D : IDisposable
         ImGui.SameLine();
 
         // 3D viewport
-        ImGui.BeginChild("3DViewport", new Vector2(0, 0), ImGuiChildFlags.Border);
+        ImGui.BeginChild("3DViewport", new Vector2(0, 0), ImGuiChildFlags.Border, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
         DrawViewport(mesh, results, ImGui.GetContentRegionAvail());
         ImGui.EndChild();
     }

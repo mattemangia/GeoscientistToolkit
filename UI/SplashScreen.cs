@@ -157,7 +157,7 @@ public class SplashScreen : IDisposable
             ImGui.PopStyleColor();
 
             // Subtitle/Author info
-            var subtitleText = "Matteo Mangiagalli - 2025";
+            var subtitleText = "Matteo Mangiagalli - 2026";
             var subtitleSize = ImGui.CalcTextSize(subtitleText);
             ImGui.SetCursorPos(new Vector2((windowSize.X - subtitleSize.X) * 0.5f, windowSize.Y * 0.7f + titleSize.Y * 1.5f + 15));
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.6f, 0.6f, 0.65f, 1.0f));

@@ -428,7 +428,7 @@ If you use Geoscientist's Toolkit in your research, please cite:
 @software{geoscientist_toolkit,
   title = {Geoscientist's Toolkit: Integrated Geoscientific Analysis Platform},
   author = {Mangia, Matteo},
-  year = {2025},
+  year = {2026},
   url = {https://github.com/mattemangia/GeoscientistToolkit}
 }
 ```

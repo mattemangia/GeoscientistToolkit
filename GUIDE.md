@@ -1401,8 +1401,8 @@ project.gtp (ZIP)
 ```json
 {
   "name": "Project Name",
-  "created": "2025-01-15T10:30:00Z",
-  "modified": "2025-01-15T14:20:00Z",
+  "created": "2026-01-15T10:30:00Z",
+  "modified": "2026-01-15T14:20:00Z",
   "datasets": [
     {
       "id": "unique-id",
@@ -1693,7 +1693,7 @@ UI: ImGui.NET 1.90.8.1
 **Author:** Matteo Mangiagalli
 **Institution:** Università degli Studi di Urbino Carlo Bo
 **Email:** m.mangiagalli@campus.uniurb.it
-**Year:** 2025
+**Year:** 2026
 
 ---
 
@@ -1702,17 +1702,17 @@ UI: ImGui.NET 1.90.8.1
 If you use Geoscientist's Toolkit in your research or projects, please cite:
 
 ```
-Mangiagalli, M. (2025). Geoscientist's Toolkit: A Comprehensive Platform for
+Mangiagalli, M. (2026). Geoscientist's Toolkit: A Comprehensive Platform for
 Geoscientific Data Analysis and Simulation. Università degli Studi di Urbino
 Carlo Bo. Available at: https://github.com/mattemangia/GeoscientistToolkit
 ```
 
 BibTeX format:
 ```bibtex
-@software{mangiagalli2025geoscientist,
+@software{mangiagalli2026geoscientist,
   author = {Mangiagalli, Matteo},
   title = {Geoscientist's Toolkit: A Comprehensive Platform for Geoscientific Data Analysis and Simulation},
-  year = {2025},
+  year = {2026},
   institution = {Università degli Studi di Urbino Carlo Bo},
   email = {m.mangiagalli@campus.uniurb.it},
   url = {https://github.com/mattemangia/GeoscientistToolkit}
@@ -1721,6 +1721,6 @@ BibTeX format:
 
 ---
 
-**Document Generated:** 2025-11-17
+**Document Generated:** 2026-11-17
 **Software:** Geoscientist's Toolkit
 **License:** See LICENSE file in repository
