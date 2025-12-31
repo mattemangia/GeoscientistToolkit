@@ -350,6 +350,9 @@ var device1 = _device;
             float time = step * loadParams.TimeStep_s;
             timeArray[step] = time;
 
+            if (step % 100 == 0)
+                Util.Logger.Log($"[TriaxialSimulation] Step {step}/{nSteps}, Time={time:F2}s");
+
             // Apply confining pressure (constant or from curve)
             float sigma3 = GetLoadAtTime(loadParams.ConfiningPressureCurve,
                 loadParams.ConfiningPressure_MPa, time, loadParams.TotalTime_s);
@@ -402,6 +405,11 @@ var device1 = _device;
             // Check failure
             bool failed = CheckFailure(sigma1_eff, sigma3_eff, sigma3_eff,
                 cohesion, frictionAngle, tensileStrength, failureCriterion);
+
+            if (failed && !hasFailed)
+            {
+                Util.Logger.Log($"[TriaxialSimulation] FAILURE DETECTED at Step {step}, Stress={sigma1:F2} MPa");
+            }
 
             // Store results
             axialStrainArray[step] = axialStrain * 100f; // Convert to percent

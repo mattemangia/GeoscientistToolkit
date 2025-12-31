@@ -80,6 +80,7 @@ public class TriaxialSimulationTool : IDisposable
     private List<PhysicalMaterial> _filteredMaterials = new();
 
     // Presets
+    private string _selectedPresetName = "Select Preset...";
     private readonly Dictionary<string, (float confining, float axialRate, float maxStrain)> _loadingPresets = new()
     {
         { "Standard UCS (Unconfined)", (0.0f, 0.5f, 5.0f) },
@@ -396,16 +397,40 @@ public class TriaxialSimulationTool : IDisposable
     private void DrawLoadingSection()
     {
         ImGui.Text("Loading Presets:");
-        if (ImGui.BeginCombo("##LoadingPreset", "Select Preset..."))
+        if (ImGui.BeginCombo("##LoadingPreset", _selectedPresetName))
         {
             foreach (var preset in _loadingPresets)
             {
-                if (ImGui.Selectable(preset.Key))
+                bool isSelected = _selectedPresetName == preset.Key;
+                if (ImGui.Selectable(preset.Key, isSelected))
                 {
+                    _selectedPresetName = preset.Key;
                     _loadParams.ConfiningPressure_MPa = preset.Value.confining;
+                    // The preset defines axialRate. If we are in Strain Controlled mode,
+                    // this rate is likely too high if interpreted as strain rate if the values are like 0.5 (50%).
+                    // However, if we assume the presets are for Stress Controlled tests, we should switch mode.
+                    // Or we interpret the value differently.
+                    // Given values like 0.5, 1.0, 2.0 -> these look like Stress Rates (MPa/s).
+                    // If we want to support Strain Controlled, we should calculate a reasonable strain rate.
+
                     _loadParams.AxialStressRate_MPa_per_s = preset.Value.axialRate;
                     _loadParams.MaxAxialStrain_percent = preset.Value.maxStrain;
+
+                    // Ensure TotalTime is sufficient
+                    // If Stress Controlled: Time = MaxStress / Rate.
+                    // But MaxStress isn't in preset, MaxStrain is.
+                    // We can estimate time based on MaxStrain and an assumed Modulus (e.g. 50GPa) if needed,
+                    // or just set a long enough time.
+
+                    // Let's set a generous TotalTime so it doesn't timeout prematurely
+                    _loadParams.TotalTime_s = 1000.0f;
+
+                    // Also adjust time step for stability/speed trade-off
+                    _loadParams.TimeStep_s = 0.1f;
                 }
+
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
             }
             ImGui.EndCombo();
         }
@@ -975,6 +1000,10 @@ public class TriaxialSimulationTool : IDisposable
         _statusMessage = "Running simulation...";
         _simulationProgress = 0f;
 
+        Util.Logger.Log("[TriaxialTool] Starting simulation...");
+        Util.Logger.Log($"[TriaxialTool] Mode: {_loadParams.LoadingMode}, Rate: {_loadParams.AxialStrainRate_per_s}/s or {_loadParams.AxialStressRate_MPa_per_s} MPa/s");
+        Util.Logger.Log($"[TriaxialTool] Total Time: {_loadParams.TotalTime_s}s");
+
         await Task.Run(() =>
         {
             try
@@ -998,10 +1027,12 @@ public class TriaxialSimulationTool : IDisposable
                 _simulationProgress = 1.0f;
                 _statusMessage = "Simulation complete";
                 _simulationComplete = true;
+                Util.Logger.Log("[TriaxialTool] Simulation completed successfully.");
             }
             catch (Exception ex)
             {
                 _statusMessage = $"Simulation error: {ex.Message}";
+                Util.Logger.LogError($"[TriaxialTool] Simulation error: {ex.Message}");
             }
             finally
             {
