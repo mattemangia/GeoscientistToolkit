@@ -18,6 +18,10 @@
 
 Geoscientist's Toolkit is an advanced, cross-platform desktop application built with C# and .NET 8.0 that provides an integrated environment for working with diverse geophysical and geochemical datasets. From pore-scale (micrometers) to basin-scale (kilometers) analysis, it combines real-time 3D visualization, GPU-accelerated simulations, and a domain-specific scripting language (GeoScript) to enable sophisticated workflows across multiple geoscience disciplines.
 
+## Start Here
+
+Looking for a linear onboarding path? Start with [START_HERE.md](START_HERE.md) for a step-by-step flow (installation → project → dataset → output) that links to the most relevant guides. For a complete feature-to-documentation map, see [docs/FUNCTIONAL_OVERVIEW.md](docs/FUNCTIONAL_OVERVIEW.md).
+
 ## Key Features
 
 ### 🌍 Multi-Scale Analysis
