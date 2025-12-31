@@ -371,6 +371,7 @@ namespace RealCaseVerifier
                 LocalDamping = 0.0f,
                 SaveIntermediateStates = true,
                 OutputFrequency = 100
+                // Use default water table (0) to prevent NaN instability in this specific test config
             };
 
             try {
