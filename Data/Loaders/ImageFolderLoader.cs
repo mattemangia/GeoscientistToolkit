@@ -1,5 +1,6 @@
 // GeoscientistToolkit/Data/Loaders/ImageFolderLoader.cs
 
+using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Util;
 
@@ -33,9 +34,56 @@ public class ImageFolderLoader : IDataLoader
 
     public async Task<Dataset> LoadAsync(IProgress<(float progress, string message)> progressReporter)
     {
-        // This loader requires the ImageStackOrganizerDialog to be opened
-        // The actual loading is handled by the organizer
-        throw new NotImplementedException("ImageFolderLoader requires the ImageStackOrganizerDialog");
+        if (string.IsNullOrEmpty(FolderPath) || !Directory.Exists(FolderPath))
+            throw new InvalidOperationException("Folder path is invalid or does not exist");
+
+        return await Task.Run(() =>
+        {
+            try
+            {
+                progressReporter?.Report((0.05f, "Scanning folder for images..."));
+
+                var files = Directory.GetFiles(FolderPath)
+                    .Where(ImageLoader.IsSupportedImageFile)
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                if (files.Length == 0)
+                    throw new InvalidOperationException("No supported image files found in the selected folder");
+
+                var datasets = new List<Dataset>();
+                for (int i = 0; i < files.Length; i++)
+                {
+                    var file = files[i];
+                    var name = Path.GetFileNameWithoutExtension(file);
+
+                    progressReporter?.Report((0.1f + 0.8f * (i / (float)files.Length), $"Reading {name}..."));
+
+                    var info = ImageLoader.LoadImageInfo(file);
+                    var dataset = new ImageDataset(name, file)
+                    {
+                        Width = info.Width,
+                        Height = info.Height,
+                        BitDepth = info.BitsPerChannel * info.Channels
+                    };
+
+                    PopulateGPSMetadata(dataset, file);
+                    datasets.Add(dataset);
+                }
+
+                progressReporter?.Report((0.95f, "Creating dataset group..."));
+                var groupName = Path.GetFileName(FolderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                var group = new DatasetGroup(string.IsNullOrEmpty(groupName) ? "Image Folder" : groupName, datasets);
+
+                progressReporter?.Report((1.0f, "Image folder imported successfully!"));
+                return group;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[ImageFolderLoader] Error importing image folder: {ex}");
+                throw new Exception($"Failed to import image folder: {ex.Message}", ex);
+            }
+        });
     }
 
     public void Reset()

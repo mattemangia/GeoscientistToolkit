@@ -217,6 +217,8 @@ public class GeothermalVisualization3D : IDisposable
     {
         Logger.Log("[CreateDummyTextures] Starting...");
 
+        float fallbackTemperature = GetFallbackTemperature();
+
         // Create dummy temperature texture if not exists
         if (_temperatureTexture3D == null)
         {
@@ -231,7 +233,7 @@ public class GeothermalVisualization3D : IDisposable
             // Initialize with dummy data BEFORE creating view (required by D3D11 for some configurations)
             var dataSize = (int)(texSize * texSize * texSize);
             var dummyData = new float[dataSize];
-            for (var i = 0; i < dataSize; i++) dummyData[i] = 293.15f; // 20°C in Kelvin
+            for (var i = 0; i < dataSize; i++) dummyData[i] = fallbackTemperature;
             _graphicsDevice.UpdateTexture(_temperatureTexture3D, dummyData, 0, 0, 0, texSize, texSize, texSize, 0, 0);
 
             // Now create the view after data initialization
@@ -272,6 +274,17 @@ public class GeothermalVisualization3D : IDisposable
 
         Logger.Log(
             $"[CreateDummyTextures] Complete. TempView={_temperatureView != null}, VelView={_velocityView != null}");
+    }
+
+    private float GetFallbackTemperature()
+    {
+        if (_options != null)
+            return (float)_options.SurfaceTemperature;
+
+        if (_previewOptions != null)
+            return (float)_previewOptions.SurfaceTemperature;
+
+        return 293.15f;
     }
 
     private void InitializeResourceSet()
