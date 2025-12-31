@@ -170,7 +170,7 @@ public class TriaxialSimulationTool : IDisposable
         var availWidth = ImGui.GetContentRegionAvail().X;
         var leftWidth = Math.Min(500, availWidth * 0.35f);
 
-        ImGui.BeginChild("ControlsPanel", new Vector2(leftWidth, 0), ImGuiChildFlags.Border);
+        ImGui.BeginChild("ControlsPanel", new Vector2(leftWidth, 0), ImGuiChildFlags.Border, ImGuiWindowFlags.AlwaysVerticalScrollbar);
         DrawControlsPanel();
         ImGui.EndChild();
 
