@@ -11,7 +11,8 @@
     <RootNamespace>GeoscientistToolkit.NodeEndpoint</RootNamespace>
     <AssemblyName>NodeEndpoint</AssemblyName>
     <ApplicationIcon>image.ico</ApplicationIcon>
-    <NoWarn>CS8604;CS8618;CS0612;CS8622;CS8602;CS0414;CS8603;CS8600;CS8601;CS8625;CS8619;NETSDK1206;CS0618;CS9191</NoWarn>
+    <NoWarn>CS8604;CS8618;CS0612;CS8622;CS8602;CS0414;CS8603;CS8600;CS8601;CS8625;CS8619;NETSDK1206;CS0618;CS9191;NU1701</NoWarn>
+    <RestoreNoWarn>$(RestoreNoWarn);NU1701</RestoreNoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -47,14 +48,6 @@
     <Compile Include="..\Analysis\AcousticSimulation\SimulationData.cs" Link="Analysis\AcousticSimulation\SimulationData.cs" />
     <Compile Include="..\Analysis\AcousticSimulation\SimulationParameters.cs" Link="Analysis\AcousticSimulation\SimulationParameters.cs" />
 
-    <!-- NOTE: Geothermal, Seismic, NMR, and PNM are EXCLUDED - they have complex dependencies on:
-         - UI libraries (ImGuiNET, ProgressBarDialog)
-         - Advanced data types (Mesh3D, VolumeData, CtImageStack, Borehole, GIS, PNMDataset)
-         - Complex simulation infrastructure (CrustalModel, WavePropagationEngine, etc.)
-         These simulations are better suited for the main application with full UI support.
-         For headless distributed computing, focus on geomechanics and acoustic simulations. -->
-
-    <!-- PNM - EXCLUDED (AbsolutePermeability needs PNMDataset which has 91+ errors) -->
 
     <!-- Essential data types (no UI) -->
     <Compile Include="..\Data\Dataset.cs" Link="Data\Dataset.cs" />

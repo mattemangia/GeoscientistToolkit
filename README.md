@@ -124,11 +124,12 @@ Looking for a linear onboarding path? Start with [START_HERE.md](START_HERE.md) 
 - **GPU**: OpenGL 3.3+ or Vulkan support (for 3D visualization)
 - **RAM**: 8 GB minimum, 16 GB+ recommended
 - **Disk**: 2 GB minimum, 10 GB+ recommended for large datasets
+- **Optional components**: OpenCL, ONNX Runtime, GDAL, and AI models are supported but not mandatory. See [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) for versions and OS-specific install notes.
 
 ### Quick Start
 
-#### Installer multi-piattaforma
-Gli eseguibili del wizard TUI `InstallerWizard` permettono di installare e aggiornare automaticamente il toolkit su Windows, Linux e macOS (Intel/Apple Silicon). Il tool `InstallerPackager` comprime i build `dotnet publish`, include i modelli ONNX e il server Node endpoint e aggiorna il manifest per l'auto-update. Tutte le istruzioni pratiche sono descritte in [docs/installers.md](docs/installers.md).
+#### Cross-platform installer
+The `InstallerWizard` TUI binaries install and update the toolkit on Windows, Linux, and macOS (Intel/Apple Silicon). The `InstallerPackager` tool bundles `dotnet publish` outputs, includes ONNX models and the NodeEndpoint server, and updates the auto-update manifest. Step-by-step instructions are available in [docs/installers.md](docs/installers.md).
 
 #### Clone and Build
 ```bash
@@ -142,6 +143,23 @@ dotnet run
 Download platform-specific releases from the [Releases](../../releases) page.
 
 No installation required - just extract and run!
+
+### CI/CD
+
+This repository uses GitHub Actions for build validation. See `.github/workflows/ci.yml` for the .NET 8 build pipeline.
+
+### Diagnostic CLI
+
+The ImGui executable supports diagnostic flags for validating AI models, renderer/GPU setup, and automated tests without launching the full UI:
+
+```bash
+dotnet run -- --ai-diagnostic
+dotnet run -- --gui-diagnostic
+dotnet run -- --test=all
+dotnet run -- --test=test1,test2
+```
+
+Diagnostics open a full-screen log window with **Cancel** and **Close** controls. Errors are highlighted in red.
 
 ---
 

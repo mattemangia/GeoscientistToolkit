@@ -169,6 +169,65 @@ The server will start on `http://localhost:5000` with:
 - Max concurrent connections: 100
 - Max request body size: 1 GB (for large CT volumes)
 
+## Production-like Deployment
+
+For a production-like deployment, publish the service, configure environment variables, and run it under a process manager (systemd on Linux or NSSM/Windows Service on Windows).
+
+### Publish (self-contained or framework-dependent)
+
+```bash
+cd NodeEndpoint
+dotnet publish -c Release -o ./publish
+```
+
+### Environment configuration
+
+Set environment variables before running:
+
+- `ASPNETCORE_ENVIRONMENT=Production`
+- `ASPNETCORE_URLS=http://0.0.0.0:5000`
+- Optional: `DOTNET_GCServer=1` for server GC
+
+Update `appsettings.json` (or `appsettings.Production.json`) for:
+- Keepalive timeout
+- Max request size
+- Node discovery settings
+- Shared storage paths
+
+### systemd example (Linux)
+
+Create `/etc/systemd/system/geoscientist-nodeendpoint.service`:
+
+```ini
+[Unit]
+Description=GeoscientistToolkit NodeEndpoint
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/geoscientist-nodeendpoint
+ExecStart=/opt/geoscientist-nodeendpoint/NodeEndpoint
+Restart=always
+RestartSec=5
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://0.0.0.0:5000
+Environment=DOTNET_GCServer=1
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable geoscientist-nodeendpoint
+sudo systemctl start geoscientist-nodeendpoint
+```
+
+### Reverse proxy (optional)
+
+Front the service with Nginx or Apache to handle TLS termination and request size limits for large CT volumes.
+
 ## API Endpoints
 
 ### Node Management
