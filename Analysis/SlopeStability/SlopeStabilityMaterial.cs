@@ -20,6 +20,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         // Elastic properties (for block deformation if needed)
         public float YoungModulus { get; set; }         // Pa
         public float PoissonRatio { get; set; }         // dimensionless
+        public float Restitution { get; set; }          // Coeff. of Restitution (0-1)
 
         // Strength properties (Mohr-Coulomb)
         public float Cohesion { get; set; }             // Pa
@@ -50,6 +51,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             Density = 2700.0f;              // Typical rock: 2700 kg/m³
             YoungModulus = 50e9f;           // 50 GPa
             PoissonRatio = 0.25f;
+            Restitution = 0.5f;             // Default semi-elastic
             Cohesion = 1e6f;                // 1 MPa
             FrictionAngle = 35.0f;
             TensileStrength = 0.5e6f;       // 0.5 MPa

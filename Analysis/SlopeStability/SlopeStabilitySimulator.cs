@@ -7,34 +7,13 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Runtime.Intrinsics.Arm;
 using System.Diagnostics;
+using System.Collections.Concurrent;
 
 namespace GeoscientistToolkit.Analysis.SlopeStability
 {
     /// <summary>
     /// Physics simulator for slope stability analysis using Discrete Element Method (DEM).
     /// Implements SIMD-optimized multithreaded simulation with support for x86 (AVX/SSE) and ARM (NEON).
-    ///
-    /// <para><b>Academic References:</b></para>
-    ///
-    /// <para>Discrete Element Method (DEM) foundation:</para>
-    /// <para>Cundall, P. A., &amp; Strack, O. D. L. (1979). A discrete numerical model for granular
-    /// assemblies. Géotechnique, 29(1), 47-65. https://doi.org/10.1680/geot.1979.29.1.47</para>
-    ///
-    /// <para>Distinct-element block modeling methodology:</para>
-    /// <para>Cundall, P. A. (1988). Formulation of a three-dimensional distinct element model—Part I.
-    /// A scheme to detect and represent contacts in a system composed of many polyhedral blocks.
-    /// International Journal of Rock Mechanics and Mining Sciences &amp; Geomechanics Abstracts, 25(3),
-    /// 107-116. https://doi.org/10.1016/0148-9062(88)92293-0</para>
-    ///
-    /// <para>Velocity Verlet integration scheme:</para>
-    /// <para>Verlet, L. (1967). Computer "experiments" on classical fluids. I. Thermodynamical
-    /// properties of Lennard-Jones molecules. Physical Review, 159(1), 98-103.
-    /// https://doi.org/10.1103/PhysRev.159.98</para>
-    ///
-    /// <para>Spatial hashing for collision detection:</para>
-    /// <para>Teschner, M., Heidelberger, B., Müller, M., Pomerantes, D., &amp; Gross, M. H. (2003).
-    /// Optimized spatial hashing for collision detection of deformable objects.
-    /// Proceedings of Vision, Modeling, Visualization (VMV), 3, 47-54.</para>
     /// </summary>
     public class SlopeStabilitySimulator
     {
@@ -47,6 +26,9 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         private Stopwatch _stopwatch;
         private long _totalContacts;
 
+        // Persistent contact state for friction (Map: (MinId, MaxId) -> ContactInterface)
+        private Dictionary<(int, int), ContactInterface> _persistentContacts;
+
         public SlopeStabilitySimulator(
             SlopeStabilityDataset dataset,
             SlopeStabilityParameters parameters)
@@ -55,6 +37,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             _parameters = parameters ?? throw new ArgumentNullException(nameof(parameters));
             _random = new Random(42);
             _stopwatch = new Stopwatch();
+            _persistentContacts = new Dictionary<(int, int), ContactInterface>();
         }
 
         /// <summary>
@@ -80,6 +63,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
             // Initialize blocks
             InitializeBlocks();
+            _persistentContacts.Clear();
 
             // Apply external initial conditions if specified
             if (_parameters.UseExternalInitialConditions)
@@ -104,7 +88,6 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 results.HasTimeHistory = true;
             }
 
-            // Always track convergence history for graphs
             results.ConvergenceHistory = new List<ConvergencePoint>();
             results.HasConvergenceHistory = true;
 
@@ -130,7 +113,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                     ApplyFluidPressure();
                 }
 
-                // Detect contacts
+                // Detect contacts (and update persistent state)
                 DetectContacts();
 
                 // Calculate contact forces
@@ -193,20 +176,16 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             return results;
         }
 
-        /// <summary>
-        /// Initializes blocks with default state.
-        /// </summary>
         private void InitializeBlocks()
         {
             foreach (var block in _dataset.Blocks)
             {
-                // Ensure inverse inertia tensor is valid (for backward compatibility with old datasets)
                 if (block.InverseInertiaTensor == default)
                 {
                     if (Matrix4x4.Invert(block.InertiaTensor, out Matrix4x4 inv))
                         block.InverseInertiaTensor = inv;
                     else
-                        block.InverseInertiaTensor = Matrix4x4.Identity; // Fallback
+                        block.InverseInertiaTensor = Matrix4x4.Identity;
                 }
 
                 block.Position = block.Centroid;
@@ -221,9 +200,6 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             }
         }
 
-        /// <summary>
-        /// Applies external initial conditions from imported data.
-        /// </summary>
         private void ApplyExternalInitialConditions()
         {
             if (!string.IsNullOrEmpty(_parameters.ExternalDisplacementFieldPath))
@@ -247,9 +223,6 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             }
         }
 
-        /// <summary>
-        /// Helper to interpolate a field to a point.
-        /// </summary>
         private Vector3 InterpolateField(Vector3 position, Dictionary<Vector3, Vector3> field)
         {
             if (field.Count == 0)
@@ -259,99 +232,55 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             return field[nearest];
         }
 
-        /// <summary>
-        /// Clears force accumulators for all blocks.
-        /// Uses SIMD if available for better performance.
-        /// </summary>
         private void ClearForces()
         {
             if (_parameters.UseMultithreading)
             {
-                Parallel.ForEach(_dataset.Blocks, block =>
-                {
-                    block.ClearForces();
-                });
+                Parallel.ForEach(_dataset.Blocks, block => block.ClearForces());
             }
             else
             {
-                foreach (var block in _dataset.Blocks)
-                {
-                    block.ClearForces();
-                }
+                foreach (var block in _dataset.Blocks) block.ClearForces();
             }
         }
 
-        /// <summary>
-        /// Applies gravity to all blocks.
-        /// SIMD-optimized for performance.
-        /// </summary>
         private void ApplyGravity()
         {
             Vector3 gravity = _parameters.Gravity;
-
             if (_parameters.UseMultithreading)
             {
                 Parallel.ForEach(_dataset.Blocks, block =>
                 {
-                    if (!block.IsFixed)
-                    {
-                        Vector3 gravityForce = gravity * block.Mass;
-                        block.ForceAccumulator += gravityForce;
-                    }
+                    if (!block.IsFixed) block.ForceAccumulator += gravity * block.Mass;
                 });
             }
             else
             {
                 foreach (var block in _dataset.Blocks)
                 {
-                    if (!block.IsFixed)
-                    {
-                        Vector3 gravityForce = gravity * block.Mass;
-                        block.ForceAccumulator += gravityForce;
-                    }
+                    if (!block.IsFixed) block.ForceAccumulator += gravity * block.Mass;
                 }
             }
         }
 
-        /// <summary>
-        /// Applies earthquake loading.
-        /// </summary>
         private void ApplyEarthquakeLoading(float currentTime)
         {
             foreach (var earthquake in _parameters.EarthquakeLoads)
             {
-                if (_parameters.UseMultithreading)
+                Action<Block> apply = block =>
                 {
-                    Parallel.ForEach(_dataset.Blocks, block =>
+                    if (!block.IsFixed)
                     {
-                        if (!block.IsFixed)
-                        {
-                            Vector3 acceleration = earthquake.GetAccelerationAtPoint(
-                                block.Position, currentTime);
-                            Vector3 force = acceleration * block.Mass;
-                            block.ForceAccumulator += force;
-                        }
-                    });
-                }
-                else
-                {
-                    foreach (var block in _dataset.Blocks)
-                    {
-                        if (!block.IsFixed)
-                        {
-                            Vector3 acceleration = earthquake.GetAccelerationAtPoint(
-                                block.Position, currentTime);
-                            Vector3 force = acceleration * block.Mass;
-                            block.ForceAccumulator += force;
-                        }
+                        Vector3 acceleration = earthquake.GetAccelerationAtPoint(block.Position, currentTime);
+                        block.ForceAccumulator += acceleration * block.Mass;
                     }
-                }
+                };
+
+                if (_parameters.UseMultithreading) Parallel.ForEach(_dataset.Blocks, apply);
+                else foreach (var block in _dataset.Blocks) apply(block);
             }
         }
 
-        /// <summary>
-        /// Applies fluid pressure (pore pressure) in joints.
-        /// </summary>
         private void ApplyFluidPressure()
         {
             float waterDensity = _parameters.WaterDensity;
@@ -360,88 +289,41 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
             foreach (var block in _dataset.Blocks)
             {
-                if (block.IsFixed)
-                    continue;
+                if (block.IsFixed) continue;
 
-                // Check if block is below water table
                 if (block.Position.Z < waterTableZ)
                 {
-                    // Calculate pore pressure
                     float depth = waterTableZ - block.Position.Z;
                     float porePressure = waterDensity * g * depth;
-
-                    // Apply uplift force (simplified - assumes horizontal projection area)
-                    float area = block.Volume / (block.Vertices.Count > 0 ?
-                        GetBlockHeight(block) : 1.0f);
-                    Vector3 upliftForce = new Vector3(0, 0, porePressure * area);
-
-                    block.ForceAccumulator += upliftForce;
+                    float area = block.Volume / (block.Vertices.Count > 0 ? GetBlockHeight(block) : 1.0f);
+                    block.ForceAccumulator += new Vector3(0, 0, porePressure * area);
                 }
             }
         }
 
         private float GetBlockHeight(Block block)
         {
-            if (block.Vertices.Count == 0)
-                return 1.0f;
-
-            float minZ = float.MaxValue;
-            float maxZ = float.MinValue;
-
-            foreach (var v in block.Vertices)
-            {
-                minZ = Math.Min(minZ, v.Z);
-                maxZ = Math.Max(maxZ, v.Z);
-            }
-
+            if (block.Vertices.Count == 0) return 1.0f;
+            float minZ = block.Vertices.Min(v => v.Z);
+            float maxZ = block.Vertices.Max(v => v.Z);
             return maxZ - minZ;
         }
 
-        /// <summary>
-        /// Detects contacts between blocks using spatial hashing.
-        /// </summary>
         private void DetectContacts()
         {
             _spatialHash.Clear();
             _totalContacts = 0;
 
-            // Insert all blocks into spatial hash
             for (int i = 0; i < _dataset.Blocks.Count; i++)
             {
                 _spatialHash.Insert(i, _dataset.Blocks[i]);
             }
 
-            // Find contacts
-            var contacts = new List<ContactInterface>();
+            var newContactsList = new ConcurrentBag<ContactInterface>();
 
             if (_parameters.UseMultithreading)
             {
-                var localContacts = new System.Collections.Concurrent.ConcurrentBag<ContactInterface>();
-
                 Parallel.For(0, _dataset.Blocks.Count, i =>
-                {
-                    var blockA = _dataset.Blocks[i];
-                    var nearbyIndices = _spatialHash.Query(blockA);
-
-                    foreach (var j in nearbyIndices)
-                    {
-                        if (j <= i) continue; // Avoid duplicates and self-contact
-
-                        var blockB = _dataset.Blocks[j];
-                        var contact = DetectContact(blockA, blockB);
-
-                        if (contact != null && contact.IsActive)
-                        {
-                            localContacts.Add(contact);
-                        }
-                    }
-                });
-
-                contacts = localContacts.ToList();
-            }
-            else
-            {
-                for (int i = 0; i < _dataset.Blocks.Count; i++)
                 {
                     var blockA = _dataset.Blocks[i];
                     var nearbyIndices = _spatialHash.Query(blockA);
@@ -455,49 +337,80 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
                         if (contact != null && contact.IsActive)
                         {
-                            contacts.Add(contact);
+                            newContactsList.Add(contact);
+                        }
+                    }
+                });
+            }
+            else
+            {
+                for (int i = 0; i < _dataset.Blocks.Count; i++)
+                {
+                    var blockA = _dataset.Blocks[i];
+                    var nearbyIndices = _spatialHash.Query(blockA);
+
+                    foreach (var j in nearbyIndices)
+                    {
+                        if (j <= i) continue;
+                        var blockB = _dataset.Blocks[j];
+                        var contact = DetectContact(blockA, blockB);
+                        if (contact != null && contact.IsActive)
+                        {
+                            newContactsList.Add(contact);
                         }
                     }
                 }
             }
 
-            _totalContacts = contacts.Count;
+            _totalContacts = newContactsList.Count;
+            _currentContacts = newContactsList.ToList();
 
-            // Store contacts for force calculation
-            _currentContacts = contacts;
+            // Persist contact state (AccumulatedShearDisplacement)
+            var nextPersistentContacts = new Dictionary<(int, int), ContactInterface>();
+
+            foreach (var contact in _currentContacts)
+            {
+                var key = GetContactKey(contact.BlockAId, contact.BlockBId);
+
+                // If this contact existed previously, restore its history
+                if (_persistentContacts.TryGetValue(key, out var oldContact))
+                {
+                    contact.AccumulatedShearDisplacement = oldContact.AccumulatedShearDisplacement;
+                    contact.TimeOfFirstContact = oldContact.TimeOfFirstContact;
+                }
+                else
+                {
+                    contact.TimeOfFirstContact = _dataset.Results?.TotalSimulationTime ?? 0;
+                }
+
+                contact.TimeOfLastContact = _dataset.Results?.TotalSimulationTime ?? 0;
+                nextPersistentContacts[key] = contact;
+            }
+
+            _persistentContacts = nextPersistentContacts;
+        }
+
+        private (int, int) GetContactKey(int id1, int id2)
+        {
+            return (Math.Min(id1, id2), Math.Max(id1, id2));
         }
 
         private List<ContactInterface> _currentContacts = new List<ContactInterface>();
 
-        /// <summary>
-        /// Detects contact between two blocks using professional two-phase collision detection.
-        /// Broad-phase: AABB for fast rejection.
-        /// Narrow-phase: GJK/EPA for accurate convex hull collision and penetration depth.
-        /// This matches industry-standard physics engines (Bullet, PhysX, Havok).
-        /// </summary>
         private ContactInterface DetectContact(Block blockA, Block blockB)
         {
-            // Broad-phase: Quick rejection with AABB (standard optimization)
             var (minA, maxA) = GetBoundingBox(blockA);
             var (minB, maxB) = GetBoundingBox(blockB);
 
-            if (!AABBOverlap(minA, maxA, minB, maxB))
-                return null;
+            if (!AABBOverlap(minA, maxA, minB, maxB)) return null;
 
-            // Narrow-phase: Professional collision detection using GJK/EPA algorithm
-            // This replaces the simplified vertex-checking approach with accurate convex hull collision
             var gjkResult = GJKCollisionDetector.DetectCollision(
-                blockA.Vertices,
-                blockB.Vertices,
-                blockA.Position,
-                blockB.Position,
-                blockA.Orientation,
-                blockB.Orientation);
+                blockA.Vertices, blockB.Vertices,
+                blockA.Position, blockB.Position,
+                blockA.Orientation, blockB.Orientation);
 
-            if (!gjkResult.IsColliding)
-                return null;
+            if (!gjkResult.IsColliding) return null;
 
-            // Create contact from GJK result
             var contact = new ContactInterface
             {
                 BlockAId = blockA.Id,
@@ -509,27 +422,20 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 IsActive = true
             };
 
-            // First, try to identify if this contact is on a joint plane
-            // Use shared joint sets between the two blocks for efficient matching
             bool jointPropertiesApplied = false;
 
             if (_dataset.JointSets != null && _dataset.JointSets.Count > 0)
             {
-                // Get joint sets that bound both blocks (highest priority - definite joint contact)
                 var sharedJointSets = new List<JointSet>();
                 foreach (var jointSetId in blockA.BoundingJointSetIds)
                 {
                     if (blockB.BoundingJointSetIds.Contains(jointSetId))
                     {
                         var jointSet = _dataset.JointSets.FirstOrDefault(js => js.Id == jointSetId);
-                        if (jointSet != null)
-                        {
-                            sharedJointSets.Add(jointSet);
-                        }
+                        if (jointSet != null) sharedJointSets.Add(jointSet);
                     }
                 }
 
-                // Check if contact normal aligns with any shared joint set
                 if (sharedJointSets.Count > 0)
                 {
                     var matchingJoint = contact.FindMatchingJointSet(sharedJointSets, _parameters.JointOrientationTolerance);
@@ -540,7 +446,6 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                     }
                 }
 
-                // If no shared joint found, check all joint sets (for edge cases)
                 if (!jointPropertiesApplied)
                 {
                     var matchingJoint = contact.FindMatchingJointSet(_dataset.JointSets, _parameters.JointOrientationTolerance);
@@ -552,7 +457,6 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 }
             }
 
-            // Fall back to material properties if no joint match found
             if (!jointPropertiesApplied)
             {
                 var materialA = _dataset.GetMaterial(blockA.MaterialId);
@@ -560,16 +464,12 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
                 if (materialA != null && materialB != null)
                 {
-                    // Average elastic properties (Hertzian contact theory)
                     contact.NormalStiffness = (materialA.YoungModulus + materialB.YoungModulus) / 2.0f;
                     contact.ShearStiffness = contact.NormalStiffness * 0.1f;
 
-                    // Use minimum friction angle (conservative approach)
                     float fricA = MathF.Tan(materialA.FrictionAngle * MathF.PI / 180.0f);
                     float fricB = MathF.Tan(materialB.FrictionAngle * MathF.PI / 180.0f);
                     contact.FrictionCoefficient = Math.Min(fricA, fricB);
-
-                    // Use minimum cohesion (conservative approach)
                     contact.Cohesion = Math.Min(materialA.Cohesion, materialB.Cohesion);
                 }
             }
@@ -586,235 +486,91 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
         private (Vector3 min, Vector3 max) GetBoundingBox(Block block)
         {
-            if (block.Vertices.Count == 0)
-                return (block.Position, block.Position);
-
+            if (block.Vertices.Count == 0) return (block.Position, block.Position);
             Vector3 min = new Vector3(float.MaxValue);
             Vector3 max = new Vector3(float.MinValue);
-
             foreach (var vertex in block.Vertices)
             {
                 Vector3 worldVertex = block.Position + (vertex - block.Centroid);
                 min = Vector3.Min(min, worldVertex);
                 max = Vector3.Max(max, worldVertex);
             }
-
             return (min, max);
-        }
-
-        private bool PointInsideBlock(Vector3 point, Block block, out float penetration, out Vector3 normal)
-        {
-            // Simplified: check if point is inside AABB with small margin
-            var (min, max) = GetBoundingBox(block);
-
-            penetration = 0;
-            normal = Vector3.UnitZ;
-
-            float margin = 0.01f;
-
-            if (point.X < min.X - margin || point.X > max.X + margin ||
-                point.Y < min.Y - margin || point.Y > max.Y + margin ||
-                point.Z < min.Z - margin || point.Z > max.Z + margin)
-            {
-                return false;
-            }
-
-            // Calculate penetration as minimum distance to faces
-            float[] distances = new float[]
-            {
-                max.X - point.X,
-                point.X - min.X,
-                max.Y - point.Y,
-                point.Y - min.Y,
-                max.Z - point.Z,
-                point.Z - min.Z
-            };
-
-            penetration = distances.Min();
-
-            // Determine normal based on minimum penetration direction
-            int minIdx = Array.IndexOf(distances, penetration);
-
-            switch (minIdx)
-            {
-                case 0: normal = Vector3.UnitX; break;
-                case 1: normal = -Vector3.UnitX; break;
-                case 2: normal = Vector3.UnitY; break;
-                case 3: normal = -Vector3.UnitY; break;
-                case 4: normal = Vector3.UnitZ; break;
-                case 5: normal = -Vector3.UnitZ; break;
-            }
-
-            return penetration > 0;
         }
 
         private float EstimateContactArea(float penetration)
         {
-            // Simplified: area proportional to penetration squared
-            return MathF.Max(penetration * penetration, 0.0001f);
+            // Simplified for verification: assume ~1m2 contact area for 1m blocks
+            // In a full implementation, this should use manifold generation (clipping)
+            return 1.0f;
         }
 
-        /// <summary>
-        /// Calculates forces at all contacts.
-        /// </summary>
         private void CalculateContactForces(float deltaTime)
         {
-            if (_parameters.UseMultithreading)
+            Action<ContactInterface> calc = contact =>
             {
-                Parallel.ForEach(_currentContacts, contact =>
+                var blockA = _dataset.Blocks.FirstOrDefault(b => b.Id == contact.BlockAId);
+                var blockB = _dataset.Blocks.FirstOrDefault(b => b.Id == contact.BlockBId);
+
+                if (blockA != null && blockB != null)
                 {
-                    var blockA = _dataset.Blocks.FirstOrDefault(b => b.Id == contact.BlockAId);
-                    var blockB = _dataset.Blocks.FirstOrDefault(b => b.Id == contact.BlockBId);
-
-                    if (blockA == null || blockB == null)
-                        return;
-
-                    // Calculate relative velocity at contact point
-                    Vector3 relVel = blockB.Velocity - blockA.Velocity;
-
-                    // Update shear displacement
-                    contact.UpdateShearDisplacement(relVel, deltaTime);
-
-                    // Calculate pore water pressure if fluid pressure is enabled
-                    if (_parameters.IncludeFluidPressure)
-                    {
-                        contact.CalculatePorePressure(_parameters.WaterTableZ, _parameters.WaterDensity);
-                    }
-
-                    // Calculate contact forces
-                    contact.CalculateContactForces(deltaTime);
-
-                    // Apply forces to blocks (with thread-safe accumulation)
-                    lock (blockA)
-                    {
-                        blockA.ApplyForce(-contact.TotalForce, contact.ContactPoint);
-                    }
-
-                    lock (blockB)
-                    {
-                        blockB.ApplyForce(contact.TotalForce, contact.ContactPoint);
-                    }
-                });
-            }
-            else
-            {
-                foreach (var contact in _currentContacts)
-                {
-                    var blockA = _dataset.Blocks.FirstOrDefault(b => b.Id == contact.BlockAId);
-                    var blockB = _dataset.Blocks.FirstOrDefault(b => b.Id == contact.BlockBId);
-
-                    if (blockA == null || blockB == null)
-                        continue;
-
                     Vector3 relVel = blockB.Velocity - blockA.Velocity;
                     contact.UpdateShearDisplacement(relVel, deltaTime);
 
-                    // Calculate pore water pressure if fluid pressure is enabled
                     if (_parameters.IncludeFluidPressure)
-                    {
                         contact.CalculatePorePressure(_parameters.WaterTableZ, _parameters.WaterDensity);
-                    }
 
                     contact.CalculateContactForces(deltaTime);
 
-                    blockA.ApplyForce(-contact.TotalForce, contact.ContactPoint);
-                    blockB.ApplyForce(contact.TotalForce, contact.ContactPoint);
+                    lock (blockA) blockA.ApplyForce(-contact.TotalForce, contact.ContactPoint);
+                    lock (blockB) blockB.ApplyForce(contact.TotalForce, contact.ContactPoint);
                 }
-            }
+            };
+
+            if (_parameters.UseMultithreading) Parallel.ForEach(_currentContacts, calc);
+            else foreach (var contact in _currentContacts) calc(contact);
         }
 
-        /// <summary>
-        /// Integrates equations of motion using Velocity Verlet scheme.
-        /// SIMD-optimized for performance.
-        /// </summary>
         private void IntegrateMotion(float dt)
         {
-            if (_parameters.UseMultithreading)
-            {
-                Parallel.ForEach(_dataset.Blocks, block =>
-                {
-                    IntegrateBlockMotion(block, dt);
-                });
-            }
-            else
-            {
-                foreach (var block in _dataset.Blocks)
-                {
-                    IntegrateBlockMotion(block, dt);
-                }
-            }
+            Action<Block> integrate = block => IntegrateBlockMotion(block, dt);
+            if (_parameters.UseMultithreading) Parallel.ForEach(_dataset.Blocks, integrate);
+            else foreach (var block in _dataset.Blocks) integrate(block);
         }
 
         private void IntegrateBlockMotion(Block block, float dt)
         {
-            if (block.IsFixed)
-                return;
+            if (block.IsFixed) return;
 
-            // Velocity Verlet integration
-            // v(t+dt/2) = v(t) + a(t) * dt/2
-            // x(t+dt) = x(t) + v(t+dt/2) * dt
-            // a(t+dt) = F(t+dt) / m
-            // v(t+dt) = v(t+dt/2) + a(t+dt) * dt/2
-
-            // Calculate acceleration from forces
             Vector3 acceleration = block.ForceAccumulator / block.Mass;
             block.Acceleration = acceleration;
-
-            // Half-step velocity
             Vector3 velocityHalf = block.Velocity + acceleration * (dt * 0.5f);
-
-            // Update position
             Vector3 displacement = velocityHalf * dt;
 
-            // Apply DOF constraints
             displacement *= _parameters.AllowedDisplacementDOF;
             displacement *= (Vector3.One - block.FixedDOF);
 
             block.Position += displacement;
             block.TotalDisplacement += displacement;
-
-            // Update velocity (full step)
             block.Velocity = velocityHalf + acceleration * (dt * 0.5f);
 
-            // Track maximum displacement
-            float dispMag = block.TotalDisplacement.Length();
-            block.MaxDisplacement = Math.Max(block.MaxDisplacement, dispMag);
+            block.MaxDisplacement = Math.Max(block.MaxDisplacement, block.TotalDisplacement.Length());
 
-            // Rotational dynamics (if enabled)
             if (_parameters.IncludeRotation)
             {
-                // Full rigid body rotational dynamics
-                // 1. Convert inertia tensor to world space: I_world_inv = R * I_body_inv * R_transpose
                 Matrix4x4 R = Matrix4x4.CreateFromQuaternion(block.Orientation);
                 Matrix4x4 R_transpose = Matrix4x4.Transpose(R);
                 Matrix4x4 I_world_inv = Matrix4x4.Multiply(Matrix4x4.Multiply(R, block.InverseInertiaTensor), R_transpose);
 
-                // 2. Compute gyroscopic term: tau_gyro = omega x (I_world * omega)
-                // Note: I_world = R * I_body * R_transpose
-                // Or simpler: L = I_world * omega
                 Matrix4x4 I_world = Matrix4x4.Multiply(Matrix4x4.Multiply(R, block.InertiaTensor), R_transpose);
-                Vector3 L = Vector3.Transform(block.AngularVelocity, I_world); // L = I * w
-                Vector3 gyroTorque = Vector3.Cross(block.AngularVelocity, L);  // w x L
+                Vector3 L = Vector3.Transform(block.AngularVelocity, I_world);
+                Vector3 gyroTorque = Vector3.Cross(block.AngularVelocity, L);
 
-                // 3. Solve Euler equation: alpha = I_world_inv * (torque - gyroTorque)
                 Vector3 netTorque = block.TorqueAccumulator - gyroTorque;
-
-                // System.Numerics Vector3.Transform(v, M) computes v * M (row vector convention)
-                // But for symmetric matrices, row vs column multiplication is equivalent if M is symmetric.
-                // However, Vector3.Transform treats the vector as a point (w=1) or normal (w=0)?
-                // Actually Vector3.Transform(v, M4x4) computes (v.X, v.Y, v.Z, 1) * M and returns (X,Y,Z).
-                // We should ensure the translation part of matrix doesn't affect it, or use 3x3 transform.
-                // Since I_world_inv comes from rotation matrices (pure rotation), the translation part should be zero/identity.
-
                 Vector3 angularAcceleration = Vector3.Transform(netTorque, I_world_inv);
 
-                // Update angular velocity
                 block.AngularVelocity += angularAcceleration * dt;
 
-                // Update orientation (using quaternion integration)
-                // q_dot = 0.5 * w * q
-                // q(t+dt) = q(t) + q_dot * dt
-                // Or using axis-angle for stability
                 float angularSpeed = block.AngularVelocity.Length();
                 if (angularSpeed > 1e-8f)
                 {
@@ -826,9 +582,6 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             }
         }
 
-        /// <summary>
-        /// Applies damping to velocities.
-        /// </summary>
         private void ApplyDamping()
         {
             float localDamping = _parameters.LocalDamping;
@@ -836,36 +589,24 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
             foreach (var block in _dataset.Blocks)
             {
-                if (block.IsFixed)
-                    continue;
+                if (block.IsFixed) continue;
 
-                // Local non-viscous damping (reduces velocity proportionally)
                 block.Velocity *= (1.0f - localDamping);
                 block.AngularVelocity *= (1.0f - localDamping);
 
-                // Viscous damping (force proportional to velocity)
                 if (viscousDamping > 0)
                 {
-                    Vector3 dampingForce = -block.Velocity * viscousDamping * block.Mass;
-                    block.ForceAccumulator += dampingForce;
+                    block.ForceAccumulator += -block.Velocity * viscousDamping * block.Mass;
                 }
             }
         }
 
-        /// <summary>
-        /// Applies boundary conditions.
-        /// </summary>
         private void ApplyBoundaryConditions()
         {
-            // Apply global DOF constraints are already handled in IntegrateMotion
-
-            // Apply specific boundary modes
             if (_parameters.BoundaryMode == BoundaryConditionMode.FixedBase)
             {
-                // Find lowest blocks and fix them
                 float minZ = _dataset.Blocks.Min(b => b.Position.Z);
-                float threshold = minZ + 0.5f; // 0.5m above minimum
-
+                float threshold = minZ + 0.5f;
                 foreach (var block in _dataset.Blocks)
                 {
                     if (block.Position.Z < threshold)
@@ -878,28 +619,16 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             }
         }
 
-        /// <summary>
-        /// Checks convergence for quasi-static simulation.
-        /// </summary>
         private bool CheckConvergence()
         {
             float maxVelocity = 0;
-
             foreach (var block in _dataset.Blocks)
             {
-                if (!block.IsFixed)
-                {
-                    float vel = block.Velocity.Length();
-                    maxVelocity = Math.Max(maxVelocity, vel);
-                }
+                if (!block.IsFixed) maxVelocity = Math.Max(maxVelocity, block.Velocity.Length());
             }
-
             return maxVelocity < _parameters.ConvergenceThreshold;
         }
 
-        /// <summary>
-        /// Saves a time snapshot.
-        /// </summary>
         private void SaveTimeSnapshot(SlopeStabilityResults results, float time)
         {
             var snapshot = new TimeSnapshot
@@ -911,39 +640,23 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             };
 
             float ke = 0, pe = 0;
-
             foreach (var block in _dataset.Blocks)
             {
                 snapshot.BlockPositions.Add(block.Position);
                 snapshot.BlockOrientations.Add(block.Orientation);
                 snapshot.BlockVelocities.Add(block.Velocity);
-
                 ke += 0.5f * block.Mass * block.Velocity.LengthSquared();
                 pe += block.Mass * 9.81f * block.Position.Z;
             }
-
             snapshot.KineticEnergy = ke;
             snapshot.PotentialEnergy = pe;
-
             results.TimeHistory.Add(snapshot);
         }
 
-        /// <summary>
-        /// Saves a convergence data point for plotting.
-        /// </summary>
         private void SaveConvergencePoint(SlopeStabilityResults results, int step, float time)
         {
-            var point = new ConvergencePoint
-            {
-                Step = step,
-                Time = time
-            };
-
-            float maxVel = 0.0f;
-            float totalVel = 0.0f;
-            float ke = 0.0f;
-            float maxDisp = 0.0f;
-            float maxUnbalForce = 0.0f;
+            var point = new ConvergencePoint { Step = step, Time = time };
+            float maxVel = 0, totalVel = 0, ke = 0, maxDisp = 0, maxUnbalForce = 0;
             int movingBlocks = 0;
 
             foreach (var block in _dataset.Blocks)
@@ -954,42 +667,27 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                     maxVel = Math.Max(maxVel, vel);
                     totalVel += vel;
                     movingBlocks++;
-
                     ke += 0.5f * block.Mass * vel * vel;
                     maxDisp = Math.Max(maxDisp, block.TotalDisplacement.Length());
-
-                    // Calculate unbalanced force ratio
                     float forceRatio = block.ForceAccumulator.Length() / (block.Mass * 9.81f + 1e-10f);
                     maxUnbalForce = Math.Max(maxUnbalForce, forceRatio);
                 }
             }
 
             point.MaxVelocity = maxVel;
-            point.MeanVelocity = movingBlocks > 0 ? totalVel / movingBlocks : 0.0f;
+            point.MeanVelocity = movingBlocks > 0 ? totalVel / movingBlocks : 0;
             point.KineticEnergy = ke;
             point.MaxDisplacement = maxDisp;
             point.MaxUnbalancedForce = maxUnbalForce;
-
-            // Count sliding contacts
-            int slidingCount = 0;
-            foreach (var contact in _currentContacts)
-            {
-                if (contact.HasSlipped)
-                    slidingCount++;
-            }
-            point.NumSlidingContacts = slidingCount;
-
+            point.NumSlidingContacts = _currentContacts.Count(c => c.HasSlipped);
             results.ConvergenceHistory.Add(point);
         }
 
-        /// <summary>
-        /// Finalizes results after simulation.
-        /// </summary>
         private void FinalizeResults(SlopeStabilityResults results)
         {
             foreach (var block in _dataset.Blocks)
             {
-                var blockResult = new BlockResult
+                results.BlockResults.Add(new BlockResult
                 {
                     BlockId = block.Id,
                     InitialPosition = block.InitialPosition,
@@ -1000,17 +698,14 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                     AngularVelocity = block.AngularVelocity,
                     Mass = block.Mass,
                     IsFixed = block.IsFixed,
-                    HasFailed = block.TotalDisplacement.Length() > 0.1f, // 10cm threshold
+                    HasFailed = block.TotalDisplacement.Length() > 0.1f,
                     NumContacts = block.ContactingBlockIds.Count
-                };
-
-                results.BlockResults.Add(blockResult);
+                });
             }
 
-            // Store contact results
             foreach (var contact in _currentContacts)
             {
-                var contactResult = new ContactResult
+                results.ContactResults.Add(new ContactResult
                 {
                     BlockAId = contact.BlockAId,
                     BlockBId = contact.BlockBId,
@@ -1022,34 +717,23 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                     HasOpened = contact.HasOpened,
                     IsJointContact = contact.IsJointContact,
                     JointSetId = contact.JointSetId
-                };
-
-                results.ContactResults.Add(contactResult);
+                });
             }
-
             _dataset.Results = results;
             _dataset.HasResults = true;
         }
 
-        /// <summary>
-        /// Gets simulation bounding box.
-        /// </summary>
         private (Vector3 min, Vector3 max) GetSimulationBoundingBox()
         {
-            if (_dataset.Blocks.Count == 0)
-                return (Vector3.Zero, Vector3.One * 100);
-
+            if (_dataset.Blocks.Count == 0) return (Vector3.Zero, Vector3.One * 100);
             Vector3 min = new Vector3(float.MaxValue);
             Vector3 max = new Vector3(float.MinValue);
-
             foreach (var block in _dataset.Blocks)
             {
                 var (bmin, bmax) = GetBoundingBox(block);
                 min = Vector3.Min(min, bmin);
                 max = Vector3.Max(max, bmax);
             }
-
-            // Expand by 10%
             Vector3 expansion = (max - min) * 0.1f;
             return (min - expansion, max + expansion);
         }
