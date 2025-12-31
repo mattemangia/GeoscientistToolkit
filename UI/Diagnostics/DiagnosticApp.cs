@@ -281,6 +281,7 @@ void main()
             CreateNoWindow = true,
             WorkingDirectory = command.WorkingDirectory
         };
+        ApplyTestHostArchitecture(startInfo);
 
         LogInfo($"Executing: dotnet {testArgs}");
 
@@ -370,6 +371,23 @@ void main()
         };
 
         return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private static void ApplyTestHostArchitecture(ProcessStartInfo startInfo)
+    {
+        if (startInfo.Environment.ContainsKey("VSTEST_HOST_ARCHITECTURE"))
+            return;
+
+        var architecture = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => "x64",
+            Architecture.X86 => "x86",
+            Architecture.Arm64 => "arm64",
+            Architecture.Arm => "arm",
+            _ => "x64"
+        };
+
+        startInfo.Environment["VSTEST_HOST_ARCHITECTURE"] = architecture;
     }
 
     private void DrawUi()
