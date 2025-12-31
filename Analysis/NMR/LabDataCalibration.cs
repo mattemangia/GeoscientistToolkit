@@ -386,7 +386,7 @@ public static class LabDataCalibration
         writer.WriteLine("# Sample Name: Sample-001");
         writer.WriteLine("# Instrument: Bruker Minispec mq20");
         writer.WriteLine("# Temperature: 25 °C");
-        writer.WriteLine("# Date: 2025-01-10");
+        writer.WriteLine("# Date: 2026-01-10");
         writer.WriteLine();
         writer.WriteLine("[Decay]");
         writer.WriteLine("# Time (ms), Magnetization (normalized)");

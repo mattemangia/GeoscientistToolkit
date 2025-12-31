@@ -1848,7 +1848,7 @@ SEIS_FILTER type=bandpass low=10 high=80 |> SEIS_AGC window=500
 ## License and Attribution
 
 GeoscientistToolkit GeoScript Language
-Copyright (c) 2025 GeoscientistToolkit Project
+Copyright (c) 2026 GeoscientistToolkit Project
 
 ---
 

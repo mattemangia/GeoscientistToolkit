@@ -1210,7 +1210,7 @@ public class MainWindow
             // Author information
             ImGui.Text("Author Information");
             ImGui.Spacing();
-            ImGui.BulletText("Matteo Mangiagalli - 2025");
+            ImGui.BulletText("Matteo Mangiagalli - 2026");
             ImGui.BulletText("Università degli Studi di Urbino Carlo Bo");
             ImGui.BulletText("m.mangiagalli@campus.uniurb.it");
             ImGui.Spacing();
@@ -1231,7 +1231,7 @@ public class MainWindow
             ImGui.TextWrapped("@software{geoscientist_toolkit,");
             ImGui.TextWrapped("  title = {Geoscientist's Toolkit: Integrated Geoscientific Analysis Platform},");
             ImGui.TextWrapped("  author = {Mangiagalli, Matteo},");
-            ImGui.TextWrapped("  year = {2025},");
+            ImGui.TextWrapped("  year = {2026},");
             ImGui.TextWrapped("  url = {https://github.com/mattemangia/GeoscientistToolkit}");
             ImGui.TextWrapped("}");
             ImGui.PopStyleColor();
@@ -1245,7 +1245,7 @@ public class MainWindow
             ImGui.Text("License");
             ImGui.Spacing();
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.6f, 0.8f, 0.9f, 1.0f));
-            ImGui.TextWrapped("MIT License - Copyright (c) 2025 Matteo Mangiagalli");
+            ImGui.TextWrapped("MIT License - Copyright (c) 2026 Matteo Mangiagalli");
             ImGui.PopStyleColor();
             ImGui.Spacing();
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.75f, 0.75f, 0.75f, 1.0f));

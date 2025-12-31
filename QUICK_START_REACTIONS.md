@@ -832,4 +832,4 @@ EXPORT_PNM_RESULTS /home/user/results
 
 ---
 
-**© 2025 GeoscientistToolkit Project**
+**© 2026 GeoscientistToolkit Project**
