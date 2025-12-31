@@ -270,20 +270,20 @@ void main()
             return;
         }
 
-        var testArgs = command.Arguments;
         var startInfo = new ProcessStartInfo
         {
-            FileName = "dotnet",
-            Arguments = testArgs,
+            FileName = command.FileName,
+            Arguments = command.Arguments,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = command.WorkingDirectory
         };
-        ApplyTestHostArchitecture(startInfo);
+        if (string.Equals(command.FileName, "dotnet", StringComparison.OrdinalIgnoreCase))
+            ApplyTestHostArchitecture(startInfo);
 
-        LogInfo($"Executing: dotnet {testArgs}");
+        LogInfo($"Executing: {command.FileName} {command.Arguments}");
 
         try
         {
@@ -330,14 +330,34 @@ void main()
 
     private TestRunCommand? BuildTestCommand()
     {
+        var runnerPath = ResolvePackagedTestRunnerPath();
         var packagedTestAssembly = ResolvePackagedTestAssemblyPath();
         var builder = new StringBuilder();
         string workingDirectory;
+        string fileName;
 
-        if (!string.IsNullOrWhiteSpace(packagedTestAssembly))
+        if (!string.IsNullOrWhiteSpace(runnerPath))
         {
+            fileName = runnerPath;
+            workingDirectory = Path.GetDirectoryName(runnerPath) ?? AppContext.BaseDirectory;
+
+            if (_options.TestFilters is { Length: > 0 })
+            {
+                var filter = string.Join(',', _options.TestFilters);
+                builder.Append($"--filter \"{filter}\"");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(packagedTestAssembly))
+        {
+            fileName = "dotnet";
             builder.Append($"vstest \"{packagedTestAssembly}\"");
             workingDirectory = Path.GetDirectoryName(packagedTestAssembly) ?? AppContext.BaseDirectory;
+
+            if (_options.TestFilters is { Length: > 0 })
+            {
+                var filter = string.Join("|", _options.TestFilters.Select(t => $"FullyQualifiedName~{t}"));
+                builder.Append($" --TestCaseFilter:\"{filter}\"");
+            }
         }
         else
         {
@@ -345,20 +365,18 @@ void main()
             if (!File.Exists(projectPath))
                 return null;
 
+            fileName = "dotnet";
             builder.Append($"test {projectPath}");
             workingDirectory = Directory.GetCurrentDirectory();
-        }
 
-        if (_options.TestFilters is { Length: > 0 })
-        {
-            var filter = string.Join("|", _options.TestFilters.Select(t => $"FullyQualifiedName~{t}"));
-            if (!string.IsNullOrWhiteSpace(packagedTestAssembly))
-                builder.Append($" --TestCaseFilter:\"{filter}\"");
-            else
+            if (_options.TestFilters is { Length: > 0 })
+            {
+                var filter = string.Join("|", _options.TestFilters.Select(t => $"FullyQualifiedName~{t}"));
                 builder.Append($" --filter \"{filter}\"");
+            }
         }
 
-        return new TestRunCommand(builder.ToString(), workingDirectory);
+        return new TestRunCommand(fileName, builder.ToString(), workingDirectory);
     }
 
     private static string? ResolvePackagedTestAssemblyPath()
@@ -368,6 +386,21 @@ void main()
         {
             Path.Combine(baseDirectory, "VerificationTests", "VerificationTests.dll"),
             Path.Combine(baseDirectory, "Tests", "VerificationTests", "VerificationTests.dll")
+        };
+
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private static string? ResolvePackagedTestRunnerPath()
+    {
+        var baseDirectory = AppContext.BaseDirectory;
+        var executableName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? "VerificationTestsRunner.exe"
+            : "VerificationTestsRunner";
+        var candidates = new[]
+        {
+            Path.Combine(baseDirectory, "VerificationTests", "Runner", executableName),
+            Path.Combine(baseDirectory, "VerificationTests", executableName)
         };
 
         return candidates.FirstOrDefault(File.Exists);
@@ -516,7 +549,7 @@ void main()
 
     private readonly record struct LogEntry(string Message, bool IsError);
 
-    private sealed record TestRunCommand(string Arguments, string WorkingDirectory);
+    private sealed record TestRunCommand(string FileName, string Arguments, string WorkingDirectory);
 
     private readonly struct DiagnosticVertex
     {

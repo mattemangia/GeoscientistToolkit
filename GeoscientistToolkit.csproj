@@ -163,16 +163,30 @@
         <MSBuild Projects="Tests\VerificationTests\VerificationTests.csproj"
                  Targets="Build"
                  Properties="Configuration=$(Configuration);BuildProjectReferences=false" />
+        <MSBuild Projects="Tests\VerificationTestsRunner\VerificationTestsRunner.csproj"
+                 Targets="Publish"
+                 Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true"
+                 Condition="'$(RuntimeIdentifier)' != ''" />
         <ItemGroup>
             <VerificationTestArtifacts Include="Tests\VerificationTests\bin\$(Configuration)\net8.0\**\*.*" />
+            <VerificationTestRunnerArtifacts Include="Tests\VerificationTestsRunner\bin\$(Configuration)\net8.0\$(RuntimeIdentifier)\publish\**\*.*"
+                                              Condition="'$(RuntimeIdentifier)' != ''" />
         </ItemGroup>
         <Copy SourceFiles="@(VerificationTestArtifacts)"
               DestinationFolder="$(OutputPath)VerificationTests\%(RecursiveDir)"
               SkipUnchangedFiles="true" />
+        <Copy SourceFiles="@(VerificationTestRunnerArtifacts)"
+              DestinationFolder="$(OutputPath)VerificationTests\Runner\%(RecursiveDir)"
+              SkipUnchangedFiles="true"
+              Condition="'$(RuntimeIdentifier)' != ''" />
         <Copy SourceFiles="@(VerificationTestArtifacts)"
               DestinationFolder="$(PublishDir)VerificationTests\%(RecursiveDir)"
               SkipUnchangedFiles="true"
               Condition="'$(PublishDir)' != ''" />
+        <Copy SourceFiles="@(VerificationTestRunnerArtifacts)"
+              DestinationFolder="$(PublishDir)VerificationTests\Runner\%(RecursiveDir)"
+              SkipUnchangedFiles="true"
+              Condition="'$(RuntimeIdentifier)' != '' and '$(PublishDir)' != ''" />
     </Target>
 
 </Project>
