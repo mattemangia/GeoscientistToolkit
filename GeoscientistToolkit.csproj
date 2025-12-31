@@ -33,6 +33,9 @@
         <Compile Remove="InstallerWizard\**" />
         <EmbeddedResource Remove="InstallerWizard\**" />
         <None Remove="InstallerWizard\**" />
+        <Compile Remove="Api\**" />
+        <EmbeddedResource Remove="Api\**" />
+        <None Remove="Api\**" />
         <Compile Remove="GTK\**" />
         <EmbeddedResource Remove="GTK\**" />
         <None Remove="GTK\**" />
