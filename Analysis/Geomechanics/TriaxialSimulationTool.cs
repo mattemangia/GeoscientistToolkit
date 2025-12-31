@@ -68,6 +68,7 @@ public class TriaxialSimulationTool : IDisposable
     private bool _simulationComplete;
     private float _simulationProgress;
     private string _statusMessage = "Ready";
+    private CancellationTokenSource _cancellationTokenSource;
 
     // Visualization
     private TriaxialVisualization3D _visualization3D;
@@ -134,6 +135,17 @@ public class TriaxialSimulationTool : IDisposable
 
         // Load default material
         LoadDefaultMaterial();
+
+        // Select default preset
+        _selectedPresetName = "Standard UCS (Unconfined)";
+        if (_loadingPresets.TryGetValue(_selectedPresetName, out var preset))
+        {
+            _loadParams.ConfiningPressure_MPa = preset.confining;
+            _loadParams.AxialStressRate_MPa_per_s = preset.axialRate;
+            _loadParams.MaxAxialStrain_percent = preset.maxStrain;
+            _loadParams.TotalTime_s = 1000.0f;
+            _loadParams.TimeStep_s = 0.1f;
+        }
     }
 
     public void Dispose()
@@ -999,52 +1011,72 @@ public class TriaxialSimulationTool : IDisposable
         _simulationComplete = false;
         _statusMessage = "Running simulation...";
         _simulationProgress = 0f;
+        _cancellationTokenSource = new CancellationTokenSource();
 
         Util.Logger.Log("[TriaxialTool] Starting simulation...");
         Util.Logger.Log($"[TriaxialTool] Mode: {_loadParams.LoadingMode}, Rate: {_loadParams.AxialStrainRate_per_s}/s or {_loadParams.AxialStressRate_MPa_per_s} MPa/s");
         Util.Logger.Log($"[TriaxialTool] Total Time: {_loadParams.TotalTime_s}s");
 
-        await Task.Run(() =>
+        var progress = new Progress<TriaxialResults>(results =>
         {
-            try
+            _results = results;
+            // Approximate progress based on time
+            if (results.Time_s.Length > 0 && _loadParams.TotalTime_s > 0)
             {
-                // Apply curves if enabled
-                if (_useConfiningPressureCurve)
-                    _loadParams.ConfiningPressureCurve = _confiningPressureCurve.GetPoints()
-                        .Select(p => p.Point).ToList();
-
-                if (_useAxialLoadCurve)
-                    _loadParams.AxialLoadCurve = _axialLoadCurve.GetPoints()
-                        .Select(p => p.Point).ToList();
-
-                // Run simulation (CPU for now, GPU version can be added later)
-                _results = _simulation.RunSimulationCPU(
-                    _mesh,
-                    _selectedMaterial,
-                    _loadParams,
-                    _failureCriterion);
-
-                _simulationProgress = 1.0f;
-                _statusMessage = "Simulation complete";
-                _simulationComplete = true;
-                Util.Logger.Log("[TriaxialTool] Simulation completed successfully.");
-            }
-            catch (Exception ex)
-            {
-                _statusMessage = $"Simulation error: {ex.Message}";
-                Util.Logger.LogError($"[TriaxialTool] Simulation error: {ex.Message}");
-            }
-            finally
-            {
-                _isRunning = false;
+                _simulationProgress = results.Time_s.Last() / _loadParams.TotalTime_s;
             }
         });
+
+        try
+        {
+            // Apply curves if enabled
+            if (_useConfiningPressureCurve)
+                _loadParams.ConfiningPressureCurve = _confiningPressureCurve.GetPoints()
+                    .Select(p => p.Point).ToList();
+
+            if (_useAxialLoadCurve)
+                _loadParams.AxialLoadCurve = _axialLoadCurve.GetPoints()
+                    .Select(p => p.Point).ToList();
+
+            // Run simulation on background thread with progress reporting
+            _results = await Task.Run(() => _simulation.RunSimulationCPU(
+                _mesh,
+                _selectedMaterial,
+                _loadParams,
+                _failureCriterion,
+                progress,
+                _cancellationTokenSource.Token), _cancellationTokenSource.Token);
+
+            _simulationProgress = 1.0f;
+            _statusMessage = "Simulation complete";
+            _simulationComplete = true;
+            Util.Logger.Log("[TriaxialTool] Simulation completed successfully.");
+        }
+        catch (OperationCanceledException)
+        {
+            _statusMessage = "Simulation cancelled";
+            Util.Logger.Log("[TriaxialTool] Simulation cancelled by user.");
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Simulation error: {ex.Message}";
+            Util.Logger.LogError($"[TriaxialTool] Simulation error: {ex.Message}");
+        }
+        finally
+        {
+            _isRunning = false;
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = null;
+        }
     }
 
     private void StopSimulation()
     {
-        _isRunning = false;
-        _statusMessage = "Simulation stopped";
+        if (_cancellationTokenSource != null && !_cancellationTokenSource.IsCancellationRequested)
+        {
+            _cancellationTokenSource.Cancel();
+            _statusMessage = "Stopping...";
+        }
     }
 
     private void ResetSimulation()
