@@ -263,7 +263,14 @@ void main()
 
     private async Task RunTestDiagnosticsAsync(CancellationToken token)
     {
-        var testArgs = BuildTestArguments();
+        var command = BuildTestCommand();
+        if (command == null)
+        {
+            LogError("Test run failed: unable to locate compiled tests or project files.");
+            return;
+        }
+
+        var testArgs = command.Arguments;
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -271,7 +278,8 @@ void main()
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            WorkingDirectory = command.WorkingDirectory
         };
 
         LogInfo($"Executing: dotnet {testArgs}");
@@ -319,18 +327,49 @@ void main()
         }
     }
 
-    private string BuildTestArguments()
+    private TestRunCommand? BuildTestCommand()
     {
+        var packagedTestAssembly = ResolvePackagedTestAssemblyPath();
         var builder = new StringBuilder();
-        builder.Append("test Tests/VerificationTests/VerificationTests.csproj");
+        string workingDirectory;
+
+        if (!string.IsNullOrWhiteSpace(packagedTestAssembly))
+        {
+            builder.Append($"vstest \"{packagedTestAssembly}\"");
+            workingDirectory = Path.GetDirectoryName(packagedTestAssembly) ?? AppContext.BaseDirectory;
+        }
+        else
+        {
+            var projectPath = Path.Combine("Tests", "VerificationTests", "VerificationTests.csproj");
+            if (!File.Exists(projectPath))
+                return null;
+
+            builder.Append($"test {projectPath}");
+            workingDirectory = Directory.GetCurrentDirectory();
+        }
 
         if (_options.TestFilters is { Length: > 0 })
         {
             var filter = string.Join("|", _options.TestFilters.Select(t => $"FullyQualifiedName~{t}"));
-            builder.Append($" --filter \"{filter}\"");
+            if (!string.IsNullOrWhiteSpace(packagedTestAssembly))
+                builder.Append($" --TestCaseFilter:\"{filter}\"");
+            else
+                builder.Append($" --filter \"{filter}\"");
         }
 
-        return builder.ToString();
+        return new TestRunCommand(builder.ToString(), workingDirectory);
+    }
+
+    private static string? ResolvePackagedTestAssemblyPath()
+    {
+        var baseDirectory = AppContext.BaseDirectory;
+        var candidates = new[]
+        {
+            Path.Combine(baseDirectory, "VerificationTests", "VerificationTests.dll"),
+            Path.Combine(baseDirectory, "Tests", "VerificationTests", "VerificationTests.dll")
+        };
+
+        return candidates.FirstOrDefault(File.Exists);
     }
 
     private void DrawUi()
@@ -458,6 +497,8 @@ void main()
     }
 
     private readonly record struct LogEntry(string Message, bool IsError);
+
+    private sealed record TestRunCommand(string Arguments, string WorkingDirectory);
 
     private readonly struct DiagnosticVertex
     {
