@@ -10,6 +10,13 @@ public static class Program
 
     public static void Main(string[] args)
     {
+        if (args.Any(arg => arg.Equals("--help", StringComparison.OrdinalIgnoreCase)
+                            || arg.Equals("-h", StringComparison.OrdinalIgnoreCase)))
+        {
+            ShowHelp();
+            return;
+        }
+
         var diagnosticOptions = ParseDiagnosticOptions(args);
         if (diagnosticOptions != null)
         {
@@ -24,6 +31,16 @@ public static class Program
 
         var app = new Application();
         app.Run();
+    }
+
+    private static void ShowHelp()
+    {
+        Console.WriteLine("GeoscientistToolkit command line options:");
+        Console.WriteLine("  --help, -h                Show this help message.");
+        Console.WriteLine("  --ai-diagnostic           Run AI diagnostics.");
+        Console.WriteLine("  --gui-diagnostic          Run GUI diagnostics.");
+        Console.WriteLine("  --test[=filters]          Run tests (optional comma-separated filters).");
+        Console.WriteLine("  <path>.gtp                Open a project file on launch.");
     }
 
     private static UI.Diagnostics.DiagnosticOptions ParseDiagnosticOptions(string[] args)
