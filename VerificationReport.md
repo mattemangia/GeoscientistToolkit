@@ -47,7 +47,7 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
 
 ## 3a. Slope Stability: Gravity Drop
 **Test Description:** Verification of rigid body kinematics and integration scheme (Galileo's Law of Fall).
-**Reference:** Galilei, G. (1638). *Discorsi e dimostrazioni matematiche intorno a due nuove scienze*. (Two New Sciences). (Easter Egg)
+**Reference:** Galilei, G. (1638). *Discorsi e dimostrazioni matematiche intorno a due nuove scienze*. (Two New Sciences).
 
 - **Input Values:**
     - Gravity ($g$): 9.81 m/s²
