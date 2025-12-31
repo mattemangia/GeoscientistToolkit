@@ -2,9 +2,6 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Image;
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
 
 namespace GeoscientistToolkit.Scripting.GeoScript.Operations
 {
@@ -681,7 +678,59 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
         public override Dictionary<string, string> Parameters => new() { { "width", "New width" }, { "height", "New height" } };
         public override Dataset Execute(Dataset inputDataset, List<object> parameters)
         {
-            throw new NotImplementedException("RESIZE operation requires System.Drawing.Common or SkiaSharp integration");
+            if (inputDataset is not ImageDataset imageDataset)
+                throw new InvalidOperationException("RESIZE can only be applied to image datasets");
+
+            if (imageDataset.ImageData == null)
+                imageDataset.Load();
+
+            if (parameters.Count < 2)
+                throw new ArgumentException("RESIZE requires width and height parameters");
+
+            int width = Convert.ToInt32(parameters[0]);
+            int height = Convert.ToInt32(parameters[1]);
+
+            if (width <= 0 || height <= 0)
+                throw new ArgumentException("RESIZE width and height must be positive");
+
+            var resizedData = ResizeNearestNeighbor(imageDataset.ImageData, imageDataset.Width, imageDataset.Height, width, height);
+
+            var output = new ImageDataset($"{inputDataset.Name}_resized", "")
+            {
+                Width = width,
+                Height = height,
+                BitDepth = imageDataset.BitDepth,
+                PixelSize = imageDataset.Width > 0 ? imageDataset.PixelSize * ((float)imageDataset.Width / width) : imageDataset.PixelSize,
+                Unit = imageDataset.Unit,
+                ImageData = resizedData
+            };
+
+            return output;
+        }
+
+        private static byte[] ResizeNearestNeighbor(byte[] input, int inputWidth, int inputHeight, int outputWidth, int outputHeight)
+        {
+            var output = new byte[outputWidth * outputHeight * 4];
+            float xRatio = inputWidth / (float)outputWidth;
+            float yRatio = inputHeight / (float)outputHeight;
+
+            for (int y = 0; y < outputHeight; y++)
+            {
+                int srcY = Math.Min((int)(y * yRatio), inputHeight - 1);
+                for (int x = 0; x < outputWidth; x++)
+                {
+                    int srcX = Math.Min((int)(x * xRatio), inputWidth - 1);
+                    int srcIndex = (srcY * inputWidth + srcX) * 4;
+                    int dstIndex = (y * outputWidth + x) * 4;
+
+                    output[dstIndex] = input[srcIndex];
+                    output[dstIndex + 1] = input[srcIndex + 1];
+                    output[dstIndex + 2] = input[srcIndex + 2];
+                    output[dstIndex + 3] = input[srcIndex + 3];
+                }
+            }
+
+            return output;
         }
     }
 
@@ -692,7 +741,43 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
         public override Dictionary<string, string> Parameters => new() { { "x", "X coordinate" }, { "y", "Y coordinate" }, { "width", "Width" }, { "height", "Height" } };
         public override Dataset Execute(Dataset inputDataset, List<object> parameters)
         {
-            throw new NotImplementedException("CROP operation requires additional implementation");
+            if (inputDataset is not ImageDataset imageDataset)
+                throw new InvalidOperationException("CROP can only be applied to image datasets");
+
+            if (imageDataset.ImageData == null)
+                imageDataset.Load();
+
+            if (parameters.Count < 4)
+                throw new ArgumentException("CROP requires x, y, width, and height parameters");
+
+            int x = Convert.ToInt32(parameters[0]);
+            int y = Convert.ToInt32(parameters[1]);
+            int width = Convert.ToInt32(parameters[2]);
+            int height = Convert.ToInt32(parameters[3]);
+
+            if (width <= 0 || height <= 0)
+                throw new ArgumentException("CROP width and height must be positive");
+
+            if (x < 0 || y < 0 || x + width > imageDataset.Width || y + height > imageDataset.Height)
+                throw new ArgumentException("CROP region must be within image bounds");
+
+            var outputData = new byte[width * height * 4];
+            for (int row = 0; row < height; row++)
+            {
+                int srcIndex = ((y + row) * imageDataset.Width + x) * 4;
+                int dstIndex = row * width * 4;
+                Array.Copy(imageDataset.ImageData, srcIndex, outputData, dstIndex, width * 4);
+            }
+
+            return new ImageDataset($"{inputDataset.Name}_crop", "")
+            {
+                Width = width,
+                Height = height,
+                BitDepth = imageDataset.BitDepth,
+                PixelSize = imageDataset.PixelSize,
+                Unit = imageDataset.Unit,
+                ImageData = outputData
+            };
         }
     }
 
@@ -703,7 +788,68 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
         public override Dictionary<string, string> Parameters => new() { { "angle", "Rotation angle in degrees" } };
         public override Dataset Execute(Dataset inputDataset, List<object> parameters)
         {
-            throw new NotImplementedException("ROTATE operation requires additional implementation");
+            if (inputDataset is not ImageDataset imageDataset)
+                throw new InvalidOperationException("ROTATE can only be applied to image datasets");
+
+            if (imageDataset.ImageData == null)
+                imageDataset.Load();
+
+            if (parameters.Count < 1)
+                throw new ArgumentException("ROTATE requires an angle parameter");
+
+            float angleDegrees = Convert.ToSingle(parameters[0]);
+            float angleRadians = (float)(Math.PI / 180.0) * angleDegrees;
+
+            int width = imageDataset.Width;
+            int height = imageDataset.Height;
+            var outputData = new byte[width * height * 4];
+
+            float cos = (float)Math.Cos(-angleRadians);
+            float sin = (float)Math.Sin(-angleRadians);
+
+            float cx = (width - 1) / 2f;
+            float cy = (height - 1) / 2f;
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    float dx = x - cx;
+                    float dy = y - cy;
+                    float srcX = dx * cos - dy * sin + cx;
+                    float srcY = dx * sin + dy * cos + cy;
+
+                    int srcXi = (int)Math.Round(srcX);
+                    int srcYi = (int)Math.Round(srcY);
+
+                    int dstIndex = (y * width + x) * 4;
+                    if (srcXi >= 0 && srcXi < width && srcYi >= 0 && srcYi < height)
+                    {
+                        int srcIndex = (srcYi * width + srcXi) * 4;
+                        outputData[dstIndex] = imageDataset.ImageData[srcIndex];
+                        outputData[dstIndex + 1] = imageDataset.ImageData[srcIndex + 1];
+                        outputData[dstIndex + 2] = imageDataset.ImageData[srcIndex + 2];
+                        outputData[dstIndex + 3] = imageDataset.ImageData[srcIndex + 3];
+                    }
+                    else
+                    {
+                        outputData[dstIndex] = 0;
+                        outputData[dstIndex + 1] = 0;
+                        outputData[dstIndex + 2] = 0;
+                        outputData[dstIndex + 3] = 0;
+                    }
+                }
+            }
+
+            return new ImageDataset($"{inputDataset.Name}_rotated", "")
+            {
+                Width = width,
+                Height = height,
+                BitDepth = imageDataset.BitDepth,
+                PixelSize = imageDataset.PixelSize,
+                Unit = imageDataset.Unit,
+                ImageData = outputData
+            };
         }
     }
 
@@ -714,7 +860,52 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
         public override Dictionary<string, string> Parameters => new() { { "direction", "horizontal or vertical" } };
         public override Dataset Execute(Dataset inputDataset, List<object> parameters)
         {
-            throw new NotImplementedException("FLIP operation requires additional implementation");
+            if (inputDataset is not ImageDataset imageDataset)
+                throw new InvalidOperationException("FLIP can only be applied to image datasets");
+
+            if (imageDataset.ImageData == null)
+                imageDataset.Load();
+
+            if (parameters.Count < 1)
+                throw new ArgumentException("FLIP requires a direction parameter");
+
+            string direction = parameters[0]?.ToString()?.Trim().ToLowerInvariant() ?? "";
+            bool horizontal = direction is "horizontal" or "h" or "x";
+            bool vertical = direction is "vertical" or "v" or "y";
+
+            if (!horizontal && !vertical)
+                throw new ArgumentException("FLIP direction must be 'horizontal' or 'vertical'");
+
+            int width = imageDataset.Width;
+            int height = imageDataset.Height;
+            var outputData = new byte[imageDataset.ImageData.Length];
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int srcX = horizontal ? (width - 1 - x) : x;
+                    int srcY = vertical ? (height - 1 - y) : y;
+
+                    int srcIndex = (srcY * width + srcX) * 4;
+                    int dstIndex = (y * width + x) * 4;
+
+                    outputData[dstIndex] = imageDataset.ImageData[srcIndex];
+                    outputData[dstIndex + 1] = imageDataset.ImageData[srcIndex + 1];
+                    outputData[dstIndex + 2] = imageDataset.ImageData[srcIndex + 2];
+                    outputData[dstIndex + 3] = imageDataset.ImageData[srcIndex + 3];
+                }
+            }
+
+            return new ImageDataset($"{inputDataset.Name}_flipped", "")
+            {
+                Width = width,
+                Height = height,
+                BitDepth = imageDataset.BitDepth,
+                PixelSize = imageDataset.PixelSize,
+                Unit = imageDataset.Unit,
+                ImageData = outputData
+            };
         }
     }
 }

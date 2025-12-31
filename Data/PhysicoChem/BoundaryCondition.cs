@@ -4,6 +4,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using NCalc;
 using Newtonsoft.Json;
 
 namespace GeoscientistToolkit.Data.PhysicoChem;
@@ -116,14 +118,17 @@ public class BoundaryCondition
 
     private double EvaluateExpression(string expr, double t)
     {
-        // Very simple parser - can be replaced with NCalc or similar
+        if (string.IsNullOrWhiteSpace(expr))
+            return Value;
+
         try
         {
-            expr = expr.Replace("t", t.ToString("F6"));
-            // This is a placeholder - in production use a proper expression evaluator
-            return Value; // Fallback to static value
+            var expression = new Expression(expr, EvaluateOptions.IgnoreCase);
+            expression.Parameters["t"] = t;
+            var result = expression.Evaluate();
+            return Convert.ToDouble(result, CultureInfo.InvariantCulture);
         }
-        catch
+        catch (Exception)
         {
             return Value;
         }

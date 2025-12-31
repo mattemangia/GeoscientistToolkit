@@ -27,6 +27,32 @@ var loaderApi = new LoaderApi();
 var dataset = await loaderApi.LoadAcousticVolumeAsync("/path/to/volume");
 ```
 
+## Referencing the API DLL
+
+After building the solution, the API assembly is available at:
+
+```
+Api/bin/<Configuration>/net8.0/GeoscientistToolkit.Api.dll
+```
+
+To use it in another project, add a project or file reference:
+
+```xml
+<!-- Preferred: project reference inside the same solution -->
+<ItemGroup>
+  <ProjectReference Include="..\GeoscientistToolkit\Api\GeoscientistToolkit.Api.csproj" />
+</ItemGroup>
+
+<!-- Alternatively: reference the built DLL -->
+<ItemGroup>
+  <Reference Include="GeoscientistToolkit.Api">
+    <HintPath>path\to\GeoscientistToolkit.Api.dll</HintPath>
+  </Reference>
+</ItemGroup>
+```
+
+The API DLL targets .NET 8.0, so ensure your project targets `net8.0` (or a compatible framework).
+
 ## Documentation output
 
 The project generates XML documentation during build (`GeoscientistToolkit.Api.xml`).
