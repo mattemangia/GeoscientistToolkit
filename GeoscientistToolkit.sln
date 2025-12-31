@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InstallerPackager", "Instal
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GeoscientistToolkit.Gtk", "GTK\GeoscientistToolkit.Gtk.csproj", "{12F61B56-B636-4A08-9518-F03B02291E79}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GeoscientistToolkit.Api", "Api\GeoscientistToolkit.Api.csproj", "{59838B89-83BF-4AF8-B12F-5C4F67AA1FA2}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{AE1CE582-36F1-47A0-B64C-28E9B7309902}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VerificationTests", "Tests\VerificationTests\VerificationTests.csproj", "{465DAB48-995D-42BC-9650-8575401EDCAD}"
@@ -45,6 +47,10 @@ Global
 		{12F61B56-B636-4A08-9518-F03B02291E79}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{12F61B56-B636-4A08-9518-F03B02291E79}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{12F61B56-B636-4A08-9518-F03B02291E79}.Release|Any CPU.Build.0 = Release|Any CPU
+		{59838B89-83BF-4AF8-B12F-5C4F67AA1FA2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{59838B89-83BF-4AF8-B12F-5C4F67AA1FA2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{59838B89-83BF-4AF8-B12F-5C4F67AA1FA2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{59838B89-83BF-4AF8-B12F-5C4F67AA1FA2}.Release|Any CPU.Build.0 = Release|Any CPU
 		{465DAB48-995D-42BC-9650-8575401EDCAD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{465DAB48-995D-42BC-9650-8575401EDCAD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{465DAB48-995D-42BC-9650-8575401EDCAD}.Release|Any CPU.ActiveCfg = Release|Any CPU
