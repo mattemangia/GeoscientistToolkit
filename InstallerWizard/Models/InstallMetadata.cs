@@ -4,6 +4,7 @@ public sealed record InstallMetadata
 {
     public string ProductName { get; init; } = string.Empty;
     public string Version { get; init; } = "0.0.0";
+    public string PackageId { get; init; } = string.Empty;
     public string RuntimeIdentifier { get; init; } = string.Empty;
     public string InstallPath { get; init; } = string.Empty;
     public string ManifestUrl { get; init; } = string.Empty;

@@ -10,16 +10,12 @@ internal sealed class InstallPlanBuilder
 
     public InstallPlan CreatePlan(
         InstallerManifest manifest,
-        string runtimeIdentifier,
+        RuntimePackage package,
         string installPath,
         IEnumerable<string> selectedComponentIds,
         bool createDesktopShortcut)
     {
-        var package = manifest.Packages.FirstOrDefault(p => string.Equals(p.RuntimeIdentifier, runtimeIdentifier, StringComparison.OrdinalIgnoreCase));
-        if (package is null)
-        {
-            throw new InvalidOperationException($"Nessun pacchetto configurato per {runtimeIdentifier}");
-        }
+        ArgumentNullException.ThrowIfNull(package);
 
         var availableComponents = package.Components.Count == 0
             ? new List<RuntimeComponent>
@@ -46,6 +42,6 @@ internal sealed class InstallPlanBuilder
             components = availableComponents.Where(c => c.DefaultSelected).ToList();
         }
 
-        return new InstallPlan(manifest, package, runtimeIdentifier, installPath, components, createDesktopShortcut);
+        return new InstallPlan(manifest, package, package.RuntimeIdentifier, installPath, components, createDesktopShortcut);
     }
 }

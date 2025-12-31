@@ -11,8 +11,8 @@ public sealed record InstallerSettings(
     bool EnableLogs)
 {
     public static InstallerSettings Default => new(
-        ProductName: "Geoscientist Toolkit",
-        ManifestUrl: "docs/installer-manifest.json",
+        ProductName: "Geoscientist's Toolkit",
+        ManifestUrl: "installer-manifest.json",
         DefaultInstallRoot: Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "GeoscientistToolkit"),
         ProjectPath: "../GeoscientistToolkit.csproj",
         MetadataFileName: "install-info.json",

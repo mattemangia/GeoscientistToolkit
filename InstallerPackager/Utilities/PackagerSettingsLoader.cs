@@ -27,13 +27,18 @@ internal static class PackagerSettingsLoader
 
     private static string ResolveSettingsPath()
     {
-        var baseDirectoryPath = Path.Combine(AppContext.BaseDirectory, SettingsFileName);
-        if (File.Exists(baseDirectoryPath))
+        var repoPath = Path.Combine(Environment.CurrentDirectory, "InstallerPackager", SettingsFileName);
+        if (File.Exists(repoPath))
         {
-            return baseDirectoryPath;
+            return repoPath;
         }
 
         var fallback = Path.Combine(Environment.CurrentDirectory, SettingsFileName);
-        return File.Exists(fallback) ? fallback : baseDirectoryPath;
+        if (File.Exists(fallback))
+        {
+            return fallback;
+        }
+
+        return Path.Combine(AppContext.BaseDirectory, SettingsFileName);
     }
 }

@@ -1,5 +1,6 @@
 using System.Net.Http;
 using System.Text.Json;
+using System.Linq;
 using GeoscientistToolkit.Installer.Models;
 using GeoscientistToolkit.Installer.Utilities;
 
@@ -20,7 +21,7 @@ internal sealed class ManifestLoader
         var path = overrideUrl ?? _settings.ManifestUrl;
         if (string.IsNullOrWhiteSpace(path))
         {
-            throw new InvalidOperationException("Manifest URL non configurato");
+            throw new InvalidOperationException("Manifest URL is not configured.");
         }
 
         if (Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.Scheme.StartsWith("http"))
@@ -33,11 +34,38 @@ internal sealed class ManifestLoader
             return manifest ?? new InstallerManifest();
         }
 
-        var resolvedPath = ResolveLocalPath(path);
-        await using var fileStream = File.OpenRead(resolvedPath);
-        var localManifest = await JsonSerializer.DeserializeAsync<InstallerManifest>(fileStream, JsonOptions.Value.Value, token)
-            .ConfigureAwait(false);
-        return localManifest ?? new InstallerManifest();
+        try
+        {
+            var resolvedPath = ResolveLocalPath(path);
+            await using var fileStream = File.OpenRead(resolvedPath);
+            var localManifest = await JsonSerializer.DeserializeAsync<InstallerManifest>(fileStream, JsonOptions.Value.Value, token)
+                .ConfigureAwait(false);
+            return localManifest ?? new InstallerManifest();
+        }
+        catch
+        {
+            return LoadEmbeddedManifest() ?? new InstallerManifest();
+        }
+    }
+
+    private static InstallerManifest? LoadEmbeddedManifest()
+    {
+        var assembly = typeof(ManifestLoader).Assembly;
+        var resourceName = assembly
+            .GetManifestResourceNames()
+            .FirstOrDefault(name => name.EndsWith("installer-manifest.json", StringComparison.OrdinalIgnoreCase));
+        if (resourceName is null)
+        {
+            return null;
+        }
+
+        using var stream = assembly.GetManifestResourceStream(resourceName);
+        if (stream is null)
+        {
+            return null;
+        }
+
+        return JsonSerializer.Deserialize<InstallerManifest>(stream, JsonOptions.Value.Value);
     }
 
     private string ResolveLocalPath(string path)

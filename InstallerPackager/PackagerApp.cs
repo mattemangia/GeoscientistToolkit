@@ -43,31 +43,38 @@ internal sealed class PackagerApp
 
             if (packagesToBuild.Count == 0)
             {
-                Console.Error.WriteLine("Nessun pacchetto da costruire. Verifica le piattaforme specificate.");
+                Console.Error.WriteLine("No packages to build. Check the specified platforms.");
                 return 1;
             }
 
             var publisher = new PublishService();
             var buildService = new BuildService();
+            var installerService = new InstallerPublishService();
+            var publishedInstallers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var package in packagesToBuild)
             {
                 await buildService.BuildPackageAsync(package, settings, publisher).ConfigureAwait(false);
+                if (publishedInstallers.Add(package.RuntimeIdentifier))
+                {
+                    await installerService.PublishInstallerAsync(package.RuntimeIdentifier, settings, publisher)
+                        .ConfigureAwait(false);
+                }
             }
 
             await ManifestPersistence.SaveAsync(settings.ManifestPath, manifest).ConfigureAwait(false);
-            Console.WriteLine("Pacchetti generati correttamente.");
+            Console.WriteLine("Packages generated successfully.");
             return 0;
         }
         catch (ArgumentException ex)
         {
-            Console.Error.WriteLine($"Errore: {ex.Message}");
+            Console.Error.WriteLine($"Error: {ex.Message}");
             Console.WriteLine();
             CommandLineParser.PrintHelp();
             return 1;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Errore durante il packaging: {ex.Message}\n{ex}");
+            Console.Error.WriteLine($"Packaging failed: {ex.Message}\n{ex}");
             return 1;
         }
     }

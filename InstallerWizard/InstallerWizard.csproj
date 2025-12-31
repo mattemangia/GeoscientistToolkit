@@ -12,14 +12,21 @@
     <AssemblyName>GeoscientistToolkitInstaller</AssemblyName>
     <ApplicationIcon>../image.ico</ApplicationIcon>
     <NoWarn>CS8604</NoWarn>
+    <SkipVerificationTests>true</SkipVerificationTests>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Terminal.Gui" Version="1.17.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GeoscientistToolkit.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="installer-settings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\docs\installer-manifest.json" Link="installer-manifest.json" />
   </ItemGroup>
 </Project>

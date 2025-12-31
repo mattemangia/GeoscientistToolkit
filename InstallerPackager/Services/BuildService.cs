@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using GeoscientistToolkit.Installer.Models;
@@ -15,7 +14,7 @@ internal sealed class BuildService
         Action<string>? onLog = null)
     {
         var log = onLog ?? Console.WriteLine;
-        log($"Preparazione pacchetto {package.RuntimeIdentifier}...");
+        log($"Preparing package {package.PackageId} ({package.RuntimeIdentifier})...");
 
         var tempRoot = Path.Combine(Path.GetTempPath(), "gstk-package-" + Guid.NewGuid());
         Directory.CreateDirectory(tempRoot);
@@ -24,41 +23,28 @@ internal sealed class BuildService
 
         try
         {
-            var projectPath = ExpandPath(settings.ProjectPath, settings.SettingsDirectory);
-            var nodeProjectPath = ExpandPath(settings.NodeProjectPath, settings.SettingsDirectory);
             var outputDirectory = ExpandPath(settings.PackagesOutputDirectory, settings.SettingsDirectory);
+            var packageDefinition = ResolvePackageDefinition(package, settings);
 
-            var mainPublish = await publisher.PublishAsync(
-                projectPath,
+            var additionalArgs = package.PackageId.StartsWith("node", StringComparison.OrdinalIgnoreCase)
+                ? settings.NodeAdditionalPublishArguments
+                : settings.AdditionalPublishArguments;
+
+            var publishPath = await publisher.PublishAsync(
+                packageDefinition.ProjectPath,
                 package.RuntimeIdentifier,
                 package.SelfContained,
                 settings.PublishConfiguration,
-                settings.AdditionalPublishArguments,
+                additionalArgs,
                 log,
                 CancellationToken.None).ConfigureAwait(false);
 
-            var appTarget = Path.Combine(payloadRoot, "app");
-            CopyDirectory(mainPublish, appTarget);
-            CleanupTemporaryDirectory(mainPublish);
-            CopyOnnx(settings, appTarget);
+            var appTarget = Path.Combine(payloadRoot, packageDefinition.PayloadFolder);
+            CopyDirectory(publishPath, appTarget);
+            CleanupTemporaryDirectory(publishPath);
+            CreateOnnxInstallerPackage(settings, payloadRoot);
 
-            var nodeTarget = Path.Combine(payloadRoot, "node-endpoint");
-            if (File.Exists(nodeProjectPath))
-            {
-                var nodePublish = await publisher.PublishAsync(
-                    nodeProjectPath,
-                    package.RuntimeIdentifier,
-                    package.SelfContained,
-                    settings.PublishConfiguration,
-                    settings.NodeAdditionalPublishArguments,
-                    log,
-                    CancellationToken.None).ConfigureAwait(false);
-                CopyDirectory(nodePublish, nodeTarget);
-                CleanupTemporaryDirectory(nodePublish);
-                CreateNodeLaunchers(nodeTarget, settings.NodeExecutableName);
-            }
-
-            var archiveName = $"{settings.PackageName}-{package.RuntimeIdentifier}.zip";
+            var archiveName = $"{settings.PackageName}-{package.PackageId}-{package.RuntimeIdentifier}.zip";
             Directory.CreateDirectory(outputDirectory);
             var archivePath = Path.Combine(outputDirectory, archiveName);
             if (File.Exists(archivePath))
@@ -66,7 +52,7 @@ internal sealed class BuildService
                 File.Delete(archivePath);
             }
 
-            log("Creazione archivio...");
+            log("Creating archive...");
             ZipFile.CreateFromDirectory(payloadRoot, archivePath, CompressionLevel.SmallestSize, includeBaseDirectory: false);
             package.Transport = PackageTransport.Archive;
             package.PackageUrl = CombineUrl(settings.PackageBaseUrl, archiveName);
@@ -86,61 +72,47 @@ internal sealed class BuildService
         }
     }
 
-    private static void CopyOnnx(PackagerSettings settings, string appTarget)
+    private static void CreateOnnxInstallerPackage(PackagerSettings settings, string payloadRoot)
     {
-        var source = ExpandPath(settings.OnnxDirectory, settings.SettingsDirectory);
-        if (Directory.Exists(source))
+        var templateSource = ExpandPath(settings.OnnxInstallerTemplatePath, settings.SettingsDirectory);
+        var installerTarget = Path.Combine(payloadRoot, "onnx-installer");
+        Directory.CreateDirectory(installerTarget);
+
+        if (Directory.Exists(templateSource))
         {
-            var destination = Path.Combine(appTarget, "ONNX");
-            CopyDirectory(source, destination);
+            CopyDirectory(templateSource, installerTarget);
+        }
+
+        var modelsSource = ExpandPath(settings.OnnxDirectory, settings.SettingsDirectory);
+        if (Directory.Exists(modelsSource))
+        {
+            var modelsTarget = Path.Combine(installerTarget, "models");
+            CopyDirectory(modelsSource, modelsTarget);
         }
     }
 
-    private static void CreateNodeLaunchers(string nodeTarget, string executableName)
+    private static PackageDefinition ResolvePackageDefinition(RuntimePackage package, PackagerSettings settings)
     {
-        if (!Directory.Exists(nodeTarget))
+        return package.PackageId.ToLowerInvariant() switch
         {
-            return;
-        }
-
-        var baseName = Path.GetFileNameWithoutExtension(executableName);
-        var windowsExecutable = Path.Combine(nodeTarget, baseName + ".exe");
-        var unixExecutable = Path.Combine(nodeTarget, baseName);
-
-        if (File.Exists(windowsExecutable))
-        {
-            var windowsScript = Path.Combine(nodeTarget, "start-endpoint.cmd");
-            File.WriteAllText(windowsScript, $"@echo off\r\n%~dp0{baseName}.exe %*\r\n");
-        }
-
-        if (File.Exists(unixExecutable))
-        {
-            var linuxScript = Path.Combine(nodeTarget, "start-endpoint.sh");
-            File.WriteAllText(linuxScript, $"#!/bin/sh\nDIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n\"$DIR/{baseName}\" \"$@\"\n");
-            MakeExecutable(linuxScript);
-
-            var macScript = Path.Combine(nodeTarget, "start-endpoint.command");
-            File.WriteAllText(macScript, $"#!/bin/bash\n\"$(dirname \"$0\")/{baseName}\" \"$@\"\n");
-            MakeExecutable(macScript);
-        }
-    }
-
-    private static void MakeExecutable(string path)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "chmod",
-                Arguments = $"+x \"{path}\"",
-                UseShellExecute = false,
-                CreateNoWindow = true
-            })?.WaitForExit();
-        }
-        catch
-        {
-            // ignore
-        }
+            "imgui" => new PackageDefinition(
+                ExpandPath(settings.ImGuiProjectPath, settings.SettingsDirectory),
+                settings.ImGuiExecutableName,
+                "app-imgui"),
+            "gtk" => new PackageDefinition(
+                ExpandPath(settings.GtkProjectPath, settings.SettingsDirectory),
+                settings.GtkExecutableName,
+                "app-gtk"),
+            "node-server" => new PackageDefinition(
+                ExpandPath(settings.NodeServerProjectPath, settings.SettingsDirectory),
+                settings.NodeServerExecutableName,
+                "node-server"),
+            "node-endpoint" => new PackageDefinition(
+                ExpandPath(settings.NodeEndpointProjectPath, settings.SettingsDirectory),
+                settings.NodeEndpointExecutableName,
+                "node-endpoint"),
+            _ => throw new InvalidOperationException($"Unknown package id '{package.PackageId}'.")
+        };
     }
 
     private static void CopyDirectory(string source, string destination)
@@ -218,4 +190,6 @@ internal sealed class BuildService
 
         return baseUrl.TrimEnd('/') + "/" + fileName;
     }
+
+    private sealed record PackageDefinition(string ProjectPath, string ExecutableName, string PayloadFolder);
 }

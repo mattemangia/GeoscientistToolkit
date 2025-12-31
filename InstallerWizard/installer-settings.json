@@ -1,6 +1,6 @@
 {
-  "ProductName": "Geoscientist Toolkit",
-  "ManifestUrl": "docs/installer-manifest.json",
+  "ProductName": "Geoscientist's Toolkit",
+  "ManifestUrl": "installer-manifest.json",
   "DefaultInstallRoot": "~/GeoscientistToolkit",
   "ProjectPath": "../GeoscientistToolkit.csproj",
   "MetadataFileName": "install-info.json",

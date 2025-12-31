@@ -8,6 +8,7 @@ using GeoscientistToolkit.Installer.Models;
 using GeoscientistToolkit.Installer.Services;
 using GeoscientistToolkit.Installer.Utilities;
 using Terminal.Gui;
+using TerminalGuiApplication = Terminal.Gui.Application;
 
 namespace GeoscientistToolkit.Installer;
 
@@ -22,11 +23,12 @@ internal sealed class InstallerWizardApp
     private InstallerManifest? _manifest;
     private InstallMetadata? _metadata;
     private bool _hasUpdate;
+    private string _selectedPackageId = "imgui";
     private string _selectedRuntime = RuntimeHelper.GetCurrentRuntimeIdentifier();
     private string _installPath;
 
     private Wizard? _wizard;
-    private ListView? _runtimeList;
+    private ListView? _packageList;
     private TextField? _installPathField;
     private Label? _welcomeLabel;
     private Label? _updateLabel;
@@ -63,16 +65,16 @@ internal sealed class InstallerWizardApp
 
     public void Run()
     {
-        Application.Init();
+        TerminalGuiApplication.Init();
         try
         {
             LoadState();
             _wizard = BuildWizard();
-            Application.Run(_wizard);
+            TerminalGuiApplication.Run(_wizard);
         }
         finally
         {
-            Application.Shutdown();
+            TerminalGuiApplication.Shutdown();
         }
     }
 
@@ -83,7 +85,7 @@ internal sealed class InstallerWizardApp
             return;
         }
         _isStopping = true;
-        Application.RequestStop();
+        TerminalGuiApplication.RequestStop();
     }
 
     private void LoadState()
@@ -96,6 +98,10 @@ internal sealed class InstallerWizardApp
         if (_metadata is not null)
         {
             _selectedRuntime = _metadata.RuntimeIdentifier;
+            if (!string.IsNullOrWhiteSpace(_metadata.PackageId))
+            {
+                _selectedPackageId = _metadata.PackageId;
+            }
             _installPath = _metadata.InstallPath;
             _createDesktopShortcut = _metadata.CreateDesktopShortcut;
             if (_metadata.Components.Count > 0)
@@ -135,13 +141,13 @@ internal sealed class InstallerWizardApp
         // Add step changed handler to ensure proper refresh
         wizard.StepChanged += (args) =>
         {
-            Application.MainLoop.Invoke(() =>
+            TerminalGuiApplication.MainLoop.Invoke(() =>
             {
                 wizard.SetNeedsDisplay();
-                Application.Refresh();
-                if (Application.Driver != null)
+                TerminalGuiApplication.Refresh();
+                if (TerminalGuiApplication.Driver != null)
                 {
-                    Application.Driver.Refresh();
+                    TerminalGuiApplication.Driver.Refresh();
                 }
             });
         };
@@ -151,9 +157,9 @@ internal sealed class InstallerWizardApp
 
     private Wizard.WizardStep CreateWelcomePage()
     {
-        var page = new Wizard.WizardStep("Benvenuto")
+        var page = new Wizard.WizardStep("Welcome")
         {
-            HelpText = "Preparazione dell'installazione"
+            HelpText = "Preparing the installation"
         };
 
         var titleLabel = new Label
@@ -202,19 +208,19 @@ internal sealed class InstallerWizardApp
             Width = Dim.Fill(),
             Height = 2,
             Text = _manifest is null
-                ? "[!] Manifest non disponibile"
-                : $"[*] Versione disponibile: {_manifest.Version}",
+                ? "[!] Manifest unavailable"
+                : $"[*] Available version: {_manifest.Version}",
             ColorScheme = new ColorScheme
             {
                 Normal = Terminal.Gui.Attribute.Make(Color.BrightYellow, Color.Black)
             }
         };
 
-        var installedVersionText = _metadata is not null ? $"[#] Versione installata: {_metadata.Version}\n" : string.Empty;
+        var installedVersionText = _metadata is not null ? $"[#] Installed version: {_metadata.Version}\n" : string.Empty;
         var updateIcon = _hasUpdate ? "[+]" : "[√]";
         var updateText = _hasUpdate
-            ? "È disponibile un aggiornamento. Procedere per installarlo."
-            : "Nessun aggiornamento necessario.";
+            ? "An update is available. Continue to install it."
+            : "No updates required.";
 
         _updateLabel = new Label
         {
@@ -237,7 +243,7 @@ internal sealed class InstallerWizardApp
 
         if (_manifest?.Prerequisites.Any() == true)
         {
-            var prereqFrame = new FrameView("Prerequisiti")
+            var prereqFrame = new FrameView("Prerequisites")
             {
                 X = 0,
                 Y = Pos.Bottom(_updateLabel) + 1,
@@ -272,12 +278,12 @@ internal sealed class InstallerWizardApp
 
     private Wizard.WizardStep CreateRuntimePage()
     {
-        var page = new Wizard.WizardStep("Opzioni")
+        var page = new Wizard.WizardStep("Options")
         {
-            HelpText = "Seleziona runtime e cartella di installazione"
+            HelpText = "Select a package and installation folder"
         };
 
-        var runtimeLabel = new Label("[>] Seleziona Runtime:")
+        var runtimeLabel = new Label("[>] Select package:")
         {
             X = 0,
             Y = 0,
@@ -288,9 +294,9 @@ internal sealed class InstallerWizardApp
         };
 
         var packages = _manifest?.Packages ?? new List<RuntimePackage>();
-        var items = packages.Select(p => $"  {p.RuntimeIdentifier} · {(p.Description ?? "")}").ToList();
+        var items = packages.Select(p => $"  {p.Description ?? p.PackageId} · {p.RuntimeIdentifier}").ToList();
 
-        _runtimeList = new ListView(items)
+        _packageList = new ListView(items)
         {
             X = 0,
             Y = Pos.Bottom(runtimeLabel) + 1,
@@ -304,14 +310,16 @@ internal sealed class InstallerWizardApp
             }
         };
 
-        var defaultIndex = Math.Max(0, packages.FindIndex(p => string.Equals(p.RuntimeIdentifier, _selectedRuntime, StringComparison.OrdinalIgnoreCase)));
-        _runtimeList.SelectedItem = defaultIndex >= 0 ? defaultIndex : 0;
-        _runtimeList.SelectedItemChanged += _ => RefreshComponentOptions();
+        var defaultIndex = Math.Max(0, packages.FindIndex(p =>
+            string.Equals(p.PackageId, _selectedPackageId, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(p.RuntimeIdentifier, _selectedRuntime, StringComparison.OrdinalIgnoreCase)));
+        _packageList.SelectedItem = defaultIndex >= 0 ? defaultIndex : 0;
+        _packageList.SelectedItemChanged += _ => RefreshComponentOptions();
 
-        var pathLabel = new Label("[/] Percorso di installazione:")
+        var pathLabel = new Label("[/] Install path:")
         {
             X = 0,
-            Y = Pos.Bottom(_runtimeList) + 1,
+            Y = Pos.Bottom(_packageList) + 1,
             ColorScheme = new ColorScheme
             {
                 Normal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Black)
@@ -330,7 +338,7 @@ internal sealed class InstallerWizardApp
             }
         };
 
-        _componentsFrame = new FrameView("Componenti")
+        _componentsFrame = new FrameView("Components")
         {
             X = 0,
             Y = Pos.Bottom(_installPathField) + 1,
@@ -342,7 +350,7 @@ internal sealed class InstallerWizardApp
             }
         };
 
-        _shortcutCheckbox = new CheckBox("Crea collegamento sul desktop", _createDesktopShortcut)
+        _shortcutCheckbox = new CheckBox("Create desktop shortcut", _createDesktopShortcut)
         {
             X = 0,
             Y = Pos.Bottom(_componentsFrame) + 1
@@ -351,11 +359,11 @@ internal sealed class InstallerWizardApp
         {
             _createDesktopShortcut = _shortcutCheckbox.Checked;
             _shortcutCheckbox.SetNeedsDisplay();
-            Application.Refresh();
+            TerminalGuiApplication.Refresh();
         };
 
         page.Add(runtimeLabel);
-        page.Add(_runtimeList);
+        page.Add(_packageList);
         page.Add(pathLabel);
         page.Add(_installPathField);
         page.Add(_componentsFrame);
@@ -380,13 +388,12 @@ internal sealed class InstallerWizardApp
         }
 
         _componentsFrame.RemoveAll();
-        var runtime = GetSelectedRuntime();
-        var package = _manifest.Packages.FirstOrDefault(p => string.Equals(p.RuntimeIdentifier, runtime, StringComparison.OrdinalIgnoreCase));
+        var package = GetSelectedPackage();
         _currentComponents = (IReadOnlyList<RuntimeComponent>?)package?.Components ?? Array.Empty<RuntimeComponent>();
 
         if (_currentComponents.Count == 0)
         {
-            _componentsFrame.Add(new Label("Nessun componente configurato")
+            _componentsFrame.Add(new Label("No components configured")
             {
                 X = 0,
                 Y = 0,
@@ -422,24 +429,24 @@ internal sealed class InstallerWizardApp
             {
                 _componentSelections[component.Id] = checkBox.Checked;
                 checkBox.SetNeedsDisplay();
-                Application.Refresh();
+                TerminalGuiApplication.Refresh();
             };
             _componentsFrame.Add(checkBox);
         }
 
         _componentsFrame.Height = Math.Max(5, _currentComponents.Count + 2);
         _componentsFrame.SetNeedsDisplay();
-        Application.Refresh();
+        TerminalGuiApplication.Refresh();
     }
 
     private Wizard.WizardStep CreateReviewPage()
     {
-        var page = new Wizard.WizardStep("Riepilogo")
+        var page = new Wizard.WizardStep("Review")
         {
-            HelpText = "Conferma i parametri scelti"
+            HelpText = "Confirm your selections"
         };
 
-        var reviewFrame = new FrameView("Configurazione")
+        var reviewFrame = new FrameView("Configuration")
         {
             X = 0,
             Y = 0,
@@ -483,7 +490,7 @@ internal sealed class InstallerWizardApp
 
         if (OperatingSystem.IsWindows())
         {
-            _elevateButton = new Button("[!] Richiedi privilegi amministratore")
+            _elevateButton = new Button("[!] Request administrator privileges")
             {
                 X = 0,
                 Y = Pos.Bottom(_elevationLabel) + 1,
@@ -509,12 +516,12 @@ internal sealed class InstallerWizardApp
 
     private Wizard.WizardStep CreateProgressPage()
     {
-        var page = new Wizard.WizardStep("Installazione")
+        var page = new Wizard.WizardStep("Installation")
         {
-            HelpText = "Esecuzione attività"
+            HelpText = "Running tasks"
         };
 
-        var progressFrame = new FrameView("Avanzamento")
+        var progressFrame = new FrameView("Progress")
         {
             X = 0,
             Y = 0,
@@ -542,7 +549,7 @@ internal sealed class InstallerWizardApp
             X = 0,
             Y = Pos.Bottom(_progressBar) + 1,
             Width = Dim.Fill(),
-            Text = "[...] In attesa...",
+            Text = "[...] Waiting...",
             ColorScheme = new ColorScheme
             {
                 Normal = Terminal.Gui.Attribute.Make(Color.BrightYellow, Color.Black)
@@ -552,7 +559,7 @@ internal sealed class InstallerWizardApp
         progressFrame.Add(_progressBar);
         progressFrame.Add(_statusLabel);
 
-        var logFrame = new FrameView("Registro attività")
+        var logFrame = new FrameView("Activity log")
         {
             X = 0,
             Y = Pos.Bottom(progressFrame) + 1,
@@ -604,7 +611,7 @@ internal sealed class InstallerWizardApp
             _wizard.SetNeedsDisplay();
             
             // Use MainLoop.Invoke to ensure UI updates happen on the main thread
-            Application.MainLoop.Invoke(() =>
+            TerminalGuiApplication.MainLoop.Invoke(() =>
             {
                 // Force the wizard to update its focus
                 _wizard.SetFocus();
@@ -619,14 +626,14 @@ internal sealed class InstallerWizardApp
                 // Force complete redraw
                 page.SetNeedsDisplay();
                 _wizard.SetNeedsDisplay();
-                Application.Refresh();
+                TerminalGuiApplication.Refresh();
                 
                 // Force driver refresh if available
-                if (Application.Driver != null)
+                if (TerminalGuiApplication.Driver != null)
                 {
                     try
                     {
-                        Application.Driver.Refresh();
+                        TerminalGuiApplication.Driver.Refresh();
                     }
                     catch
                     {
@@ -638,7 +645,7 @@ internal sealed class InstallerWizardApp
         else
         {
             // Fallback if wizard is null
-            Application.Refresh();
+            TerminalGuiApplication.Refresh();
         }
     }
 
@@ -668,39 +675,42 @@ internal sealed class InstallerWizardApp
             return;
         }
 
-        var runtime = GetSelectedRuntime();
+        var selectedPackage = GetSelectedPackage();
+        var runtime = selectedPackage?.RuntimeIdentifier ?? _selectedRuntime;
+        var packageLabel = selectedPackage?.Description ?? selectedPackage?.PackageId ?? "Unknown";
         var path = ExpandPath(_installPathField?.Text?.ToString() ?? _installPath);
         var componentIds = GetSelectedComponentIds();
         var selectedComponents = new HashSet<string>(componentIds, StringComparer.OrdinalIgnoreCase);
         var componentNames = _currentComponents.Count == 0
-            ? "Nessun componente"
+            ? "No components"
             : string.Join(", ", _currentComponents
                 .Where(c => selectedComponents.Contains(c.Id))
                 .Select(c => c.DisplayName));
 
-        var desktopShortcut = (_shortcutCheckbox?.Checked ?? _createDesktopShortcut) ? "Sì" : "No";
+        var desktopShortcut = (_shortcutCheckbox?.Checked ?? _createDesktopShortcut) ? "Yes" : "No";
         var adminStatus = OperatingSystem.IsWindows()
-            ? (_isElevated ? "attivi" : "non attivi")
-            : "non richiesti";
+            ? (_isElevated ? "enabled" : "not enabled")
+            : "not required";
 
         var reviewText = $@"
 ╔═══════════════════════════════════════════════════════════════╗
-║  RIEPILOGO INSTALLAZIONE                                     ║
+║  INSTALLATION SUMMARY                                        ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-  [*] Prodotto:                 {_settings.ProductName}
-  [#] Versione manifest:        {_manifest.Version}
+  [*] Product:                  {_settings.ProductName}
+  [#] Manifest version:         {_manifest.Version}
+  [>] Package:                  {packageLabel}
   [>] Runtime:                  {runtime}
-  [/] Percorso:                 {path}
-  [+] Componenti:               {componentNames}
-  [~] Collegamento desktop:     {desktopShortcut}
-  [!] Privilegi amministratore: {adminStatus}
+  [/] Install path:             {path}
+  [+] Components:               {componentNames}
+  [~] Desktop shortcut:         {desktopShortcut}
+  [!] Admin privileges:         {adminStatus}
 
 ";
 
         _reviewText.Text = reviewText;
         _reviewText.SetNeedsDisplay();
-        Application.Refresh();
+        TerminalGuiApplication.Refresh();
     }
 
     private void UpdateElevationLabel()
@@ -712,20 +722,20 @@ internal sealed class InstallerWizardApp
 
         if (!OperatingSystem.IsWindows())
         {
-            _elevationLabel.Text = "Privilegi amministratore non necessari su questo sistema.";
+            _elevationLabel.Text = "Administrator privileges are not required on this system.";
             if (_elevateButton is not null)
             {
                 _elevateButton.Visible = false;
                 _elevateButton.SetNeedsDisplay();
             }
             _elevationLabel.SetNeedsDisplay();
-            Application.Refresh();
+            TerminalGuiApplication.Refresh();
             return;
         }
 
         _elevationLabel.Text = _isElevated
-            ? "Privilegi amministratore già concessi."
-            : "Per installare in cartelle protette è consigliata l'elevazione con UAC.";
+            ? "Administrator privileges already granted."
+            : "Installing into protected folders may require UAC elevation.";
 
         if (_elevateButton is not null)
         {
@@ -734,18 +744,18 @@ internal sealed class InstallerWizardApp
         }
 
         _elevationLabel.SetNeedsDisplay();
-        Application.Refresh();
+        TerminalGuiApplication.Refresh();
     }
 
-    private string GetSelectedRuntime()
+    private RuntimePackage? GetSelectedPackage()
     {
-        if (_runtimeList is null || _manifest is null || _manifest.Packages.Count == 0)
+        if (_packageList is null || _manifest is null || _manifest.Packages.Count == 0)
         {
-            return _selectedRuntime;
+            return _manifest?.Packages.FirstOrDefault();
         }
 
-        var index = Math.Clamp(_runtimeList.SelectedItem, 0, _manifest.Packages.Count - 1);
-        return _manifest.Packages[index].RuntimeIdentifier;
+        var index = Math.Clamp(_packageList.SelectedItem, 0, _manifest.Packages.Count - 1);
+        return _manifest.Packages[index];
     }
 
     private IReadOnlyCollection<string> GetSelectedComponentIds()
@@ -776,11 +786,11 @@ internal sealed class InstallerWizardApp
             try
             {
                 await ExecuteInstallationAsync().ConfigureAwait(false);
-                Application.MainLoop.Invoke(() =>
+                TerminalGuiApplication.MainLoop.Invoke(() =>
                 {
                     if (_statusLabel is not null)
                     {
-                        _statusLabel.Text = "[√] Installazione completata con successo!";
+                        _statusLabel.Text = "[√] Installation completed successfully!";
                         _statusLabel.ColorScheme = new ColorScheme
                         {
                             Normal = Terminal.Gui.Attribute.Make(Color.BrightGreen, Color.Black)
@@ -790,36 +800,36 @@ internal sealed class InstallerWizardApp
                     if (_wizard is not null)
                     {
                         _wizard.NextFinishButton.Visible = true;
-                        _wizard.NextFinishButton.Text = "Fine";
+                        _wizard.NextFinishButton.Text = "Finish";
                         _wizard.NextFinishButton.Enabled = true;
                         _wizard.SetNeedsDisplay();
                     }
-                    Application.Refresh();
+                    TerminalGuiApplication.Refresh();
                 });
             }
             catch (Exception ex)
             {
-                Application.MainLoop.Invoke(() =>
+                TerminalGuiApplication.MainLoop.Invoke(() =>
                 {
                     if (_statusLabel is not null)
                     {
-                        _statusLabel.Text = $"[X] Errore: {ex.Message}";
+                        _statusLabel.Text = $"[X] Error: {ex.Message}";
                         _statusLabel.ColorScheme = new ColorScheme
                         {
                             Normal = Terminal.Gui.Attribute.Make(Color.BrightRed, Color.Black)
                         };
                         _statusLabel.SetNeedsDisplay();
                     }
-                    _logView?.InsertText($"\n[X] ERRORE DETTAGLIATO:\n{ex}\n");
+                    _logView?.InsertText($"\n[X] DETAILED ERROR:\n{ex}\n");
                     _logView?.SetNeedsDisplay();
                     if (_wizard is not null)
                     {
                         _wizard.NextFinishButton.Visible = true;
-                        _wizard.NextFinishButton.Text = "Chiudi";
+                        _wizard.NextFinishButton.Text = "Close";
                         _wizard.NextFinishButton.Enabled = true;
                         _wizard.SetNeedsDisplay();
                     }
-                    Application.Refresh();
+                    TerminalGuiApplication.Refresh();
                 });
             }
         });
@@ -851,7 +861,7 @@ internal sealed class InstallerWizardApp
         }
         catch (Win32Exception ex)
         {
-            Log($"Elevazione annullata o non riuscita: {ex.Message}");
+            Log($"Elevation cancelled or failed: {ex.Message}");
         }
     }
 
@@ -859,19 +869,20 @@ internal sealed class InstallerWizardApp
     {
         if (_manifest is null)
         {
-            throw new InvalidOperationException("Manifest non caricato");
+            throw new InvalidOperationException("Manifest not loaded");
         }
 
-        var runtime = GetSelectedRuntime();
+        var selectedPackage = GetSelectedPackage()
+            ?? throw new InvalidOperationException("No package selected.");
         var installPath = ExpandPath(_installPathField?.Text?.ToString() ?? _installPath);
         var componentIds = GetSelectedComponentIds();
         var plan = _planBuilder.CreatePlan(
             _manifest,
-            runtime,
+            selectedPackage,
             installPath,
             componentIds,
             _shortcutCheckbox?.Checked ?? _createDesktopShortcut);
-        UpdateProgress(0.05f, "Preparazione cartelle");
+        UpdateProgress(0.05f, "Preparing folders");
         if (Directory.Exists(plan.InstallPath))
         {
             Directory.Delete(plan.InstallPath, true);
@@ -881,15 +892,15 @@ internal sealed class InstallerWizardApp
         string payloadPath;
         if (plan.Package.Transport == PackageTransport.Archive)
         {
-            UpdateProgress(0.15f, "Download pacchetto");
+            UpdateProgress(0.15f, "Downloading package");
             payloadPath = await _archiveInstallService.DownloadAndExtractAsync(plan.Package, Log).ConfigureAwait(false);
         }
         else
         {
-            throw new NotSupportedException("Il pacchetto selezionato non fornisce un archivio compresso. Eseguire il packager prima della distribuzione.");
+            throw new NotSupportedException("The selected package does not provide a compressed archive. Run the packager before distribution.");
         }
 
-        UpdateProgress(0.6f, "Copia componenti");
+        UpdateProgress(0.6f, "Copying components");
         foreach (var component in plan.Components)
         {
             var source = string.IsNullOrWhiteSpace(component.RelativePath) || component.RelativePath == "."
@@ -899,24 +910,24 @@ internal sealed class InstallerWizardApp
             CopyDirectory(source, target);
         }
 
-        UpdateProgress(0.8f, "Creazione launcher");
+        UpdateProgress(0.8f, "Creating launchers");
         CreateLaunchers(plan);
 
         if (plan.CreateDesktopShortcut)
         {
-            UpdateProgress(0.85f, "Collegamento desktop");
+            UpdateProgress(0.85f, "Creating desktop shortcut");
             CreateDesktopShortcut(plan);
         }
-        UpdateProgress(0.9f, "Scrittura metadati");
+        UpdateProgress(0.9f, "Writing metadata");
         await _updateService.SaveMetadataAsync(plan).ConfigureAwait(false);
-        UpdateProgress(1f, "Installazione completata");
+        UpdateProgress(1f, "Installation complete");
     }
 
     private void CopyDirectory(string source, string destination)
     {
         if (!Directory.Exists(source))
         {
-            throw new DirectoryNotFoundException($"Percorso sorgente non trovato: {source}");
+            throw new DirectoryNotFoundException($"Source path not found: {source}");
         }
 
         foreach (var dir in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
@@ -950,14 +961,15 @@ internal sealed class InstallerWizardApp
             return;
         }
 
+        var scriptBase = GetLauncherBaseName(plan.Package.PackageId);
         if (OperatingSystem.IsWindows())
         {
-            var script = Path.Combine(plan.InstallPath, "GeoscientistToolkit.cmd");
+            var script = Path.Combine(plan.InstallPath, $"{scriptBase}.cmd");
             File.WriteAllText(script, $"@echo off\r\n\"%~dp0{executableRelative}\" %*\r\n");
         }
         else
         {
-            var script = Path.Combine(plan.InstallPath, "geoscientist-toolkit.sh");
+            var script = Path.Combine(plan.InstallPath, $"{scriptBase}.sh");
             var relativePath = executableRelative.Replace('\\', '/');
             File.WriteAllText(script, $"#!/bin/sh\nDIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n\"$DIR/{relativePath}\" \"$@\"\n");
             try
@@ -975,6 +987,18 @@ internal sealed class InstallerWizardApp
                 // ignore
             }
         }
+    }
+
+    private static string GetLauncherBaseName(string packageId)
+    {
+        return packageId.ToLowerInvariant() switch
+        {
+            "gtk" => "geoscientist-toolkit-gtk",
+            "imgui" => "geoscientist-toolkit-imgui",
+            "node-endpoint" => "geoscientist-toolkit-node-endpoint",
+            "node-server" => "geoscientist-toolkit-node-server",
+            _ => "geoscientist-toolkit"
+        };
     }
 
     private void CreateDesktopShortcut(InstallPlan plan)
@@ -1029,7 +1053,7 @@ internal sealed class InstallerWizardApp
         }
         catch (Exception ex)
         {
-            Log($"Impossibile creare il collegamento Windows: {ex.Message}");
+            Log($"Unable to create Windows shortcut: {ex.Message}");
         }
     }
 
@@ -1076,7 +1100,7 @@ internal sealed class InstallerWizardApp
 
     private void UpdateProgress(float percentage, string status)
     {
-        Application.MainLoop.Invoke(() =>
+        TerminalGuiApplication.MainLoop.Invoke(() =>
         {
             if (_progressBar is not null)
             {
@@ -1089,20 +1113,20 @@ internal sealed class InstallerWizardApp
                 _statusLabel.Text = $"{icon} {status}";
                 _statusLabel.SetNeedsDisplay();
             }
-            Application.Refresh();
+            TerminalGuiApplication.Refresh();
         });
     }
 
     private void Log(string message)
     {
-        Application.MainLoop.Invoke(() =>
+        TerminalGuiApplication.MainLoop.Invoke(() =>
         {
             if (_logView is not null)
             {
                 _logView.InsertText(message + Environment.NewLine);
                 _logView.SetNeedsDisplay();
             }
-            Application.Refresh();
+            TerminalGuiApplication.Refresh();
         });
     }
 

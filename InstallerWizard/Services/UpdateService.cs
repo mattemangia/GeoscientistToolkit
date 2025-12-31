@@ -58,6 +58,7 @@ internal sealed class UpdateService
         {
             ProductName = _settings.ProductName,
             Version = plan.Manifest.Version,
+            PackageId = plan.Package.PackageId,
             RuntimeIdentifier = plan.RuntimeIdentifier,
             InstallPath = plan.InstallPath,
             ManifestUrl = _settings.ManifestUrl,

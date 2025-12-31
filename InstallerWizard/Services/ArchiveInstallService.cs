@@ -13,7 +13,7 @@ internal sealed class ArchiveInstallService
     {
         if (string.IsNullOrWhiteSpace(package.PackageUrl))
         {
-            throw new InvalidOperationException("PackageUrl non configurato per il pacchetto archivio");
+            throw new InvalidOperationException("PackageUrl is not configured for the archive package.");
         }
 
         var tempFile = Path.Combine(Path.GetTempPath(), "gstk-archive-" + Guid.NewGuid() + ".zip");
@@ -33,7 +33,7 @@ internal sealed class ArchiveInstallService
     {
         if (Uri.TryCreate(urlOrPath, UriKind.Absolute, out var uri) && uri.Scheme.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
-            onOutput?.Invoke($"Scaricamento {urlOrPath}...");
+            onOutput?.Invoke($"Downloading {urlOrPath}...");
             await using var stream = await _httpClient.GetStreamAsync(uri, token).ConfigureAwait(false);
             await using var file = File.Create(destination);
             await stream.CopyToAsync(file, token).ConfigureAwait(false);
@@ -49,7 +49,7 @@ internal sealed class ArchiveInstallService
 
         if (!File.Exists(expandedPath))
         {
-            throw new FileNotFoundException($"Archivio locale non trovato: {expandedPath}");
+            throw new FileNotFoundException($"Local archive not found: {expandedPath}");
         }
 
         File.Copy(expandedPath, destination, true);
@@ -63,7 +63,7 @@ internal sealed class ArchiveInstallService
         var normalized = Convert.ToHexString(hash).ToLowerInvariant();
         if (!string.Equals(normalized, expectedHash.Trim(), StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Verifica SHA256 del pacchetto fallita");
+            throw new InvalidOperationException("Package SHA256 verification failed.");
         }
     }
 }
