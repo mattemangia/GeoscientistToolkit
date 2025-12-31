@@ -1,6 +1,8 @@
 <Project>
   <PropertyGroup>
-    <NoWarn>$(NoWarn);NU1701;NETSDK1206</NoWarn>
-    <RestoreNoWarn>$(RestoreNoWarn);NU1701;NETSDK1206</RestoreNoWarn>
+    <NoWarn>$(NoWarn);NU1701;NETSDK1206;CS8892</NoWarn>
+    <RestoreNoWarn>$(RestoreNoWarn);NU1701;NETSDK1206;CS8892</RestoreNoWarn>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
   </PropertyGroup>
 </Project>
