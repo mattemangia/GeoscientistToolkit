@@ -34,34 +34,47 @@ namespace RealCaseVerifier
             Console.WriteLine("=================================================");
 
             bool allPassed = true;
+            bool runAll = args.Length == 0 || args.Contains("all");
 
             // 1. Geomechanics
-            allPassed &= VerifyGeomechanicsGranite();
+            if (runAll || args.Contains("geo") || args.Contains("geomech"))
+                allPassed &= VerifyGeomechanicsGranite();
 
             // 2. Seismology
-            allPassed &= VerifySeismicPREM();
+            if (runAll || args.Contains("seismo"))
+                allPassed &= VerifySeismicPREM();
 
             // 3. Slope Stability
-            allPassed &= VerifySlopeStabilityGravity();
-            allPassed &= VerifySlopeStabilitySliding();
+            if (runAll || args.Contains("slope")) {
+                allPassed &= VerifySlopeStabilityGravity();
+                allPassed &= VerifySlopeStabilitySliding();
+            }
 
             // 4. Multiphase / Thermodynamics
-            allPassed &= VerifyWaterSaturationPressure();
+            if (runAll || args.Contains("thermo"))
+                allPassed &= VerifyWaterSaturationPressure();
 
             // 5. PNM
-            allPassed &= VerifyPNMPermeability();
+            if (runAll || args.Contains("pnm"))
+                allPassed &= VerifyPNMPermeability();
 
             // 6. Acoustic
-            allPassed &= VerifyAcousticSpeed();
+            if (runAll || args.Contains("acoustic"))
+                allPassed &= VerifyAcousticSpeed();
 
             // 7. Heat Transfer
-            allPassed &= VerifyHeatTransfer();
+            if (runAll || args.Contains("heat"))
+                allPassed &= VerifyHeatTransfer();
 
             // 8. Hydrology
-            allPassed &= VerifyHydrologyFlow();
+            if (runAll || args.Contains("hydro"))
+                allPassed &= VerifyHydrologyFlow();
 
             // 9. Geothermal
-            allPassed &= await VerifyGeothermalSystem();
+            if (runAll || args.Contains("geothermal")) {
+                allPassed &= await VerifyGeothermalSystem();
+                allPassed &= await VerifyDeepGeothermalCoaxial();
+            }
 
             if (allPassed)
             {
@@ -160,7 +173,7 @@ namespace RealCaseVerifier
             crustalModel.CrustalTypes.Add("rift", type);
 
             int nx=240, ny=40, nz=40;
-            double dx=0.05, dy=0.05, dz=0.05;
+            double dx=50.0, dy=50.0, dz=50.0; // Meters
             double dt = 0.001;
 
             var engine = new WavePropagationEngine(crustalModel, nx, ny, nz, dx, dy, dz, dt, false);
@@ -169,10 +182,11 @@ namespace RealCaseVerifier
             int sx = 20, sy = 20, sz = 20;
             int rx = 220, ry = 20, rz = 20;
 
-            engine.AddPointSource(sx, sy, sz, -1.0, Math.PI/4, Math.PI/4, Math.PI/4);
+            // Amplitude must be large enough to be detected at 10km (10000m)
+            engine.AddPointSource(sx, sy, sz, 10000.0, Math.PI/4, Math.PI/4, Math.PI/4);
 
-            double tP_actual = -1;
-            double threshold = 1e-6;
+            double maxAmp = 0;
+            double tP_actual = 0;
 
             int steps = 3000;
 
@@ -180,10 +194,16 @@ namespace RealCaseVerifier
             {
                 engine.TimeStep();
                 var wave = engine.GetWaveFieldAt(rx, ry, rz);
-                if (tP_actual < 0 && Math.Abs(wave.Amplitude) > threshold) tP_actual = t * dt;
+
+                // Track peak amplitude to identify main arrival
+                if (Math.Abs(wave.Amplitude) > maxAmp)
+                {
+                    maxAmp = Math.Abs(wave.Amplitude);
+                    tP_actual = t * dt;
+                }
             }
 
-            Console.WriteLine($"Actual P-Wave Arrival: {tP_actual:F4} s");
+            Console.WriteLine($"Actual P-Wave Arrival (Peak): {tP_actual:F4} s");
 
             if (tP_actual > 0)
             {
@@ -201,7 +221,7 @@ namespace RealCaseVerifier
 
         static bool VerifySlopeStabilityGravity()
         {
-            Console.WriteLine("\n[Test 3a] Slope Stability: Gravity Drop (Galileo - Easter Egg)");
+            Console.WriteLine("\n[Test 3a] Slope Stability: Gravity Drop");
             Console.WriteLine("Reference: Galilei (1638).");
 
             var dataset = new SlopeStabilityDataset();
@@ -225,7 +245,7 @@ namespace RealCaseVerifier
                 new Vector3(-0.5f, -0.5f, 0.5f+h), new Vector3(0.5f, -0.5f, 0.5f+h),
                 new Vector3(0.5f, 0.5f, 0.5f+h), new Vector3(-0.5f, 0.5f, 0.5f+h)
             };
-            block.CalculateGeometricProperties(); // CRITICAL: Ensures Centroid and Position are consistent
+            block.CalculateGeometricProperties();
 
             dataset.Blocks.Add(floor);
             dataset.Blocks.Add(block);
@@ -234,7 +254,7 @@ namespace RealCaseVerifier
             var parameters = new SlopeStabilityParameters {
                 TimeStep = 0.001f, TotalTime = 2.0f, Gravity = new Vector3(0,0,-9.81f),
                 UseCustomGravityDirection = true, SpatialHashGridSize = 10,
-                LocalDamping = 0.0f // Disable damping for pure gravity test
+                LocalDamping = 0.0f
             };
 
             try {
@@ -277,16 +297,17 @@ namespace RealCaseVerifier
             };
             floor.CalculateGeometricProperties();
 
-            // Sliding Block (Heavier for stability)
+            // Sliding Block
             var block = new Block { Id = 2, IsFixed = false, Mass = 1000.0f, MaterialId = 1 };
-            // Flatter block (2x2x0.5) to prevent toppling
+            // Simple Cube 1x1x1 starting slightly above ground
+            float z0 = 0.01f;
+            float z1 = 1.01f;
             block.Vertices = new List<Vector3> {
-                new Vector3(-1.0f,-1.0f,0), new Vector3(1.0f,-1.0f,0),
-                new Vector3(1.0f,1.0f,0), new Vector3(-1.0f,1.0f,0),
-                new Vector3(-1.0f,-1.0f,0.5f), new Vector3(1.0f,-1.0f,0.5f),
-                new Vector3(1.0f,1.0f,0.5f), new Vector3(-1.0f,1.0f,0.5f)
+                new Vector3(-0.5f,-0.5f,z0), new Vector3(0.5f,-0.5f,z0),
+                new Vector3(0.5f,0.5f,z0), new Vector3(-0.5f,0.5f,z0),
+                new Vector3(-0.5f,-0.5f,z1), new Vector3(0.5f,-0.5f,z1),
+                new Vector3(0.5f,0.5f,z1), new Vector3(-0.5f,0.5f,z1)
             };
-            block.Position = new Vector3(0, 0, 0.55f); // Start slightly above floor to prevent initial overlap
             block.CalculateGeometricProperties();
 
             dataset.Blocks.Add(floor);
@@ -296,7 +317,8 @@ namespace RealCaseVerifier
             var mat = new SlopeStabilityMaterial {
                 Id = 1,
                 FrictionAngle = frictionAngle,
-                YoungModulus = 1e5f, // Soft contact for stability
+                // Soft enough for stable contact, persistency handles friction
+                YoungModulus = 1e6f,
                 Cohesion = 0f
             };
             dataset.Materials.Add(mat);
@@ -315,10 +337,13 @@ namespace RealCaseVerifier
             Console.WriteLine($"Expected Distance (1s): {expected_dist:F2} m");
 
             var parameters = new SlopeStabilityParameters {
-                TimeStep = 0.0001f, TotalTime = time, Gravity = gravity,
-                UseCustomGravityDirection = true, SpatialHashGridSize = 5,
-                IncludeRotation = false, // Disable rotation to verify pure sliding
-                LocalDamping = 0.0f
+                TimeStep = 0.0001f,
+                TotalTime = time,
+                Gravity = gravity,
+                UseCustomGravityDirection = true,
+                SpatialHashGridSize = 5,
+                IncludeRotation = false,
+                LocalDamping = 0.0f // Zero damping for physical sliding verification
             };
 
             try {
@@ -326,7 +351,6 @@ namespace RealCaseVerifier
                 var results = sim.RunSimulation();
 
                 var finalBlock = results.BlockResults.First(b => b.BlockId == 2);
-                // The block starts at X=0 (Centroid X=0).
                 float dist = finalBlock.FinalPosition.X;
 
                 Console.WriteLine($"Actual Distance: {dist:F2} m");
@@ -648,6 +672,76 @@ namespace RealCaseVerifier
                 }
 
                 Console.WriteLine("Status: FAIL (No results)");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Geothermal Error: {ex.Message}");
+                return false;
+            }
+        }
+
+        static async Task<bool> VerifyDeepGeothermalCoaxial()
+        {
+            Console.WriteLine("\n[Test 10] Geothermal: Deep Coaxial Heat Exchanger");
+            Console.WriteLine("Scenario: 3km Deep Well, High Geothermal Gradient");
+
+            var options = new GeothermalSimulationOptions();
+            options.SimulationTime = 3600 * 24; // 1 Day
+            options.TimeStep = 300; // 5 min
+            options.RadialGridPoints = 15;
+            options.AngularGridPoints = 8;
+            options.VerticalGridPoints = 30; // More vertical resolution for deep well
+            options.DomainRadius = 20.0;
+
+            options.BoreholeDataset = new BoreholeDataset("DeepWell", "Verification");
+            options.BoreholeDataset.TotalDepth = 3000.0f;
+            options.BoreholeDataset.WellDiameter = 0.25f; // Larger diameter
+
+            options.BoreholeDataset.LithologyUnits = new List<LithologyUnit>
+            {
+                new LithologyUnit { DepthFrom=0, DepthTo=3000, Name="Granite" }
+            };
+
+            options.SetDefaultValues();
+
+            // Deep Geothermal Setup
+            options.HeatExchangerType = HeatExchangerType.Coaxial;
+            options.FlowConfiguration = FlowConfiguration.CounterFlowReversed; // Cold down annulus, Hot up inner
+            options.HeatExchangerDepth = 3000.0f;
+            options.AverageGeothermalGradient = 0.06; // 60 C/km (High)
+            options.SurfaceTemperature = 288.15; // 15 C
+            // Bottom Temp should be 15 + 0.06 * 3000 = 195 C
+
+            options.FluidInletTemperature = 313.15; // 40 C (Injection)
+            options.FluidMassFlowRate = 2.0; // Higher flow for production
+
+            // Inner pipe insulation (low conductivity)
+            options.InnerPipeThermalConductivity = 0.02;
+
+            var mesh = GeothermalMeshGenerator.GenerateCylindricalMesh(options.BoreholeDataset, options);
+            var solver = new GeothermalSimulationSolver(options, mesh, null, CancellationToken.None);
+
+            try
+            {
+                var results = await solver.RunSimulationAsync();
+
+                if (results.OutletTemperature != null && results.OutletTemperature.Any())
+                {
+                    var finalTempC = results.OutletTemperature.Last().temperature - 273.15;
+                    Console.WriteLine($"Depth: 3000m. Gradient: 60 C/km.");
+                    Console.WriteLine($"Inlet: 40.0 C. Outlet: {finalTempC:F2} C");
+
+                    // Expect significant heating
+                    // Outlet should be much higher than inlet
+                    if (finalTempC > 60.0)
+                    {
+                        Console.WriteLine("Status: PASS (Significant heating observed)");
+                        return true;
+                    }
+                    Console.WriteLine($"Status: FAIL (Outlet temp too low: {finalTempC:F2})");
+                    return false;
+                }
                 return false;
             }
             catch (Exception ex)

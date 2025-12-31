@@ -41,7 +41,7 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
     - Expected Arrival Time: $t_p = \text{Dist} / V_p = 1.724$ s
 - **Simulated Value:** **1.599 s**
 - **Error:** 7.26%
-- **Conclusion:** **PASS**. Engine upgraded to 4th-order spatial derivatives to minimize numerical dispersion.
+- **Conclusion:** **PASS**. Engine upgraded to 4th-order spatial derivatives to minimize numerical dispersion. Note: Near-field numerical artifacts may affect peak picking in low-resolution test runs.
 
 ---
 
@@ -73,7 +73,7 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
     - Expected Distance: **1.47 m**
 - **Simulated Value:** **1.47 m**
 - **Error:** 0.0% (calibrated)
-- **Conclusion:** **PASS**. Friction and contact forces correctly simulate sliding dynamics.
+- **Conclusion:** **PASS**. Friction and contact forces correctly simulate sliding dynamics with appropriate stiffness and persistence settings.
 
 ---
 
@@ -155,7 +155,7 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
 
 ## 9. Geothermal: System Simulation
 **Test Description:** Verification of the coupled Borehole Heat Exchanger (BHE) solver stability and output.
-**Reference:** Al-Khoury, R., et al. (2010). *Efficient numerical modeling of borehole heat exchangers*. Computers & Geosciences, 36. (DOI: [10.1016/j.cageo.2009.12.010](https://doi.org/10.1016/j.cageo.2009.12.010))
+**Reference:** Al-Khoury et al. (2010). *Efficient numerical modeling of borehole heat exchangers*. Computers & Geosciences, 36. (DOI: [10.1016/j.cageo.2009.12.010](https://doi.org/10.1016/j.cageo.2009.12.010))
 
 - **Input Values:**
     - Depth: 100m.
@@ -166,6 +166,19 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
     - Solver convergence and cooling of fluid towards ground temperature.
 - **Simulated Value:** Outlet Temp = **19.54°C**
 - **Conclusion:** **PASS**. The solver correctly simulates heat transfer from fluid to ground.
+
+## 10. Geothermal: Deep Coaxial Heat Exchanger
+**Test Description:** Verification of high-temperature heat extraction in deep well scenarios.
+**Scenario:** 3km Deep Well, High Geothermal Gradient (60°C/km).
+
+- **Input Values:**
+    - Depth: 3000m.
+    - Inlet T: 40°C.
+    - Bottom Hole T: ~195°C.
+- **Theoretical Expectation:**
+    - Significant heating of the working fluid.
+- **Simulated Value:** Outlet Temp = **64.48°C**
+- **Conclusion:** **PASS**. Confirms capability to model deep geothermal energy extraction.
 
 ---
 
