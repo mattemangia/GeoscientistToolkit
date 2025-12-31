@@ -159,4 +159,20 @@
         <EmbeddedResource Include="image.png" />
     </ItemGroup>
 
+    <Target Name="BuildVerificationTests" AfterTargets="Build;Publish" Condition="'$(IsTestProject)' != 'true'">
+        <MSBuild Projects="Tests\VerificationTests\VerificationTests.csproj"
+                 Targets="Build"
+                 Properties="Configuration=$(Configuration);BuildProjectReferences=false" />
+        <ItemGroup>
+            <VerificationTestArtifacts Include="Tests\VerificationTests\bin\$(Configuration)\net8.0\**\*.*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(VerificationTestArtifacts)"
+              DestinationFolder="$(OutputPath)VerificationTests\%(RecursiveDir)"
+              SkipUnchangedFiles="true" />
+        <Copy SourceFiles="@(VerificationTestArtifacts)"
+              DestinationFolder="$(PublishDir)VerificationTests\%(RecursiveDir)"
+              SkipUnchangedFiles="true"
+              Condition="'$(PublishDir)' != ''" />
+    </Target>
+
 </Project>
