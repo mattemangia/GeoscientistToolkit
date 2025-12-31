@@ -15,4 +15,3 @@ Place your AI segmentation ONNX models in this directory:
 - vocab.txt
 
 Download models from the official repositories and follow the CTS model preparation instructions.
-
