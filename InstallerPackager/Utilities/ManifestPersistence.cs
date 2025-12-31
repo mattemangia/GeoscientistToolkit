@@ -17,11 +17,11 @@ internal static class ManifestPersistence
     {
         if (!File.Exists(path))
         {
-            Console.WriteLine($"Manifest non trovato in {path}. Creazione manifest di default...");
+            Console.WriteLine($"Manifest not found at {path}. Creating default manifest...");
             var defaultManifest = CreateDefaultManifest();
             await SaveAsync(path, defaultManifest, token).ConfigureAwait(false);
-            Console.WriteLine($"Manifest di default creato in {path}");
-            Console.WriteLine("Puoi modificare il manifest per aggiungere/rimuovere piattaforme o cambiare le opzioni.");
+            Console.WriteLine($"Default manifest created at {path}");
+            Console.WriteLine("You can edit the manifest to add/remove packages or tweak options.");
             return defaultManifest;
         }
 
@@ -37,27 +37,31 @@ internal static class ManifestPersistence
             {
                 new RuntimePackage
                 {
+                    PackageId = "imgui",
                     RuntimeIdentifier = "win-x64",
                     SelfContained = true,
-                    Description = "Windows 64-bit"
+                    Description = "Geoscientist's Toolkit (ImGui)"
                 },
                 new RuntimePackage
                 {
+                    PackageId = "imgui",
                     RuntimeIdentifier = "linux-x64",
                     SelfContained = true,
-                    Description = "Linux 64-bit"
+                    Description = "Geoscientist's Toolkit (ImGui)"
                 },
                 new RuntimePackage
                 {
+                    PackageId = "imgui",
                     RuntimeIdentifier = "osx-x64",
                     SelfContained = true,
-                    Description = "macOS Intel 64-bit"
+                    Description = "Geoscientist's Toolkit (ImGui)"
                 },
                 new RuntimePackage
                 {
+                    PackageId = "imgui",
                     RuntimeIdentifier = "osx-arm64",
                     SelfContained = true,
-                    Description = "macOS Apple Silicon (ARM64)"
+                    Description = "Geoscientist's Toolkit (ImGui)"
                 }
             }
         };

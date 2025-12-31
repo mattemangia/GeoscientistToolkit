@@ -4,6 +4,7 @@ using GeoscientistToolkit.InstallerPackager.Services;
 using GeoscientistToolkit.InstallerPackager.Utilities;
 using NStack;
 using Terminal.Gui;
+using TerminalGuiApplication = Terminal.Gui.Application;
 
 namespace GeoscientistToolkit.InstallerPackager.UI;
 
@@ -31,28 +32,28 @@ internal sealed class PackagerTui
         {
             _manifest = await ManifestPersistence.LoadOrCreateAsync(_settings.ManifestPath).ConfigureAwait(false);
 
-            Application.Init();
+            TerminalGuiApplication.Init();
             try
             {
                 CreateUI();
-                Application.Run();
+                TerminalGuiApplication.Run();
                 return 0;
             }
             finally
             {
-                Application.Shutdown();
+                TerminalGuiApplication.Shutdown();
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Errore TUI: {ex.Message}");
+            Console.Error.WriteLine($"TUI error: {ex.Message}");
             return 1;
         }
     }
 
     private void CreateUI()
     {
-        _window = new Window("GeoscientistToolkit - Installer Packager")
+        _window = new Window("Geoscientist's Toolkit - Installer Packager")
         {
             X = 0,
             Y = 0,
@@ -71,13 +72,14 @@ internal sealed class PackagerTui
         int yOffset = 2;
         foreach (var package in _manifest.Packages)
         {
-            var checkbox = new CheckBox($"{package.RuntimeIdentifier} - {package.Description}")
+            var label = $"{package.Description ?? package.PackageId} ({package.RuntimeIdentifier})";
+            var checkbox = new CheckBox(label)
             {
                 X = 3,
                 Y = yOffset++,
                 Checked = true
             };
-            _platformCheckboxes[package.RuntimeIdentifier] = checkbox;
+            _platformCheckboxes[GetPackageKey(package)] = checkbox;
             _window.Add(checkbox);
         }
 
@@ -179,7 +181,7 @@ internal sealed class PackagerTui
         };
         _window.Add(_logView);
 
-        Application.Top.Add(_window);
+        TerminalGuiApplication.Top.Add(_window);
     }
 
     private async void OnBuildClicked()
@@ -192,7 +194,7 @@ internal sealed class PackagerTui
 
         _buildButton.Enabled = false;
         _logView.Text = "";
-        LogMessage("Avvio build...\n");
+        LogMessage("Starting build...\n");
 
         try
         {
@@ -203,7 +205,7 @@ internal sealed class PackagerTui
 
             if (selectedPlatforms.Count == 0)
             {
-                LogMessage("ERRORE: Nessuna piattaforma selezionata!\n");
+                LogMessage("ERROR: No packages selected.\n");
                 return;
             }
 
@@ -220,19 +222,26 @@ internal sealed class PackagerTui
             };
 
             var packagesToBuild = manifest.Packages
-                .Where(p => selectedPlatforms.Contains(p.RuntimeIdentifier))
+                .Where(p => selectedPlatforms.Contains(GetPackageKey(p)))
                 .ToList();
 
             LogMessage($"Building {packagesToBuild.Count} package(s)...\n");
 
             var publisher = new PublishService();
             var buildService = new BuildService();
+            var installerService = new InstallerPublishService();
+            var publishedInstallers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var package in packagesToBuild)
             {
-                LogMessage($"\n=== Building {package.RuntimeIdentifier} ===\n");
+                LogMessage($"\n=== Building {package.PackageId} ({package.RuntimeIdentifier}) ===\n");
                 await buildService.BuildPackageAsync(package, settings, publisher, LogMessage).ConfigureAwait(false);
-                LogMessage($"✓ {package.RuntimeIdentifier} completed\n");
+                if (publishedInstallers.Add(package.RuntimeIdentifier))
+                {
+                    await installerService.PublishInstallerAsync(package.RuntimeIdentifier, settings, publisher, LogMessage)
+                        .ConfigureAwait(false);
+                }
+                LogMessage($"✓ {package.PackageId} ({package.RuntimeIdentifier}) completed\n");
             }
 
             await ManifestPersistence.SaveAsync(settings.ManifestPath, manifest).ConfigureAwait(false);
@@ -242,7 +251,7 @@ internal sealed class PackagerTui
         }
         catch (Exception ex)
         {
-            LogMessage($"\nERRORE: {ex.Message}\n");
+            LogMessage($"\nERROR: {ex.Message}\n");
             LogMessage($"{ex}\n");
         }
         finally
@@ -255,10 +264,15 @@ internal sealed class PackagerTui
     {
         if (_logView == null) return;
 
-        Application.MainLoop.Invoke(() =>
+        TerminalGuiApplication.MainLoop.Invoke(() =>
         {
             _logView.Text += message;
             _logView.MoveEnd();
         });
+    }
+
+    private static string GetPackageKey(RuntimePackage package)
+    {
+        return $"{package.PackageId}:{package.RuntimeIdentifier}";
     }
 }

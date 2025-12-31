@@ -1,130 +1,511 @@
 {
-  "version": "1.0.0",
-  "releaseNotesUrl": "https://github.com/example/GeoscientistToolkit/releases",
-  "minimumDotnetSdk": "8.0.100",
-  "prerequisites": [
+  "Version": "1.0.0",
+  "ReleaseNotesUrl": "https://github.com/example/GeoscientistToolkit/releases",
+  "MinimumDotnetSdk": "8.0.100",
+  "Packages": [
     {
-      "id": "disk-space",
-      "description": "Assicurarsi di avere spazio sufficiente sul disco di destinazione",
-      "command": "echo ok"
+      "PackageId": "imgui",
+      "RuntimeIdentifier": "win-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-imgui-win-x64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Geoscientist\u0027s Toolkit (ImGui)",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "imgui-app",
+          "DisplayName": "Geoscientist\u0027s Toolkit (ImGui)",
+          "RelativePath": "app-imgui",
+          "TargetSubdirectory": "",
+          "EntryExecutable": "GeoscientistToolkit.exe",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": true
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.cmd",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "gtk",
+      "RuntimeIdentifier": "win-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-gtk-win-x64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Geoscientist\u0027s Toolkit (GTK)",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "gtk-app",
+          "DisplayName": "Geoscientist\u0027s Toolkit (GTK)",
+          "RelativePath": "app-gtk",
+          "TargetSubdirectory": "",
+          "EntryExecutable": "GeoscientistToolkit.Gtk.exe",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": true
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.cmd",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "node-endpoint",
+      "RuntimeIdentifier": "win-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-node-endpoint-win-x64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Node Endpoint",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "node-endpoint",
+          "DisplayName": "Node Endpoint",
+          "RelativePath": "node-endpoint",
+          "TargetSubdirectory": "NodeEndpoint",
+          "EntryExecutable": "NodeEndpoint.exe",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": false
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.cmd",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "node-server",
+      "RuntimeIdentifier": "win-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-node-server-win-x64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Node Server",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "node-server",
+          "DisplayName": "Node Server",
+          "RelativePath": "node-server",
+          "TargetSubdirectory": "NodeServer",
+          "EntryExecutable": "NodeEndpoint.exe",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": false
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.cmd",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "imgui",
+      "RuntimeIdentifier": "linux-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-imgui-linux-x64.zip",
+      "Sha256": "5479f3d8fa9372f6e61828cb4c17559961c7a8bf6b9210af6d95dda61e128ddb",
+      "SizeBytes": 434512518,
+      "Description": "Geoscientist\u0027s Toolkit (ImGui)",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "imgui-app",
+          "DisplayName": "Geoscientist\u0027s Toolkit (ImGui)",
+          "RelativePath": "app-imgui",
+          "TargetSubdirectory": "",
+          "EntryExecutable": "GeoscientistToolkit",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": true
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "gtk",
+      "RuntimeIdentifier": "linux-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-gtk-linux-x64.zip",
+      "Sha256": "218086467ef543fed2c077aa38bbb903540dcd423726610b47d9de6cbb28d9ed",
+      "SizeBytes": 440678091,
+      "Description": "Geoscientist\u0027s Toolkit (GTK)",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "gtk-app",
+          "DisplayName": "Geoscientist\u0027s Toolkit (GTK)",
+          "RelativePath": "app-gtk",
+          "TargetSubdirectory": "",
+          "EntryExecutable": "GeoscientistToolkit.Gtk",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": true
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "node-endpoint",
+      "RuntimeIdentifier": "linux-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-node-endpoint-linux-x64.zip",
+      "Sha256": "e6f983a039d4e184da5bdc8e9bb96c9b82eff9af339c44fa06480d8e0d91c554",
+      "SizeBytes": 58056350,
+      "Description": "Node Endpoint",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "node-endpoint",
+          "DisplayName": "Node Endpoint",
+          "RelativePath": "node-endpoint",
+          "TargetSubdirectory": "NodeEndpoint",
+          "EntryExecutable": "NodeEndpoint",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": false
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "node-server",
+      "RuntimeIdentifier": "linux-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-node-server-linux-x64.zip",
+      "Sha256": "1c5447116efb6c0fcf5a986e26db07474be0c83f59be38a676ae7a63f56a588e",
+      "SizeBytes": 58056330,
+      "Description": "Node Server",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "node-server",
+          "DisplayName": "Node Server",
+          "RelativePath": "node-server",
+          "TargetSubdirectory": "NodeServer",
+          "EntryExecutable": "NodeEndpoint",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": false
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "imgui",
+      "RuntimeIdentifier": "osx-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-imgui-osx-x64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Geoscientist\u0027s Toolkit (ImGui)",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "imgui-app",
+          "DisplayName": "Geoscientist\u0027s Toolkit (ImGui)",
+          "RelativePath": "app-imgui",
+          "TargetSubdirectory": "",
+          "EntryExecutable": "GeoscientistToolkit",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": true
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "gtk",
+      "RuntimeIdentifier": "osx-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-gtk-osx-x64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Geoscientist\u0027s Toolkit (GTK)",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "gtk-app",
+          "DisplayName": "Geoscientist\u0027s Toolkit (GTK)",
+          "RelativePath": "app-gtk",
+          "TargetSubdirectory": "",
+          "EntryExecutable": "GeoscientistToolkit.Gtk",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": true
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "node-endpoint",
+      "RuntimeIdentifier": "osx-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-node-endpoint-osx-x64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Node Endpoint",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "node-endpoint",
+          "DisplayName": "Node Endpoint",
+          "RelativePath": "node-endpoint",
+          "TargetSubdirectory": "NodeEndpoint",
+          "EntryExecutable": "NodeEndpoint",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": false
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "node-server",
+      "RuntimeIdentifier": "osx-x64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-node-server-osx-x64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Node Server",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "node-server",
+          "DisplayName": "Node Server",
+          "RelativePath": "node-server",
+          "TargetSubdirectory": "NodeServer",
+          "EntryExecutable": "NodeEndpoint",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": false
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "imgui",
+      "RuntimeIdentifier": "osx-arm64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-imgui-osx-arm64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Geoscientist\u0027s Toolkit (ImGui)",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "imgui-app",
+          "DisplayName": "Geoscientist\u0027s Toolkit (ImGui)",
+          "RelativePath": "app-imgui",
+          "TargetSubdirectory": "",
+          "EntryExecutable": "GeoscientistToolkit",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": true
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "gtk",
+      "RuntimeIdentifier": "osx-arm64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-gtk-osx-arm64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Geoscientist\u0027s Toolkit (GTK)",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "gtk-app",
+          "DisplayName": "Geoscientist\u0027s Toolkit (GTK)",
+          "RelativePath": "app-gtk",
+          "TargetSubdirectory": "",
+          "EntryExecutable": "GeoscientistToolkit.Gtk",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": true
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "node-endpoint",
+      "RuntimeIdentifier": "osx-arm64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-node-endpoint-osx-arm64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Node Endpoint",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "node-endpoint",
+          "DisplayName": "Node Endpoint",
+          "RelativePath": "node-endpoint",
+          "TargetSubdirectory": "NodeEndpoint",
+          "EntryExecutable": "NodeEndpoint",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": false
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "PackageId": "node-server",
+      "RuntimeIdentifier": "osx-arm64",
+      "Transport": "Archive",
+      "SelfContained": true,
+      "PackageUrl": "https://example.com/installers/GeoscientistToolkit-node-server-osx-arm64.zip",
+      "Sha256": "",
+      "SizeBytes": 0,
+      "Description": "Node Server",
+      "AdditionalPublishArguments": null,
+      "Components": [
+        {
+          "Id": "node-server",
+          "DisplayName": "Node Server",
+          "RelativePath": "node-server",
+          "TargetSubdirectory": "NodeServer",
+          "EntryExecutable": "NodeEndpoint",
+          "DefaultSelected": true,
+          "SupportsDesktopShortcut": false
+        },
+        {
+          "Id": "onnx-installer",
+          "DisplayName": "ONNX model installer (optional)",
+          "RelativePath": "onnx-installer",
+          "TargetSubdirectory": "onnx-installer",
+          "EntryExecutable": "install-onnx-models.sh",
+          "DefaultSelected": false,
+          "SupportsDesktopShortcut": false
+        }
+      ]
     }
   ],
-  "packages": [
+  "Prerequisites": [
     {
-      "runtimeIdentifier": "win-x64",
-      "transport": "Archive",
-      "selfContained": true,
-      "description": "Windows 64 bit",
-      "packageUrl": "https://example.com/installers/GeoscientistToolkit-win-x64.zip",
-      "sha256": "",
-      "sizeBytes": 0,
-      "components": [
-        {
-          "id": "app",
-          "displayName": "Applicazione principale",
-          "relativePath": "app",
-          "targetSubdirectory": "",
-          "entryExecutable": "GeoscientistToolkit.exe",
-          "defaultSelected": true,
-          "supportsDesktopShortcut": true
-        },
-        {
-          "id": "node-endpoint",
-          "displayName": "Server endpoint Node",
-          "relativePath": "node-endpoint",
-          "targetSubdirectory": "NodeEndpoint",
-          "entryExecutable": "start-endpoint.cmd",
-          "defaultSelected": false,
-          "supportsDesktopShortcut": false
-        }
-      ]
-    },
-    {
-      "runtimeIdentifier": "linux-x64",
-      "transport": "Archive",
-      "selfContained": true,
-      "description": "Linux 64 bit",
-      "packageUrl": "https://example.com/installers/GeoscientistToolkit-linux-x64.zip",
-      "sha256": "",
-      "sizeBytes": 0,
-      "components": [
-        {
-          "id": "app",
-          "displayName": "Applicazione principale",
-          "relativePath": "app",
-          "targetSubdirectory": "",
-          "entryExecutable": "GeoscientistToolkit",
-          "defaultSelected": true,
-          "supportsDesktopShortcut": true
-        },
-        {
-          "id": "node-endpoint",
-          "displayName": "Server endpoint Node",
-          "relativePath": "node-endpoint",
-          "targetSubdirectory": "NodeEndpoint",
-          "entryExecutable": "start-endpoint.sh",
-          "defaultSelected": false,
-          "supportsDesktopShortcut": false
-        }
-      ]
-    },
-    {
-      "runtimeIdentifier": "osx-x64",
-      "transport": "Archive",
-      "selfContained": true,
-      "description": "macOS Intel",
-      "packageUrl": "https://example.com/installers/GeoscientistToolkit-osx-x64.zip",
-      "sha256": "",
-      "sizeBytes": 0,
-      "components": [
-        {
-          "id": "app",
-          "displayName": "Applicazione principale",
-          "relativePath": "app",
-          "targetSubdirectory": "",
-          "entryExecutable": "GeoscientistToolkit",
-          "defaultSelected": true,
-          "supportsDesktopShortcut": true
-        },
-        {
-          "id": "node-endpoint",
-          "displayName": "Server endpoint Node",
-          "relativePath": "node-endpoint",
-          "targetSubdirectory": "NodeEndpoint",
-          "entryExecutable": "start-endpoint.command",
-          "defaultSelected": false,
-          "supportsDesktopShortcut": false
-        }
-      ]
-    },
-    {
-      "runtimeIdentifier": "osx-arm64",
-      "transport": "Archive",
-      "selfContained": true,
-      "description": "macOS Apple Silicon",
-      "packageUrl": "https://example.com/installers/GeoscientistToolkit-osx-arm64.zip",
-      "sha256": "",
-      "sizeBytes": 0,
-      "components": [
-        {
-          "id": "app",
-          "displayName": "Applicazione principale",
-          "relativePath": "app",
-          "targetSubdirectory": "",
-          "entryExecutable": "GeoscientistToolkit",
-          "defaultSelected": true,
-          "supportsDesktopShortcut": true
-        },
-        {
-          "id": "node-endpoint",
-          "displayName": "Server endpoint Node",
-          "relativePath": "node-endpoint",
-          "targetSubdirectory": "NodeEndpoint",
-          "entryExecutable": "start-endpoint.command",
-          "defaultSelected": false,
-          "supportsDesktopShortcut": false
-        }
-      ]
+      "Id": "disk-space",
+      "Description": "Ensure there is enough free disk space on the target drive.",
+      "Command": "echo ok",
+      "HelpUrl": ""
     }
   ]
 }

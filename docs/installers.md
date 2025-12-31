@@ -1,65 +1,75 @@
-# Installer multi-piattaforma
+# Cross-platform installers
 
-L'ecosistema di installazione è composto da due progetti:
+The installer ecosystem is made of two projects:
 
-1. **InstallerPackager** (`net8.0` console) comprime i build `dotnet publish`, copia la cartella `ONNX/` e il server `NodeEndpoint` nelle sottocartelle `app/` e `node-endpoint/`, genera gli script `start-endpoint.*` e aggiorna automaticamente `docs/installer-manifest.json` con URL, dimensioni e hash SHA256 degli archivi.
-2. **InstallerWizard** (wizard TUI basato su [Terminal.Gui](https://github.com/gui-cs/Terminal.Gui)) scarica/legge gli archivi compressi, permette di scegliere runtime, componenti (app principale o endpoint) e shortcut desktop, supporta l'elevazione UAC su Windows e gestisce gli aggiornamenti automatici leggendo il manifest.
+1. **InstallerPackager** (`net8.0` console) publishes self-contained builds, creates per-product archives (ImGui, GTK, Node Server, Node Endpoint) and generates the installer executable for each runtime. It updates `docs/installer-manifest.json` with package URLs, sizes, and SHA256 hashes.
+2. **InstallerWizard** (ImGui + Terminal.Gui) downloads or reads the archives, lets users pick a package, installation folder, optional ONNX installer bundle, and desktop shortcuts. It supports UAC elevation on Windows and automatic updates by reading the manifest.
 
-## Prerequisiti
+## Prerequisites
 
-- .NET 8 SDK per eseguire il packager e per compilare i binari self-contained.
-- Modelli `.onnx` salvati dentro `ONNX/` (verranno copiati automaticamente nella cartella `ONNX` accanto all'eseguibile pubblicato).
-- Eventuale feed HTTP/HTTPS o spazio CDN dove pubblicare `docs/installer-manifest.json` e gli archivi prodotti.
+- .NET 8 SDK to run the packager and build self-contained binaries.
+- A place to publish `docs/installer-manifest.json` and the generated archives.
 
-Il wizard di installazione **non** richiede il .NET SDK sulle macchine target perché consuma gli archivi già compilati.
+The installer itself is self-contained, so target machines do **not** need the .NET SDK.
 
-## Configurazione dei manifest
+## Manifest configuration
 
-1. Aggiornare `docs/installer-manifest.json` con il numero di versione (`version`), la descrizione dei prerequisiti e i componenti (`components`) da visualizzare nel wizard. Ogni componente deve indicare `relativePath` (cartella all'interno dell'archivio) e `targetSubdirectory` (cartella finale sotto la directory di installazione).
-2. Personalizzare `InstallerWizard/installer-settings.json` per definire il nome prodotto, il percorso di default e l'URL pubblico del manifest.
-3. Personalizzare `InstallerPackager/packager-settings.json` per indicare dove salvare gli archivi (`PackagesOutputDirectory`), il prefisso degli URL (`PackageBaseUrl`), i percorsi dei progetti (`ProjectPath` e `NodeProjectPath`) e l'eventuale nome dell'eseguibile del server (`NodeExecutableName`).
+1. Update `docs/installer-manifest.json` with the version number, prerequisite descriptions, and package components shown in the installer. Each component must specify:
+   - `relativePath`: folder inside the archive
+   - `targetSubdirectory`: install destination under the chosen install root
+2. Update `InstallerWizard/installer-settings.json` to set the product name, default install path, and manifest URL for interactive runs.
+3. Update `InstallerPackager/packager-settings.json` to set the output directory, package base URL, and project paths for each product.
 
-## Creazione dei pacchetti
+## Creating packages
 
 ```bash
-# Da /workspace/GeoscientistToolkit
+# From /workspace/GeoscientistToolkit
 cd InstallerPackager
-# facoltativo: verificare/aggiornare packager-settings.json
+# Optional: verify/update packager-settings.json
 cat packager-settings.json
-# genera tutti gli archivi e aggiorna docs/installer-manifest.json
+# Build all packages and update docs/installer-manifest.json
+# Also publishes the installer executable per runtime
+# (output folder only contains the installer executable + archives)
 dotnet run --project InstallerPackager.csproj
 ```
 
-Il packager, per ogni runtime elencato nel manifest:
+For each runtime listed in the manifest, the packager:
 
-1. esegue `dotnet publish` per `GeoscientistToolkit` e `NodeEndpoint` creando bundle self-contained;
-2. copia la cartella `ONNX/` dentro `app/ONNX/` così da distribuire anche i modelli;
-3. crea gli script `start-endpoint.cmd`, `start-endpoint.sh`, `start-endpoint.command` dentro `node-endpoint/` puntando agli eseguibili pubblicati;
-4. comprime l'intera struttura (`app/` + `node-endpoint/`) in `artifacts/installers/<NomePacchetto>-<rid>.zip`;
-5. calcola SHA256 e dimensione e aggiorna `packageUrl`, `sha256`, `sizeBytes` nel manifest.
+1. Runs `dotnet publish` for the selected package project to produce a self-contained bundle.
+2. Adds the ONNX installer placeholder (scripts + optional `models/` content) to the payload.
+3. Compresses the payload into `artifacts/installers/<PackageName>-<packageId>-<rid>.zip`.
+4. Calculates SHA256 + size, and updates `packageUrl`, `sha256`, and `sizeBytes` in the manifest.
+5. Publishes the self-contained installer executable (one per runtime) into the same output directory.
 
-Pubblicare i file `.zip` nella posizione indicata da `PackageBaseUrl` e distribuire il manifest aggiornato.
+Publish the generated `.zip` files and the updated manifest where your installer can reach them.
 
-## Utilizzo dell'InstallerWizard
+## Using the InstallerWizard
 
-1. Compilare il wizard per le piattaforme desiderate (ad es. `dotnet publish InstallerWizard/InstallerWizard.csproj -c Release -r win-x64 --self-contained true`).
-2. Copiare l'eseguibile risultante insieme al `installer-settings.json` preconfigurato.
-3. All'avvio l'utente potrà:
-   - scegliere il runtime disponibile per quell'archivio;
-   - selezionare se installare l'app principale, il server endpoint o entrambi;
-   - decidere se creare i collegamenti desktop;
-   - elevare i privilegi UAC su Windows quando necessario per scrivere in `Program Files` o creare scorciatoie.
-4. Durante l'installazione gli archivi vengono scaricati/verificati (hash SHA256), decompressi e copiati nelle cartelle finali. Il wizard genera script di avvio e, se richiesto, i collegamenti desktop (`.lnk`, `.desktop`, `.command`).
+- The installer defaults to the ImGui UI and automatically falls back to the terminal UI when a graphical environment is unavailable.
+- You can override the UI on the command line:
+  - `--ui imgui`
+  - `--ui terminal`
+  - `--imgui`
+  - `--terminal`
 
-## Aggiornamenti automatici
+During installation the user can:
 
-- In `plan.InstallPath` viene salvato `install-info.json` con versione, runtime, componenti e URL del manifest.
-- Ad ogni avvio del wizard viene scaricato il manifest configurato e confrontato il campo `version` con quello installato.
-- Se il server fornisce un numero di versione maggiore, il wizard propone l'aggiornamento e scarica nuovamente gli archivi corrispondenti.
-- Per distribuire un aggiornamento è sufficiente rieseguire `InstallerPackager` (per rigenerare archivi/hash) e pubblicare il manifest aggiornato.
+- Choose a package (ImGui, GTK, Node Server, or Node Endpoint)
+- Pick a custom install folder
+- Optionally include the ONNX installer bundle
+- Create desktop shortcuts
+- Elevate privileges on Windows when required
 
-## Suggerimenti
+The installer downloads, verifies, extracts, and installs the selected components, then writes `install-info.json` in the install folder.
 
-- Inserire i modelli `.onnx` richiesti in `ONNX/` prima di lanciare il packager per evitare installazioni incomplete.
-- È possibile mantenere più copie di `packager-settings.json` per ambienti diversi (es. staging e production) e sostituire il file prima di lanciare il packager.
-- Nel manifest si possono aggiungere prerequisiti specifici della piattaforma (driver GPU, runtime aggiuntivi). Verranno mostrati nella schermata iniziale del wizard.
+## Automatic updates
+
+- `install-info.json` stores the installed version, runtime, package id, and selected components.
+- The installer checks the manifest on startup and offers updates when a newer version is available.
+- Re-run `InstallerPackager` and publish the updated manifest + archives to distribute updates.
+
+## Notes
+
+- Place ONNX models under `ONNX/` (or in the ONNX installer `models/` folder) before running the packager if you want them bundled.
+- Keep multiple `packager-settings.json` variants for staging/production as needed.
+- Add platform-specific prerequisites in the manifest (GPU drivers, extra runtimes). They appear on the welcome screen.

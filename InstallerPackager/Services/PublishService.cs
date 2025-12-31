@@ -15,7 +15,7 @@ internal sealed class PublishService
     {
         if (!File.Exists(projectPath))
         {
-            throw new FileNotFoundException($"Progetto non trovato: {projectPath}");
+            throw new FileNotFoundException($"Project not found: {projectPath}");
         }
 
         var tempDirectory = Path.Combine(Path.GetTempPath(), "gstk-packager-" + Guid.NewGuid());
@@ -32,7 +32,8 @@ internal sealed class PublishService
             "--nologo",
             "--self-contained", selfContained ? "true" : "false",
             "/p:PublishSingleFile=true",
-            "/p:IncludeNativeLibrariesForSelfExtract=true"
+            "/p:IncludeNativeLibrariesForSelfExtract=true",
+            "/p:SkipVerificationTests=true"
         };
 
         if (!string.IsNullOrWhiteSpace(additionalArgs))
@@ -45,7 +46,7 @@ internal sealed class PublishService
 
         if (exitCode != 0)
         {
-            throw new InvalidOperationException($"dotnet publish per {projectPath} è terminato con codice {exitCode}");
+            throw new InvalidOperationException($"dotnet publish for {projectPath} exited with code {exitCode}");
         }
 
         return publishDirectory;

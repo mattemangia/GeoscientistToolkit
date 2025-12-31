@@ -11,6 +11,7 @@ public sealed record InstallerManifest
 
 public sealed record RuntimePackage
 {
+    public string PackageId { get; init; } = "imgui";
     public string RuntimeIdentifier { get; init; } = "win-x64";
     public PackageTransport Transport { get; set; } = PackageTransport.Archive;
     public bool SelfContained { get; init; } = true;
