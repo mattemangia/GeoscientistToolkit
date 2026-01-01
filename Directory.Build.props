@@ -4,5 +4,6 @@
     <RestoreNoWarn>$(RestoreNoWarn);NU1701;NETSDK1206;CS8892</RestoreNoWarn>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <WarningLevel>0</WarningLevel>
   </PropertyGroup>
 </Project>

@@ -510,9 +510,9 @@ public class TriaxialSimulationTool : IDisposable
     {
         _availablePnmDatasets.Clear();
         var projectManager = ProjectManager.Instance;
-        if (projectManager?.Project?.Datasets == null) return;
+        if (projectManager?.LoadedDatasets == null) return;
 
-        foreach (var dataset in projectManager.Project.Datasets)
+        foreach (var dataset in projectManager.LoadedDatasets)
         {
             if (dataset is PNMDataset pnmDataset)
             {
@@ -533,9 +533,10 @@ public class TriaxialSimulationTool : IDisposable
         try
         {
             var loader = new PNMLoader();
-            var loadedDatasets = await loader.LoadAsync(filePath, new Progress<float>(), CancellationToken.None);
+            loader.FilePath = filePath;
+            var dataset = await loader.LoadAsync(new Progress<(float, string)>());
 
-            if (loadedDatasets != null && loadedDatasets.Count > 0 && loadedDatasets[0] is PNMDataset pnmDataset)
+            if (dataset is PNMDataset pnmDataset)
             {
                 _selectedPnmDataset = pnmDataset;
                 CalculatePnmProperties();
