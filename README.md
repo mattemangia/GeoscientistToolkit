@@ -24,14 +24,14 @@ Looking for a linear onboarding path? Start with [START_HERE.md](START_HERE.md) 
 
 ## Key Features
 
-### 🌍 Multi-Scale Analysis
+### Multi-Scale Analysis
 - **Pore-scale**: Micro-CT imaging, pore network modeling, NMR simulation
 - **Core-scale**: Rock physics, acoustic properties, thermal conductivity
 - **Well-scale**: Borehole/well log analysis, geothermal simulation
 - **Reservoir-scale**: Seismic analysis, 3D geological modeling
 - **Basin-scale**: Regional mapping, GIS integration
 
-### 📊 Comprehensive Data Support
+### Comprehensive Data Support
 
 | Data Type | Formats | Key Capabilities |
 |-----------|---------|------------------|
@@ -44,71 +44,71 @@ Looking for a linear onboarding path? Start with [START_HERE.md](START_HERE.md) 
 | **Tabular** | CSV, Excel | Data plotting, statistical analysis |
 | **Pore Networks** | Custom | Flow simulation, permeability calculation, tortuosity |
 
-### 🔬 Advanced Analysis Modules
+### Advanced Analysis Modules
 
 #### CT Imaging & Segmentation
-- 🖼️ Interactive 3D/2D/slice viewers with multi-planar reconstruction
-- 🖌️ Manual segmentation tools (brush, lasso, magic wand)
-- 🤖 AI-powered segmentation using ONNX models:
+- Interactive 3D/2D/slice viewers with multi-planar reconstruction
+- Manual segmentation tools (brush, lasso, magic wand)
+- AI-powered segmentation using ONNX models:
   - **SAM2** (Segment Anything Model v2)
   - **MicroSAM** (optimized for microscopy)
   - **Grounding DINO** (text-prompted segmentation)
-- 📐 Material definition and interpolation between slices
-- 🔄 Export to 3D meshes via Marching Cubes/Surface Nets
+- Material definition and interpolation between slices
+- Export to 3D meshes via Marching Cubes/Surface Nets
 
 #### Seismic Analysis
-- 📡 SEG-Y file loading and comprehensive visualization
-- 📊 Multiple display modes: wiggle trace, variable area, color maps
-- 🔗 **Borehole-Seismic Integration**:
+- SEG-Y file loading and comprehensive visualization
+- Multiple display modes: wiggle trace, variable area, color maps
+- **Borehole-Seismic Integration**:
   - Generate synthetic seismograms from well logs
   - Create pseudo-boreholes from seismic traces
   - Well-to-seismic tie with correlation analysis
   - Interactive correlation visualization
 
 #### Physical Property Simulations
-- 🌡️ **Thermal Conductivity** - Finite element heat transfer analysis
-- 🔊 **Acoustic Properties** - P-wave and S-wave velocity simulation
-- 🧲 **NMR Simulation** - T2 relaxation time calculation
-- 🪨 **Geomechanical Analysis** - Stress/strain, Mohr circles, failure prediction
-- 🧱 **Slope Stability (3D/2D)** - DEM-based block simulation and 2D cross-section stability analysis ([docs](docs/SLOPE_STABILITY_SIMULATION.md))
-- 💧 **Pore Network Modeling** - Permeability, tortuosity, flow simulation
-- 🧬 **Dual Pore Network Modeling** - Macro–micro pore coupling from CT + SEM with parallel/series/mass-transfer modes, micro-network extraction, and coupled permeability/reactive transport simulations
-- ♨️ **Geothermal Simulation** - Heat transfer and fluid flow in boreholes
+- **Thermal Conductivity** - Finite element heat transfer analysis
+- **Acoustic Properties** - P-wave and S-wave velocity simulation
+- **NMR Simulation** - T2 relaxation time calculation
+- **Geomechanical Analysis** - Stress/strain, Mohr circles, failure prediction
+- **Slope Stability (3D/2D)** - DEM-based block simulation and 2D cross-section stability analysis ([docs](docs/SLOPE_STABILITY_SIMULATION.md))
+- **Pore Network Modeling** - Permeability, tortuosity, flow simulation
+- **Dual Pore Network Modeling** - Macro–micro pore coupling from CT + SEM with parallel/series/mass-transfer modes, micro-network extraction, and coupled permeability/reactive transport simulations
+- **Geothermal Simulation** - Heat transfer and fluid flow in boreholes
 
 #### Thermodynamics & Geochemistry
-- 🧪 **Extended Compound Library** - 60+ additional silicates, carbonates, sulfates, chlorides, oxides, aqueous ions, and gases from Holland & Powell, PHREEQC, Robie & Hemingway, and SUPCRT92 datasets
-- 🧮 **GeoScript Thermo Commands** - `CALCULATE_PHASES` for phase-separated outputs, `CALCULATE_CARBONATE_ALKALINITY` for pH/alkalinity-driven carbonate speciation, and an enhanced `REACT` command with phase grouping and mineral identification
-- 🔁 **Equilibrium Workflow** - Gibbs energy minimization with element conservation, activity coefficients, and temperature-dependent constants for robust equilibrium calculations
+- **Extended Compound Library** - 60+ additional silicates, carbonates, sulfates, chlorides, oxides, aqueous ions, and gases from Holland & Powell, PHREEQC, Robie & Hemingway, and SUPCRT92 datasets
+- **GeoScript Thermo Commands** - `CALCULATE_PHASES` for phase-separated outputs, `CALCULATE_CARBONATE_ALKALINITY` for pH/alkalinity-driven carbonate speciation, and an enhanced `REACT` command with phase grouping and mineral identification
+- **Equilibrium Workflow** - Gibbs energy minimization with element conservation, activity coefficients, and temperature-dependent constants for robust equilibrium calculations
 
 #### 3D Visualization
-- 🎮 Hardware-accelerated rendering via Veldrid (OpenGL/Vulkan/DirectX)
-- 🔄 Real-time manipulation and interaction
-- 👀 Multiple viewport support with docking
-- 🪟 Pop-out window capability
-- 📸 High-resolution screenshot capture
+- Hardware-accelerated rendering via Veldrid (OpenGL/Vulkan/DirectX)
+- Real-time manipulation and interaction
+- Multiple viewport support with docking
+- Pop-out window capability
+- High-resolution screenshot capture
 
-### 🚀 Performance Features
+### Performance Features
 - GPU-accelerated simulations using OpenCL
 - Multi-threaded processing for large datasets
 - Efficient memory management for CT stacks
 - Real-time rendering at 60+ FPS
 
-### 🛰️ Earthquake & GIS Integration
+### Earthquake & GIS Integration
 - 3D earthquake simulation with corrected stress-tensor propagation
 - Generation of subsurface GIS volumes (PGA/PGV/PGD, stress, fracture density) from simulations
 - Depth-slice layers, per-location time series extraction, and 3D geology construction from 2D map selections with layered models
 
-### 🧭 Structural Geology & Restoration
+### Structural Geology & Restoration
 - Interactive 2D cross-section restoration with real-time overlays, opacity controls, and fault rendering
 - Slider-driven flexural slip unfolding/deformation with percentage controls to compare present-day vs restored geometry
 - Overlay indicators and visibility toggles to declutter original formations during restoration previews
 
-### ⚙️ PHYSICOCHEM Multiphysics Reactors
+### PHYSICOCHEM Multiphysics Reactors
 - Dataset builder for complex reactors (box/sphere/cylinder/cone/custom) with 2D-to-3D extrusion and revolutions
 - Comprehensive boundary conditions, force fields (gravity, vortex, centrifugal), nucleation sites, and reactive transport coupling
 - Parameter sweeps with sensitivity analysis and optional geothermal coupling for TOUGH-like scenarios
 
-### 🧪 GeoScript Dataset Pipelines
+### GeoScript Dataset Pipelines
 - Pipeline syntax (`|>`) for chaining dataset/image operations
 - Built-in filters (Gaussian, median, Sobel/Canny, bilateral, NLM, unsharp) and thresholding
 - Brightness/contrast, grayscale/inversion, and mask operations directly in scripts
@@ -453,10 +453,10 @@ This project builds upon excellent open-source libraries:
 
 ## Support & Community
 
-- 📖 **Documentation**: See [GUIDE.md](GUIDE.md) and `/docs` directory
-- 🐛 **Bug Reports**: [GitHub Issues](../../issues)
-- 💡 **Feature Requests**: [GitHub Discussions](../../discussions)
-- 📧 **Contact**: matteo.mangia@gmail.com
+- **Documentation**: See [GUIDE.md](GUIDE.md) and `/docs` directory
+- **Bug Reports**: [GitHub Issues](../../issues)
+- **Feature Requests**: [GitHub Discussions](../../discussions)
+- **Contact**: matteo.mangia@gmail.com
 
 ---
 
@@ -478,7 +478,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and version history.
 
 <div align="center">
 
-**Built with ❤️ for the geoscience community**
+**Built for the geoscience community**
 
 [Documentation](GUIDE.md) • [Report Bug](../../issues) • [Request Feature](../../discussions)
 

@@ -1,80 +1,80 @@
-# Guida Rapida: Avviare una Reazione di Esempio
+# Quick Guide: Starting a Sample Reaction
 
-**GeoscientistToolkit - Quick Start Guide per Simulazioni Reattive**
+**GeoscientistToolkit - Quick Start Guide for Reactive Simulations**
 
 ---
 
-## Indice
+## Table of Contents
 
-1. [Introduzione](#introduzione)
-2. [🚀 Start Veloce con Interfaccia GTK](#-start-veloce-con-interfaccia-gtk)
-3. [Esempio 1: Reazione Semplice in un Reattore Box](#esempio-1-reazione-semplice-in-un-reattore-box)
-4. [Esempio 2: Precipitazione di Calcite](#esempio-2-precipitazione-di-calcite)
-5. [Esempio 3: Trasporto Reattivo in PNM](#esempio-3-trasporto-reattivo-in-pnm)
-6. [Visualizzare i Risultati](#visualizzare-i-risultati)
+1. [Introduction](#introduction)
+2. [Quick Start with GTK Interface](#quick-start-with-gtk-interface)
+3. [Example 1: Simple Reaction in a Box Reactor](#example-1-simple-reaction-in-a-box-reactor)
+4. [Example 2: Calcite Precipitation](#example-2-calcite-precipitation)
+5. [Example 3: Reactive Transport in PNM](#example-3-reactive-transport-in-pnm)
+6. [Visualizing Results](#visualizing-results)
 7. [Troubleshooting](#troubleshooting)
 
 ---
 
-## Introduzione
+## Introduction
 
-GeoscientistToolkit offre due sistemi principali per simulazioni reattive:
+GeoscientistToolkit offers two main systems for reactive simulations:
 
-- **PhysicoChem**: Reattori multifisici con geometrie personalizzate (box, cilindri, sfere, mesh Voronoi)
-- **PNM Reactive Transport**: Trasporto reattivo attraverso reti di pori da immagini CT
+- **PhysicoChem**: Multiphysics reactors with custom geometries (box, cylinders, spheres, Voronoi meshes)
+- **PNM Reactive Transport**: Reactive transport through pore networks from CT images
 
-Questa guida ti mostra come avviare rapidamente una simulazione di esempio.
+This guide shows you how to quickly start a sample simulation.
 
 ---
 
-## 🚀 Start Veloce con Interfaccia GTK
+## Quick Start with GTK Interface
 
-### Il Modo più Semplice: Testare il Reattore di Default
+### The Simplest Way: Test the Default Reactor
 
-All'avvio, GeoscientistToolkit GTK crea automaticamente un **reattore esotermico di default** pronto per essere testato!
+On startup, GeoscientistToolkit GTK automatically creates a **default exothermic reactor** ready to be tested!
 
-#### Passo 1: Avviare l'Applicazione GTK
+#### Step 1: Launch the GTK Application
 
 ```bash
 cd GeoscientistToolkit
 ./bin/GeoscientistToolkit-gtk
-# oppure su Windows: bin\GeoscientistToolkit-gtk.exe
+# or on Windows: bin\GeoscientistToolkit-gtk.exe
 ```
 
-#### Passo 2: Visualizzare il Reattore di Default
+#### Step 2: View the Default Reactor
 
-Quando l'applicazione si apre, vedrai:
+When the application opens, you'll see:
 
-1. **Pannello sinistro**: Lista dei dataset
-   - Dovrebbe esserci `Default Exothermic Reactor` già caricato
-2. **Pannello centrale**: Viewport 3D
-3. **Pannello destro**: Opzioni di visualizzazione e controlli
+1. **Left panel**: Dataset list
+   - There should be `Default Exothermic Reactor` already loaded
+2. **Center panel**: 3D viewport
+3. **Right panel**: Visualization options and controls
 
-**Clicca** sul dataset `Default Exothermic Reactor` per selezionarlo.
+**Click** on the `Default Exothermic Reactor` dataset to select it.
 
-#### Passo 3: Visualizzare la Mesh 3D
+#### Step 3: Visualize the 3D Mesh
 
-Il reattore di default è un cubo con una griglia **3x3x3** di celle (27 celle totali):
+The default reactor is a cube with a **3x3x3** cell grid (27 total cells):
 
-- **Dimensioni**: Larghezza 6.0m, Altezza 6.0m, Profondità 6.0m
-- **Reactanti iniziali**:
+- **Dimensions**: Width 6.0m, Height 6.0m, Depth 6.0m
+- **Initial reactants**:
   - `ReactantA`: 5.0 mol/L
   - `ReactantB`: 3.0 mol/L
-  - `Product`: 0.0 mol/L (si forma durante la reazione)
+  - `Product`: 0.0 mol/L (forms during reaction)
   - `Catalyst`: 0.01 mol/L
-- **Temperatura iniziale**: 298.15 K (25°C)
-- **Reazione esotermica**: ReactantA + ReactantB → Product + Calore
+- **Initial temperature**: 298.15 K (25°C)
+- **Exothermic reaction**: ReactantA + ReactantB → Product + Heat
 
-Nel **Viewport 3D**:
-- Dovresti vedere **27 box** disposti in una griglia 3D
-- Ruota la vista con **mouse destro + trascina**
-- Zoom con **rotella del mouse**
-- Pan con **mouse centrale + trascina**
+In the **3D Viewport**:
+- You should see **27 boxes** arranged in a 3D grid
+- Rotate the view with **right mouse + drag**
+- Zoom with **mouse wheel**
+- Pan with **middle mouse + drag**
 
-#### Passo 4: Ispezionare le Celle
+#### Step 4: Inspect Cells
 
-1. **Clicca su una cella** (box) nel viewport 3D
-2. Nel pannello destro vedrai:
+1. **Click on a cell** (box) in the 3D viewport
+2. In the right panel you'll see:
    ```
    Selected Cell: Cell_13
    Temperature: 298.15 K
@@ -88,57 +88,57 @@ Nel **Viewport 3D**:
      Catalyst: 0.01 mol/L
    ```
 
-#### Passo 5: Selezionare un Piano di Celle
+#### Step 5: Select a Plane of Cells
 
-Nel pannello destro, sezione **"Plane Selection"**:
+In the right panel, **"Plane Selection"** section:
 
-1. Clicca su **"Select XY plane"** → Seleziona tutte le celle sullo stesso piano orizzontale
-2. Clicca su **"Select XZ plane"** → Seleziona celle su piano verticale lungo X
-3. Clicca su **"Select YZ plane"** → Seleziona celle su piano verticale lungo Y
+1. Click on **"Select XY plane"** → Selects all cells on the same horizontal plane
+2. Click on **"Select XZ plane"** → Selects cells on vertical plane along X
+3. Click on **"Select YZ plane"** → Selects cells on vertical plane along Y
 
-Le celle selezionate vengono evidenziate in **ciano brillante**.
+Selected cells are highlighted in **bright cyan**.
 
-#### Passo 6: Configurare una Reazione
+#### Step 6: Configure a Reaction
 
-Per configurare le specie chimiche e le reazioni:
+To configure chemical species and reactions:
 
-1. **Menu superiore** → `Tools` → `Configure Species...`
-2. Si apre un dialogo dove puoi:
-   - Aggiungere nuove specie chimiche
-   - Modificare concentrazioni iniziali
-   - Configurare reazioni chimiche
+1. **Upper menu** → `Tools` → `Configure Species...`
+2. A dialog opens where you can:
+   - Add new chemical species
+   - Modify initial concentrations
+   - Configure chemical reactions
 
-Oppure usa il **GeoScript** (vedi sotto).
+Or use **GeoScript** (see below).
 
 ---
 
-### Creare un Nuovo Reattore da Zero
+### Creating a New Reactor from Scratch
 
-#### Passo 1: Creare un Nuovo Dataset PhysicoChem
+#### Step 1: Create a New PhysicoChem Dataset
 
-Nella **toolbar superiore**:
-- Clicca sul pulsante **"Add PhysicoChem"** (icona con simbolo fisico-chimico)
+In the **upper toolbar**:
+- Click the **"Add PhysicoChem"** button (icon with physico-chemical symbol)
 
-Oppure:
+Or:
 - **Menu** → `File` → `New project`
 
-Verrà creato un nuovo dataset vuoto chiamato `PhysicoChem_HHmmss`.
+A new empty dataset called `PhysicoChem_HHmmss` will be created.
 
-#### Passo 2: Creare un Dominio (Reattore)
+#### Step 2: Create a Domain (Reactor)
 
-1. **Toolbar** → Clicca su **"Create Domain"** (icona mesh)
+1. **Toolbar** → Click on **"Create Domain"** (mesh icon)
 
-   **Oppure:** `Tools` → `Create Domain...`
+   **Or:** `Tools` → `Create Domain...`
 
-2. Si apre il **Domain Creator Dialog** con le seguenti opzioni:
+2. The **Domain Creator Dialog** opens with the following options:
 
-   **a) Nome del Dominio**
+   **a) Domain Name**
    ```
-   Domain Name: [ReattorePrincipale]
+   Domain Name: [MainReactor]
    ```
 
-   **b) Tipo di Geometria** (seleziona dal menu a tendina):
-   - `Box (Rectangular)` ← **Scelta più semplice**
+   **b) Geometry Type** (select from dropdown):
+   - `Box (Rectangular)` ← **Simplest choice**
    - `Sphere`
    - `Cylinder`
    - `Cone`
@@ -146,15 +146,15 @@ Verrà creato un nuovo dataset vuoto chiamato `PhysicoChem_HHmmss`.
    - `Parallelepiped`
    - `Custom 2D Extrusion`
    - `Custom 3D Mesh`
-   - `Voronoi` ← **Mesh casuale**
+   - `Voronoi` ← **Random mesh**
 
-   **c) Materiale** (seleziona dal menu):
-   - Se hai materiali nella libreria, selezionali qui
-   - Altrimenti lascia `(None)` e configuralo dopo
+   **c) Material** (select from menu):
+   - If you have materials in the library, select them here
+   - Otherwise leave `(None)` and configure later
 
-   **d) Parametri Geometrici** (cambiano in base al tipo):
+   **d) Geometric Parameters** (change based on type):
 
-   **Per Box:**
+   **For Box:**
    ```
    Center X (m):  0.0
    Center Y (m):  0.0
@@ -164,7 +164,7 @@ Verrà creato un nuovo dataset vuoto chiamato `PhysicoChem_HHmmss`.
    Height (m):    10.0
    ```
 
-   **Per Cylinder:**
+   **For Cylinder:**
    ```
    Base Center X (m): 0.0
    Base Center Y (m): 0.0
@@ -176,7 +176,7 @@ Verrà creato un nuovo dataset vuoto chiamato `PhysicoChem_HHmmss`.
    Height (m):  10.0
    ```
 
-   **Per Voronoi (mesh casuale):**
+   **For Voronoi (random mesh):**
    ```
    Number of Sites: 100
    Width (m):  10.0
@@ -184,62 +184,62 @@ Verrà creato un nuovo dataset vuoto chiamato `PhysicoChem_HHmmss`.
    Height (m): 10.0
    ```
 
-   **e) Opzioni**:
-   - ✅ `Domain is active` (lascia selezionato)
-   - ✅ `Allow interaction with other domains` (se vuoi che i reactanti si mescolino)
+   **e) Options**:
+   - ✅ `Domain is active` (leave selected)
+   - ✅ `Allow interaction with other domains` (if you want reactants to mix)
 
-3. Clicca **"Create"**
+3. Click **"Create"**
 
-Il dominio viene creato e la mesh viene generata automaticamente!
+The domain is created and the mesh is generated automatically!
 
-#### Passo 3: Configurare le Specie Chimiche
+#### Step 3: Configure Chemical Species
 
 1. **Menu** → `Tools` → `Configure Species...`
 
-2. Nel dialogo che si apre:
-   - **Nome specie**: `Ca2+`
-   - **Concentrazione iniziale**: `0.01` mol/L
-   - Clicca **"Add"**
+2. In the dialog that opens:
+   - **Species name**: `Ca2+`
+   - **Initial concentration**: `0.01` mol/L
+   - Click **"Add"**
 
-3. Ripeti per altre specie:
+3. Repeat for other species:
    - `CO3^2-`: `0.01` mol/L
    - `Cl-`: `0.02` mol/L
-   - ecc.
+   - etc.
 
-#### Passo 4: Impostare Boundary Conditions
+#### Step 4: Set Boundary Conditions
 
 1. **Menu** → `Tools` → `Set Boundary Conditions...`
 
-2. Scegli il tipo di condizione al contorno:
-   - **Inlet** (ingresso reactanti)
-   - **Outlet** (uscita prodotti)
-   - **Fixed Temperature** (temperatura fissata)
-   - **Heat Flux** (flusso di calore)
-   - **No-Slip Wall** (parete solida)
+2. Choose the type of boundary condition:
+   - **Inlet** (reactant inlet)
+   - **Outlet** (product outlet)
+   - **Fixed Temperature** (fixed temperature)
+   - **Heat Flux** (heat flow)
+   - **No-Slip Wall** (solid wall)
 
-3. Esempio - Inlet di Ca²⁺:
+3. Example - Ca²⁺ Inlet:
    ```
-   Name: InletCalcio
+   Name: CalciumInlet
    Type: Inlet
-   Location: X Min (faccia sinistra)
+   Location: X Min (left face)
    Variable: Concentration
    Species: Ca2+
    Value: 0.05 mol/L
    ```
 
-#### Passo 5: Aggiungere Forze (Opzionale)
+#### Step 5: Add Forces (Optional)
 
 1. **Menu** → `Tools` → `Force Field Editor...`
 
-2. Scegli tipo di forza:
-   - **Gravity** (gravità)
-   - **Vortex** (flusso vorticoso)
-   - **Centrifugal** (forza centrifuga)
-   - **Custom** (personalizzato)
+2. Choose force type:
+   - **Gravity** (gravity)
+   - **Vortex** (vortex flow)
+   - **Centrifugal** (centrifugal force)
+   - **Custom** (custom)
 
-3. Esempio - Gravità:
+3. Example - Gravity:
    ```
-   Name: Gravità
+   Name: Gravity
    Type: Gravity
    Gravity Vector:
      X: 0.0
@@ -247,165 +247,165 @@ Il dominio viene creato e la mesh viene generata automaticamente!
      Z: -9.81
    ```
 
-#### Passo 6: Eseguire la Simulazione
+#### Step 6: Run the Simulation
 
-**Metodo 1: Interfaccia grafica** (se disponibile)
-- Clicca su **"Run Simulation"**
+**Method 1: Graphical interface** (if available)
+- Click on **"Run Simulation"**
 
-**Metodo 2: GeoScript** (consigliato)
+**Method 2: GeoScript** (recommended)
 
-1. **Clicca sul tab "GeoScript"** nel pannello inferiore
+1. **Click on the "GeoScript" tab** in the lower panel
 
-2. Scrivi lo script:
+2. Write the script:
 
 ```geoscript
-# Configura parametri simulazione
+# Configure simulation parameters
 SET_SIM_PARAMS 3600 1.0 true true true
-# Argomenti: tempo_totale(s) time_step(s) enable_flow enable_heat enable_reactions
+# Arguments: total_time(s) time_step(s) enable_flow enable_heat enable_reactions
 
-# Esegui simulazione
+# Run simulation
 RUN_PHYSICOCHEM_SIMULATION
 
-# Esporta risultati
-EXPORT_RESULTS ./risultati_reazione
+# Export results
+EXPORT_RESULTS ./reaction_results
 ```
 
-3. Clicca **"Run Script"** o premi `Ctrl+Enter`
+3. Click **"Run Script"** or press `Ctrl+Enter`
 
-#### Passo 7: Visualizzare i Risultati
+#### Step 7: Visualize Results
 
-Dopo la simulazione:
+After the simulation:
 
-1. **Color Mode** (pannello destro):
-   - Seleziona `Temperature` per vedere il campo di temperatura
-   - Seleziona `Pressure` per vedere il campo di pressione
-   - Seleziona `Concentration` e scegli una specie (es. `Ca2+`)
+1. **Color Mode** (right panel):
+   - Select `Temperature` to see temperature field
+   - Select `Pressure` to see pressure field
+   - Select `Concentration` and choose a species (e.g., `Ca2+`)
 
 2. **Render Mode**:
-   - `Wireframe`: Solo bordi delle celle
-   - `Solid`: Celle solide colorate
-   - `Points`: Solo centri delle celle
+   - `Wireframe`: Only cell edges
+   - `Solid`: Solid colored cells
+   - `Points`: Only cell centers
 
-3. **Slicing** (taglio 3D):
-   - ✅ Abilita `Enable Slicing`
-   - Muovi lo slider per tagliare il reattore e vedere l'interno
+3. **Slicing** (3D cutting):
+   - ✅ Enable `Enable Slicing`
+   - Move the slider to cut the reactor and see inside
 
 ---
 
-### Esempio Completo GTK: Reazione Ca²⁺ + CO₃²⁻ → CaCO₃
+### Complete GTK Example: Ca²⁺ + CO₃²⁻ → CaCO₃ Reaction
 
-#### Script GeoScript Completo
+#### Complete GeoScript Script
 
-Crea un file `test_calcite_gtk.geoscript` con:
+Create a file `test_calcite_gtk.geoscript` with:
 
 ```geoscript
 # ========================================
-# Test Precipitazione Calcite - GTK
+# Calcite Precipitation Test - GTK
 # ========================================
 
-# 1. Crea nuovo dataset PhysicoChem
-# (oppure usa quello di default già caricato)
+# 1. Create new PhysicoChem dataset
+# (or use the already loaded default one)
 
-# 2. Aggiungi le specie chimiche
+# 2. Add chemical species
 ADD_SPECIES Ca2+ 0.02
 ADD_SPECIES CO3^2- 0.02
 ADD_SPECIES Na+ 0.01
 ADD_SPECIES Cl- 0.01
 
-# 3. Imposta concentrazioni iniziali per tutte le celle
+# 3. Set initial concentrations for all cells
 SET_INITIAL_CONCENTRATION Ca2+ 0.01
 SET_INITIAL_CONCENTRATION CO3^2- 0.01
 
-# 4. Configura boundary condition - Inlet con alta concentrazione
+# 4. Configure boundary condition - Inlet with high concentration
 ADD_BOUNDARY_CONDITION Inlet XMin Concentration Ca2+ 0.05
 ADD_BOUNDARY_CONDITION Inlet XMin Concentration CO3^2- 0.05
 
-# 5. Aggiungi gravità
+# 5. Add gravity
 ADD_FORCE Gravity 0 0 -9.81
 
-# 6. Configura parametri simulazione
+# 6. Configure simulation parameters
 SET_SIM_PARAMS 1800 0.5 true true true
-# 30 minuti, timestep 0.5s, flow ON, heat ON, reactions ON
+# 30 minutes, timestep 0.5s, flow ON, heat ON, reactions ON
 
-# 7. Abilita nucleazione
+# 7. Enable nucleation
 ENABLE_NUCLEATION Calcite 0.0 0.0 0.0 1e6 1.2
-# Argomenti: minerale X Y Z rate critical_supersaturation
+# Arguments: mineral X Y Z rate critical_supersaturation
 
-# 8. Esegui simulazione
+# 8. Run simulation
 RUN_PHYSICOCHEM_SIMULATION
 
-# 9. Stampa risultati
-PRINT "Simulazione completata!"
-PRINT "Visualizza i risultati con Color Mode → Concentration → Ca2+"
-PRINT "Oppure Color Mode → Mineral Precipitation → Calcite"
+# 9. Print results
+PRINT "Simulation completed!"
+PRINT "Visualize results with Color Mode → Concentration → Ca2+"
+PRINT "Or Color Mode → Mineral Precipitation → Calcite"
 
-# 10. Esporta
-EXPORT_RESULTS ./risultati_calcite_gtk
+# 10. Export
+EXPORT_RESULTS ./calcite_gtk_results
 ```
 
-#### Eseguire lo Script
+#### Running the Script
 
-1. **Nel tab GeoScript** dell'applicazione GTK
-2. Incolla il contenuto sopra
-3. Clicca **"Run Script"**
-4. Osserva la simulazione in tempo reale nel viewport 3D!
-
----
-
-### Tips per l'Interfaccia GTK
-
-#### Navigazione 3D
-- **Ruota**: Mouse destro + trascina
-- **Zoom**: Rotella mouse
-- **Pan**: Mouse centrale + trascina (o Shift + mouse destro)
-
-#### Selezione Celle
-- **Singola cella**: Click sinistro sulla cella
-- **Piano XY**: Pulsante "Select XY plane"
-- **Piano XZ**: Pulsante "Select XZ plane"
-- **Piano YZ**: Pulsante "Select YZ plane"
-- **Deseleziona tutto**: Click su sfondo
-
-#### Visualizzazione
-- **Wireframe**: Vedi solo gli spigoli (più veloce)
-- **Solid**: Celle colorate piene (più chiaro)
-- **Slicing**: Taglia il reattore per vedere l'interno
-- **Isosurface**: Mostra superfici a valore costante
-
-#### Camera Controls (pannello destro)
-- **Yaw**: Rotazione orizzontale (-180° a 180°)
-- **Pitch**: Inclinazione verticale (-90° a 90°)
-- **Zoom**: Livello di zoom (0.1x a 8x)
-- **Reset View**: Torna alla vista di default
+1. **In the GeoScript tab** of the GTK application
+2. Paste the content above
+3. Click **"Run Script"**
+4. Watch the simulation in real-time in the 3D viewport!
 
 ---
 
-## Esempio 1: Reazione Semplice in un Reattore Box
+### Tips for GTK Interface
+
+#### 3D Navigation
+- **Rotate**: Right mouse + drag
+- **Zoom**: Mouse wheel
+- **Pan**: Middle mouse + drag (or Shift + right mouse)
+
+#### Cell Selection
+- **Single cell**: Left click on the cell
+- **XY plane**: "Select XY plane" button
+- **XZ plane**: "Select XZ plane" button
+- **YZ plane**: "Select YZ plane" button
+- **Deselect all**: Click on background
+
+#### Visualization
+- **Wireframe**: See only edges (faster)
+- **Solid**: Full colored cells (clearer)
+- **Slicing**: Cut the reactor to see inside
+- **Isosurface**: Show surfaces at constant value
+
+#### Camera Controls (right panel)
+- **Yaw**: Horizontal rotation (-180° to 180°)
+- **Pitch**: Vertical tilt (-90° to 90°)
+- **Zoom**: Zoom level (0.1x to 8x)
+- **Reset View**: Return to default view
+
+---
+
+## Example 1: Simple Reaction in a Box Reactor
 
 ### Scenario
-Due box sovrapposti con reactanti diversi che possono mescolarsi attraverso un'interfaccia.
+Two stacked boxes with different reactants that can mix through an interface.
 
-### Codice C#
+### C# Code
 
 ```csharp
 using GeoscientistToolkit.Data.PhysicoChem;
 using GeoscientistToolkit.Analysis.PhysicoChem;
 
-// Crea il dataset
-var dataset = new PhysicoChemDataset("ReattoreSemplice",
-    "Due box sovrapposti con reactanti Ca2+ e HCO3-");
+// Create the dataset
+var dataset = new PhysicoChemDataset("SimpleReactor",
+    "Two stacked boxes with Ca2+ and HCO3- reactants");
 
-// Box superiore con Ca2+ (ione calcio)
-var topBox = new ReactorDomain("BoxSuperiore", new ReactorGeometry
+// Top box with Ca2+ (calcium ion)
+var topBox = new ReactorDomain("TopBox", new ReactorGeometry
 {
     Type = GeometryType.Box,
-    Center = (0.5, 0.5, 0.75),  // Centro in metri
-    Dimensions = (1.0, 1.0, 0.5) // Larghezza x Profondità x Altezza (m)
+    Center = (0.5, 0.5, 0.75),  // Center in meters
+    Dimensions = (1.0, 1.0, 0.5) // Width x Depth x Height (m)
 });
 
 topBox.Material = new MaterialProperties
 {
-    Porosity = 0.3,           // 30% porosità
+    Porosity = 0.3,           // 30% porosity
     Permeability = 1e-12      // m²
 };
 
@@ -420,8 +420,8 @@ topBox.InitialConditions = new InitialConditions
     }
 };
 
-// Box inferiore con HCO3- (bicarbonato)
-var bottomBox = new ReactorDomain("BoxInferiore", new ReactorGeometry
+// Bottom box with HCO3- (bicarbonate)
+var bottomBox = new ReactorDomain("BottomBox", new ReactorGeometry
 {
     Type = GeometryType.Box,
     Center = (0.5, 0.5, 0.25),
@@ -439,74 +439,74 @@ bottomBox.InitialConditions = new InitialConditions
     }
 };
 
-// Aggiungi i domini
+// Add the domains
 dataset.AddDomain(topBox);
 dataset.AddDomain(bottomBox);
 
-// Crea interfaccia interattiva tra i box
-var boundary = new BoundaryCondition("Interfaccia",
+// Create interactive interface between boxes
+var boundary = new BoundaryCondition("Interface",
     BoundaryType.Interactive,
     BoundaryLocation.Custom);
 
-boundary.CustomRegionCenter = (0.5, 0.5, 0.5); // All'interfaccia
+boundary.CustomRegionCenter = (0.5, 0.5, 0.5); // At the interface
 boundary.CustomRegionRadius = 0.1;
-boundary.IsActive = true; // I reactanti possono mescolarsi
+boundary.IsActive = true; // Reactants can mix
 
 dataset.BoundaryConditions.Add(boundary);
 
-// Aggiungi gravità
-var gravity = new ForceField("Gravità", ForceType.Gravity)
+// Add gravity
+var gravity = new ForceField("Gravity", ForceType.Gravity)
 {
     GravityVector = (0, 0, -9.81)
 };
 dataset.Forces.Add(gravity);
 
-// Configura la simulazione
-dataset.SimulationParams.TotalTime = 3600.0;      // 1 ora
-dataset.SimulationParams.TimeStep = 1.0;          // 1 secondo
+// Configure simulation
+dataset.SimulationParams.TotalTime = 3600.0;      // 1 hour
+dataset.SimulationParams.TimeStep = 1.0;          // 1 second
 dataset.SimulationParams.EnableReactiveTransport = true;
 dataset.SimulationParams.EnableFlow = true;
 dataset.SimulationParams.EnableHeatTransfer = true;
 
-// Esegui la simulazione
+// Run the simulation
 var solver = new PhysicoChemSolver(dataset);
 solver.RunSimulation();
 
-// Analizza i risultati
+// Analyze results
 var finalState = dataset.CurrentState;
-Console.WriteLine($"Temperatura media finale: {finalState.Temperature.Average()} K");
-Console.WriteLine($"Simulazione completata!");
+Console.WriteLine($"Final average temperature: {finalState.Temperature.Average()} K");
+Console.WriteLine($"Simulation completed!");
 ```
 
-### Cosa fa questo codice?
+### What does this code do?
 
-1. **Crea due box** separati verticalmente
-2. Box superiore contiene **Ca²⁺** (calcio)
-3. Box inferiore contiene **HCO₃⁻** (bicarbonato)
-4. All'interfaccia i reactanti si mescolano e possono reagire formando **CaCO₃** (calcite)
-5. La gravità influenza il flusso verso il basso
+1. **Creates two boxes** separated vertically
+2. Top box contains **Ca²⁺** (calcium)
+3. Bottom box contains **HCO₃⁻** (bicarbonate)
+4. At the interface reactants mix and can react forming **CaCO₃** (calcite)
+5. Gravity influences downward flow
 
 ---
 
-## Esempio 2: Precipitazione di Calcite
+## Example 2: Calcite Precipitation
 
 ### Scenario
-Reattore cilindrico con flusso vorticoso dove il calcio e carbonato precipitano formando calcite.
+Cylindrical reactor with vortex flow where calcium and carbonate precipitate forming calcite.
 
-### Codice C#
+### C# Code
 
 ```csharp
-// Crea reattore cilindrico
-var dataset = new PhysicoChemDataset("ReattoreCalcite",
-    "Precipitazione di CaCO3 in reattore cilindrico");
+// Create cylindrical reactor
+var dataset = new PhysicoChemDataset("CalciteReactor",
+    "CaCO3 precipitation in cylindrical reactor");
 
-var cylinder = new ReactorDomain("Reattore", new ReactorGeometry
+var cylinder = new ReactorDomain("Reactor", new ReactorGeometry
 {
     Type = GeometryType.Cylinder,
     Center = (0, 0, 0),
-    Radius = 0.5,      // 0.5 m raggio
-    Height = 1.0,      // 1 m altezza
-    InnerRadius = 0.0  // Cilindro solido (non cavo)
+    Radius = 0.5,      // 0.5 m radius
+    Height = 1.0,      // 1 m height
+    InnerRadius = 0.0  // Solid cylinder (not hollow)
 });
 
 cylinder.Material = new MaterialProperties
@@ -515,22 +515,22 @@ cylinder.Material = new MaterialProperties
     Permeability = 1e-11
 };
 
-// Condizioni iniziali supersaturate per precipitazione
+// Supersaturated initial conditions for precipitation
 cylinder.InitialConditions = new InitialConditions
 {
-    Temperature = 350.0,   // 77°C - temperatura elevata
+    Temperature = 350.0,   // 77°C - elevated temperature
     Pressure = 200000.0,   // 2 bar
     Concentrations = new Dictionary<string, double>
     {
-        {"Ca2+", 0.02},    // Alta concentrazione
-        {"CO3^2-", 0.02}   // Alta concentrazione → supersaturazione
+        {"Ca2+", 0.02},    // High concentration
+        {"CO3^2-", 0.02}   // High concentration → supersaturation
     }
 };
 
 dataset.AddDomain(cylinder);
 
-// Aggiungi campo di forza vorticoso per mescolare
-var vortex = new ForceField("VorticeCentrale", ForceType.Vortex)
+// Add vortex force field for mixing
+var vortex = new ForceField("CentralVortex", ForceType.Vortex)
 {
     VortexCenter = (0, 0, 0.5),
     VortexAxis = (0, 0, 1),
@@ -540,8 +540,8 @@ var vortex = new ForceField("VorticeCentrale", ForceType.Vortex)
 
 dataset.Forces.Add(vortex);
 
-// Aggiungi sito di nucleazione al centro
-var nucleationSite = new NucleationSite("NucleazioneCentrale",
+// Add nucleation site at center
+var nucleationSite = new NucleationSite("CentralNucleation",
     (0, 0, 0.5),
     "Calcite");
 
@@ -550,89 +550,89 @@ nucleationSite.CriticalSupersaturation = 1.2;
 
 dataset.NucleationSites.Add(nucleationSite);
 
-// Abilita nucleazione
+// Enable nucleation
 dataset.SimulationParams.EnableNucleation = true;
-dataset.SimulationParams.TotalTime = 1800.0;   // 30 minuti
+dataset.SimulationParams.TotalTime = 1800.0;   // 30 minutes
 dataset.SimulationParams.TimeStep = 0.5;
 
-// Esegui
+// Run
 var solver = new PhysicoChemSolver(dataset);
 solver.RunSimulation();
 
-Console.WriteLine("Precipitazione di calcite completata!");
+Console.WriteLine("Calcite precipitation completed!");
 ```
 
-### Reazione Chimica
+### Chemical Reaction
 
 ```
 Ca²⁺ + CO₃²⁻ → CaCO₃(s) ↓
 ```
 
-Quando la concentrazione è supersaturata (Ω > 1.2), si forma calcite solida che precipita.
+When concentration is supersaturated (Ω > 1.2), solid calcite forms and precipitates.
 
 ---
 
-## Esempio 3: Trasporto Reattivo in PNM
+## Example 3: Reactive Transport in PNM
 
 ### Scenario
-Simulazione di trasporto reattivo attraverso una rete di pori estratta da immagini CT, con precipitazione di calcite che riduce la permeabilità.
+Reactive transport simulation through a pore network extracted from CT images, with calcite precipitation reducing permeability.
 
-### Metodo 1: Codice C#
+### Method 1: C# Code
 
 ```csharp
 using GeoscientistToolkit.Analysis.Pnm;
 using GeoscientistToolkit.Data.Pnm;
 
-// Assumi di avere già un PNM caricato
-// var pnm = ... (generato da CT scan)
+// Assume you already have a loaded PNM
+// var pnm = ... (generated from CT scan)
 
-// Configura simulazione
+// Configure simulation
 var options = new PNMReactiveTransportOptions
 {
-    TotalTime = 3600.0,          // 1 ora
-    TimeStep = 1.0,              // 1 secondo
-    OutputInterval = 60.0,       // Salva ogni minuto
+    TotalTime = 3600.0,          // 1 hour
+    TimeStep = 1.0,              // 1 second
+    OutputInterval = 60.0,       // Save every minute
 
-    // Parametri di flusso
+    // Flow parameters
     FlowAxis = FlowAxis.Z,
     InletPressure = 2.0f,        // Pa
     OutletPressure = 0.0f,       // Pa
-    FluidViscosity = 1.0f,       // cP (acqua)
+    FluidViscosity = 1.0f,       // cP (water)
     FluidDensity = 1000f,        // kg/m³
 
-    // Trasferimento di calore
+    // Heat transfer
     InletTemperature = 298.15f,  // 25°C
     ThermalConductivity = 0.6f,  // W/(m·K)
     SpecificHeat = 4184f,        // J/(kg·K)
 
-    // Trasporto
+    // Transport
     MolecularDiffusivity = 2.299e-9f,  // m²/s
     Dispersivity = 0.1f,               // m
 
-    // Condizioni iniziali
+    // Initial conditions
     InitialConcentrations = new Dictionary<string, float>
     {
-        {"Ca2+", 0.005f},      // mol/L (bassa concentrazione iniziale)
+        {"Ca2+", 0.005f},      // mol/L (low initial concentration)
         {"CO3^2-", 0.005f}
     },
     InletConcentrations = new Dictionary<string, float>
     {
-        {"Ca2+", 0.02f},       // mol/L (alta → supersaturazione)
+        {"Ca2+", 0.02f},       // mol/L (high → supersaturation)
         {"CO3^2-", 0.02f}
     },
     InitialMinerals = new Dictionary<string, float>
     {
-        {"Calcite", 0.02f}     // 2% del volume dei pori
+        {"Calcite", 0.02f}     // 2% of pore volume
     },
 
-    // Controllo reazioni
+    // Reaction control
     EnableReactions = true,
     UpdateGeometry = true,
     MinPoreRadius = 0.1f,      // voxel
     MinThroatRadius = 0.05f    // voxel
 };
 
-// Esegui simulazione con report di progresso
+// Run simulation with progress reporting
 var progress = new Progress<(float, string)>(p =>
 {
     Console.WriteLine($"{p.Item1:P0}: {p.Item2}");
@@ -640,80 +640,80 @@ var progress = new Progress<(float, string)>(p =>
 
 var results = PNMReactiveTransport.Solve(pnm, options, progress);
 
-// Risultati
-Console.WriteLine($"Permeabilità iniziale: {results.InitialPermeability:E3} mD");
-Console.WriteLine($"Permeabilità finale: {results.FinalPermeability:E3} mD");
-Console.WriteLine($"Variazione: {results.PermeabilityChange:P2}");
+// Results
+Console.WriteLine($"Initial permeability: {results.InitialPermeability:E3} mD");
+Console.WriteLine($"Final permeability: {results.FinalPermeability:E3} mD");
+Console.WriteLine($"Change: {results.PermeabilityChange:P2}");
 ```
 
-### Metodo 2: Script GeoScript (più semplice!)
+### Method 2: GeoScript (simpler!)
 
-Crea un file `esempio_reazione.geoscript`:
+Create a file `reaction_example.geoscript`:
 
 ```geoscript
-# Esempio: Trasporto Reattivo PNM
-# Assumi di avere già caricato un dataset PNM
+# Example: PNM Reactive Transport
+# Assume you already have a loaded PNM dataset
 
-# 1. Imposta le specie chimiche
+# 1. Set chemical species
 SET_PNM_SPECIES Ca2+ 0.02 0.005
-# Argomenti: nome_specie concentrazione_inlet(mol/L) concentrazione_iniziale(mol/L)
+# Arguments: species_name inlet_concentration(mol/L) initial_concentration(mol/L)
 
 SET_PNM_SPECIES CO3^2- 0.02 0.005
 
-# 2. Imposta minerali iniziali (opzionale)
+# 2. Set initial minerals (optional)
 SET_PNM_MINERALS Calcite 0.02
-# Argomenti: nome_minerale frazione_volume (2% dei pori riempito con calcite)
+# Arguments: mineral_name volume_fraction (2% of pores filled with calcite)
 
-# 3. Esegui simulazione
+# 3. Run simulation
 RUN_PNM_REACTIVE_TRANSPORT 3600 1.0 298.15 2.0 0.0
-# Argomenti: tempo_totale(s) time_step(s) temp_inlet(K) press_inlet(Pa) press_outlet(Pa)
+# Arguments: total_time(s) time_step(s) temp_inlet(K) press_inlet(Pa) press_outlet(Pa)
 
-# 4. Esporta risultati
-EXPORT_PNM_RESULTS ./risultati_reazione
-# Crea:
-#   - summary.csv: Metriche complessive
-#   - time_series.csv: Evoluzione permeabilità
-#   - final_pores.csv: Stato finale di tutti i pori
+# 4. Export results
+EXPORT_PNM_RESULTS ./reaction_results
+# Creates:
+#   - summary.csv: Overall metrics
+#   - time_series.csv: Permeability evolution
+#   - final_pores.csv: Final state of all pores
 ```
 
-Poi esegui lo script nel toolkit.
+Then run the script in the toolkit.
 
 ---
 
-## Visualizzare i Risultati
+## Visualizing Results
 
-### Nell'interfaccia GTK (GUI)
+### In the GTK interface (GUI)
 
-1. **Apri il dataset** dopo la simulazione
-2. Seleziona il **viewport 3D**
-3. Scegli la **modalità di colore**:
-   - **Temperature**: Visualizza il campo di temperatura
-   - **Pressure**: Visualizza il campo di pressione
-   - **Species Concentration**: Seleziona una specie (es. Ca²⁺, CO₃²⁻)
-   - **Mineral Precipitation**: Seleziona un minerale (es. Calcite)
-   - **Reaction Rate**: Mostra dove le reazioni sono più attive
+1. **Open the dataset** after simulation
+2. Select the **3D viewport**
+3. Choose the **color mode**:
+   - **Temperature**: Visualize temperature field
+   - **Pressure**: Visualize pressure field
+   - **Species Concentration**: Select a species (e.g., Ca²⁺, CO₃²⁻)
+   - **Mineral Precipitation**: Select a mineral (e.g., Calcite)
+   - **Reaction Rate**: Show where reactions are most active
 
-4. **Interazione**:
-   - Clicca su una cella per vedere dettagli (T, P, concentrazioni)
-   - Ruota con mouse destro
-   - Zoom con rotella
+4. **Interaction**:
+   - Click on a cell to see details (T, P, concentrations)
+   - Rotate with right mouse
+   - Zoom with wheel
 
-### File di Output (PNM)
+### Output Files (PNM)
 
 #### `summary.csv`
 ```csv
-Metrica,Valore
-Permeabilità Iniziale (mD),125.5
-Permeabilità Finale (mD),98.3
-Variazione Permeabilità (%),-21.7
-Tempo di Calcolo (s),45.2
-Iterazioni Totali,3600
-Convergenza,True
+Metric,Value
+Initial Permeability (mD),125.5
+Final Permeability (mD),98.3
+Permeability Change (%),-21.7
+Computation Time (s),45.2
+Total Iterations,3600
+Convergence,True
 ```
 
 #### `time_series.csv`
 ```csv
-Tempo (s),Permeabilità (mD)
+Time (s),Permeability (mD)
 0.0,125.5
 60.0,123.1
 120.0,120.8
@@ -733,102 +733,102 @@ PoreID,X,Y,Z,Radius,Volume,Pressure,Temperature,Ca2+,CO3^2-,Calcite_Volume
 
 ## Troubleshooting
 
-### Problema: La simulazione diverge
+### Problem: Simulation diverges
 
-**Soluzioni:**
-- Riduci il `TimeStep` (es. da 1.0 a 0.1 secondi)
-- Verifica le condizioni iniziali (concentrazioni non troppo alte)
-- Controlla che le proprietà dei materiali siano ragionevoli
+**Solutions:**
+- Reduce the `TimeStep` (e.g., from 1.0 to 0.1 seconds)
+- Verify initial conditions (concentrations not too high)
+- Check that material properties are reasonable
 
 ```csharp
-dataset.SimulationParams.TimeStep = 0.1; // Ridotto
+dataset.SimulationParams.TimeStep = 0.1; // Reduced
 ```
 
-### Problema: Nessuna reazione avviene
+### Problem: No reaction occurs
 
-**Soluzioni:**
-- Verifica che `EnableReactiveTransport = true`
-- Controlla le concentrazioni (devono essere supersaturate per precipitazione)
-- Assicurati che i reactanti siano presenti in entrambi i domini/celle
+**Solutions:**
+- Verify that `EnableReactiveTransport = true`
+- Check concentrations (must be supersaturated for precipitation)
+- Ensure reactants are present in both domains/cells
 
 ```csharp
 dataset.SimulationParams.EnableReactiveTransport = true;
-dataset.SimulationParams.EnableReactions = true;  // Per PNM
+dataset.SimulationParams.EnableReactions = true;  // For PNM
 ```
 
-### Problema: Simulazione molto lenta
+### Problem: Simulation very slow
 
-**Soluzioni:**
-- Aumenta il `TimeStep` (ma attenzione alla stabilità!)
-- Riduci la risoluzione della mesh
-- Abilita l'accelerazione GPU se disponibile
+**Solutions:**
+- Increase `TimeStep` (but watch for stability!)
+- Reduce mesh resolution
+- Enable GPU acceleration if available
 
 ```csharp
 dataset.SimulationParams.UseGPU = true;
-dataset.SimulationParams.TimeStep = 5.0; // Aumentato
+dataset.SimulationParams.TimeStep = 5.0; // Increased
 ```
 
-### Problema: File di output non trovati
+### Problem: Output files not found
 
-**Soluzioni:**
-- Verifica il percorso di esportazione
-- Assicurati che la simulazione sia completata
-- Controlla i permessi di scrittura
+**Solutions:**
+- Verify export path
+- Ensure simulation completed
+- Check write permissions
 
 ```csharp
-// Usa percorso assoluto
+// Use absolute path
 EXPORT_PNM_RESULTS /home/user/results
 ```
 
 ---
 
-## Parametri Comuni
+## Common Parameters
 
-### Temperature (K)
-- **Ambiente**: 298.15 K (25°C)
-- **Geotermico**: 350-450 K (77-177°C)
-- **Idrotermale**: 450-600 K (177-327°C)
+### Temperatures (K)
+- **Ambient**: 298.15 K (25°C)
+- **Geothermal**: 350-450 K (77-177°C)
+- **Hydrothermal**: 450-600 K (177-327°C)
 
-### Pressioni (Pa)
-- **Atmosferica**: 101325 Pa (1 atm)
-- **Sotterranea (100m)**: ~1 MPa
-- **Profonda (1km)**: ~10 MPa
-- **Geotermico**: 10-50 MPa
+### Pressures (Pa)
+- **Atmospheric**: 101325 Pa (1 atm)
+- **Underground (100m)**: ~1 MPa
+- **Deep (1km)**: ~10 MPa
+- **Geothermal**: 10-50 MPa
 
-### Concentrazioni tipiche (mol/L)
-- **Acqua pura**: 10⁻⁷ (H⁺, OH⁻)
-- **Acqua di mare**: 0.035 (NaCl)
-- **Acquiferi**: 0.001-0.01 (ioni disciolti)
-- **Brine**: 0.1-5.0 (alta salinità)
+### Typical Concentrations (mol/L)
+- **Pure water**: 10⁻⁷ (H⁺, OH⁻)
+- **Seawater**: 0.035 (NaCl)
+- **Aquifers**: 0.001-0.01 (dissolved ions)
+- **Brines**: 0.1-5.0 (high salinity)
 
-### Porosità
-- **Arenaria**: 0.15-0.30 (15-30%)
-- **Calcare**: 0.05-0.20 (5-20%)
-- **Fratturato**: 0.01-0.05 (1-5%)
-- **Permeabile**: 0.30-0.50 (30-50%)
-
----
-
-## Prossimi Passi
-
-1. **Sperimenta** con i parametri (temperature, concentrazioni, geometrie)
-2. **Crea geometrie personalizzate** (profili 2D, mesh Voronoi)
-3. **Aggiungi più specie** chimiche e reazioni complesse
-4. **Esplora sweep parametrici** per analisi di sensibilità
-5. **Accoppia** con simulazioni geotermiche
+### Porosity
+- **Sandstone**: 0.15-0.30 (15-30%)
+- **Limestone**: 0.05-0.20 (5-20%)
+- **Fractured**: 0.01-0.05 (1-5%)
+- **Permeable**: 0.30-0.50 (30-50%)
 
 ---
 
-## Riferimenti
+## Next Steps
 
-- **Guida Completa PhysicoChem**: `PHYSICOCHEM_GUIDE.md`
-- **Trasporto Reattivo PNM**: `Documentation/PNM_REACTIVE_TRANSPORT.md`
-- **Manuale GeoScript**: `GEOSCRIPT_MANUAL.md`
-- **Esempi**: `Examples/PNM_ReactiveTransport_Example.geoscript`
+1. **Experiment** with parameters (temperatures, concentrations, geometries)
+2. **Create custom geometries** (2D profiles, Voronoi meshes)
+3. **Add more chemical species** and complex reactions
+4. **Explore parametric sweeps** for sensitivity analysis
+5. **Couple** with geothermal simulations
 
 ---
 
-**Buone simulazioni!** 🧪⚗️🔬
+## References
+
+- **Complete PhysicoChem Guide**: `PHYSICOCHEM_GUIDE.md`
+- **PNM Reactive Transport**: `Documentation/PNM_REACTIVE_TRANSPORT.md`
+- **GeoScript Manual**: `GEOSCRIPT_MANUAL.md`
+- **Examples**: `Examples/PNM_ReactiveTransport_Example.geoscript`
+
+---
+
+**Happy simulating!**
 
 ---
 
