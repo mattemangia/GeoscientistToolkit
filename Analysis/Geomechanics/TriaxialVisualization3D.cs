@@ -208,7 +208,7 @@ public class TriaxialVisualization3D : IDisposable
             // Capture mouse wheel for zoom - prevent parent window from scrolling
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem))
             {
-                ImGui.SetItemKeyOwner(ImGuiKey.MouseWheelY);
+                // ImGui.SetItemKeyOwner(ImGuiKey.MouseWheelY);
             }
 
             // Zoom with scroll

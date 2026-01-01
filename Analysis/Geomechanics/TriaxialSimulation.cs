@@ -82,6 +82,7 @@ public class TriaxialResults
     public float[] VonMisesStress_MPa { get; set; }
 
     public List<MohrCircleData> MohrCirclesAtPeak { get; set; } = new();
+    public List<MohrCircleData> MohrCircles { get; set; } = new();
     public List<FracturePlane> FracturePlanes { get; set; } = new();
 
     public float YoungModulus_GPa { get; set; }
