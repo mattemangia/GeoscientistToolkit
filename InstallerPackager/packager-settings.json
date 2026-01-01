@@ -1,7 +1,7 @@
 {
   "ManifestPath": "docs/installer-manifest.json",
   "PackagesOutputDirectory": "artifacts/installers",
-  "PackageBaseUrl": "https://example.com/installers",
+  "PackageBaseUrl": "",
   "ImGuiProjectPath": "../GeoscientistToolkit.csproj",
   "ImGuiExecutableName": "GeoscientistToolkit",
   "GtkProjectPath": "../GTK/GeoscientistToolkit.Gtk.csproj",

@@ -82,7 +82,7 @@ public class MainGtkWindow : Gtk.Window
 
     private Dataset? _selectedDataset;
 
-    public MainGtkWindow(ProjectManager projectManager, SettingsManager settingsManager, NodeManager nodeManager) : base("GeoscientistToolkit GTK Edition")
+    public MainGtkWindow(ProjectManager projectManager, SettingsManager settingsManager, NodeManager nodeManager) : base("Geoscientist's Toolkit - Reactor (GTK)")
     {
         _projectManager = projectManager;
         _settingsManager = settingsManager;
@@ -190,7 +190,7 @@ public class MainGtkWindow : Gtk.Window
         toolbar.Insert(new SeparatorToolItem(), -1);
         toolbar.Insert(CreateIconButton("Add PhysicoChem", "Add a new PhysicoChem dataset", CairoExtensions.MakeIcon(IconSymbol.PhysicoChem), (_, _) =>
         {
-            var dataset = new PhysicoChemDataset($"PhysicoChem_{DateTime.Now:HHmmss}", "GTK multiphysics profile");
+            var dataset = new PhysicoChemDataset($"PhysicoChem_{DateTime.Now:HHmmss}", "Reactor multiphysics profile");
             _projectManager.AddDataset(dataset);
             RefreshDatasetList();
             SelectFirstDataset();
@@ -211,7 +211,7 @@ public class MainGtkWindow : Gtk.Window
 
         toolbar.Insert(CreateIconButton("New Empty Mesh", "Create an empty 3D mesh", CairoExtensions.MakeIcon(IconSymbol.Mesh), (_, _) =>
         {
-            var mesh = Mesh3DDataset.CreateEmpty("Mesh3D (GTK)", string.Empty);
+            var mesh = Mesh3DDataset.CreateEmpty("Mesh3D (Reactor)", string.Empty);
             _projectManager.AddDataset(mesh);
             RefreshDatasetList();
             SelectFirstDataset();
@@ -243,7 +243,7 @@ public class MainGtkWindow : Gtk.Window
     {
         var panel = new VBox(false, 6);
 
-        var header = new Label("Loaded datasets (GTK edition)") { Xalign = 0 };
+        var header = new Label("Loaded datasets (Reactor)") { Xalign = 0 };
         panel.PackStart(header, false, false, 0);
 
         _datasetView.Model = _datasetStore;
@@ -639,7 +639,7 @@ public class MainGtkWindow : Gtk.Window
     {
         var box = new VBox(false, 6);
 
-        var info = new Label("GTK client stays compatible with the Node Endpoint for clusters and distributed runs.")
+        var info = new Label("Reactor client stays compatible with the Node Endpoint for clusters and distributed runs.")
         {
             Xalign = 0,
             Wrap = true
@@ -862,7 +862,7 @@ public class MainGtkWindow : Gtk.Window
                 sb.AppendLine($"Format: {mesh3D.FileFormat}");
                 break;
             default:
-                sb.AppendLine("GTK editor ready for generic datasets.");
+                sb.AppendLine("Reactor editor ready for generic datasets.");
                 break;
         }
 
@@ -1290,8 +1290,8 @@ public class MainGtkWindow : Gtk.Window
 
     private void ShowAboutDialog()
     {
-        const string citation = "Mangiagalli, M. (2026). Geoscientist's Toolkit (GTK Edition) [Computer software]. GitHub. https://github.com/mattemangia/geoscientisttoolkit";
-        var dialog = new Dialog("About Geoscientist's Toolkit", this, DialogFlags.Modal)
+        const string citation = "Mangiagalli, M. (2026). Geoscientist's Toolkit - Reactor (GTK) [Computer software]. GitHub. https://github.com/mattemangia/geoscientisttoolkit";
+        var dialog = new Dialog("About Geoscientist's Toolkit - Reactor (GTK)", this, DialogFlags.Modal)
         {
             TransientFor = this,
             Modal = true,
@@ -1315,8 +1315,7 @@ public class MainGtkWindow : Gtk.Window
             logo = new Image(Stock.MissingImage, IconSize.Dialog);
         }
         var infoBox = new VBox(false, 2);
-        infoBox.PackStart(new Label("Geoscientist's Toolkit") { Xalign = 0 }, false, false, 0);
-        infoBox.PackStart(new Label("GTK Edition") { Xalign = 0 }, false, false, 0);
+        infoBox.PackStart(new Label("Geoscientist's Toolkit - Reactor (GTK)") { Xalign = 0 }, false, false, 0);
         infoBox.PackStart(new Label("The Geoscientist's Toolkit Dev Team") { Xalign = 0 }, false, false, 0);
         infoBox.PackStart(new Label("Contact: Matteo Mangiagalli - Università degli Studi di Urbino Carlo Bo\nm.mangiagalli@campus.uniurb.it")
         {
@@ -1487,7 +1486,7 @@ public class MainGtkWindow : Gtk.Window
 
         Dataset dataset = type switch
         {
-            "PhysicoChem" => new PhysicoChemDataset(name, "Designer GTK")
+            "PhysicoChem" => new PhysicoChemDataset(name, "Designer Reactor")
             {
                 Materials = { new MaterialProperties { MaterialID = "Rock", Density = 2500, ThermalConductivity = 2.1, SpecificHeat = 900 } },
                 Forces = { new ForceField("Gravity", ForceType.Gravity) }
@@ -1518,7 +1517,7 @@ public class MainGtkWindow : Gtk.Window
 
         var mat = new MaterialProperties
         {
-            MaterialID = string.IsNullOrWhiteSpace(_materialNameEntry.Text) ? "GTK Material" : _materialNameEntry.Text.Trim(),
+            MaterialID = string.IsNullOrWhiteSpace(_materialNameEntry.Text) ? "Reactor Material" : _materialNameEntry.Text.Trim(),
             Density = 2400,
             ThermalConductivity = 1.8,
             SpecificHeat = 800

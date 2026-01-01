@@ -42,12 +42,12 @@
       "PackageUrl": "https://example.com/installers/GeoscientistToolkit-gtk-win-x64.zip",
       "Sha256": "41617ba14ed4d07065ef0b993dd06cab58d006a9c212612ec65b8ecbf0ba3ee9",
       "SizeBytes": 284212565,
-      "Description": "Geoscientist\u0027s Toolkit (GTK)",
+      "Description": "Geoscientist\u0027s Toolkit - Reactor (GTK)",
       "AdditionalPublishArguments": null,
       "Components": [
         {
           "Id": "gtk-app",
-          "DisplayName": "Geoscientist\u0027s Toolkit (GTK)",
+          "DisplayName": "Geoscientist\u0027s Toolkit - Reactor (GTK)",
           "RelativePath": "app-gtk",
           "TargetSubdirectory": "",
           "EntryExecutable": "GeoscientistToolkit.Gtk.exe",
@@ -166,12 +166,12 @@
       "PackageUrl": "https://example.com/installers/GeoscientistToolkit-gtk-linux-x64.zip",
       "Sha256": "6687d16b4ad070ff15ad7a37e9daf33d54e9befbd370a72ff3c21503b989962b",
       "SizeBytes": 441604662,
-      "Description": "Geoscientist\u0027s Toolkit (GTK)",
+      "Description": "Geoscientist\u0027s Toolkit - Reactor (GTK)",
       "AdditionalPublishArguments": null,
       "Components": [
         {
           "Id": "gtk-app",
-          "DisplayName": "Geoscientist\u0027s Toolkit (GTK)",
+          "DisplayName": "Geoscientist\u0027s Toolkit - Reactor (GTK)",
           "RelativePath": "app-gtk",
           "TargetSubdirectory": "",
           "EntryExecutable": "GeoscientistToolkit.Gtk",
@@ -290,12 +290,12 @@
       "PackageUrl": "https://example.com/installers/GeoscientistToolkit-gtk-osx-x64.zip",
       "Sha256": "",
       "SizeBytes": 0,
-      "Description": "Geoscientist\u0027s Toolkit (GTK)",
+      "Description": "Geoscientist\u0027s Toolkit - Reactor (GTK)",
       "AdditionalPublishArguments": null,
       "Components": [
         {
           "Id": "gtk-app",
-          "DisplayName": "Geoscientist\u0027s Toolkit (GTK)",
+          "DisplayName": "Geoscientist\u0027s Toolkit - Reactor (GTK)",
           "RelativePath": "app-gtk",
           "TargetSubdirectory": "",
           "EntryExecutable": "GeoscientistToolkit.Gtk",
@@ -414,12 +414,12 @@
       "PackageUrl": "https://example.com/installers/GeoscientistToolkit-gtk-osx-arm64.zip",
       "Sha256": "ed1931b4f42050f7ac76882fb050a0fae9824f7204512ac0b5b4048f9cee72df",
       "SizeBytes": 119487757,
-      "Description": "Geoscientist\u0027s Toolkit (GTK)",
+      "Description": "Geoscientist\u0027s Toolkit - Reactor (GTK)",
       "AdditionalPublishArguments": null,
       "Components": [
         {
           "Id": "gtk-app",
-          "DisplayName": "Geoscientist\u0027s Toolkit (GTK)",
+          "DisplayName": "Geoscientist\u0027s Toolkit - Reactor (GTK)",
           "RelativePath": "app-gtk",
           "TargetSubdirectory": "",
           "EntryExecutable": "GeoscientistToolkit.Gtk",
