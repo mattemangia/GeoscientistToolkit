@@ -560,14 +560,10 @@ var device1 = _device;
                 vonMises[i] = MathF.Sqrt(3.0f * J2); // Simplification for principal frame
             }
 
-            // 5. Report Progress
-            if (progress != null && step % 10 == 0) // Update every 10 steps
+            // 5. Report Progress - update every few percent of completion
+            int progressInterval = Math.Max(1, nSteps / 100); // Report ~100 times
+            if (progress != null && (step % progressInterval == 0 || step == nSteps - 1))
             {
-                // Create a shallow copy or snapshot for visualization
-                // We update the arrays in the main results object directly since we are on a background thread
-                // and the UI reads them. To be safe, we should clone, but for visualization it's usually fine.
-                // NOTE: Arrays in 'results' are references. We need to assign them if they were null.
-
                 // Assign current state to results
                 results.Time_s = timeArray.ToArray();
                 results.AxialStrain = axialStrainArray.ToArray();
@@ -576,15 +572,20 @@ var device1 = _device;
                 results.VolumetricStrain = volumetricStrainArray.ToArray();
                 results.PorePressure_MPa = porePressureArray.ToArray();
                 results.HasFailed = failedArray.ToArray();
-                results.Displacement = displacement; // Reference update
+                results.Displacement = displacement;
                 results.Stress = stress;
                 results.VonMisesStress_MPa = vonMises;
 
+                // Update peak stress in progress reports
+                if (peakStress > results.PeakStrength_MPa)
+                {
+                    results.PeakStrength_MPa = peakStress;
+                }
+
                 progress.Report(results);
 
-                // Add delay to make it "visible"
-                // 1000 steps over 5 seconds = 5ms per step.
-                Thread.Sleep(5);
+                // Add delay to make progress visible in UI (total ~3-5 seconds for full simulation)
+                Thread.Sleep(30);
             }
         }
 

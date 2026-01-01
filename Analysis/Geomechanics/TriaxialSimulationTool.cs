@@ -119,13 +119,15 @@ public class TriaxialSimulationTool : IDisposable
         _pnmFileDialog.SetExtensions((".json", "PNM JSON File"));
 
         // Initialize curve editors
+        // Curves use Y as a multiplier for the base value
+        // Default confining: ramp up to full pressure in first 10%, then hold
         var defaultConfiningCurve = new List<CurvePoint>
         {
-            new CurvePoint(0, 0),
-            new CurvePoint(0.2f, 1.0f),
-            new CurvePoint(1.0f, 1.0f)
+            new CurvePoint(0, 1.0f),    // Start at full pressure
+            new CurvePoint(1.0f, 1.0f)  // Maintain full pressure
         };
 
+        // Default axial: linear ramp from 0 to 1 (strain-controlled uses strain rate, not this curve)
         var defaultAxialCurve = new List<CurvePoint>
         {
             new CurvePoint(0, 0),
@@ -155,16 +157,19 @@ public class TriaxialSimulationTool : IDisposable
         // Load default material
         LoadDefaultMaterial();
 
-        // Select default preset
-        _selectedPresetName = "Standard UCS (Unconfined)";
+        // Select default preset - use Medium Confining for more interesting results
+        _selectedPresetName = "Medium Confining (10 MPa)";
         if (_loadingPresets.TryGetValue(_selectedPresetName, out var preset))
         {
             _loadParams.ConfiningPressure_MPa = preset.confining;
             _loadParams.AxialStressRate_MPa_per_s = preset.axialRate;
             _loadParams.MaxAxialStrain_percent = preset.maxStrain;
-            _loadParams.TotalTime_s = 1000.0f;
-            _loadParams.TimeStep_s = 0.1f;
         }
+
+        // Set realistic time parameters for a typical triaxial test
+        _loadParams.TotalTime_s = 500.0f;    // 500 seconds total
+        _loadParams.TimeStep_s = 0.5f;       // 0.5 second steps -> 1000 steps
+        _loadParams.AxialStrainRate_per_s = 1e-4f;  // Higher strain rate for faster results
     }
 
     public void Dispose()
@@ -1251,7 +1256,19 @@ public class TriaxialSimulationTool : IDisposable
 
     private async void RunSimulation()
     {
-        if (_mesh == null || _selectedMaterial == null) return;
+        // Check prerequisites with user feedback
+        if (_mesh == null)
+        {
+            _statusMessage = "Error: Generate a mesh first!";
+            Util.Logger.LogWarning("[TriaxialTool] Cannot run simulation: mesh not generated");
+            return;
+        }
+        if (_selectedMaterial == null)
+        {
+            _statusMessage = "Error: Select a material first!";
+            Util.Logger.LogWarning("[TriaxialTool] Cannot run simulation: no material selected");
+            return;
+        }
 
         _isRunning = true;
         _simulationComplete = false;
