@@ -1,6 +1,7 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtVolume3DControlPanel.cs
 
 using System.Numerics;
+using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.UI;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
@@ -18,9 +19,13 @@ public class CtVolume3DControlPanel : BasePanel
 
     private int _exportFileFormat;
     private string _newPlaneName = "Plane";
-
-    // UI state for clipping plane editing
     private int _selectedPlaneIndex = -1;
+
+    private int _meshIsoValue = 128;
+    private int _meshStepSize = 2;
+    private bool _isExporting;
+    private float _exportProgress;
+    private string _exportStatus = "";
 
     public CtVolume3DControlPanel(CtVolume3DViewer viewer, CtImageStackDataset dataset)
         : base("3D Volume Controls", new Vector2(400, 600))
@@ -404,25 +409,99 @@ public class CtVolume3DControlPanel : BasePanel
     {
         ImGui.Text("Export Options");
         ImGui.Separator();
+
         ImGui.Text("Screenshot");
         if (ImGui.Button("Save Screenshot..."))
             _screenshotDialog.Open("screenshot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+
         ImGui.Spacing();
         ImGui.Separator();
-        ImGui.Text("3D Model Export");
-        ImGui.TextWrapped("Export requires a dedicated meshing library (e.g., Marching Cubes). This is a placeholder.");
+        ImGui.Text("3D Mesh Export (Marching Cubes)");
+
+        ImGui.SliderInt("Iso Value", ref _meshIsoValue, 1, 255);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Density threshold for surface extraction");
+
+        ImGui.SliderInt("Step Size", ref _meshStepSize, 1, 8);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Larger values = faster but less detailed mesh");
+
+        ImGui.Spacing();
         ImGui.RadioButton("OBJ", ref _exportFileFormat, 0);
         ImGui.SameLine();
         ImGui.RadioButton("STL", ref _exportFileFormat, 1);
+
+        ImGui.BeginDisabled(_isExporting);
         if (ImGui.Button("Export 3D Model..."))
             _exportModelDialog.Open("model_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+        ImGui.EndDisabled();
+
+        if (_isExporting)
+        {
+            ImGui.ProgressBar(_exportProgress, new Vector2(-1, 0), _exportStatus);
+        }
     }
 
     private void HandleFileDialogs()
     {
         if (_screenshotDialog.Submit()) _viewer.SaveScreenshot(_screenshotDialog.SelectedPath);
+
         if (_exportModelDialog.Submit())
-            Logger.LogWarning(
-                $"[CtVolume3DControlPanel] Model export to '{_exportModelDialog.SelectedPath}' is not implemented. A marching cubes library is required.");
+        {
+            var outputPath = _exportModelDialog.SelectedPath;
+            _ = ExportMeshAsync(outputPath);
+        }
+    }
+
+    private async Task ExportMeshAsync(string outputPath)
+    {
+        if (_dataset.Volume == null)
+        {
+            Logger.LogError("[CtVolume3DControlPanel] No volume data available for mesh export");
+            return;
+        }
+
+        _isExporting = true;
+        _exportProgress = 0;
+        _exportStatus = "Starting mesh generation...";
+
+        try
+        {
+            var mesher = new MarchingCubesMesher();
+            var progress = new Progress<(float progress, string message)>(p =>
+            {
+                _exportProgress = p.progress;
+                _exportStatus = p.message;
+            });
+
+            var (vertices, indices) = await mesher.GenerateMeshAsync(
+                _dataset.Volume,
+                (byte)_meshIsoValue,
+                _meshStepSize,
+                progress);
+
+            if (vertices.Count == 0)
+            {
+                Logger.LogWarning("[CtVolume3DControlPanel] No mesh generated - try adjusting the iso value");
+                return;
+            }
+
+            float scale = _dataset.PixelSize;
+            if (_exportFileFormat == 0)
+                MarchingCubesMesher.ExportToObj(outputPath, vertices, indices, scale);
+            else
+                MarchingCubesMesher.ExportToStl(outputPath, vertices, indices, scale);
+
+            Logger.Log($"[CtVolume3DControlPanel] Exported mesh to '{outputPath}' ({vertices.Count} vertices, {indices.Count / 3} triangles)");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[CtVolume3DControlPanel] Mesh export failed: {ex.Message}");
+        }
+        finally
+        {
+            _isExporting = false;
+            _exportStatus = "";
+        }
     }
 }
