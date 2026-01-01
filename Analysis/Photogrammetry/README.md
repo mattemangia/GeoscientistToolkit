@@ -2,7 +2,7 @@
 
 Sistema completo di fotogrammetria real-time per GeoscientistToolkit con gestione automatica dei modelli ONNX e esportazione avanzata.
 
-## 🎯 Caratteristiche Principali
+## Caratteristiche Principali
 
 - **Stima della profondità**: Supporto per modelli ONNX (MiDaS, DPT, ZoeDepth)
 - **Rilevamento keypoint**: SuperPoint con descrittori deep learning
@@ -54,7 +54,7 @@ I modelli ONNX devono essere scaricati separatamente:
 
 **Nota**: Se LightGlue non è disponibile, il sistema usa automaticamente brute-force matching.
 
-## 🚀 Quick Start (Nuovo!)
+## Quick Start (Nuovo!)
 
 ### Metodo 1: Download Automatico (Consigliato)
 
@@ -94,7 +94,7 @@ I modelli ONNX devono essere scaricati separatamente:
 
 3. **Salva e inizializza** la pipeline
 
-## ⚙️ Configurazione Avanzata
+## Configurazione Avanzata
 
 ### Settings → Photogrammetry
 
@@ -169,7 +169,7 @@ Dalla finestra "Real-time Photogrammetry":
    - Grafico processing time
    - Totale keyframes e GCP
 
-## 📤 Esportazione
+## Esportazione
 
 ### Menu File → Export
 

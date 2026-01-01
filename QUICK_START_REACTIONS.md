@@ -7,7 +7,7 @@
 ## Indice
 
 1. [Introduzione](#introduzione)
-2. [🚀 Start Veloce con Interfaccia GTK](#-start-veloce-con-interfaccia-gtk)
+2. [Start Veloce con Interfaccia GTK](#start-veloce-con-interfaccia-gtk)
 3. [Esempio 1: Reazione Semplice in un Reattore Box](#esempio-1-reazione-semplice-in-un-reattore-box)
 4. [Esempio 2: Precipitazione di Calcite](#esempio-2-precipitazione-di-calcite)
 5. [Esempio 3: Trasporto Reattivo in PNM](#esempio-3-trasporto-reattivo-in-pnm)
@@ -27,7 +27,7 @@ Questa guida ti mostra come avviare rapidamente una simulazione di esempio.
 
 ---
 
-## 🚀 Start Veloce con Interfaccia GTK
+## Start Veloce con Interfaccia GTK
 
 ### Il Modo più Semplice: Testare il Reattore di Default
 
@@ -828,7 +828,7 @@ EXPORT_PNM_RESULTS /home/user/results
 
 ---
 
-**Buone simulazioni!** 🧪⚗️🔬
+**Buone simulazioni!**
 
 ---
 
