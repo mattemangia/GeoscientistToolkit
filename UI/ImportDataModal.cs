@@ -40,7 +40,9 @@ public class ImportDataModal
         "Video File (MP4/AVI/MOV)",
         "Audio File (WAV/MP3/OGG)",
         "Text Document (TXT/RTF)",
-        "Slope Stability Results (Binary)"
+        "Slope Stability Results (Binary)",
+        "DICOM Series (CT/MRI)",
+        "CT Stack File (.ctstack)"
     };
 
     private readonly ImGuiFileDialog _fileDialog;
@@ -89,6 +91,13 @@ public class ImportDataModal
     private readonly ImGuiFileDialog _textDialog;
     private readonly SlopeStabilityResultsBinaryLoader _slopeResultsLoader;
     private readonly ImGuiFileDialog _slopeResultsDialog;
+
+    // New loaders
+    private readonly DicomLoader _dicomLoader;
+    private readonly ImGuiFileDialog _dicomDialog;
+    private readonly CtStackFileLoader _ctStackFileLoader;
+    private readonly ImGuiFileDialog _ctStackFileDialog;
+
     private ImportState _currentState = ImportState.Idle;
     private Task<Dataset> _importTask;
     private Dataset _pendingDataset;
@@ -127,6 +136,8 @@ public class ImportDataModal
         _textDialog = new ImGuiFileDialog("ImportTextDialog", FileDialogType.OpenFile, "Select Text File");
         _slopeResultsDialog = new ImGuiFileDialog("ImportSlopeResultsDialog", FileDialogType.OpenFile,
             "Select Slope Stability Results");
+        _dicomDialog = new ImGuiFileDialog("ImportDicomDialog", FileDialogType.OpenDirectory, "Select DICOM Directory");
+        _ctStackFileDialog = new ImGuiFileDialog("ImportCtStackFileDialog", FileDialogType.OpenFile, "Select .ctstack File");
         _organizerDialog = new ImageStackOrganizerDialog();
 
         // Initialize loaders
@@ -152,6 +163,8 @@ public class ImportDataModal
         _audioLoader = new AudioLoader();
         _textLoader = new TextLoader();
         _slopeResultsLoader = new SlopeStabilityResultsBinaryLoader();
+        _dicomLoader = new DicomLoader();
+        _ctStackFileLoader = new CtStackFileLoader();
     }
 
     public void Open()
@@ -276,6 +289,8 @@ public class ImportDataModal
         if (_audioDialog.Submit()) _audioLoader.AudioPath = _audioDialog.SelectedPath;
         if (_textDialog.Submit()) _textLoader.TextPath = _textDialog.SelectedPath;
         if (_slopeResultsDialog.Submit()) _slopeResultsLoader.FilePath = _slopeResultsDialog.SelectedPath;
+        if (_dicomDialog.Submit()) _dicomLoader.SourcePath = _dicomDialog.SelectedPath;
+        if (_ctStackFileDialog.Submit()) _ctStackFileLoader.SourcePath = _ctStackFileDialog.SelectedPath;
     }
 
     private void DrawOptions()
@@ -358,6 +373,12 @@ public class ImportDataModal
                 break;
             case 22: // Slope Stability Results
                 DrawSlopeStabilityResultsOptions();
+                break;
+            case 23: // DICOM Series
+                DrawDicomOptions();
+                break;
+            case 24: // .ctstack
+                DrawCtStackFileOptions();
                 break;
         }
 
@@ -855,6 +876,70 @@ public class ImportDataModal
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import slope stability results");
+        }
+    }
+
+    private void DrawDicomOptions()
+    {
+        ImGui.TextWrapped("Import a DICOM series (CT/MRI) from a folder. The application will scan the folder for .dcm files and sort them.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("DICOM Directory:");
+        var path = _dicomLoader.SourcePath ?? "";
+        ImGui.InputText("##DicomPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##DicomDir"))
+        {
+            _dicomDialog.Open();
+        }
+
+        ImGui.Spacing();
+        bool useMemMap = _dicomLoader.UseMemoryMapping;
+        if (ImGui.Checkbox("Use Memory Mapping (for large datasets)", ref useMemMap))
+        {
+            _dicomLoader.UseMemoryMapping = useMemMap;
+        }
+
+        if (_dicomLoader.CanImport)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import DICOM series");
+        }
+        else if (!string.IsNullOrEmpty(_dicomLoader.ValidationMessage))
+        {
+             ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), $"⚠ {_dicomLoader.ValidationMessage}");
+        }
+    }
+
+    private void DrawCtStackFileOptions()
+    {
+        ImGui.TextWrapped("Import a CT Stack defined by a .ctstack manifest file.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text(".ctstack File:");
+        var path = _ctStackFileLoader.SourcePath ?? "";
+        ImGui.InputText("##CtStackPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##CtStackFile"))
+        {
+             string[] extensions = { ".ctstack" };
+            _ctStackFileDialog.Open(null, extensions);
+        }
+
+        if (_ctStackFileLoader.CanImport)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import .ctstack");
         }
     }
 
@@ -1537,6 +1622,8 @@ public class ImportDataModal
             20 => _audioLoader, // Added for Audio
             21 => _textLoader,
             22 => _slopeResultsLoader,
+            23 => _dicomLoader,
+            24 => _ctStackFileLoader,
             _ => null
         };
     }
@@ -1615,6 +1702,8 @@ public class ImportDataModal
         _audioLoader.Reset(); // Added for Audio
         _textLoader.Reset();
         _slopeResultsLoader.Reset();
+        _dicomLoader.Reset();
+        _ctStackFileLoader.Reset();
 
         // Reset state
         _importTask = null;
