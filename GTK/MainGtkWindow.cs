@@ -1290,7 +1290,7 @@ public class MainGtkWindow : Gtk.Window
 
     private void ShowAboutDialog()
     {
-        const string citation = "Mangiagalli, M. (2024). Geoscientist's Toolkit (GTK Edition) [Computer software]. GitHub. https://github.com/mattemangia/geoscientisttoolkit";
+        const string citation = "Mangiagalli, M. (2026). Geoscientist's Toolkit (GTK Edition) [Computer software]. GitHub. https://github.com/mattemangia/geoscientisttoolkit";
         var dialog = new Dialog("About Geoscientist's Toolkit", this, DialogFlags.Modal)
         {
             TransientFor = this,
