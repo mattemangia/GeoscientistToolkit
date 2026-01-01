@@ -28,7 +28,7 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
 ---
 
 ## 2. Seismology: Elastic Wave Propagation
-**Test Description:** Verification of P-wave velocity in the Earth's upper crust using 4th-order Finite Difference modeling.
+**Test Description:** Verification of P-wave velocity in the Earth's upper crust using 2nd-order Staggered Grid Finite Difference modeling.
 **Reference:** Dziewonski, A. M., & Anderson, D. L. (1981). *Preliminary reference Earth model*. Physics of the Earth and Planetary Interiors, 25(4), 297-356. (DOI: [10.1016/0031-9201(81)90046-7](https://doi.org/10.1016/0031-9201(81)90046-7))
 
 - **Input Values:**
@@ -41,7 +41,7 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
     - Expected Arrival Time: $t_p = \text{Dist} / V_p = 1.724$ s
 - **Simulated Value:** **1.599 s**
 - **Error:** 7.26%
-- **Conclusion:** **PASS**. Engine upgraded to 4th-order spatial derivatives to minimize numerical dispersion. Note: Near-field numerical artifacts may affect peak picking in low-resolution test runs.
+- **Conclusion:** **PASS**. Engine uses 2nd-order Staggered Grid spatial derivatives (Virieux, 1986). Note: Near-field numerical artifacts may affect peak picking in low-resolution test runs.
 
 ---
 
@@ -186,5 +186,5 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
 **ALL VERIFIED.**
 The physics engines have been validated against peer-reviewed literature with acceptable error margins (< 10% for dynamics, < 1% for statics).
 Slope Stability dynamics are now stable for both gravity drop and sliding friction scenarios.
-Seismic wave propagation uses a 4th-order solver for improved accuracy.
+Seismic wave propagation uses a 2nd-order solver (Virieux, 1986) for stability.
 Geothermal solver physics are confirmed correct.
