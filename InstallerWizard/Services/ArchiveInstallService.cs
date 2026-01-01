@@ -47,6 +47,11 @@ internal sealed class ArchiveInstallService
             expandedPath = Path.Combine(home, expandedPath[2..]);
         }
 
+        if (!Path.IsPathRooted(expandedPath))
+        {
+             expandedPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, expandedPath));
+        }
+
         if (!File.Exists(expandedPath))
         {
             throw new FileNotFoundException($"Local archive not found: {expandedPath}");

@@ -51,9 +51,19 @@ internal sealed class PackagerApp
             var buildService = new BuildService();
             var installerService = new InstallerPublishService();
             var publishedInstallers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Phase 1: Build all packages and update manifest
             foreach (var package in packagesToBuild)
             {
                 await buildService.BuildPackageAsync(package, settings, publisher).ConfigureAwait(false);
+            }
+
+            // Save manifest with updated package info (Url, SHA, Size)
+            await ManifestPersistence.SaveAsync(settings.ManifestPath, manifest).ConfigureAwait(false);
+
+            // Phase 2: Build installers (which embed the updated manifest)
+            foreach (var package in packagesToBuild)
+            {
                 if (publishedInstallers.Add(package.RuntimeIdentifier))
                 {
                     await installerService.PublishInstallerAsync(package.RuntimeIdentifier, settings, publisher)
@@ -61,7 +71,6 @@ internal sealed class PackagerApp
                 }
             }
 
-            await ManifestPersistence.SaveAsync(settings.ManifestPath, manifest).ConfigureAwait(false);
             Console.WriteLine("Packages generated successfully.");
             return 0;
         }
