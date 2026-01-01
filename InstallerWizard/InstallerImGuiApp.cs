@@ -7,6 +7,7 @@ using System.Linq;
 using GeoscientistToolkit.Installer.Models;
 using GeoscientistToolkit.Installer.Services;
 using GeoscientistToolkit.Installer.Utilities;
+using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 using Veldrid;
@@ -37,6 +38,8 @@ internal sealed class InstallerImGuiApp
     private IReadOnlyList<RuntimeComponent> _currentComponents = Array.Empty<RuntimeComponent>();
     private readonly Dictionary<string, bool> _componentSelections = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly ImGuiFileDialog _directoryDialog;
+
     private float _progress;
     private string _status = "Waiting...";
     private readonly ConcurrentQueue<string> _pendingLogs = new();
@@ -59,6 +62,7 @@ internal sealed class InstallerImGuiApp
         _archiveInstallService = archiveInstallService;
         _installPath = ExpandPath(settings.DefaultInstallRoot);
         _isElevated = IsRunningAsAdministrator();
+        _directoryDialog = new ImGuiFileDialog("install-directory", FileDialogType.OpenDirectory, "Select Installation Folder");
     }
 
     public void Run()
@@ -164,6 +168,12 @@ internal sealed class InstallerImGuiApp
     {
         ApplyPendingLogs();
 
+        // Handle directory dialog
+        if (_directoryDialog.Submit())
+        {
+            _installPath = _directoryDialog.SelectedPath;
+        }
+
         ImGui.SetNextWindowSize(new Vector2(1000, 680), ImGuiCond.FirstUseEver);
         ImGui.Begin($"{_settings.ProductName} Installer", ImGuiWindowFlags.NoCollapse);
 
@@ -262,7 +272,14 @@ internal sealed class InstallerImGuiApp
 
         ImGui.Spacing();
         ImGui.Text("Install path:");
+        var browseButtonWidth = 80f;
+        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - browseButtonWidth - ImGui.GetStyle().ItemSpacing.X);
         ImGui.InputText("##install-path", ref _installPath, 512);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...", new Vector2(browseButtonWidth, 0)))
+        {
+            _directoryDialog.Open(ExpandPath(_installPath));
+        }
 
         ImGui.Spacing();
         ImGui.Text("Components:");
