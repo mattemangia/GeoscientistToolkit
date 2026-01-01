@@ -33,6 +33,7 @@ internal sealed class PublishService
             "--self-contained", selfContained ? "true" : "false",
             "/p:PublishSingleFile=true",
             "/p:IncludeNativeLibrariesForSelfExtract=true",
+            "/p:IncludeAllContentForSelfExtract=true",
             "/p:SkipVerificationTests=true"
         };
 
