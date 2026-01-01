@@ -1,307 +1,307 @@
 # Real-time Photogrammetry Pipeline
 
-Sistema completo di fotogrammetria real-time per GeoscientistToolkit con gestione automatica dei modelli ONNX e esportazione avanzata.
+Complete real-time photogrammetry system for GeoscientistToolkit with automatic ONNX model management and advanced export.
 
-## Caratteristiche Principali
+## Key Features
 
-- **Stima della profondità**: Supporto per modelli ONNX (MiDaS, DPT, ZoeDepth)
-- **Rilevamento keypoint**: SuperPoint con descrittori deep learning
-- **Feature matching**: LightGlue per matching veloce e accurato (con fallback a brute-force)
-- **RANSAC depth-aware**: Stima della posa con vincoli di profondità
-- **Keyframe 2.5D**: Sistema di keyframe con PnP e bundle adjustment
-- **Acquisizione video**: Supporto webcam e file video
-- **Georeferenziazione**: Sistema GCP con refinement altitudine
-- **Accelerazione GPU**: Supporto CUDA per inferenza ONNX
+- **Depth estimation**: Support for ONNX models (MiDaS, DPT, ZoeDepth)
+- **Keypoint detection**: SuperPoint with deep learning descriptors
+- **Feature matching**: LightGlue for fast and accurate matching (with brute-force fallback)
+- **Depth-aware RANSAC**: Pose estimation with depth constraints
+- **2.5D Keyframes**: Keyframe system with PnP and bundle adjustment
+- **Video acquisition**: Webcam and video file support
+- **Georeferencing**: GCP system with altitude refinement
+- **GPU acceleration**: CUDA support for ONNX inference
 
-## Requisiti
+## Requirements
 
-### Pacchetti NuGet (già inclusi nel .csproj)
+### NuGet Packages (already included in .csproj)
 - Microsoft.ML.OnnxRuntime (>=1.19.2)
-- Microsoft.ML.OnnxRuntime.Gpu (>=1.19.2) - per GPU
+- Microsoft.ML.OnnxRuntime.Gpu (>=1.19.2) - for GPU
 - OpenCvSharp4 (>=4.10.0)
-- MathNet.Numerics (già presente)
+- MathNet.Numerics (already present)
 
-### Modelli ONNX
+### ONNX Models
 
-I modelli ONNX devono essere scaricati separatamente:
+ONNX models must be downloaded separately:
 
 #### 1. Depth Estimation
 
-**MiDaS Small** (consigliato per real-time):
+**MiDaS Small** (recommended for real-time):
 - Download: https://github.com/isl-org/MiDaS/releases
-- File: `midas_v21_small_256.onnx` o simile
-- Dimensione input: 384x384
+- File: `midas_v21_small_256.onnx` or similar
+- Input size: 384x384
 
-**ZoeDepth** (per profondità metric-aware):
+**ZoeDepth** (for metric-aware depth):
 - Download: https://github.com/isl-org/ZoeDepth
-- Convertire in ONNX usando script Python
-- Dimensione input: 512x384
+- Convert to ONNX using Python script
+- Input size: 512x384
 
 #### 2. Keypoint Detection
 
 **SuperPoint**:
 - Download: https://github.com/magicleap/SuperPointPretrainedNetwork
-- Convertire in ONNX oppure usare port già convertiti:
+- Convert to ONNX or use already converted ports:
   - https://github.com/PINTO0309/PINTO_model_zoo (SuperPoint ONNX)
 - Input: Grayscale 1CHW
 
 #### 3. Feature Matching
 
-**LightGlue** (opzionale):
+**LightGlue** (optional):
 - Download: https://github.com/cvg/LightGlue
-- Convertire in ONNX
-- Input: Coppie di descrittori
+- Convert to ONNX
+- Input: Descriptor pairs
 
-**Nota**: Se LightGlue non è disponibile, il sistema usa automaticamente brute-force matching.
+**Note**: If LightGlue is not available, the system automatically uses brute-force matching.
 
-## Quick Start (Nuovo!)
+## Quick Start (New!)
 
-### Metodo 1: Download Automatico (Consigliato)
+### Method 1: Automatic Download (Recommended)
 
-1. **Apri le Impostazioni**:
+1. **Open Settings**:
    ```
    Menu: Edit → Settings → Photogrammetry
    ```
 
-2. **Download Automatico dei Modelli**:
-   - Clicca "Download MiDaS Small (Depth)" - scarica automaticamente il modello di profondità (~20 MB)
-   - Clicca "Download SuperPoint" - scarica automaticamente il rilevatore di keypoint (~5 MB)
-   - (Opzionale) "Download LightGlue" se disponibile
+2. **Automatic Model Download**:
+   - Click "Download MiDaS Small (Depth)" - automatically downloads depth model (~20 MB)
+   - Click "Download SuperPoint" - automatically downloads keypoint detector (~5 MB)
+   - (Optional) "Download LightGlue" if available
 
-3. **Configura Pipeline**:
-   - Abilita GPU se disponibile (richiede CUDA)
-   - Imposta risoluzione target (640x480 consigliato)
-   - Configura camera intrinsics (o usa auto-stima)
-   - Clicca "Apply" per salvare
+3. **Configure Pipeline**:
+   - Enable GPU if available (requires CUDA)
+   - Set target resolution (640x480 recommended)
+   - Configure camera intrinsics (or use auto-estimation)
+   - Click "Apply" to save
 
-4. **Avvia Fotogrammetria**:
+4. **Start Photogrammetry**:
    ```
    Menu: Tools → Real-time Photogrammetry
    Tab Configuration → Initialize Pipeline
    Tab Capture → Start Capture
    ```
 
-### Metodo 2: Selezione Manuale
+### Method 2: Manual Selection
 
-1. **Scarica i modelli** manualmente (vedi `ModelDownloadGuide.md`)
+1. **Download models** manually (see `ModelDownloadGuide.md`)
 
-2. **Configura percorsi nelle Settings**:
+2. **Configure paths in Settings**:
    ```
    Edit → Settings → Photogrammetry
    ```
-   - Usa il pulsante "Browse..." per selezionare ogni modello ONNX
-   - Imposta la cartella Models Directory
+   - Use the "Browse..." button to select each ONNX model
+   - Set the Models Directory folder
 
-3. **Salva e inizializza** la pipeline
+3. **Save and initialize** the pipeline
 
-## Configurazione Avanzata
+## Advanced Configuration
 
 ### Settings → Photogrammetry
 
-Le impostazioni di fotogrammetria sono completamente integrate nel sistema di configurazione:
+Photogrammetry settings are fully integrated into the configuration system:
 
 #### **Model Paths**
-- `Depth Model`: Percorso al modello ONNX per depth estimation
-- `SuperPoint Model`: Percorso al modello per keypoint detection
-- `LightGlue Model`: (Opzionale) Percorso al matcher
-- `Models Directory`: Cartella di default per i modelli
+- `Depth Model`: Path to ONNX model for depth estimation
+- `SuperPoint Model`: Path to model for keypoint detection
+- `LightGlue Model`: (Optional) Path to matcher
+- `Models Directory`: Default folder for models
 
 #### **Pipeline Settings**
-- `Use GPU Acceleration`: Abilita CUDA se disponibile
+- `Use GPU Acceleration`: Enable CUDA if available
 - `Depth Model Type`: MiDaS Small / DPT Small / ZoeDepth
-- `Keyframe Interval`: Crea keyframe ogni N frame (1-30)
-- `Target Width/Height`: Risoluzione elaborazione (320-1920 / 240-1080)
+- `Keyframe Interval`: Create keyframe every N frames (1-30)
+- `Target Width/Height`: Processing resolution (320-1920 / 240-1080)
 
 #### **Camera Intrinsics**
-- `Focal Length X/Y`: Lunghezza focale in pixel
-- `Principal Point X/Y`: Centro ottico
-- Pulsante "Auto-estimate": Calcola da risoluzione
+- `Focal Length X/Y`: Focal length in pixels
+- `Principal Point X/Y`: Optical center
+- "Auto-estimate" button: Calculate from resolution
 
 #### **Export Settings**
 - `Default Export Format`: PLY / XYZ / OBJ
-- `Export Textured Mesh`: Include texture (quando disponibile)
-- `Export Camera Path`: Esporta traiettoria camera
+- `Export Textured Mesh`: Include texture (when available)
+- `Export Camera Path`: Export camera trajectory
 
-### Configurare la Pipeline dalla Finestra RT Photogrammetry
+### Configuring the Pipeline from RT Photogrammetry Window
 
-Dalla finestra "Real-time Photogrammetry":
+From the "Real-time Photogrammetry" window:
 
 1. **Tab Configuration**:
-   - Inserire i percorsi ai modelli ONNX
-   - Selezionare il tipo di modello depth
-   - Abilitare GPU se disponibile
-   - Impostare risoluzione target (640x480 consigliato per real-time)
-   - Configurare camera intrinsics (o usare auto-stima)
-   - Cliccare "Initialize Pipeline"
+   - Enter paths to ONNX models
+   - Select depth model type
+   - Enable GPU if available
+   - Set target resolution (640x480 recommended for real-time)
+   - Configure camera intrinsics (or use auto-estimation)
+   - Click "Initialize Pipeline"
 
 2. **Tab Capture**:
-   - Selezionare sorgente video:
-     - **Webcam**: Scegli dalla lista di telecamere rilevate
-     - **File Video**: Usa "Browse..." per selezionare file (.mp4, .avi, .mov, ecc.)
-   - Cliccare "Start Capture"
-   - Visualizzazione live di frame e depth map
-   - Il sistema processerà i frame in tempo reale
+   - Select video source:
+     - **Webcam**: Choose from list of detected cameras
+     - **Video File**: Use "Browse..." to select file (.mp4, .avi, .mov, etc.)
+   - Click "Start Capture"
+   - Live display of frame and depth map
+   - System will process frames in real-time
 
 3. **Tab Keyframes**:
-   - Tabella con tutti i keyframe creati
-   - Informazioni: Frame ID, Timestamp, Numero punti 3D
-   - Pulsante "Perform Bundle Adjustment" per raffinamento
+   - Table with all created keyframes
+   - Information: Frame ID, Timestamp, Number of 3D points
+   - "Perform Bundle Adjustment" button for refinement
 
 4. **Tab Georeferencing**:
-   - **Aggiungere GCP**:
-     - Nome del punto
-     - Posizione locale (x,y,z) nel sistema della ricostruzione
-     - Posizione mondo (E,N,Alt) in coordinate reali (UTM, lat/lon, ecc.)
-     - Accuratezza in metri
-   - **Gestione GCP**:
-     - Tabella con tutti i GCP
-     - Checkbox per attivare/disattivare
-     - Pulsante "Remove" per eliminare
-   - **Calcolo Transform**:
-     - Richiede minimo 3 GCP attivi
-     - Checkbox "Refine with Altitude" per accuratezza verticale
-     - Mostra risultati: GCP usati, errore RMS, scala, traslazione, rotazione
+   - **Add GCP**:
+     - Point name
+     - Local position (x,y,z) in reconstruction system
+     - World position (E,N,Alt) in real coordinates (UTM, lat/lon, etc.)
+     - Accuracy in meters
+   - **GCP Management**:
+     - Table with all GCPs
+     - Checkbox to enable/disable
+     - "Remove" button to delete
+   - **Compute Transform**:
+     - Requires minimum 3 active GCPs
+     - "Refine with Altitude" checkbox for vertical accuracy
+     - Shows results: GCPs used, RMS error, scale, translation, rotation
 
 5. **Tab Statistics**:
-   - Frames processati totali
-   - Tempo medio di elaborazione
-   - FPS corrente
-   - Grafico processing time
-   - Totale keyframes e GCP
+   - Total processed frames
+   - Average processing time
+   - Current FPS
+   - Processing time graph
+   - Total keyframes and GCPs
 
-## Esportazione
+## Export
 
 ### Menu File → Export
 
-Tutte le esportazioni supportano georeferenziazione automatica se ≥3 GCP sono disponibili:
+All exports support automatic georeferencing if ≥3 GCPs are available:
 
 #### **Export Point Cloud**
-Formati disponibili:
+Available formats:
 - **PLY (Polygon File Format)**:
   - ASCII format
-  - Include coordinate XYZ e colori RGB
-  - Compatibile con MeshLab, CloudCompare, Blender
+  - Includes XYZ coordinates and RGB colors
+  - Compatible with MeshLab, CloudCompare, Blender
 
 - **XYZ (Simple Text)**:
-  - Formato testo semplice
-  - Una riga per punto: `X Y Z R G B`
-  - Facile import in software GIS
+  - Simple text format
+  - One line per point: `X Y Z R G B`
+  - Easy import in GIS software
 
 - **OBJ (Wavefront)**:
-  - Solo vertici (point cloud)
-  - File .mtl separato per colori
-  - Compatibile con tutti i software 3D
+  - Vertices only (point cloud)
+  - Separate .mtl file for colors
+  - Compatible with all 3D software
 
-**Come esportare**:
+**How to export**:
 1. Menu File → Export Point Cloud...
-2. Scegli nome file e formato (.ply, .xyz, .obj)
-3. Il sistema esporta automaticamente tutti i punti 3D dai keyframes
-4. Se GCP disponibili, applica georeferenziazione
+2. Choose file name and format (.ply, .xyz, .obj)
+3. System automatically exports all 3D points from keyframes
+4. If GCPs available, applies georeferencing
 
 #### **Export Mesh**
-- Attualmente esporta come point cloud in formato OBJ
-- Nota: TSDF fusion per mesh densa non ancora implementato
-- Roadmap futura: marching cubes, texturing
+- Currently exports as point cloud in OBJ format
+- Note: TSDF fusion for dense mesh not yet implemented
+- Future roadmap: marching cubes, texturing
 
 #### **Export Camera Path**
-- Esporta traiettoria completa della camera
-- Formato: `FrameID X Y Z QuatX QuatY QuatZ QuatW Timestamp`
-- Utile per:
-  - Visualizzazione percorso
-  - Import in software animazione
-  - Analisi movimento camera
+- Exports complete camera trajectory
+- Format: `FrameID X Y Z QuatX QuatY QuatZ QuatW Timestamp`
+- Useful for:
+  - Path visualization
+  - Import in animation software
+  - Camera movement analysis
 
-## Workflow consigliato
+## Recommended Workflow
 
-### Pipeline Real-time (monocamera)
+### Real-time Pipeline (monocular)
 
 1. **Pre-processing**:
-   - Undistort (se disponibili parametri di distorsione)
-   - Resize a risoluzione target
-   - Normalizzazione
+   - Undistort (if distortion parameters available)
+   - Resize to target resolution
+   - Normalization
 
 2. **Depth Estimation**:
-   - Inferenza modello depth (MiDaS/ZoeDepth)
-   - Output: depth map relativa per frame
+   - Depth model inference (MiDaS/ZoeDepth)
+   - Output: relative depth map per frame
 
 3. **Keypoint & Matching**:
-   - **Opzione A**: SuperPoint + LightGlue (sparse, veloce)
-   - **Opzione B**: ORB features (fallback, più lento ma senza modelli)
+   - **Option A**: SuperPoint + LightGlue (sparse, fast)
+   - **Option B**: ORB features (fallback, slower but no models needed)
 
-4. **RANSAC Depth-Aware**:
-   - Stima Essential matrix con RANSAC
-   - Allineamento scala usando depth map
-   - Filtraggio outlier con vincoli di profondità
+4. **Depth-Aware RANSAC**:
+   - Essential matrix estimation with RANSAC
+   - Scale alignment using depth map
+   - Outlier filtering with depth constraints
 
-5. **Keyframe 2.5D**:
-   - Creazione keyframe ogni N frame
-   - Salvataggio keypoints con profondità (3D sparse)
-   - PnP+RANSAC per tracking contro keyframe
+5. **2.5D Keyframes**:
+   - Keyframe creation every N frames
+   - Save keypoints with depth (3D sparse)
+   - PnP+RANSAC for tracking against keyframes
    - Bundle adjustment in background
 
 6. **Georeferencing**:
-   - Raccolta GCP (minimo 3 punti)
-   - Calcolo trasformazione di similarità (7 parametri)
-   - Refinement altitudine opzionale
+   - GCP collection (minimum 3 points)
+   - Similarity transformation computation (7 parameters)
+   - Optional altitude refinement
 
 ## Performance
 
-### Tempi di elaborazione tipici (CPU i7, risoluzione 640x480)
+### Typical processing times (CPU i7, resolution 640x480)
 
 - MiDaS Small: ~100-200 ms/frame
 - SuperPoint: ~50-100 ms/frame
 - LightGlue: ~30-50 ms/frame
 - RANSAC + Pose: ~10-20 ms/frame
-- **Totale**: ~200-400 ms/frame (~2-5 FPS)
+- **Total**: ~200-400 ms/frame (~2-5 FPS)
 
-### Con GPU (NVIDIA RTX 3060)
+### With GPU (NVIDIA RTX 3060)
 
 - MiDaS Small: ~10-20 ms/frame
 - SuperPoint: ~5-10 ms/frame
 - LightGlue: ~5-10 ms/frame
-- **Totale**: ~30-50 ms/frame (~20-30 FPS)
+- **Total**: ~30-50 ms/frame (~20-30 FPS)
 
 ## Troubleshooting
 
 ### "Failed to load model"
-- Verificare che il percorso al file ONNX sia corretto
-- Verificare che il modello sia nel formato ONNX corretto
-- Controllare i log per dettagli
+- Verify that the ONNX file path is correct
+- Verify that the model is in correct ONNX format
+- Check logs for details
 
 ### "CUDA not available"
-- Installare CUDA Toolkit (11.x o 12.x)
-- Installare driver NVIDIA aggiornati
-- Il sistema userà automaticamente CPU se CUDA non è disponibile
+- Install CUDA Toolkit (11.x or 12.x)
+- Install updated NVIDIA drivers
+- System will automatically use CPU if CUDA is not available
 
 ### "Not enough matches"
-- Ridurre il threshold di confidence nei keypoint
-- Verificare che la scena abbia texture sufficiente
-- Provare diverse impostazioni di esposizione camera
+- Lower the confidence threshold for keypoints
+- Verify that the scene has sufficient texture
+- Try different camera exposure settings
 
-### Frame rate basso
-- Ridurre risoluzione target
-- Disabilitare modelli pesanti (usare MiDaS Small invece di ZoeDepth)
-- Abilitare GPU acceleration
-- Aumentare keyframe interval
+### Low frame rate
+- Reduce target resolution
+- Disable heavy models (use MiDaS Small instead of ZoeDepth)
+- Enable GPU acceleration
+- Increase keyframe interval
 
-## Limitazioni
+## Limitations
 
-1. **Scala ambigua**: La ricostruzione monoculare ha scala arbitraria. Usare GCP per scala assoluta.
-2. **Texture necessaria**: Scene senza texture (pareti bianche) producono pochi keypoint.
-3. **Movimento lento**: Per risultati migliori, muovere la camera lentamente.
-4. **Depth relativa**: MiDaS produce profondità relativa, non metrica. ZoeDepth è più accurato ma più lento.
+1. **Ambiguous scale**: Monocular reconstruction has arbitrary scale. Use GCPs for absolute scale.
+2. **Texture needed**: Scenes without texture (white walls) produce few keypoints.
+3. **Slow movement**: For best results, move camera slowly.
+4. **Relative depth**: MiDaS produces relative depth, not metric. ZoeDepth is more accurate but slower.
 
-## Sviluppi futuri
+## Future Developments
 
-- [ ] Ricostruzione densa con TSDF fusion
-- [ ] Meshing real-time con marching cubes
-- [ ] Texturing automatico
+- [ ] Dense reconstruction with TSDF fusion
+- [ ] Real-time meshing with marching cubes
+- [ ] Automatic texturing
 - [ ] Loop closure detection
 - [ ] Export PLY/OBJ point cloud
 - [ ] Multi-camera support
-- [ ] IMU fusion per posa più robusta
+- [ ] IMU fusion for more robust pose
 
-## Riferimenti
+## References
 
 - MiDaS: https://github.com/isl-org/MiDaS
 - ZoeDepth: https://github.com/isl-org/ZoeDepth
