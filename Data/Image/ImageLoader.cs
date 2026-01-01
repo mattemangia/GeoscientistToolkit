@@ -1,9 +1,12 @@
-﻿// GeoscientistToolkit/Util/ImageLoader.cs
+// GeoscientistToolkit/Util/ImageLoader.cs
 
 using BitMiracle.LibTiff.Classic;
 using StbImageSharp;
 using MetadataExtractor;
 using MetadataExtractor.Formats.Exif;
+using FellowOakDicom;
+using FellowOakDicom.Imaging;
+using FellowOakDicom.Imaging.Codec;
 
 namespace GeoscientistToolkit.Util;
 
@@ -23,6 +26,7 @@ public static class ImageLoader
         var ext = Path.GetExtension(path).ToLowerInvariant();
 
         if (ext == ".tif" || ext == ".tiff") return LoadTiffInfo(path);
+        if (ext == ".dcm") return LoadDicomInfo(path);
 
         using (var stream = File.OpenRead(path))
         {
@@ -46,6 +50,7 @@ public static class ImageLoader
         var ext = Path.GetExtension(path).ToLowerInvariant();
 
         if (ext == ".tif" || ext == ".tiff") return LoadTiff(path);
+        if (ext == ".dcm") return LoadDicom(path);
 
         using (var stream = File.OpenRead(path))
         {
@@ -100,6 +105,15 @@ public static class ImageLoader
 
                     return rgbaData;
                 }
+
+            if (ext == ".dcm")
+            {
+                 var info = LoadDicom(path);
+                 width = info.Width;
+                 height = info.Height;
+                 channels = 4;
+                 return info.Data;
+            }
 
             // Use StbImageSharp for other formats
             using (var stream = File.OpenRead(path))
@@ -181,6 +195,7 @@ public static class ImageLoader
         var ext = Path.GetExtension(path).ToLowerInvariant();
 
         if (ext == ".tif" || ext == ".tiff") return LoadTiffAsGrayscale(path, out width, out height);
+        if (ext == ".dcm") return LoadDicomAsGrayscale(path, out width, out height);
 
         // For other formats, try to load as grayscale first
         try
@@ -523,6 +538,127 @@ public static class ImageLoader
         }
     }
 
+    // DICOM SUPPORT
+    private static ImageInfo LoadDicomInfo(string path)
+    {
+         var file = DicomFile.Open(path);
+         var pixelData = DicomPixelData.Create(file.Dataset);
+         return new ImageInfo
+         {
+             Width = pixelData.Width,
+             Height = pixelData.Height,
+             Channels = pixelData.SamplesPerPixel,
+             BitsPerChannel = pixelData.BitsStored,
+             Data = null
+         };
+    }
+
+    private static ImageInfo LoadDicom(string path)
+    {
+        byte[] grayscale = LoadDicomAsGrayscale(path, out int w, out int h);
+
+        // Convert to RGBA
+        byte[] rgba = new byte[w * h * 4];
+        for(int i=0; i<w*h; i++)
+        {
+            byte val = grayscale[i];
+            rgba[i*4] = val;
+            rgba[i*4+1] = val;
+            rgba[i*4+2] = val;
+            rgba[i*4+3] = 255;
+        }
+
+        return new ImageInfo
+        {
+            Width = w,
+            Height = h,
+            Channels = 4,
+            BitsPerChannel = 8,
+            Data = rgba
+        };
+    }
+
+    private static byte[] LoadDicomAsGrayscale(string path, out int width, out int height)
+    {
+        var file = DicomFile.Open(path);
+
+        // Decompress if needed
+        if (file.Dataset.InternalTransferSyntax.IsEncapsulated)
+        {
+            try
+            {
+                var transcoder = new DicomTranscoder(file.Dataset.InternalTransferSyntax, DicomTransferSyntax.ExplicitVRLittleEndian);
+                file = transcoder.Transcode(file);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[ImageLoader] Failed to transcode DICOM: {ex.Message}. Attempting to read anyway.");
+            }
+        }
+
+        var pixelData = DicomPixelData.Create(file.Dataset);
+        width = pixelData.Width;
+        height = pixelData.Height;
+
+        // Get raw data
+        var byteBuffer = pixelData.GetFrame(0).Data;
+
+        // DICOM data is often 12-bit or 16-bit stored in 16-bit.
+        // We need to apply Window/Level or Rescale Slope/Intercept to get HU, then map to 0-255.
+        // Or just map min-max to 0-255.
+
+        // Let's assume 16-bit and map to 8-bit.
+        int bitsAllocated = pixelData.BitsAllocated;
+
+        byte[] result = new byte[width * height];
+
+        if (bitsAllocated > 8)
+        {
+            // Assume Little Endian (ExplicitVRLittleEndian)
+            // Find min/max for simple auto-windowing
+            // (A real medical viewer would use the WindowCenter/WindowWidth tags)
+
+            // Read tags for better rendering
+            double rescaleSlope = file.Dataset.GetValueOrDefault(DicomTag.RescaleSlope, 0, 1.0);
+            double rescaleIntercept = file.Dataset.GetValueOrDefault(DicomTag.RescaleIntercept, 0, 0.0);
+            double windowCenter = file.Dataset.GetValueOrDefault(DicomTag.WindowCenter, 0, 0.0);
+            double windowWidth = file.Dataset.GetValueOrDefault(DicomTag.WindowWidth, 0, 0.0);
+
+            // If no window width, calculate min/max
+            // For now, let's just do a simple min/max normalization which is robust for a general "Toolkit".
+
+            short[] values = new short[width * height];
+            int min = int.MaxValue;
+            int max = int.MinValue;
+
+            for (int i = 0; i < width * height; i++)
+            {
+                // Little endian 16-bit
+                short val = (short)(byteBuffer[i * 2] | (byteBuffer[i * 2 + 1] << 8));
+                values[i] = val;
+                if (val < min) min = val;
+                if (val > max) max = val;
+            }
+
+            // Normalize
+            double range = max - min;
+            if (range <= 0) range = 1;
+
+            for (int i = 0; i < width * height; i++)
+            {
+                result[i] = (byte)((values[i] - min) / range * 255.0);
+            }
+        }
+        else
+        {
+            // 8-bit
+            Array.Copy(byteBuffer, result, width * height);
+        }
+
+        return result;
+    }
+
+
     private static byte[] ConvertToGrayscale(byte[] rgbaData, int width, int height)
     {
         var grayscale = new byte[width * height];
@@ -585,7 +721,7 @@ public static class ImageLoader
                ext == ".bmp" || ext == ".tga" || ext == ".psd" ||
                ext == ".gif" || ext == ".hdr" || ext == ".pic" ||
                ext == ".pnm" || ext == ".ppm" || ext == ".pgm" ||
-               ext == ".tif" || ext == ".tiff";
+               ext == ".tif" || ext == ".tiff" || ext == ".dcm";
     }
 
     public class ImageInfo

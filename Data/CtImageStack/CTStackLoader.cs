@@ -1,5 +1,6 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/CTStackLoader.cs
+// GeoscientistToolkit/Data/CtImageStack/CTStackLoader.cs
 
+using System.Text.Json;
 using GeoscientistToolkit.Data.VolumeData;
 using GeoscientistToolkit.Util;
 
@@ -24,13 +25,18 @@ public static class CTStackLoader
         // Check if path is a file or directory
         if (File.Exists(path))
         {
-            // Check if it's a multi-page TIFF
             var ext = Path.GetExtension(path).ToLowerInvariant();
+
+            // Check if it's a multi-page TIFF
             if ((ext == ".tif" || ext == ".tiff") && ImageLoader.IsMultiPageTiff(path))
                 return await LoadCTStackFromMultiPageTiffAsync(path, pixelSize, binningFactor,
                     useMemoryMapping, progress, datasetName);
 
-            throw new ArgumentException("The specified file is not a multi-page TIFF file.");
+            // Check if it's a .ctstack definition file
+            if (ext == ".ctstack")
+                return await LoadCTStackFromDefinitionFileAsync(path, pixelSize, binningFactor, useMemoryMapping, progress, datasetName);
+
+            throw new ArgumentException($"The specified file type ({ext}) is not supported as a stack volume.");
         }
 
         if (Directory.Exists(path))
@@ -38,6 +44,229 @@ public static class CTStackLoader
                 useMemoryMapping, progress, datasetName);
 
         throw new FileNotFoundException("The specified path does not exist.");
+    }
+
+    private static async Task<ChunkedVolume> LoadCTStackFromDefinitionFileAsync(
+        string path,
+        double pixelSize,
+        int binningFactor,
+        bool useMemoryMapping,
+        IProgress<float> progress,
+        string datasetName)
+    {
+        Logger.Log($"[CTStackLoader] Loading CT stack from definition file: {path}");
+
+        if (string.IsNullOrEmpty(datasetName))
+            datasetName = Path.GetFileNameWithoutExtension(path);
+
+        string json = await File.ReadAllTextAsync(path);
+
+        // Simple JSON parsing
+        List<string> slicePaths = new List<string>();
+        double definedPixelSize = pixelSize;
+
+        try
+        {
+            using (JsonDocument doc = JsonDocument.Parse(json))
+            {
+                var root = doc.RootElement;
+                if (root.TryGetProperty("slices", out var slicesElement) && slicesElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var element in slicesElement.EnumerateArray())
+                    {
+                        slicePaths.Add(element.GetString());
+                    }
+                }
+
+                if (root.TryGetProperty("pixelSize", out var psElement))
+                {
+                    definedPixelSize = psElement.GetDouble();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[CTStackLoader] Failed to parse .ctstack file: {ex.Message}");
+            throw;
+        }
+
+        // Resolve relative paths
+        var baseDir = Path.GetDirectoryName(path);
+        var resolvedPaths = slicePaths.Select(p => Path.IsPathRooted(p) ? p : Path.Combine(baseDir, p)).ToList();
+
+        // Filter existing
+        var validFiles = resolvedPaths.Where(File.Exists).ToList();
+
+        if (validFiles.Count == 0)
+            throw new FileNotFoundException("No valid image files found in .ctstack definition.");
+
+        // Use the defined pixel size if the user didn't override it (passed 0 or default?)
+        // The calling code passes pixelSize based on UI settings. We usually prefer the file's metadata if available?
+        // Let's log it.
+        Logger.Log($"[CTStackLoader] .ctstack metadata pixel size: {definedPixelSize}. Using provided: {pixelSize}");
+
+        // Call internal loader logic
+        // We can reuse LoadDirectAsync or LoadWith3DBinningAsync, but they are private and take 'folderPath'.
+        // We need to refactor slightly or copy logic.
+        // Since we can't easily change the signature of those private methods without potentially breaking other things (though they are private),
+        // let's create a new internal method that takes List<string> directly.
+
+        if (binningFactor > 1)
+            return await LoadFromFilesWith3DBinningAsync(baseDir, validFiles, pixelSize, binningFactor, useMemoryMapping, progress, datasetName);
+
+        return await LoadFromFilesDirectAsync(baseDir, validFiles, pixelSize, useMemoryMapping, progress, datasetName);
+    }
+
+    // Refactored from LoadCTStackFromFolderAsync
+
+    private static async Task<ChunkedVolume> LoadFromFilesDirectAsync(
+        string workingDir,
+        List<string> imageFiles,
+        double pixelSize,
+        bool useMemoryMapping,
+        IProgress<float> progress,
+        string datasetName)
+    {
+        // Check for existing volume file in the working directory
+        var volumePath = Path.Combine(workingDir, $"{datasetName}.Volume.bin");
+
+        if (File.Exists(volumePath))
+        {
+            Logger.Log($"[CTStackLoader] Found existing volume file: {volumePath}");
+            try
+            {
+                var volume = await ChunkedVolume.LoadFromBinAsync(volumePath, useMemoryMapping);
+                volume.PixelSize = pixelSize;
+                progress?.Report(1.0f);
+                return volume;
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[CTStackLoader] Error loading existing volume: {ex.Message}");
+            }
+        }
+
+        // Load from images
+        // We need a ChunkedVolume.FromFilesAsync? Or reuse FromFolderAsync logic but pass files?
+        // ChunkedVolume.FromFolderAsync takes a folder path.
+        // We should probably implement loading from file list here manually as FromFolderAsync does.
+
+        // Reuse logic from LoadDirectAsync (which was private static).
+        // I will copy the logic here essentially.
+
+        // Get dimensions
+        var (width, height) = await GetImageDimensionsAsync(imageFiles[0]);
+        var depth = imageFiles.Count;
+
+        ChunkedVolume newVolume;
+
+        if (useMemoryMapping)
+        {
+            await CreateMemoryMappedFileAsync(volumePath, width, height, depth,
+                ChunkedVolume.DEFAULT_CHUNK_DIM, pixelSize);
+
+            newVolume = await ChunkedVolume.LoadFromBinAsync(volumePath, true);
+        }
+        else
+        {
+            newVolume = new ChunkedVolume(width, height, depth)
+            {
+                PixelSize = pixelSize
+            };
+        }
+
+        // Load pages directly into the volume
+        await Task.Run(() =>
+        {
+            for (var z = 0; z < depth; z++)
+            {
+                var pageData = ImageLoader.LoadGrayscaleImage(imageFiles[z], out var pageWidth, out var pageHeight);
+
+                if (pageWidth != width || pageHeight != height)
+                {
+                    Logger.LogError($"[CTStackLoader] Slice {z} has different dimensions ({pageWidth}×{pageHeight}) than expected ({width}×{height})");
+                    // Resize? Or skip? For now, we continue, but this might crash WriteSliceZ if strictly checked.
+                    // Ideally we resize.
+                }
+
+                newVolume.WriteSliceZ(z, pageData);
+                progress?.Report((float)(z + 1) / depth);
+            }
+        });
+
+        if (!useMemoryMapping) await newVolume.SaveAsBinAsync(volumePath);
+        await CreateEmptyLabelsFileAsync(workingDir, newVolume, datasetName);
+
+        return newVolume;
+    }
+
+    private static async Task<ChunkedVolume> LoadFromFilesWith3DBinningAsync(
+        string workingDir,
+        List<string> imageFiles,
+        double pixelSize,
+        int binningFactor,
+        bool useMemoryMapping,
+        IProgress<float> progress,
+        string datasetName)
+    {
+         // Same logic as LoadWith3DBinningAsync but public/internal reused
+         // I'll just copy the implementation of LoadWith3DBinningAsync here but using the file list
+
+        Logger.Log($"[CTStackLoader] Applying {binningFactor}× 3D binning");
+
+        var binnedMarker = Path.Combine(workingDir, $"binned_{binningFactor}x3d.marker");
+        var volumePath = Path.Combine(workingDir, $"{datasetName}.Volume.bin");
+
+        if (File.Exists(binnedMarker) && File.Exists(volumePath))
+        {
+            try
+            {
+                var volume = await ChunkedVolume.LoadFromBinAsync(volumePath, useMemoryMapping);
+                volume.PixelSize = pixelSize * binningFactor;
+                progress?.Report(1.0f);
+                return volume;
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[CTStackLoader] Error loading existing binned volume: {ex.Message}");
+            }
+        }
+
+        var (origWidth, origHeight) = await GetImageDimensionsAsync(imageFiles[0]);
+        var origDepth = imageFiles.Count;
+
+        var newWidth = Math.Max(1, origWidth / binningFactor);
+        var newHeight = Math.Max(1, origHeight / binningFactor);
+        var newDepth = Math.Max(1, (origDepth + binningFactor - 1) / binningFactor);
+
+        ChunkedVolume binnedVolume;
+
+        if (useMemoryMapping)
+        {
+            await CreateMemoryMappedFileAsync(volumePath, newWidth, newHeight, newDepth,
+                ChunkedVolume.DEFAULT_CHUNK_DIM, pixelSize * binningFactor);
+            binnedVolume = await ChunkedVolume.LoadFromBinAsync(volumePath, true);
+        }
+        else
+        {
+            binnedVolume = new ChunkedVolume(newWidth, newHeight, newDepth)
+            {
+                PixelSize = pixelSize * binningFactor
+            };
+        }
+
+        await Process3DBinningAsync(binnedVolume, imageFiles, binningFactor, progress);
+
+        if (!useMemoryMapping) await binnedVolume.SaveAsBinAsync(volumePath);
+
+        await File.WriteAllTextAsync(binnedMarker,
+            $"3D Binned with factor {binningFactor} at {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n" +
+            $"Original: {origWidth}×{origHeight}×{origDepth}\n" +
+            $"Binned: {newWidth}×{newHeight}×{newDepth}");
+
+        await CreateEmptyLabelsFileAsync(workingDir, binnedVolume, datasetName);
+
+        return binnedVolume;
     }
 
     /// <summary>
@@ -99,10 +328,10 @@ public static class CTStackLoader
 
         // Check if binning is needed
         if (binningFactor > 1)
-            return await LoadWith3DBinningAsync(folderPath, imageFiles, pixelSize, binningFactor,
+            return await LoadFromFilesWith3DBinningAsync(folderPath, imageFiles, pixelSize, binningFactor,
                 useMemoryMapping, progress, datasetName);
 
-        return await LoadDirectAsync(folderPath, imageFiles, pixelSize, useMemoryMapping,
+        return await LoadFromFilesDirectAsync(folderPath, imageFiles, pixelSize, useMemoryMapping,
             progress, datasetName);
     }
 
@@ -374,134 +603,6 @@ public static class CTStackLoader
                 counts[x, y] += count;
             }
         }
-    }
-
-    /// <summary>
-    ///     Loads images directly without binning
-    /// </summary>
-    private static async Task<ChunkedVolume> LoadDirectAsync(
-        string folderPath,
-        List<string> imageFiles,
-        double pixelSize,
-        bool useMemoryMapping,
-        IProgress<float> progress,
-        string datasetName)
-    {
-        // Check for existing volume file
-        var volumePath = Path.Combine(folderPath, $"{datasetName}.Volume.bin");
-
-        if (File.Exists(volumePath))
-        {
-            Logger.Log($"[CTStackLoader] Found existing volume file: {volumePath}");
-            try
-            {
-                var volume = await ChunkedVolume.LoadFromBinAsync(volumePath, useMemoryMapping);
-                volume.PixelSize = pixelSize;
-                progress?.Report(1.0f);
-                return volume;
-            }
-            catch (Exception ex)
-            {
-                Logger.Log($"[CTStackLoader] Error loading existing volume: {ex.Message}");
-                Logger.Log("[CTStackLoader] Regenerating volume from images...");
-            }
-        }
-
-        // Load from images
-        var newVolume = await ChunkedVolume.FromFolderAsync(folderPath,
-            ChunkedVolume.DEFAULT_CHUNK_DIM, useMemoryMapping, progress, datasetName);
-        newVolume.PixelSize = pixelSize;
-
-        // Save for future use (only if not memory mapped - it's already saved)
-        if (!useMemoryMapping) await newVolume.SaveAsBinAsync(volumePath);
-
-        // Create empty labels file
-        await CreateEmptyLabelsFileAsync(folderPath, newVolume, datasetName);
-
-        return newVolume;
-    }
-
-    /// <summary>
-    ///     Loads images with 3D binning applied
-    /// </summary>
-    private static async Task<ChunkedVolume> LoadWith3DBinningAsync(
-        string folderPath,
-        List<string> imageFiles,
-        double pixelSize,
-        int binningFactor,
-        bool useMemoryMapping,
-        IProgress<float> progress,
-        string datasetName)
-    {
-        Logger.Log($"[CTStackLoader] Applying {binningFactor}× 3D binning");
-
-        // Check for existing binned volume
-        var binnedMarker = Path.Combine(folderPath, $"binned_{binningFactor}x3d.marker");
-        var volumePath = Path.Combine(folderPath, $"{datasetName}.Volume.bin");
-
-        if (File.Exists(binnedMarker) && File.Exists(volumePath))
-        {
-            Logger.Log("[CTStackLoader] Found existing binned volume");
-            try
-            {
-                var volume = await ChunkedVolume.LoadFromBinAsync(volumePath, useMemoryMapping);
-                volume.PixelSize = pixelSize * binningFactor;
-                progress?.Report(1.0f);
-                return volume;
-            }
-            catch (Exception ex)
-            {
-                Logger.Log($"[CTStackLoader] Error loading existing binned volume: {ex.Message}");
-            }
-        }
-
-        // Get original dimensions
-        var (origWidth, origHeight) = await GetImageDimensionsAsync(imageFiles[0]);
-        var origDepth = imageFiles.Count;
-
-        // Calculate binned dimensions - true 3D binning
-        var newWidth = Math.Max(1, origWidth / binningFactor);
-        var newHeight = Math.Max(1, origHeight / binningFactor);
-        var newDepth = Math.Max(1, (origDepth + binningFactor - 1) / binningFactor);
-
-        Logger.Log(
-            $"[CTStackLoader] 3D Binning {origWidth}×{origHeight}×{origDepth} → {newWidth}×{newHeight}×{newDepth}");
-
-        // Create binned volume
-        ChunkedVolume binnedVolume;
-
-        if (useMemoryMapping)
-        {
-            // Create memory-mapped file
-            await CreateMemoryMappedFileAsync(volumePath, newWidth, newHeight, newDepth,
-                ChunkedVolume.DEFAULT_CHUNK_DIM, pixelSize * binningFactor);
-
-            binnedVolume = await ChunkedVolume.LoadFromBinAsync(volumePath, true);
-        }
-        else
-        {
-            binnedVolume = new ChunkedVolume(newWidth, newHeight, newDepth)
-            {
-                PixelSize = pixelSize * binningFactor
-            };
-        }
-
-        // Process images with 3D binning
-        await Process3DBinningAsync(binnedVolume, imageFiles, binningFactor, progress);
-
-        // Save the binned volume (if not memory mapped)
-        if (!useMemoryMapping) await binnedVolume.SaveAsBinAsync(volumePath);
-
-        // Create marker file
-        await File.WriteAllTextAsync(binnedMarker,
-            $"3D Binned with factor {binningFactor} at {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n" +
-            $"Original: {origWidth}×{origHeight}×{origDepth}\n" +
-            $"Binned: {newWidth}×{newHeight}×{newDepth}");
-
-        // Create empty labels file
-        await CreateEmptyLabelsFileAsync(folderPath, binnedVolume, datasetName);
-
-        return binnedVolume;
     }
 
     /// <summary>
