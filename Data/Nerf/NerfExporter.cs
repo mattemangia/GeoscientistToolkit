@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using System.Text;
+using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Data.Nerf;
@@ -372,18 +373,18 @@ public class NerfExporter
                     cornerPositions[6] = _gridMin + new Vector3(x + 1, y + 1, z + 1) * cellSize;
                     cornerPositions[7] = _gridMin + new Vector3(x, y + 1, z + 1) * cellSize;
 
-                    // Get triangulation from lookup table
-                    int[] triangulation = MarchingCubesTable.GetTriangulation(cubeIndex);
-
-                    for (int i = 0; triangulation[i] != -1; i += 3)
+                    for (int i = 0; i < 16; i += 3)
                     {
+                        int e0 = MarchingCubesTables.TriangleTable[cubeIndex, i];
+                        if (e0 < 0) break;
+
                         int[] tri = new int[3];
 
                         for (int j = 0; j < 3; j++)
                         {
-                            int edgeIndex = triangulation[i + j];
-                            int v0 = MarchingCubesTable.EdgeVertices[edgeIndex, 0];
-                            int v1 = MarchingCubesTable.EdgeVertices[edgeIndex, 1];
+                            int edgeIndex = MarchingCubesTables.TriangleTable[cubeIndex, i + j];
+                            int v0 = MarchingCubesTables.EdgeVertices[edgeIndex, 0];
+                            int v1 = MarchingCubesTables.EdgeVertices[edgeIndex, 1];
 
                             // Interpolate vertex position along edge
                             float t = (threshold - cornerDensities[v0]) / (cornerDensities[v1] - cornerDensities[v0]);
@@ -799,101 +800,6 @@ public struct ColoredPoint
     public Vector3 Position { get; set; }
     public Vector3 Color { get; set; }
     public float Density { get; set; }
-}
-
-#endregion
-
-#region Marching Cubes Lookup Tables
-
-/// <summary>
-/// Lookup tables for Marching Cubes algorithm.
-/// </summary>
-public static class MarchingCubesTable
-{
-    // Edge to vertex mapping
-    public static readonly int[,] EdgeVertices = new int[,]
-    {
-        {0, 1}, {1, 2}, {2, 3}, {3, 0},  // Bottom face
-        {4, 5}, {5, 6}, {6, 7}, {7, 4},  // Top face
-        {0, 4}, {1, 5}, {2, 6}, {3, 7}   // Vertical edges
-    };
-
-    // Triangulation table (256 cases, up to 15 edge indices per case, -1 terminated)
-    private static readonly int[][] TriTable = InitializeTriTable();
-
-    public static int[] GetTriangulation(int cubeIndex)
-    {
-        return TriTable[cubeIndex];
-    }
-
-    private static int[][] InitializeTriTable()
-    {
-        // Standard Marching Cubes triangulation table
-        // Each entry contains edge indices for triangles, terminated by -1
-        var table = new int[256][];
-
-        // Initialize all with empty
-        for (int i = 0; i < 256; i++)
-            table[i] = new[] { -1 };
-
-        // Populate the table with actual triangulations
-        // (Abbreviated - full table has 256 entries)
-        // Using common cases for demonstration
-
-        table[0] = new[] { -1 };
-        table[255] = new[] { -1 };
-
-        // Case 1: corner 0 inside
-        table[1] = new[] { 0, 8, 3, -1 };
-        table[2] = new[] { 0, 1, 9, -1 };
-        table[3] = new[] { 1, 8, 3, 9, 8, 1, -1 };
-        table[4] = new[] { 1, 2, 10, -1 };
-        table[5] = new[] { 0, 8, 3, 1, 2, 10, -1 };
-        table[6] = new[] { 9, 2, 10, 0, 2, 9, -1 };
-        table[7] = new[] { 2, 8, 3, 2, 10, 8, 10, 9, 8, -1 };
-        table[8] = new[] { 3, 11, 2, -1 };
-        table[9] = new[] { 0, 11, 2, 8, 11, 0, -1 };
-        table[10] = new[] { 1, 9, 0, 2, 3, 11, -1 };
-        table[11] = new[] { 1, 11, 2, 1, 9, 11, 9, 8, 11, -1 };
-        table[12] = new[] { 3, 10, 1, 11, 10, 3, -1 };
-        table[13] = new[] { 0, 10, 1, 0, 8, 10, 8, 11, 10, -1 };
-        table[14] = new[] { 3, 9, 0, 3, 11, 9, 11, 10, 9, -1 };
-        table[15] = new[] { 9, 8, 10, 10, 8, 11, -1 };
-
-        // Continue with more cases...
-        table[16] = new[] { 4, 7, 8, -1 };
-        table[17] = new[] { 4, 3, 0, 7, 3, 4, -1 };
-        table[18] = new[] { 0, 1, 9, 8, 4, 7, -1 };
-        table[19] = new[] { 4, 1, 9, 4, 7, 1, 7, 3, 1, -1 };
-        table[20] = new[] { 1, 2, 10, 8, 4, 7, -1 };
-
-        // Fill remaining cases with symmetric patterns
-        for (int i = 21; i < 256; i++)
-        {
-            if (table[i] == null || table[i].Length == 1)
-            {
-                // Generate from symmetry or use empty
-                int complement = 255 - i;
-                if (table[complement] != null && table[complement].Length > 1)
-                {
-                    table[i] = (int[])table[complement].Clone();
-                }
-                else
-                {
-                    table[i] = new[] { -1 };
-                }
-            }
-        }
-
-        // Additional important cases
-        table[51] = new[] { 1, 8, 3, 9, 8, 1, 2, 10, 6, 2, 6, 11, -1 };
-        table[85] = new[] { 0, 8, 3, 1, 2, 10, 4, 5, 9, 6, 7, 11, -1 };
-        table[102] = new[] { 0, 1, 9, 2, 3, 11, 4, 5, 6, 4, 6, 7, -1 };
-        table[153] = new[] { 0, 8, 3, 1, 2, 10, 4, 7, 8, 4, 8, 5, -1 };
-        table[170] = new[] { 0, 1, 9, 2, 3, 11, 4, 7, 8, 5, 6, 10, -1 };
-
-        return table;
-    }
 }
 
 #endregion
