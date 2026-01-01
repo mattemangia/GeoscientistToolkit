@@ -14,7 +14,10 @@
 using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data.Materials;
+using GeoscientistToolkit.Data.Pnm;
+using GeoscientistToolkit.Data.Loaders;
 using GeoscientistToolkit.UI;
+using GeoscientistToolkit.UI.Utils;
 using ImGuiNET;
 
 namespace GeoscientistToolkit.Analysis.Geomechanics;
@@ -91,6 +94,18 @@ public class TriaxialSimulationTool : IDisposable
         { "Very High Confining (100 MPa)", (100.0f, 2.0f, 15.0f) },
     };
 
+    // PNM Dataset support
+    private PNMDataset _selectedPnmDataset;
+    private bool _usePnmDataset;
+    private bool _showPnmSelector;
+    private ImGuiExportFileDialog _pnmFileDialog;
+    private List<PNMDataset> _availablePnmDatasets = new();
+    private int _selectedPnmDatasetIndex = -1;
+
+    // PNM-derived properties
+    private float _pnmPorosity;
+    private float _pnmPermeability_mD;
+
     public TriaxialSimulationTool()
     {
         _simulation = new TriaxialSimulation();
@@ -99,14 +114,20 @@ public class TriaxialSimulationTool : IDisposable
         _visualization3D = new TriaxialVisualization3D();
         _calibrationManager = new GeomechanicalCalibrationManager();
 
+        // Initialize PNM file dialog
+        _pnmFileDialog = new ImGuiExportFileDialog("pnm_import_dialog", "Import PNM Dataset");
+        _pnmFileDialog.SetExtensions((".json", "PNM JSON File"));
+
         // Initialize curve editors
+        // Curves use Y as a multiplier for the base value
+        // Default confining: ramp up to full pressure in first 10%, then hold
         var defaultConfiningCurve = new List<CurvePoint>
         {
-            new CurvePoint(0, 0),
-            new CurvePoint(0.2f, 1.0f),
-            new CurvePoint(1.0f, 1.0f)
+            new CurvePoint(0, 1.0f),    // Start at full pressure
+            new CurvePoint(1.0f, 1.0f)  // Maintain full pressure
         };
 
+        // Default axial: linear ramp from 0 to 1 (strain-controlled uses strain rate, not this curve)
         var defaultAxialCurve = new List<CurvePoint>
         {
             new CurvePoint(0, 0),
@@ -136,16 +157,19 @@ public class TriaxialSimulationTool : IDisposable
         // Load default material
         LoadDefaultMaterial();
 
-        // Select default preset
-        _selectedPresetName = "Standard UCS (Unconfined)";
+        // Select default preset - use Medium Confining for more interesting results
+        _selectedPresetName = "Medium Confining (10 MPa)";
         if (_loadingPresets.TryGetValue(_selectedPresetName, out var preset))
         {
             _loadParams.ConfiningPressure_MPa = preset.confining;
             _loadParams.AxialStressRate_MPa_per_s = preset.axialRate;
             _loadParams.MaxAxialStrain_percent = preset.maxStrain;
-            _loadParams.TotalTime_s = 1000.0f;
-            _loadParams.TimeStep_s = 0.1f;
         }
+
+        // Set realistic time parameters for a typical triaxial test
+        _loadParams.TotalTime_s = 500.0f;    // 500 seconds total
+        _loadParams.TimeStep_s = 0.5f;       // 0.5 second steps -> 1000 steps
+        _loadParams.AxialStrainRate_per_s = 1e-4f;  // Higher strain rate for faster results
     }
 
     public void Dispose()
@@ -161,6 +185,12 @@ public class TriaxialSimulationTool : IDisposable
     public void Draw()
     {
         if (!_isOpen) return;
+
+        // Set initial window size to a reasonable default (1200x800)
+        ImGui.SetNextWindowSize(new Vector2(1200, 800), ImGuiCond.FirstUseEver);
+        // Center the window on first use
+        var viewport = ImGui.GetMainViewport();
+        ImGui.SetNextWindowPos(viewport.GetCenter(), ImGuiCond.FirstUseEver, new Vector2(0.5f, 0.5f));
 
         ImGui.Begin("Triaxial Simulation Tool", ref _isOpen, ImGuiWindowFlags.MenuBar);
 
@@ -189,6 +219,15 @@ public class TriaxialSimulationTool : IDisposable
         // Draw curve editor windows
         _confiningPressureCurve.Draw();
         _axialLoadCurve.Draw();
+
+        // Handle PNM file dialog
+        if (_pnmFileDialog.Submit())
+        {
+            if (!string.IsNullOrEmpty(_pnmFileDialog.SelectedPath))
+            {
+                LoadPnmFromFile(_pnmFileDialog.SelectedPath);
+            }
+        }
     }
 
     private void DrawMenuBar()
@@ -264,6 +303,14 @@ public class TriaxialSimulationTool : IDisposable
         if (ImGui.CollapsingHeader("Lab Data Calibration"))
         {
             DrawCalibrationSection();
+        }
+
+        ImGui.Spacing();
+
+        // PNM Dataset
+        if (ImGui.CollapsingHeader("PNM Dataset (Optional)"))
+        {
+            DrawPnmSection();
         }
 
         ImGui.Spacing();
@@ -368,6 +415,210 @@ public class TriaxialSimulationTool : IDisposable
         }
 
         ImGui.Unindent();
+    }
+
+    private void DrawPnmSection()
+    {
+        ImGui.Checkbox("Use PNM Dataset for Properties", ref _usePnmDataset);
+
+        if (_usePnmDataset)
+        {
+            ImGui.Indent();
+
+            // Refresh available PNM datasets from ProjectManager
+            RefreshAvailablePnmDatasets();
+
+            if (_availablePnmDatasets.Count > 0)
+            {
+                ImGui.Text("Select loaded PNM dataset:");
+
+                // Dropdown for available PNM datasets
+                var datasetNames = _availablePnmDatasets.Select(d => d.Name).ToArray();
+                var currentName = _selectedPnmDatasetIndex >= 0 && _selectedPnmDatasetIndex < datasetNames.Length
+                    ? datasetNames[_selectedPnmDatasetIndex]
+                    : "Select...";
+
+                if (ImGui.BeginCombo("##PnmDatasetCombo", currentName))
+                {
+                    for (int i = 0; i < datasetNames.Length; i++)
+                    {
+                        bool isSelected = i == _selectedPnmDatasetIndex;
+                        if (ImGui.Selectable(datasetNames[i], isSelected))
+                        {
+                            _selectedPnmDatasetIndex = i;
+                            LoadPnmDataset(_availablePnmDatasets[i]);
+                        }
+                        if (isSelected)
+                            ImGui.SetItemDefaultFocus();
+                    }
+                    ImGui.EndCombo();
+                }
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "No PNM datasets loaded in project");
+            }
+
+            ImGui.Spacing();
+            ImGui.Text("Or import from file:");
+
+            if (ImGui.Button("Import PNM File...", new Vector2(-1, 0)))
+            {
+                _pnmFileDialog.Open();
+            }
+
+            // Display loaded PNM info
+            if (_selectedPnmDataset != null)
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Text("Loaded PNM Properties:");
+                ImGui.Indent();
+                ImGui.Text($"Name: {_selectedPnmDataset.Name}");
+                ImGui.Text($"Pores: {_selectedPnmDataset.Pores.Count:N0}");
+                ImGui.Text($"Throats: {_selectedPnmDataset.Throats.Count:N0}");
+                ImGui.Text($"Voxel Size: {_selectedPnmDataset.VoxelSize:F2} µm");
+
+                // Calculate and display porosity and permeability
+                CalculatePnmProperties();
+
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(0.5f, 1f, 0.5f, 1),
+                    $"Porosity: {_pnmPorosity * 100:F2}%");
+                ImGui.TextColored(new Vector4(0.5f, 0.8f, 1f, 1),
+                    $"Permeability: {_pnmPermeability_mD:F3} mD");
+
+                // Image dimensions for mesh scaling
+                ImGui.Spacing();
+                ImGui.Text($"Image Dimensions:");
+                ImGui.Text($"  {_selectedPnmDataset.ImageWidth} x {_selectedPnmDataset.ImageHeight} x {_selectedPnmDataset.ImageDepth} voxels");
+
+                ImGui.Unindent();
+
+                ImGui.Spacing();
+                if (ImGui.Button("Adapt Mesh to PNM", new Vector2(-1, 0)))
+                {
+                    AdaptMeshToPnm();
+                }
+            }
+
+            ImGui.Unindent();
+        }
+    }
+
+    private void RefreshAvailablePnmDatasets()
+    {
+        _availablePnmDatasets.Clear();
+        var projectManager = ProjectManager.Instance;
+        if (projectManager?.Project?.Datasets == null) return;
+
+        foreach (var dataset in projectManager.Project.Datasets)
+        {
+            if (dataset is PNMDataset pnmDataset)
+            {
+                _availablePnmDatasets.Add(pnmDataset);
+            }
+        }
+    }
+
+    private void LoadPnmDataset(PNMDataset pnmDataset)
+    {
+        _selectedPnmDataset = pnmDataset;
+        CalculatePnmProperties();
+        Util.Logger.Log($"[TriaxialTool] Loaded PNM dataset: {pnmDataset.Name}");
+    }
+
+    private async void LoadPnmFromFile(string filePath)
+    {
+        try
+        {
+            var loader = new PNMLoader();
+            var loadedDatasets = await loader.LoadAsync(filePath, new Progress<float>(), CancellationToken.None);
+
+            if (loadedDatasets != null && loadedDatasets.Count > 0 && loadedDatasets[0] is PNMDataset pnmDataset)
+            {
+                _selectedPnmDataset = pnmDataset;
+                CalculatePnmProperties();
+                Util.Logger.Log($"[TriaxialTool] Loaded PNM from file: {filePath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Util.Logger.LogError($"[TriaxialTool] Failed to load PNM file: {ex.Message}");
+            _statusMessage = $"Error loading PNM: {ex.Message}";
+        }
+    }
+
+    private void CalculatePnmProperties()
+    {
+        if (_selectedPnmDataset == null) return;
+
+        // Calculate porosity from pore volumes
+        float totalPoreVolume = _selectedPnmDataset.Pores.Sum(p => p.VolumePhysical > 0 ? p.VolumePhysical : p.VolumeVoxels);
+        float imageVolume = _selectedPnmDataset.ImageWidth * _selectedPnmDataset.ImageHeight * _selectedPnmDataset.ImageDepth;
+
+        if (imageVolume > 0)
+        {
+            _pnmPorosity = totalPoreVolume / imageVolume;
+        }
+        else
+        {
+            // Estimate from average pore density
+            _pnmPorosity = 0.15f; // Default assumption
+        }
+
+        // Get permeability from dataset (prefer Darcy, then NS, then LBM)
+        if (_selectedPnmDataset.DarcyPermeability > 0)
+            _pnmPermeability_mD = _selectedPnmDataset.DarcyPermeability;
+        else if (_selectedPnmDataset.NavierStokesPermeability > 0)
+            _pnmPermeability_mD = _selectedPnmDataset.NavierStokesPermeability;
+        else if (_selectedPnmDataset.LatticeBoltzmannPermeability > 0)
+            _pnmPermeability_mD = _selectedPnmDataset.LatticeBoltzmannPermeability;
+        else
+        {
+            // Estimate permeability from mean pore/throat size using Kozeny-Carman
+            float meanThroatRadius = _selectedPnmDataset.Throats.Count > 0
+                ? _selectedPnmDataset.Throats.Average(t => t.Radius) * _selectedPnmDataset.VoxelSize * 1e-6f  // to meters
+                : 1e-5f;
+
+            // k = phi * r^2 / (8 * tau) - simplified Kozeny-Carman
+            float tau = _selectedPnmDataset.Tortuosity > 0 ? _selectedPnmDataset.Tortuosity : 1.5f;
+            float k_m2 = _pnmPorosity * meanThroatRadius * meanThroatRadius / (8f * tau);
+            _pnmPermeability_mD = k_m2 * 1.01325e15f; // Convert m² to mD
+        }
+    }
+
+    private void AdaptMeshToPnm()
+    {
+        if (_selectedPnmDataset == null) return;
+
+        // Calculate physical dimensions from PNM
+        float voxelSize_m = _selectedPnmDataset.VoxelSize * 1e-6f; // µm to m
+        float width_m = _selectedPnmDataset.ImageWidth * voxelSize_m;
+        float height_m = _selectedPnmDataset.ImageHeight * voxelSize_m;
+        float depth_m = _selectedPnmDataset.ImageDepth * voxelSize_m;
+
+        // For cylindrical sample, use the smallest lateral dimension as diameter
+        // and the depth as height (assuming Z is axial direction)
+        float minLateral = MathF.Min(width_m, height_m);
+        float sampleRadius = minLateral / 2f;
+        float sampleHeight = depth_m;
+
+        // Ensure minimum dimensions (convert to mm for display)
+        _cylinderRadius_mm = MathF.Max(sampleRadius * 1000f, 5f);
+        _cylinderHeight_mm = MathF.Max(sampleHeight * 1000f, 10f);
+
+        // Adjust mesh density based on PNM resolution
+        // Use at least 4 radial divisions per 10mm
+        _meshDensityRadial = Math.Max(4, (int)(_cylinderRadius_mm / 2.5f));
+        _meshDensityAxial = Math.Max(8, (int)(_cylinderHeight_mm / 5f));
+        _meshDensityCircumferential = Math.Max(12, _meshDensityRadial * 3);
+
+        _statusMessage = $"Mesh adapted to PNM: R={_cylinderRadius_mm:F1}mm, H={_cylinderHeight_mm:F1}mm";
+        Util.Logger.Log($"[TriaxialTool] {_statusMessage}");
+
+        // Auto-generate mesh
+        GenerateMesh();
     }
 
     private void DrawMeshSection()
@@ -1005,7 +1256,19 @@ public class TriaxialSimulationTool : IDisposable
 
     private async void RunSimulation()
     {
-        if (_mesh == null || _selectedMaterial == null) return;
+        // Check prerequisites with user feedback
+        if (_mesh == null)
+        {
+            _statusMessage = "Error: Generate a mesh first!";
+            Util.Logger.LogWarning("[TriaxialTool] Cannot run simulation: mesh not generated");
+            return;
+        }
+        if (_selectedMaterial == null)
+        {
+            _statusMessage = "Error: Select a material first!";
+            Util.Logger.LogWarning("[TriaxialTool] Cannot run simulation: no material selected");
+            return;
+        }
 
         _isRunning = true;
         _simulationComplete = false;

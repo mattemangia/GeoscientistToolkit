@@ -222,7 +222,12 @@ public class MohrCircleRenderer : IDisposable
         if (_showPoles) DrawPoles(drawList, circle, ToScreen, white);
 
         // Draw failure plane if failed
-        if (circle.HasFailed) DrawFailurePlane(drawList, circle, ToScreen, canvasPos, canvasSize);
+        if (circle.HasFailed)
+        {
+            DrawFailurePlane(drawList, circle, ToScreen, canvasPos, canvasSize);
+            // Draw tangent line at failure point on circle
+            DrawFailureTangent(drawList, circle, parameters, ToScreen, maxStress, maxShear);
+        }
     }
 
     private void DrawCircle(ImDrawListPtr drawList, Vector2 center, float radius, uint color, float thickness)
@@ -361,6 +366,90 @@ public class MohrCircleRenderer : IDisposable
             drawList.AddCircleFilled(polePos, 4f, ImGui.GetColorU32(new Vector4(1, 0, 0, 1)));
             drawList.AddText(polePos + new Vector2(8, -5), color, "Pole");
         }
+    }
+
+    private void DrawFailureTangent(ImDrawListPtr drawList, MohrCircleData circle,
+        GeomechanicalParameters parameters, Func<float, float, Vector2> toScreen, float maxStress, float maxShear)
+    {
+        // Calculate the point where the failure envelope is tangent to the Mohr circle
+        // For Mohr-Coulomb: The tangent point is at angle θ = 45° + φ/2 from σ1 direction
+        float phi_rad = parameters.FrictionAngle * MathF.PI / 180f;
+        float c = parameters.Cohesion;
+
+        // Circle center and radius
+        float center_sigma = (circle.Sigma1 + circle.Sigma3) / 2f;
+        float radius = (circle.Sigma1 - circle.Sigma3) / 2f;
+
+        if (radius <= 0) return;
+
+        // The tangent point on the circle where the Mohr-Coulomb envelope touches
+        // At failure, the angle from center to tangent point is (90° - φ)
+        // So the point is: σ_n = center - radius * sin(φ), τ = radius * cos(φ)
+        float sigma_tangent = center_sigma - radius * MathF.Sin(phi_rad);
+        float tau_tangent = radius * MathF.Cos(phi_rad);
+
+        // Draw the tangent point (larger, more visible)
+        var tangentPos = toScreen(sigma_tangent, tau_tangent);
+        var failurePointColor = ImGui.GetColorU32(new Vector4(1f, 0.3f, 0f, 1f)); // Orange
+        drawList.AddCircleFilled(tangentPos, 7f, failurePointColor);
+
+        // Draw a ring around the tangent point for emphasis
+        drawList.AddCircle(tangentPos, 10f, ImGui.GetColorU32(new Vector4(1f, 1f, 0f, 1f)), 16, 2f);
+
+        // Label the failure point
+        var white = ImGui.GetColorU32(new Vector4(1, 1, 1, 1));
+        drawList.AddText(tangentPos + new Vector2(12, -8), white, "Failure Point");
+        drawList.AddText(tangentPos + new Vector2(12, 4), white, $"σ={sigma_tangent:F1}, τ={tau_tangent:F1}");
+
+        // Draw the tangent line (the failure envelope line passing through this point)
+        // The tangent line has slope tan(φ) and passes through (sigma_tangent, tau_tangent)
+        // Line: τ = τ_tangent + tan(φ) * (σ - σ_tangent)
+        // Which simplifies to: τ = c + σ * tan(φ) (the Mohr-Coulomb envelope)
+
+        var tangentLineColor = ImGui.GetColorU32(new Vector4(1f, 0.5f, 0f, 1f)); // Orange line
+
+        // Calculate line endpoints extending beyond the tangent point
+        float lineExtent = maxStress * 0.5f;
+        float sigma_start = sigma_tangent - lineExtent;
+        float sigma_end = sigma_tangent + lineExtent;
+
+        float tau_start = tau_tangent + MathF.Tan(phi_rad) * (sigma_start - sigma_tangent);
+        float tau_end = tau_tangent + MathF.Tan(phi_rad) * (sigma_end - sigma_tangent);
+
+        // Clip to visible range
+        if (tau_start >= 0 && tau_start <= maxShear && tau_end >= 0 && tau_end <= maxShear)
+        {
+            var lineStart = toScreen(sigma_start, tau_start);
+            var lineEnd = toScreen(sigma_end, tau_end);
+            drawList.AddLine(lineStart, lineEnd, tangentLineColor, 2.5f);
+        }
+
+        // Draw a line from circle center to tangent point (radius at failure)
+        var centerPos = toScreen(center_sigma, 0);
+        drawList.AddLine(centerPos, tangentPos, ImGui.GetColorU32(new Vector4(0.5f, 0.8f, 1f, 0.7f)), 1.5f);
+
+        // Draw the 2θ angle arc (angle from σ axis to the radius at failure)
+        // θ = 45° + φ/2, so 2θ = 90° + φ
+        float twoTheta = MathF.PI / 2f + phi_rad;
+        var arcColor = ImGui.GetColorU32(new Vector4(0.7f, 1f, 0.7f, 0.8f));
+        float arcRadius = 25f;
+
+        // Draw arc from 0 to 2θ
+        const int arcSegments = 16;
+        for (int i = 0; i < arcSegments; i++)
+        {
+            float a1 = twoTheta * i / arcSegments;
+            float a2 = twoTheta * (i + 1) / arcSegments;
+
+            // Arc in screen space (note: screen Y is inverted)
+            var p1 = centerPos + new Vector2(arcRadius * MathF.Cos(a1), -arcRadius * MathF.Sin(a1));
+            var p2 = centerPos + new Vector2(arcRadius * MathF.Cos(a2), -arcRadius * MathF.Sin(a2));
+            drawList.AddLine(p1, p2, arcColor, 1.5f);
+        }
+
+        // Label the angle
+        var angleLabel = centerPos + new Vector2(arcRadius + 5, -arcRadius / 2);
+        drawList.AddText(angleLabel, arcColor, $"2θ = {(twoTheta * 180f / MathF.PI):F0}°");
     }
 
     private void DrawFailurePlane(ImDrawListPtr drawList, MohrCircleData circle,

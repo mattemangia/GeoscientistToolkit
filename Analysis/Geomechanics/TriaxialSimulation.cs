@@ -560,14 +560,10 @@ var device1 = _device;
                 vonMises[i] = MathF.Sqrt(3.0f * J2); // Simplification for principal frame
             }
 
-            // 5. Report Progress
-            if (progress != null && step % 10 == 0) // Update every 10 steps
+            // 5. Report Progress - update every few percent of completion
+            int progressInterval = Math.Max(1, nSteps / 100); // Report ~100 times
+            if (progress != null && (step % progressInterval == 0 || step == nSteps - 1))
             {
-                // Create a shallow copy or snapshot for visualization
-                // We update the arrays in the main results object directly since we are on a background thread
-                // and the UI reads them. To be safe, we should clone, but for visualization it's usually fine.
-                // NOTE: Arrays in 'results' are references. We need to assign them if they were null.
-
                 // Assign current state to results
                 results.Time_s = timeArray.ToArray();
                 results.AxialStrain = axialStrainArray.ToArray();
@@ -576,15 +572,20 @@ var device1 = _device;
                 results.VolumetricStrain = volumetricStrainArray.ToArray();
                 results.PorePressure_MPa = porePressureArray.ToArray();
                 results.HasFailed = failedArray.ToArray();
-                results.Displacement = displacement; // Reference update
+                results.Displacement = displacement;
                 results.Stress = stress;
                 results.VonMisesStress_MPa = vonMises;
 
+                // Update peak stress in progress reports
+                if (peakStress > results.PeakStrength_MPa)
+                {
+                    results.PeakStrength_MPa = peakStress;
+                }
+
                 progress.Report(results);
 
-                // Add delay to make it "visible"
-                // 1000 steps over 5 seconds = 5ms per step.
-                Thread.Sleep(5);
+                // Add delay to make progress visible in UI (total ~3-5 seconds for full simulation)
+                Thread.Sleep(30);
             }
         }
 
@@ -599,6 +600,59 @@ var device1 = _device;
         results.Displacement = displacement;
         results.Stress = stress;
         results.VonMisesStress_MPa = vonMises;
+
+        // Ensure peak strength is always assigned (even if no macro-failure occurred)
+        if (results.PeakStrength_MPa <= 0 && axialStressArray.Count > 0)
+        {
+            results.PeakStrength_MPa = peakStress;
+
+            // Create a Mohr circle for the peak stress state even without failure
+            float phi_rad = frictionAngle * MathF.PI / 180f;
+            results.FailureAngle_deg = 45f + frictionAngle / 2f;
+
+            float sigma3_final = loadParams.ConfiningPressure_MPa;
+            var peakMohrCircle = new MohrCircleData
+            {
+                Sigma1 = peakStress,
+                Sigma2 = sigma3_final,
+                Sigma3 = sigma3_final,
+                Position = new Vector3(0, 0, mesh.Height / 2),
+                Location = "Peak Stress",
+                MaxShearStress = (peakStress - sigma3_final) / 2,
+                HasFailed = hasFailed,
+                FailureAngle = results.FailureAngle_deg,
+                NormalStressAtFailure = (peakStress + sigma3_final) / 2 - (peakStress - sigma3_final) / 2 * MathF.Sin(phi_rad),
+                ShearStressAtFailure = (peakStress - sigma3_final) / 2 * MathF.Cos(phi_rad)
+            };
+
+            if (results.MohrCirclesAtPeak.Count == 0)
+            {
+                results.MohrCirclesAtPeak.Add(peakMohrCircle);
+            }
+
+            Util.Logger.Log($"[TriaxialSimulation] Completed - Peak Stress: {peakStress:F2} MPa, Failed: {hasFailed}");
+        }
+
+        // Always add Mohr circle for general stress state visualization
+        if (results.MohrCircles.Count == 0 && axialStressArray.Count > 0)
+        {
+            float sigma3_final = loadParams.ConfiningPressure_MPa;
+            float phi_rad = frictionAngle * MathF.PI / 180f;
+
+            results.MohrCircles.Add(new MohrCircleData
+            {
+                Sigma1 = peakStress,
+                Sigma2 = sigma3_final,
+                Sigma3 = sigma3_final,
+                Position = new Vector3(0, 0, mesh.Height / 2),
+                Location = "Sample Center",
+                MaxShearStress = (peakStress - sigma3_final) / 2,
+                HasFailed = hasFailed,
+                FailureAngle = 45f + frictionAngle / 2f,
+                NormalStressAtFailure = (peakStress + sigma3_final) / 2 - (peakStress - sigma3_final) / 2 * MathF.Sin(phi_rad),
+                ShearStressAtFailure = (peakStress - sigma3_final) / 2 * MathF.Cos(phi_rad)
+            });
+        }
 
         return results;
     }
@@ -622,21 +676,28 @@ var device1 = _device;
         if (curve == null || curve.Count == 0)
             return defaultValue;
 
-        // Normalize time to curve range
-        float t = time / totalTime;
+        // Normalize time to curve range [0, 1]
+        float t = totalTime > 0 ? time / totalTime : 0;
+        t = Math.Clamp(t, 0f, 1f);
+
+        // Handle single point curve
+        if (curve.Count == 1)
+            return defaultValue * curve[0].Y;
 
         // Find interpolated value
         for (int i = 0; i < curve.Count - 1; i++)
         {
             if (t >= curve[i].X && t <= curve[i + 1].X)
             {
-                float alpha = (t - curve[i].X) / (curve[i + 1].X - curve[i].X);
-                return curve[i].Y + alpha * (curve[i + 1].Y - curve[i].Y);
+                float range = curve[i + 1].X - curve[i].X;
+                float alpha = range > 0 ? (t - curve[i].X) / range : 0;
+                float interpolatedFactor = curve[i].Y + alpha * (curve[i + 1].Y - curve[i].Y);
+                return defaultValue * interpolatedFactor; // Apply as multiplier to default value
             }
         }
 
-        // Return last value if beyond curve
-        return curve[curve.Count - 1].Y;
+        // Return last value if beyond curve (multiplied by default)
+        return defaultValue * curve[curve.Count - 1].Y;
     }
 
     private bool CheckFailure(float sigma1, float sigma2, float sigma3,
