@@ -8,7 +8,7 @@ namespace GeoscientistToolkit.GtkUI;
 /// </summary>
 public sealed class SplashWindow : Window
 {
-    public SplashWindow() : base("GeoscientistToolkit Loading…")
+    public SplashWindow() : base("Geoscientist's Toolkit - Reactor (GTK) Loading…")
     {
         Decorated = false;
         Resizable = false;
@@ -22,7 +22,7 @@ public sealed class SplashWindow : Window
 
         var logo = new Image(GtkResourceLoader.LoadLogoPixbuf(320, 152));
 
-        var title = new Label("<big><b>GeoscientistToolkit GTK</b></big>")
+        var title = new Label("<big><b>Geoscientist's Toolkit - Reactor (GTK)</b></big>")
         {
             UseMarkup = true,
             Xalign = 0.5f
