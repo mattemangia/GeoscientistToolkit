@@ -174,4 +174,17 @@
         <Copy SourceFiles="@(VerificationTestRunnerArtifacts)" DestinationFolder="$(PublishDir)VerificationTests\Runner\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="'$(RuntimeIdentifier)' != '' and '$(PublishDir)' != ''" />
     </Target>
 
+    <!-- Copy libSDL2.dylib from Homebrew on macOS if available -->
+    <Target Name="CopyMacSDL2" AfterTargets="Publish" Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+        <PropertyGroup>
+            <HomebrewSDL2Arm64>/opt/homebrew/lib/libSDL2.dylib</HomebrewSDL2Arm64>
+            <HomebrewSDL2Intel>/usr/local/lib/libSDL2.dylib</HomebrewSDL2Intel>
+        </PropertyGroup>
+        <ItemGroup>
+            <SDL2Lib Include="$(HomebrewSDL2Arm64)" Condition="Exists('$(HomebrewSDL2Arm64)')" />
+            <SDL2Lib Include="$(HomebrewSDL2Intel)" Condition="Exists('$(HomebrewSDL2Intel)')" />
+        </ItemGroup>
+        <Copy SourceFiles="@(SDL2Lib)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    </Target>
+
 </Project>
