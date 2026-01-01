@@ -455,7 +455,7 @@ public class CtVolume3DControlPanel : BasePanel
 
     private async Task ExportMeshAsync(string outputPath)
     {
-        if (_dataset.Volume == null)
+        if (_dataset.VolumeData == null)
         {
             Logger.LogError("[CtVolume3DControlPanel] No volume data available for mesh export");
             return;
@@ -475,7 +475,7 @@ public class CtVolume3DControlPanel : BasePanel
             });
 
             var (vertices, indices) = await mesher.GenerateMeshAsync(
-                _dataset.Volume,
+                _dataset.VolumeData,
                 (byte)_meshIsoValue,
                 _meshStepSize,
                 progress);
