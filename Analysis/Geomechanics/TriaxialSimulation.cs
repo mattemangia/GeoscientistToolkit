@@ -49,6 +49,9 @@ public class TriaxialLoadingParameters
 
     // Temperature
     public float Temperature_C { get; set; } = 20.0f;
+
+    // Heterogeneity
+    public bool EnableHeterogeneity { get; set; } = true;
 }
 
 public enum TriaxialLoadingMode
@@ -331,15 +334,26 @@ var device1 = _device;
         // Assign random stiffness scaling to elements (Weibull distribution approximation)
         int nElements = mesh.TotalElements;
         float[] elementStiffnessScale = new float[nElements];
-        var rand = new Random(12345); // Fixed seed for reproducibility
-        for(int i=0; i<nElements; i++)
+
+        if (loadParams.EnableHeterogeneity)
         {
-            // Simple Gaussian variation +/- 10%
-            float u1 = 1.0f - (float)rand.NextDouble();
-            float u2 = 1.0f - (float)rand.NextDouble();
-            float randStdNormal = MathF.Sqrt(-2.0f * MathF.Log(u1)) * MathF.Sin(2.0f * MathF.PI * u2);
-            elementStiffnessScale[i] = 1.0f + 0.1f * randStdNormal;
-            if (elementStiffnessScale[i] < 0.1f) elementStiffnessScale[i] = 0.1f;
+            var rand = new Random(12345); // Fixed seed for reproducibility
+            for (int i = 0; i < nElements; i++)
+            {
+                // Simple Gaussian variation +/- 10%
+                float u1 = 1.0f - (float)rand.NextDouble();
+                float u2 = 1.0f - (float)rand.NextDouble();
+                float randStdNormal = MathF.Sqrt(-2.0f * MathF.Log(u1)) * MathF.Sin(2.0f * MathF.PI * u2);
+                elementStiffnessScale[i] = 1.0f + 0.1f * randStdNormal;
+                if (elementStiffnessScale[i] < 0.1f) elementStiffnessScale[i] = 0.1f;
+            }
+        }
+        else
+        {
+            for (int i = 0; i < nElements; i++)
+            {
+                elementStiffnessScale[i] = 1.0f;
+            }
         }
 
         // Initialize arrays
