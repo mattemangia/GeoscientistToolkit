@@ -600,6 +600,59 @@ var device1 = _device;
         results.Stress = stress;
         results.VonMisesStress_MPa = vonMises;
 
+        // Ensure peak strength is always assigned (even if no macro-failure occurred)
+        if (results.PeakStrength_MPa <= 0 && axialStressArray.Count > 0)
+        {
+            results.PeakStrength_MPa = peakStress;
+
+            // Create a Mohr circle for the peak stress state even without failure
+            float phi_rad = frictionAngle * MathF.PI / 180f;
+            results.FailureAngle_deg = 45f + frictionAngle / 2f;
+
+            float sigma3_final = loadParams.ConfiningPressure_MPa;
+            var peakMohrCircle = new MohrCircleData
+            {
+                Sigma1 = peakStress,
+                Sigma2 = sigma3_final,
+                Sigma3 = sigma3_final,
+                Position = new Vector3(0, 0, mesh.Height / 2),
+                Location = "Peak Stress",
+                MaxShearStress = (peakStress - sigma3_final) / 2,
+                HasFailed = hasFailed,
+                FailureAngle = results.FailureAngle_deg,
+                NormalStressAtFailure = (peakStress + sigma3_final) / 2 - (peakStress - sigma3_final) / 2 * MathF.Sin(phi_rad),
+                ShearStressAtFailure = (peakStress - sigma3_final) / 2 * MathF.Cos(phi_rad)
+            };
+
+            if (results.MohrCirclesAtPeak.Count == 0)
+            {
+                results.MohrCirclesAtPeak.Add(peakMohrCircle);
+            }
+
+            Util.Logger.Log($"[TriaxialSimulation] Completed - Peak Stress: {peakStress:F2} MPa, Failed: {hasFailed}");
+        }
+
+        // Always add Mohr circle for general stress state visualization
+        if (results.MohrCircles.Count == 0 && axialStressArray.Count > 0)
+        {
+            float sigma3_final = loadParams.ConfiningPressure_MPa;
+            float phi_rad = frictionAngle * MathF.PI / 180f;
+
+            results.MohrCircles.Add(new MohrCircleData
+            {
+                Sigma1 = peakStress,
+                Sigma2 = sigma3_final,
+                Sigma3 = sigma3_final,
+                Position = new Vector3(0, 0, mesh.Height / 2),
+                Location = "Sample Center",
+                MaxShearStress = (peakStress - sigma3_final) / 2,
+                HasFailed = hasFailed,
+                FailureAngle = 45f + frictionAngle / 2f,
+                NormalStressAtFailure = (peakStress + sigma3_final) / 2 - (peakStress - sigma3_final) / 2 * MathF.Sin(phi_rad),
+                ShearStressAtFailure = (peakStress - sigma3_final) / 2 * MathF.Cos(phi_rad)
+            });
+        }
+
         return results;
     }
 
@@ -622,21 +675,28 @@ var device1 = _device;
         if (curve == null || curve.Count == 0)
             return defaultValue;
 
-        // Normalize time to curve range
-        float t = time / totalTime;
+        // Normalize time to curve range [0, 1]
+        float t = totalTime > 0 ? time / totalTime : 0;
+        t = Math.Clamp(t, 0f, 1f);
+
+        // Handle single point curve
+        if (curve.Count == 1)
+            return defaultValue * curve[0].Y;
 
         // Find interpolated value
         for (int i = 0; i < curve.Count - 1; i++)
         {
             if (t >= curve[i].X && t <= curve[i + 1].X)
             {
-                float alpha = (t - curve[i].X) / (curve[i + 1].X - curve[i].X);
-                return curve[i].Y + alpha * (curve[i + 1].Y - curve[i].Y);
+                float range = curve[i + 1].X - curve[i].X;
+                float alpha = range > 0 ? (t - curve[i].X) / range : 0;
+                float interpolatedFactor = curve[i].Y + alpha * (curve[i + 1].Y - curve[i].Y);
+                return defaultValue * interpolatedFactor; // Apply as multiplier to default value
             }
         }
 
-        // Return last value if beyond curve
-        return curve[curve.Count - 1].Y;
+        // Return last value if beyond curve (multiplied by default)
+        return defaultValue * curve[curve.Count - 1].Y;
     }
 
     private bool CheckFailure(float sigma1, float sigma2, float sigma3,

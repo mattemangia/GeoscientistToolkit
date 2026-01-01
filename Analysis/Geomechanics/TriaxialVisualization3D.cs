@@ -196,14 +196,27 @@ public class TriaxialVisualization3D : IDisposable
         bool isHovered = mousePos.X >= canvasPos.X && mousePos.X <= canvasPos.X + canvasSize.X &&
                         mousePos.Y >= canvasPos.Y && mousePos.Y <= canvasPos.Y + canvasSize.Y;
 
-        if (isHovered)
+        // Create an invisible button to capture mouse input in the viewport area
+        ImGui.SetCursorScreenPos(canvasPos);
+        ImGui.InvisibleButton("##3DViewportInteraction", canvasSize,
+            ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight);
+
+        bool isItemHovered = ImGui.IsItemHovered();
+
+        if (isHovered || isItemHovered)
         {
+            // Capture mouse wheel for zoom - prevent parent window from scrolling
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem))
+            {
+                ImGui.SetItemKeyOwner(ImGuiKey.MouseWheelY);
+            }
+
             // Zoom with scroll
             var wheel = ImGui.GetIO().MouseWheel;
             if (wheel != 0)
             {
-                _cameraDistance *= (1 - wheel * 0.1f);
-                _cameraDistance = Math.Clamp(_cameraDistance, 0.05f, 2f);
+                _cameraDistance *= (1 - wheel * 0.15f); // Increased sensitivity
+                _cameraDistance = Math.Clamp(_cameraDistance, 0.02f, 3f);
             }
 
             // Rotate with drag
