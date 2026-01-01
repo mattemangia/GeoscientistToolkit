@@ -215,7 +215,8 @@ public class SimulationVerificationTests
             AxialStrainRate_per_s = 1e-4f,
             TotalTime_s = 1000f,
             TimeStep_s = 1f,
-            MaxAxialStrain_percent = 5f
+            MaxAxialStrain_percent = 5f,
+            EnableHeterogeneity = false
         };
 
         var simulation = new TriaxialSimulation();
