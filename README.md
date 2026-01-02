@@ -342,6 +342,7 @@ For detailed documentation, see:
 ## GeoScript Language
 
 Geoscientist's Toolkit includes **GeoScript**, a domain-specific scripting language for automating workflows:
+> **Note:** GeoScript in this project is an internal language for Geoscientist's Toolkit and is not affiliated with https://geoscript.net or any of its components.
 
 ```geoscript
 // Load and process CT data
