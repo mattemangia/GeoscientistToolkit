@@ -19,6 +19,7 @@ This document centralizes **mandatory** and **optional** requirements for the Ge
 
 **macOS**
 - `brew install --cask dotnet-sdk` (installs the .NET 8 SDK).
+- `brew install sdl2` (required for the ImGui installer UI and desktop app).
 
 **Linux (Ubuntu/Debian)**
 - `sudo apt-get update && sudo apt-get install dotnet-sdk-8.0`

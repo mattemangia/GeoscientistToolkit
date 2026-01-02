@@ -561,8 +561,6 @@ Calculates aspect (slope direction) from a DEM.
 ASPECT AS 'NewLayerName'
 ```
 
-**Note:** Currently not fully implemented.
-
 ---
 
 #### CONTOUR
@@ -573,8 +571,6 @@ Generates vector contour lines from a DEM raster.
 ```geoscript
 CONTOUR INTERVAL <value> AS 'NewLayerName'
 ```
-
-**Note:** Currently not fully implemented.
 
 ---
 
@@ -1326,6 +1322,21 @@ Remove lithology from borehole.
 #### BH_ADD_LOG
 Add a well log curve.
 
+**Syntax:**
+```geoscript
+BH_ADD_LOG type=<logType> name=<displayName> [unit=<unit>] [min=<value>] [max=<value>] [log=<true|false>] [color=<r,g,b[,a]>]
+```
+
+**Notes:**
+- `min`/`max` set display ranges for the track.
+- `log=true` enables logarithmic scaling.
+- `color` uses 0-255 RGBA values.
+
+**Example:**
+```geoscript
+BH_ADD_LOG type=GR name=GammaRay unit=API min=0 max=150 color=255,200,80
+```
+
 #### BH_CALCULATE_POROSITY
 Calculate porosity from density or sonic logs.
 
@@ -1383,7 +1394,47 @@ Calculate text statistics.
 
 ---
 
-### Utility Commands (4 commands)
+### Utility Commands (7 commands)
+
+#### LOAD
+
+Load a dataset from disk.
+
+**Syntax:**
+```geoscript
+LOAD "path/to/file" [AS "DatasetName"] [TYPE=<DatasetType>] [PIXELSIZE=<value>] [UNIT="um|mm"]
+```
+
+**Description:**
+Loads a dataset using the appropriate loader. Use `TYPE` to disambiguate formats and `PIXELSIZE`/`UNIT`
+to override image/CT spacing metadata.
+
+---
+
+#### SAVE
+
+Save the current dataset to disk.
+
+**Syntax:**
+```geoscript
+SAVE "path/to/file" [FORMAT="fmt"]
+```
+
+**Description:**
+Exports datasets using format-specific writers (e.g., CSV, LAS, BHB, PNG, GeoTIFF).
+
+---
+
+#### SET_PIXEL_SIZE
+
+Update pixel size metadata for image or CT datasets.
+
+**Syntax:**
+```geoscript
+SET_PIXEL_SIZE value=<size> [UNIT="um|mm"]
+```
+
+---
 
 #### LISTOPS
 
@@ -1796,10 +1847,10 @@ BH_ADD_LITHOLOGY, BH_REMOVE_LITHOLOGY, BH_ADD_LOG, BH_CALCULATE_POROSITY, BH_CAL
 **Miscellaneous (12):**
 ACOUSTIC_THRESHOLD, ACOUSTIC_EXTRACT_TARGETS, MESH_SMOOTH, MESH_DECIMATE, MESH_REPAIR, MESH_CALCULATE_VOLUME, VIDEO_EXTRACT_FRAME, VIDEO_STABILIZE, AUDIO_TRIM, AUDIO_NORMALIZE, TEXT_SEARCH, TEXT_REPLACE, TEXT_STATISTICS
 
-**Utility (4):**
-LISTOPS, DISPTYPE, INFO, UNLOAD
+**Utility (7):**
+LOAD, SAVE, SET_PIXEL_SIZE, LISTOPS, DISPTYPE, INFO, UNLOAD
 
-**Total: 85+ Commands**
+**Total: 88+ Commands**
 
 ---
 

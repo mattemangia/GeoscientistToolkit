@@ -33,6 +33,12 @@ cat packager-settings.json
 dotnet run --project InstallerPackager.csproj
 ```
 
+To build release-ready archives into a local `dist/` folder:
+
+```bash
+dotnet run --project InstallerPackager.csproj -c Release -o ../dist
+```
+
 For each runtime listed in the manifest, the packager:
 
 1. Runs `dotnet publish` for the selected package project to produce a self-contained bundle.
@@ -73,3 +79,4 @@ The installer downloads, verifies, extracts, and installs the selected component
 - Place ONNX models under `ONNX/` (or in the ONNX installer `models/` folder) before running the packager if you want them bundled.
 - Keep multiple `packager-settings.json` variants for staging/production as needed.
 - Add platform-specific prerequisites in the manifest (GPU drivers, extra runtimes). They appear on the welcome screen.
+- **macOS (ImGui UI + main app)**: ensure SDL2 is installed (`brew install sdl2`) before launching the ImGui installer or the main desktop app. The terminal UI installer does not require SDL.
