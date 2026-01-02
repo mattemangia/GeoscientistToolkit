@@ -1,5 +1,6 @@
 // GeoscientistToolkit/UI/AcousticVolume/DensityCalibrationTool.cs
 
+using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Util;
@@ -236,7 +237,45 @@ public class DensityCalibrationTool
 
     private void ApplyManualSelection()
     {
-        Logger.Log("[DensityCalibrationTool] Manual selection mode not yet implemented");
+        if (_regions.Count == 0)
+        {
+            Logger.LogWarning("[DensityCalibrationTool] Manual selection has no regions defined.");
+            return;
+        }
+
+        var defaultDensity = _regions.Average(r => r.Density);
+        if (_ctDataset.LabelData == null)
+        {
+            Logger.LogWarning("[DensityCalibrationTool] No label data found. Applying average region density.");
+            Parallel.For(0, _ctDataset.Depth, z =>
+            {
+                for (var y = 0; y < _ctDataset.Height; y++)
+                for (var x = 0; x < _ctDataset.Width; x++)
+                    _densityVolume.SetPropertiesFromDensity(x, y, z, defaultDensity);
+            });
+            return;
+        }
+
+        Parallel.For(0, _ctDataset.Depth, z =>
+        {
+            var labelSlice = new byte[_ctDataset.Width * _ctDataset.Height];
+            _ctDataset.LabelData.ReadSliceZ(z, labelSlice);
+
+            for (var i = 0; i < labelSlice.Length; i++)
+            {
+                var label = labelSlice[i];
+                var regionIndex = label > 0 ? label - 1 : -1;
+                var density = regionIndex >= 0 && regionIndex < _regions.Count
+                    ? _regions[regionIndex].Density
+                    : defaultDensity;
+
+                var x = i % _ctDataset.Width;
+                var y = i / _ctDataset.Width;
+                _densityVolume.SetPropertiesFromDensity(x, y, z, density);
+            }
+        });
+
+        Logger.Log("[DensityCalibrationTool] Manual selection applied using label data.");
     }
 
     private void ResetCalibration()

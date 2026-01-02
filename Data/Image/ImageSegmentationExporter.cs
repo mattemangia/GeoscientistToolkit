@@ -1,6 +1,7 @@
 // GeoscientistToolkit/Data/Image/ImageSegmentationExporter.cs
 
 using System.Numerics;
+using System.Text.Json;
 using System.Runtime.InteropServices;
 using BitMiracle.LibTiff.Classic;
 using GeoscientistToolkit.Util;
@@ -268,10 +269,48 @@ public static class ImageSegmentationExporter
         try
         {
             var json = File.ReadAllText(path);
-            // Simple JSON parsing (in production, use a proper JSON library)
-            // This is a simplified version - you'd want to use Newtonsoft.Json or System.Text.Json
-            Logger.Log(
-                "[ImageSegmentationExporter] Material definitions file found, but JSON parsing not implemented in this example");
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("materials", out var materialsElement) ||
+                materialsElement.ValueKind != JsonValueKind.Array)
+            {
+                Logger.LogWarning("[ImageSegmentationExporter] Material definitions JSON missing materials array.");
+                return;
+            }
+
+            var loadedCount = 0;
+            foreach (var materialElement in materialsElement.EnumerateArray())
+            {
+                if (!materialElement.TryGetProperty("id", out var idElement) ||
+                    !materialElement.TryGetProperty("name", out var nameElement) ||
+                    !materialElement.TryGetProperty("color", out var colorElement))
+                    continue;
+
+                if (colorElement.ValueKind != JsonValueKind.Array || colorElement.GetArrayLength() != 4)
+                    continue;
+
+                var id = idElement.GetByte();
+                var name = nameElement.GetString() ?? $"Material_{id}";
+                var color = new Vector4(
+                    (float)colorElement[0].GetDouble(),
+                    (float)colorElement[1].GetDouble(),
+                    (float)colorElement[2].GetDouble(),
+                    (float)colorElement[3].GetDouble());
+
+                var existing = segmentation.Materials.FirstOrDefault(m => m.ID == id);
+                if (existing != null)
+                {
+                    existing.Name = name;
+                    existing.Color = color;
+                }
+                else
+                {
+                    segmentation.Materials.Add(new Material(id, name, color));
+                }
+
+                loadedCount++;
+            }
+
+            Logger.Log($"[ImageSegmentationExporter] Loaded {loadedCount} material definitions from JSON.");
         }
         catch (Exception ex)
         {

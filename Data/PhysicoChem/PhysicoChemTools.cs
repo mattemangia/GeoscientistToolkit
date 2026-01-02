@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.Analysis.PhysicoChem;
@@ -1266,8 +1267,68 @@ public class PhysicoChemTools : IDatasetTools
 
     private void ExportToVTK(PhysicoChemDataset dataset, string path)
     {
-        // VTK export would be more complex - placeholder
-        Logger.Log("VTK export not yet implemented");
+        var state = dataset.ResultHistory.LastOrDefault();
+        if (state == null)
+        {
+            Logger.LogWarning("No simulation results available for VTK export.");
+            return;
+        }
+
+        var nx = state.Temperature.GetLength(0);
+        var ny = state.Temperature.GetLength(1);
+        var nz = state.Temperature.GetLength(2);
+
+        var origin = dataset.GeneratedMesh?.Origin ?? (0d, 0d, 0d);
+        var spacing = dataset.GeneratedMesh?.Spacing ?? (1d, 1d, 1d);
+
+        using var writer = new System.IO.StreamWriter(path);
+        writer.WriteLine("# vtk DataFile Version 3.0");
+        writer.WriteLine("PhysicoChem Simulation Results");
+        writer.WriteLine("ASCII");
+        writer.WriteLine("DATASET STRUCTURED_POINTS");
+        writer.WriteLine($"DIMENSIONS {nx} {ny} {nz}");
+        writer.WriteLine($"ORIGIN {origin.Item1.ToString(CultureInfo.InvariantCulture)} " +
+                         $"{origin.Item2.ToString(CultureInfo.InvariantCulture)} " +
+                         $"{origin.Item3.ToString(CultureInfo.InvariantCulture)}");
+        writer.WriteLine($"SPACING {spacing.Item1.ToString(CultureInfo.InvariantCulture)} " +
+                         $"{spacing.Item2.ToString(CultureInfo.InvariantCulture)} " +
+                         $"{spacing.Item3.ToString(CultureInfo.InvariantCulture)}");
+
+        var pointCount = nx * ny * nz;
+        writer.WriteLine($"POINT_DATA {pointCount}");
+
+        WriteScalarField(writer, "Temperature", state.Temperature);
+        WriteScalarField(writer, "Pressure", state.Pressure);
+        WriteScalarField(writer, "Porosity", state.Porosity);
+        WriteScalarField(writer, "Permeability", state.Permeability);
+
+        writer.WriteLine("VECTORS Velocity float");
+        for (var k = 0; k < nz; k++)
+        for (var j = 0; j < ny; j++)
+        for (var i = 0; i < nx; i++)
+        {
+            var vx = state.VelocityX[i, j, k];
+            var vy = state.VelocityY[i, j, k];
+            var vz = state.VelocityZ[i, j, k];
+            writer.WriteLine($"{vx.ToString(CultureInfo.InvariantCulture)} " +
+                             $"{vy.ToString(CultureInfo.InvariantCulture)} " +
+                             $"{vz.ToString(CultureInfo.InvariantCulture)}");
+        }
+    }
+
+    private static void WriteScalarField(System.IO.StreamWriter writer, string name, float[,,] field)
+    {
+        var nx = field.GetLength(0);
+        var ny = field.GetLength(1);
+        var nz = field.GetLength(2);
+
+        writer.WriteLine($"SCALARS {name} float 1");
+        writer.WriteLine("LOOKUP_TABLE default");
+
+        for (var k = 0; k < nz; k++)
+        for (var j = 0; j < ny; j++)
+        for (var i = 0; i < nx; i++)
+            writer.WriteLine(field[i, j, k].ToString(CultureInfo.InvariantCulture));
     }
 
     private void ExportToJSON(PhysicoChemDataset dataset, string path)

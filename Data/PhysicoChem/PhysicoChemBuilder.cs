@@ -691,7 +691,31 @@ public class PhysicoChemBuilder
         if (cell == null)
             return;
 
-        // Placeholder for cell rotation
+        if (cell.Vertices == null || cell.Vertices.Count == 0)
+            return;
+
+        var angle = (delta.X - delta.Y) * sensitivity;
+        if (Math.Abs(angle) < 1e-6f)
+            return;
+
+        var axis = _activeAxis switch
+        {
+            GizmoAxis.X => Vector3.UnitX,
+            GizmoAxis.Y => Vector3.UnitY,
+            GizmoAxis.Z => Vector3.UnitZ,
+            _ => Vector3.UnitY
+        };
+
+        var rotation = Matrix4x4.CreateFromAxisAngle(axis, angle);
+        var center = new Vector3((float)cell.Center.X, (float)cell.Center.Y, (float)cell.Center.Z);
+
+        for (var i = 0; i < cell.Vertices.Count; i++)
+        {
+            var vertex = cell.Vertices[i];
+            var local = vertex - center;
+            var rotated = Vector3.Transform(local, rotation);
+            cell.Vertices[i] = rotated + center;
+        }
     }
 
     private void ApplyScale(Cell cell, Vector2 delta, float sensitivity)
