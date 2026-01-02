@@ -13,6 +13,8 @@ public class CtStackFileLoader : IDataLoader
     public string Description => "Load CT stack from a .ctstack manifest file";
 
     public string SourcePath { get; set; } = "";
+    public double? PixelSizeOverride { get; set; }
+    public string UnitOverride { get; set; }
 
     public bool CanImport
     {
@@ -36,6 +38,8 @@ public class CtStackFileLoader : IDataLoader
     public void Reset()
     {
         SourcePath = "";
+        PixelSizeOverride = null;
+        UnitOverride = null;
     }
 
     public async Task<Dataset> LoadAsync(IProgress<(float progress, string message)> progressReporter)
@@ -73,7 +77,9 @@ public class CtStackFileLoader : IDataLoader
 
             // Load volume
             var volume = new ChunkedVolume(width, height, depth);
-            volume.PixelSize = manifest.PixelSize * (manifest.Unit == "mm" ? 1e-3 : 1e-6);
+            var resolvedPixelSize = PixelSizeOverride ?? manifest.PixelSize;
+            var resolvedUnit = UnitOverride ?? manifest.Unit;
+            volume.PixelSize = resolvedPixelSize * (resolvedUnit == "mm" ? 1e-3 : 1e-6);
 
             for (int z = 0; z < depth; z++)
             {
@@ -103,9 +109,9 @@ public class CtStackFileLoader : IDataLoader
                 Width = width,
                 Height = height,
                 Depth = depth,
-                PixelSize = (float)manifest.PixelSize,
-                SliceThickness = (float)manifest.PixelSize, // Assuming isotropic if not specified
-                Unit = manifest.Unit ?? "µm",
+                PixelSize = (float)resolvedPixelSize,
+                SliceThickness = (float)resolvedPixelSize, // Assuming isotropic if not specified
+                Unit = resolvedUnit ?? "µm",
                 BinningSize = 1
             };
 

@@ -11,7 +11,7 @@
     <RootNamespace>GeoscientistToolkit.Installer</RootNamespace>
     <AssemblyName>GeoscientistToolkitInstaller</AssemblyName>
     <ApplicationIcon>../image.ico</ApplicationIcon>
-    <NoWarn>CS8604</NoWarn>
+    <NoWarn>$(NoWarn);CS8604;NETSDK1206</NoWarn>
     <SkipVerificationTests>true</SkipVerificationTests>
   </PropertyGroup>
   <ItemGroup>

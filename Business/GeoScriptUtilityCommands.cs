@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Business.GeoScript;
 using GeoscientistToolkit.Data;
@@ -66,7 +67,7 @@ public class ListOpsCommand : IGeoScriptCommand
         if (type == DatasetType.SingleImage || type == DatasetType.CtImageStack)
         {
             var imageCommands = new[] { "BRIGHTNESS_CONTRAST", "FILTER", "THRESHOLD", "BINARIZE",
-                "GRAYSCALE", "INVERT", "NORMALIZE", "LISTOPS", "DISPTYPE", "UNLOAD", "INFO" };
+                "GRAYSCALE", "INVERT", "NORMALIZE", "SET_PIXEL_SIZE", "LISTOPS", "DISPTYPE", "UNLOAD", "INFO" };
             if (imageCommands.Contains(command.Name))
                 return true;
         }
@@ -90,7 +91,7 @@ public class ListOpsCommand : IGeoScriptCommand
         }
 
         // Utility commands work on all types
-        if (new[] { "LISTOPS", "DISPTYPE", "UNLOAD", "INFO" }.Contains(command.Name))
+        if (new[] { "LISTOPS", "DISPTYPE", "UNLOAD", "INFO", "SET_PIXEL_SIZE" }.Contains(command.Name))
             return true;
 
         return false;
@@ -236,5 +237,82 @@ public class InfoCommand : IGeoScriptCommand
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:0.#} KB";
         if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):0.#} MB";
         return $"{bytes / (1024.0 * 1024 * 1024):0.#} GB";
+    }
+}
+
+/// <summary>
+/// SET_PIXEL_SIZE command - Update pixel size metadata on a dataset
+/// Usage: SET_PIXEL_SIZE value=<size> [UNIT=um|mm]
+/// </summary>
+public class SetPixelSizeCommand : IGeoScriptCommand
+{
+    public string Name => "SET_PIXEL_SIZE";
+    public string HelpText => "Set pixel size metadata on image or CT datasets";
+    public string Usage => "SET_PIXEL_SIZE value=<size> [UNIT=um|mm]";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset == null)
+            throw new InvalidOperationException("No input dataset provided");
+
+        var cmd = (CommandNode)node;
+        var valueStr = cmd.Parameters.ContainsKey("value") ? cmd.Parameters["value"] : null;
+        var unitStr = cmd.Parameters.ContainsKey("unit") ? cmd.Parameters["unit"] : null;
+
+        if (string.IsNullOrEmpty(valueStr))
+        {
+            var match = Regex.Match(cmd.FullText, @"SET_PIXEL_SIZE\s+([0-9]*\.?[0-9]+)", RegexOptions.IgnoreCase);
+            if (match.Success) valueStr = match.Groups[1].Value;
+        }
+
+        if (string.IsNullOrEmpty(unitStr))
+        {
+            var unitMatch = Regex.Match(cmd.FullText, @"\s+UNIT\s*=\s*""?([a-zA-Zµ]+)""?", RegexOptions.IgnoreCase);
+            if (unitMatch.Success) unitStr = unitMatch.Groups[1].Value;
+        }
+
+        if (!float.TryParse(valueStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pixelSize) || pixelSize <= 0)
+            throw new ArgumentException("SET_PIXEL_SIZE requires a positive numeric value.");
+
+        var unit = NormalizeUnit(unitStr);
+
+        if (context.InputDataset is Data.Image.ImageDataset imageDataset)
+        {
+            imageDataset.PixelSize = pixelSize;
+            imageDataset.Unit = unit;
+            Logger.Log($"Updated image pixel size to {pixelSize} {unit}/pixel");
+            return Task.FromResult<Dataset>(imageDataset);
+        }
+
+        if (context.InputDataset is Data.CtImageStack.CtImageStackDataset ctDataset)
+        {
+            ctDataset.PixelSize = pixelSize;
+            ctDataset.SliceThickness = pixelSize;
+            ctDataset.Unit = unit;
+            Logger.Log($"Updated CT voxel size to {pixelSize} {unit}");
+            return Task.FromResult<Dataset>(ctDataset);
+        }
+
+        throw new NotSupportedException("SET_PIXEL_SIZE is supported only for image and CT datasets.");
+    }
+
+    private static string NormalizeUnit(string unit)
+    {
+        if (string.IsNullOrWhiteSpace(unit))
+            return "µm";
+
+        var normalized = unit.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "um" => "µm",
+            "micrometer" => "µm",
+            "micrometers" => "µm",
+            "micron" => "µm",
+            "microns" => "µm",
+            "mm" => "mm",
+            "millimeter" => "mm",
+            "millimeters" => "mm",
+            _ => unit
+        };
     }
 }

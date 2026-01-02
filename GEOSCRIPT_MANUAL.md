@@ -1490,7 +1490,33 @@ DISPTYPE
 
 ---
 
-#### 5.9.3 INFO
+#### 5.9.3 LOAD
+
+Loads a dataset from a file.
+
+**Syntax**:
+```geoscript
+LOAD "path/to/file" [AS "DatasetName"] [TYPE=<DatasetType>] [PIXELSIZE=<value>] [UNIT="um|mm"]
+```
+
+**Parameters**:
+- `path`: Source file or folder path.
+- `AS`: Optional dataset name override.
+- `TYPE`: Optional dataset type override for ambiguous file types.
+- `PIXELSIZE`: Optional pixel size for image/CT datasets.
+- `UNIT`: Optional unit for `PIXELSIZE` (default: µm).
+
+**Examples**:
+```geoscript
+LOAD "scan.ctstack" AS "CT Volume" TYPE=CtImageStack PIXELSIZE=2.5 UNIT="um"
+LOAD "image.tif" AS "ThinSection" PIXELSIZE=0.8 UNIT="mm"
+```
+
+**Returns**: The loaded dataset.
+
+---
+
+#### 5.9.4 INFO
 
 Shows dataset summary information.
 
@@ -1505,7 +1531,7 @@ INFO
 
 ---
 
-#### 5.9.4 UNLOAD
+#### 5.9.5 UNLOAD
 
 Unloads dataset from memory.
 
@@ -1531,19 +1557,38 @@ SAVE "path/to/file" [FORMAT="fmt"]
 
 **Parameters**:
 - `path`: Destination file path.
-- `FORMAT`: Optional format specifier (e.g., "png", "csv", "shp").
+- `FORMAT`: Optional format specifier (e.g., "png", "csv", "shp", "las", "bhb").
 
 **Examples**:
 ```geoscript
 SAVE "output_image.png"
 SAVE "results.csv" FORMAT="csv"
+SAVE "borehole.las" FORMAT="las"
 ```
 
 **Returns**: The saved dataset.
 
 ---
 
-#### 5.9.7 COPY
+#### 5.9.7 SET_PIXEL_SIZE
+
+Updates pixel size metadata on image or CT datasets.
+
+**Syntax**:
+```geoscript
+SET_PIXEL_SIZE value=<size> [UNIT="um|mm"]
+```
+
+**Examples**:
+```geoscript
+SET_PIXEL_SIZE value=1.2 UNIT="um"
+```
+
+**Returns**: The updated dataset.
+
+---
+
+#### 5.9.8 COPY
 
 Duplicates the current dataset.
 
@@ -1564,7 +1609,7 @@ COPY AS "BackupData"
 
 ---
 
-#### 5.9.8 DELETE
+#### 5.9.9 DELETE
 
 Removes the dataset from the project.
 
@@ -2051,7 +2096,7 @@ Manages available operations for each dataset type.
 GEOSCRIPT lexer recognizes the following token types:
 
 - `WITH`, `DO`, `TO`, `THEN` - Statement keywords
-- `LISTOPS`, `DISPTYPE`, `UNLOAD` - Utility keywords
+- `LISTOPS`, `DISPTYPE`, `INFO`, `UNLOAD` - Utility keywords
 - `PIPE` (`|>`) - Pipeline operator
 - `COMMA` (`,`) - Parameter separator
 - `STRING` - String literal
@@ -2100,10 +2145,10 @@ BH_ADD_LITHOLOGY, BH_REMOVE_LITHOLOGY, BH_ADD_LOG, BH_CALCULATE_POROSITY, BH_CAL
 ### Miscellaneous (12 commands)
 ACOUSTIC_THRESHOLD, ACOUSTIC_EXTRACT_TARGETS, MESH_SMOOTH, MESH_DECIMATE, MESH_REPAIR, MESH_CALCULATE_VOLUME, VIDEO_EXTRACT_FRAME, VIDEO_STABILIZE, AUDIO_TRIM, AUDIO_NORMALIZE, TEXT_SEARCH, TEXT_REPLACE, TEXT_STATISTICS
 
-### Utility (4 commands)
-LISTOPS, DISPTYPE, INFO, UNLOAD
+### Utility (7 commands)
+LOAD, SAVE, SET_PIXEL_SIZE, LISTOPS, DISPTYPE, INFO, UNLOAD
 
-**Total: 85+ Commands**
+**Total: 88+ Commands**
 
 ---
 

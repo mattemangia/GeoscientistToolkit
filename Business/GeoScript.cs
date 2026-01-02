@@ -238,6 +238,7 @@ public static class CommandRegistry
             new DispTypeCommand(),
             new UnloadCommand(),
             new InfoCommand(),
+            new SetPixelSizeCommand(),
 
             // CT Image Stack Commands
             new CtSegmentCommand(),
@@ -1111,8 +1112,28 @@ public class AspectCommand : IGeoScriptCommand
 
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
-        Logger.LogWarning("ASPECT command is not yet implemented. Requires complex raster algorithms.");
-        return Task.FromResult(context.InputDataset);
+        if (context.InputDataset is not GISDataset gisDs)
+            throw new NotSupportedException("ASPECT only works on GIS Datasets.");
+
+        var demLayer = gisDs.Layers.FirstOrDefault(l => l.Type == LayerType.Raster) as GISRasterLayer;
+        if (demLayer == null)
+            throw new NotSupportedException("Input dataset has no raster DEM layer for aspect calculation.");
+
+        var cmd = (CommandNode)node;
+        var match = Regex.Match(cmd.FullText, @"AS\s+'([^']+)'", RegexOptions.IgnoreCase);
+        if (!match.Success) throw new ArgumentException("Invalid ASPECT syntax.");
+
+        var newLayerName = match.Groups[1].Value;
+        var demData = demLayer.GetPixelData();
+        var cellSize = GeoScriptRasterUtils.GetRasterCellSize(demLayer);
+        var aspectData = GISOperationsImpl.CalculateAspectGrid(demData, cellSize);
+
+        var newGisDs = new GISDataset($"{gisDs.Name}_Aspect", "");
+        var newRasterLayer = new GISRasterLayer(aspectData, demLayer.Bounds) { Name = newLayerName };
+        newGisDs.Layers.Add(newRasterLayer);
+        newGisDs.UpdateBounds();
+
+        return Task.FromResult<Dataset>(newGisDs);
     }
 }
 
@@ -1124,9 +1145,82 @@ public class ContourCommand : IGeoScriptCommand
 
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
-        Logger.LogWarning(
-            "CONTOUR command is not yet implemented. Requires a raster-to-vector marching squares algorithm.");
-        return Task.FromResult(context.InputDataset);
+        if (context.InputDataset is not GISDataset gisDs)
+            throw new NotSupportedException("CONTOUR only works on GIS Datasets.");
+
+        var demLayer = gisDs.Layers.FirstOrDefault(l => l.Type == LayerType.Raster) as GISRasterLayer;
+        if (demLayer == null)
+            throw new NotSupportedException("Input dataset has no raster DEM layer for contour generation.");
+
+        var cmd = (CommandNode)node;
+        var match = Regex.Match(cmd.FullText, @"INTERVAL\s+([0-9]*\.?[0-9]+)\s+AS\s+'([^']+)'",
+            RegexOptions.IgnoreCase);
+        if (!match.Success) throw new ArgumentException("Invalid CONTOUR syntax.");
+
+        var interval = float.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+        if (interval <= 0)
+            throw new ArgumentException("Contour interval must be greater than zero.");
+
+        var newLayerName = match.Groups[2].Value;
+        var demData = demLayer.GetPixelData();
+        var cellSize = GeoScriptRasterUtils.GetRasterCellSize(demLayer);
+        var bounds = demLayer.Bounds;
+        var minElevation = float.MaxValue;
+        var maxElevation = float.MinValue;
+
+        for (var y = 0; y < demLayer.Height; y++)
+        for (var x = 0; x < demLayer.Width; x++)
+        {
+            var value = demData[x, y];
+            minElevation = Math.Min(minElevation, value);
+            maxElevation = Math.Max(maxElevation, value);
+        }
+
+        var contours = GISOperationsImpl.GenerateContourLines(
+            demData,
+            interval,
+            minElevation,
+            maxElevation,
+            bounds.Min,
+            cellSize);
+
+        var newGisDs = new GISDataset($"{gisDs.Name}_Contours", "");
+        var contourLayer = new GISLayer
+        {
+            Name = newLayerName,
+            Type = LayerType.Vector,
+            IsVisible = true,
+            IsEditable = false
+        };
+
+        foreach (var line in contours)
+        {
+            if (line.Count < 2)
+                continue;
+
+            contourLayer.Features.Add(new GISFeature
+            {
+                Type = FeatureType.Line,
+                Coordinates = line
+            });
+        }
+
+        newGisDs.Layers.Add(contourLayer);
+        newGisDs.UpdateBounds();
+
+        return Task.FromResult<Dataset>(newGisDs);
+    }
+}
+
+internal static class GeoScriptRasterUtils
+{
+    public static float GetRasterCellSize(GISRasterLayer rasterLayer)
+    {
+        var width = Math.Max(1, rasterLayer.Width - 1);
+        var height = Math.Max(1, rasterLayer.Height - 1);
+        var cellSizeX = rasterLayer.Bounds.Width / width;
+        var cellSizeY = rasterLayer.Bounds.Height / height;
+        return MathF.Min(cellSizeX, cellSizeY);
     }
 }
 

@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Business.GeoScript;
@@ -115,11 +116,26 @@ public class BhAddLogCommand : IGeoScriptCommand
         string type = ParseStringParameter(cmd.FullText, "type", "GR");
         string name = ParseStringParameter(cmd.FullText, "name", type);
         string unit = ParseStringParameter(cmd.FullText, "unit", "");
+        float? min = ParseOptionalFloatParameter(cmd.FullText, "min");
+        float? max = ParseOptionalFloatParameter(cmd.FullText, "max");
+        bool? isLogarithmic = ParseOptionalBoolParameter(cmd.FullText, "log");
+        var color = ParseOptionalColorParameter(cmd.FullText, "color");
 
-        // NOTE: Well logs are stored in ParameterTracks in the current implementation
-        // The Logs/WellLog classes do not exist yet in the codebase
-        Logger.Log($"BH_ADD_LOG command not fully implemented - well log storage needs ParameterTracks integration");
-        Logger.Log($"Would add well log '{name}' (Type: {type}, Unit: {unit})");
+        var defaults = GetTrackDefaults(type, unit);
+        var track = new ParameterTrack
+        {
+            Name = name,
+            Unit = string.IsNullOrWhiteSpace(unit) ? defaults.Unit : unit,
+            MinValue = min ?? defaults.MinValue,
+            MaxValue = max ?? defaults.MaxValue,
+            IsLogarithmic = isLogarithmic ?? defaults.IsLogarithmic,
+            Color = color ?? defaults.Color,
+            IsVisible = true,
+            Points = new List<ParameterPoint>()
+        };
+
+        bhDs.ParameterTracks[name] = track;
+        Logger.Log($"Added well log '{name}' (Type: {type}, Unit: {track.Unit})");
 
         return Task.FromResult<Dataset>(bhDs);
     }
@@ -129,6 +145,57 @@ public class BhAddLogCommand : IGeoScriptCommand
         var match = Regex.Match(fullText, paramName + @"\s*=\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
         return match.Success ? match.Groups[1].Value : defaultValue;
     }
+
+    private float? ParseOptionalFloatParameter(string fullText, string paramName)
+    {
+        var match = Regex.Match(fullText, paramName + @"\s*=\s*([-+]?[0-9]*\.?[0-9]+)", RegexOptions.IgnoreCase);
+        return match.Success ? float.Parse(match.Groups[1].Value) : null;
+    }
+
+    private bool? ParseOptionalBoolParameter(string fullText, string paramName)
+    {
+        var match = Regex.Match(fullText, paramName + @"\s*=\s*(true|false)", RegexOptions.IgnoreCase);
+        return match.Success ? bool.Parse(match.Groups[1].Value) : null;
+    }
+
+    private Vector4? ParseOptionalColorParameter(string fullText, string paramName)
+    {
+        var match = Regex.Match(fullText, paramName + @"\s*=\s*([0-9]{1,3}),([0-9]{1,3}),([0-9]{1,3})(?:,([0-9]{1,3}))?",
+            RegexOptions.IgnoreCase);
+        if (!match.Success)
+            return null;
+
+        var r = ClampColorComponent(int.Parse(match.Groups[1].Value));
+        var g = ClampColorComponent(int.Parse(match.Groups[2].Value));
+        var b = ClampColorComponent(int.Parse(match.Groups[3].Value));
+        var a = match.Groups[4].Success ? ClampColorComponent(int.Parse(match.Groups[4].Value)) : 255;
+
+        return new Vector4(r / 255f, g / 255f, b / 255f, a / 255f);
+    }
+
+    private int ClampColorComponent(int value)
+    {
+        return Math.Clamp(value, 0, 255);
+    }
+
+    private ParameterTrackDefaults GetTrackDefaults(string type, string unit)
+    {
+        var normalizedType = type.ToUpperInvariant();
+        return normalizedType switch
+        {
+            "GR" or "GAMMARAY" => new ParameterTrackDefaults("API", 0f, 200f, false, new Vector4(0.9f, 0.8f, 0.2f, 1.0f)),
+            "RHOB" or "DENSITY" => new ParameterTrackDefaults("g/cc", 1.5f, 3.0f, false, new Vector4(0.2f, 0.7f, 0.9f, 1.0f)),
+            "NPHI" or "NEUTRON" => new ParameterTrackDefaults("%", 0f, 60f, false, new Vector4(0.3f, 0.8f, 0.3f, 1.0f)),
+            "DT" or "SONIC" => new ParameterTrackDefaults("µs/ft", 40f, 200f, false, new Vector4(0.9f, 0.4f, 0.2f, 1.0f)),
+            "RT" or "RESISTIVITY" => new ParameterTrackDefaults("ohm·m", 0.2f, 2000f, true, new Vector4(0.8f, 0.3f, 0.9f, 1.0f)),
+            "PHI" or "POROSITY" => new ParameterTrackDefaults("%", 0f, 50f, false, new Vector4(0.2f, 0.6f, 1.0f, 1.0f)),
+            "SW" or "SATURATION" => new ParameterTrackDefaults("%", 0f, 100f, false, new Vector4(0.2f, 0.9f, 0.9f, 1.0f)),
+            _ => new ParameterTrackDefaults(string.IsNullOrWhiteSpace(unit) ? "" : unit, 0f, 100f, false, new Vector4(0.8f, 0.8f, 0.8f, 1.0f))
+        };
+    }
+
+    private readonly record struct ParameterTrackDefaults(string Unit, float MinValue, float MaxValue, bool IsLogarithmic,
+        Vector4 Color);
 }
 
 /// <summary>
