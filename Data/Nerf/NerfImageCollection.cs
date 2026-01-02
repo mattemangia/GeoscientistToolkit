@@ -342,7 +342,7 @@ public class NerfImageCollection : IDisposable
             }
             else if (File.Exists(imagesBinPath))
             {
-                Logger.LogWarning("Binary COLMAP format not yet implemented, please use text format");
+                await ImportColmapImagesBinaryAsync(imagesBinPath, progress);
             }
 
             // Import cameras
@@ -478,6 +478,57 @@ public class NerfImageCollection : IDisposable
                 frame.PrincipalPointY = cy;
             }
         }
+    }
+
+    private async Task ImportColmapImagesBinaryAsync(string path, IProgress<float> progress = null)
+    {
+        await Task.Run(() =>
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var reader = new BinaryReader(fs);
+
+            var imageCount = reader.ReadUInt64();
+            for (ulong i = 0; i < imageCount; i++)
+            {
+                var imageId = reader.ReadInt32();
+                var qw = reader.ReadDouble();
+                var qx = reader.ReadDouble();
+                var qy = reader.ReadDouble();
+                var qz = reader.ReadDouble();
+                var tx = reader.ReadDouble();
+                var ty = reader.ReadDouble();
+                var tz = reader.ReadDouble();
+                var cameraId = reader.ReadInt32();
+
+                var nameChars = new List<byte>();
+                byte b;
+                while ((b = reader.ReadByte()) != 0)
+                    nameChars.Add(b);
+                var imageName = System.Text.Encoding.UTF8.GetString(nameChars.ToArray());
+
+                var numPoints2D = reader.ReadUInt64();
+                for (ulong p = 0; p < numPoints2D; p++)
+                {
+                    reader.ReadDouble(); // x
+                    reader.ReadDouble(); // y
+                    reader.ReadInt64();  // point3D_id
+                }
+
+                var frame = _frames.FirstOrDefault(f =>
+                    string.Equals(Path.GetFileName(f.SourcePath), imageName, StringComparison.OrdinalIgnoreCase));
+
+                if (frame != null)
+                {
+                    var rotation = new Quaternion((float)qx, (float)qy, (float)qz, (float)qw);
+                    var translation = new Vector3((float)tx, (float)ty, (float)tz);
+                    frame.SetPose(Matrix4x4.CreateFromQuaternion(rotation), translation);
+                    frame.PoseStatus = PoseEstimationStatus.Estimated;
+                    frame.PoseConfidence = 1.0f;
+                }
+
+                progress?.Report((float)(i + 1) / imageCount);
+            }
+        });
     }
 
     private async Task ImportColmapPoints3DAsync(string path)

@@ -1,6 +1,7 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/TextureBrickCache.cs
 
 using System.Collections.Concurrent;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Data.CtImageStack;
 
@@ -18,6 +19,10 @@ public class TextureBrickCache : IDisposable
     private readonly FileStream _fileStream;
     private readonly string _gvtFilePath;
     private readonly ConcurrentQueue<LoadedBrick> _loadedBrickQueue = new();
+    private readonly int _brickSize;
+    private readonly int _brickByteSize;
+    private readonly GvtLodInfo[] _lodInfos;
+    private readonly int _activeLodIndex;
 
     // Threading for async loading
     private readonly Thread _loaderThread;
@@ -42,6 +47,10 @@ public class TextureBrickCache : IDisposable
 
         _fileStream = new FileStream(_gvtFilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         _reader = new BinaryReader(_fileStream);
+
+        (_brickSize, _lodInfos) = ReadHeader(_reader);
+        _brickByteSize = _brickSize * _brickSize * _brickSize;
+        _activeLodIndex = 0;
 
         _loaderThread = new Thread(LoaderThreadLoop) { IsBackground = true, Name = "BrickLoaderThread" };
         _loaderThread.Start();
@@ -120,12 +129,24 @@ public class TextureBrickCache : IDisposable
                 }
 
                 // --- Read brick data from file (outside cache lock to avoid blocking) ---
-                var offset = 1024 + (long)brickIdToLoad * (64 * 64 * 64); // Placeholder offset
+                var lodInfo = _lodInfos[_activeLodIndex];
+                var bricksX = (lodInfo.Width + _brickSize - 1) / _brickSize;
+                var bricksY = (lodInfo.Height + _brickSize - 1) / _brickSize;
+                var bricksZ = (lodInfo.Depth + _brickSize - 1) / _brickSize;
+                var totalBricks = bricksX * bricksY * bricksZ;
+
+                if (brickIdToLoad < 0 || brickIdToLoad >= totalBricks)
+                {
+                    Logger.LogWarning($"[TextureBrickCache] Brick ID {brickIdToLoad} out of range for LOD {_activeLodIndex}");
+                    continue;
+                }
+
+                var offset = lodInfo.FileOffset + (long)brickIdToLoad * _brickByteSize;
                 byte[] data;
                 lock (_reader)
                 {
                     _fileStream.Seek(offset, SeekOrigin.Begin);
-                    data = _reader.ReadBytes(64 * 64 * 64);
+                    data = _reader.ReadBytes(_brickByteSize);
                 }
 
                 // --- Update cache state (under lock) ---
@@ -147,5 +168,29 @@ public class TextureBrickCache : IDisposable
             {
                 Thread.Sleep(10); // Wait for new requests
             }
+    }
+
+    private static (int brickSize, GvtLodInfo[] lodInfos) ReadHeader(BinaryReader reader)
+    {
+        reader.BaseStream.Seek(0, SeekOrigin.Begin);
+        reader.ReadInt32(); // width
+        reader.ReadInt32(); // height
+        reader.ReadInt32(); // depth
+        var brickSize = reader.ReadInt32();
+        var lodCount = reader.ReadInt32();
+
+        var lodInfos = new GvtLodInfo[lodCount];
+        for (var i = 0; i < lodCount; i++)
+        {
+            lodInfos[i] = new GvtLodInfo
+            {
+                Width = reader.ReadInt32(),
+                Height = reader.ReadInt32(),
+                Depth = reader.ReadInt32(),
+                FileOffset = reader.ReadInt64()
+            };
+        }
+
+        return (brickSize, lodInfos);
     }
 }

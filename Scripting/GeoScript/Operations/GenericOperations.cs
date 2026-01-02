@@ -1,5 +1,6 @@
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Util;
+using System;
 using System.Collections.Generic;
 
 namespace GeoscientistToolkit.Scripting.GeoScript.Operations
@@ -18,8 +19,17 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
 
         public Dataset Execute(Dataset inputDataset, List<object> parameters)
         {
-            Logger.Log($"COPY operation not yet fully implemented");
-            return inputDataset;
+            if (inputDataset == null)
+                throw new ArgumentNullException(nameof(inputDataset));
+
+            var clone = inputDataset.Clone();
+            var newName = parameters.Count > 0 && parameters[0] is string name && !string.IsNullOrWhiteSpace(name)
+                ? name
+                : $"{inputDataset.Name}_copy";
+
+            clone.Name = newName;
+            Logger.Log($"Copied dataset '{inputDataset.Name}' to '{newName}'");
+            return clone;
         }
 
         public bool CanApplyTo(DatasetType type) => true; // Works on all types

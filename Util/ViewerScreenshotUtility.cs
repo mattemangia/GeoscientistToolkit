@@ -189,14 +189,27 @@ public static class ViewerScreenshotUtility
 
     private static void RenderImGuiOverlaysToComposite(Vector2 screenPos, Vector2 size)
     {
-        // This is the tricky part - we need to capture ImGui draw data
-        // and render it to our composite texture
+        var gd = VeldridManager.GraphicsDevice;
+        var swapchain = gd.MainSwapchain;
+        var framebuffer = swapchain.Framebuffer;
+        var backbuffer = framebuffer.ColorTargets[0].Target;
 
-        // One approach is to use a secondary ImGui render pass
-        // targeting our composite framebuffer
+        var srcX = (uint)Math.Max(0, (int)screenPos.X);
+        var srcY = (uint)Math.Max(0, (int)screenPos.Y);
+        var width = (uint)Math.Min(backbuffer.Width - srcX, (int)size.X);
+        var height = (uint)Math.Min(backbuffer.Height - srcY, (int)size.Y);
 
-        // For now, this is a placeholder - the actual implementation
-        // would need to hook into ImGui's rendering
+        if (width == 0 || height == 0)
+            return;
+
+        _captureCommandList.Begin();
+        _captureCommandList.CopyTexture(
+            backbuffer, srcX, srcY, 0, 0, 0,
+            _compositeTexture, 0, 0, 0, 0, 0,
+            width, height, 1, 1);
+        _captureCommandList.End();
+        gd.SubmitCommands(_captureCommandList);
+        gd.WaitForIdle();
     }
 
     /// <summary>

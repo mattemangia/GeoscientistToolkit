@@ -350,7 +350,18 @@ public class ChunkedVolume : IGrayscaleVolumeData
     {
         if (_useMemoryMapping)
         {
-            Logger.Log("[ChunkedVolume] Fill operation not implemented for memory-mapped volumes");
+            var mappedChunkSize = ChunkDim * ChunkDim * ChunkDim;
+            var buffer = new byte[mappedChunkSize];
+            if (value != 0)
+                Array.Fill(buffer, value);
+
+            for (var i = 0; i < TotalChunks; i++)
+            {
+                var offset = CalculateGlobalOffset(i, 0);
+                _viewAccessor.WriteArray(offset, buffer, 0, mappedChunkSize);
+            }
+
+            Logger.Log($"[ChunkedVolume] Filled memory-mapped volume with value: {value}");
             return;
         }
 

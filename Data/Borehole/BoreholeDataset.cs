@@ -1,11 +1,13 @@
 // GeoscientistToolkit/Data/Borehole/BoreholeDataset.cs
 
+using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
 using GeoscientistToolkit.Analysis.NMR;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Pnm;
+using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Data.Borehole;
@@ -473,8 +475,12 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                 ImportFromAcousticDataset(acousticDataset, unit, depthFrom, depthTo, parameterNames);
                 break;
 
+            case TableDataset tableDataset:
+                ImportFromTableDataset(tableDataset, unit, depthFrom, depthTo, parameterNames);
+                break;
+
             default:
-                Logger.LogWarning($"Parameter import not implemented for dataset type {sourceDataset.Type}");
+                Logger.LogWarning($"Parameter import not supported for dataset type {sourceDataset.Type}");
                 break;
         }
 
@@ -637,6 +643,82 @@ public class BoreholeDataset : Dataset, ISerializableDataset
             source.Value = acoustic.PoissonRatio;
             unit.ParameterSources["Poisson's Ratio"] = source;
             unit.Parameters["Poisson's Ratio"] = source.Value;
+        }
+    }
+
+    private void ImportFromTableDataset(TableDataset table, LithologyUnit unit,
+        float depthFrom, float depthTo, string[] parameters)
+    {
+        if (table == null)
+            return;
+
+        var data = table.GetDataTable();
+        if (data == null)
+        {
+            table.Load();
+            data = table.GetDataTable();
+        }
+
+        if (data == null || data.Rows.Count == 0)
+        {
+            Logger.LogWarning("[BoreholeDataset] Table dataset has no data to import.");
+            return;
+        }
+
+        var depthColumn = data.Columns.Cast<System.Data.DataColumn>()
+            .FirstOrDefault(c =>
+                c.ColumnName.Equals("Depth", StringComparison.OrdinalIgnoreCase) ||
+                c.ColumnName.Equals("Depth(m)", StringComparison.OrdinalIgnoreCase) ||
+                c.ColumnName.Equals("Depth_m", StringComparison.OrdinalIgnoreCase) ||
+                c.ColumnName.Equals("MD", StringComparison.OrdinalIgnoreCase));
+
+        if (depthColumn == null)
+        {
+            Logger.LogWarning("[BoreholeDataset] Could not find a depth column in table dataset.");
+            return;
+        }
+
+        var targetParameters = parameters?.Length > 0
+            ? parameters
+            : ParameterTracks.Keys.ToArray();
+
+        foreach (var parameter in targetParameters)
+        {
+            if (!data.Columns.Contains(parameter))
+                continue;
+
+            var values = new List<float>();
+            foreach (System.Data.DataRow row in data.Rows)
+            {
+                var depthValue = row[depthColumn.ColumnName]?.ToString();
+                if (!float.TryParse(depthValue, NumberStyles.Any, CultureInfo.InvariantCulture, out var depth))
+                    continue;
+
+                if (depth < depthFrom || depth > depthTo)
+                    continue;
+
+                var valueText = row[parameter]?.ToString();
+                if (float.TryParse(valueText, NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
+                    values.Add(value);
+            }
+
+            if (values.Count == 0)
+                continue;
+
+            var avg = values.Average();
+            var source = new ParameterSource
+            {
+                DatasetName = table.Name,
+                DatasetPath = table.FilePath,
+                DatasetType = table.Type,
+                SourceDepthFrom = depthFrom,
+                SourceDepthTo = depthTo,
+                Value = avg,
+                LastUpdated = DateTime.Now
+            };
+
+            unit.ParameterSources[parameter] = source;
+            unit.Parameters[parameter] = avg;
         }
     }
 

@@ -51,7 +51,25 @@ public class CtImageStackPropertiesRenderer : IDatasetPropertiesRenderer
         if (ImGui.CollapsingHeader("Acquisition Info"))
         {
             ImGui.Indent();
-            ImGui.TextDisabled("Not yet implemented");
+            var metadata = ct.DatasetMetadata;
+            if (!string.IsNullOrWhiteSpace(metadata.SampleName))
+                PropertiesPanel.DrawProperty("Sample", metadata.SampleName);
+            if (!string.IsNullOrWhiteSpace(metadata.LocationName))
+                PropertiesPanel.DrawProperty("Location", metadata.LocationName);
+            if (metadata.Depth.HasValue)
+                PropertiesPanel.DrawProperty("Depth", $"{metadata.Depth.Value:F2} m");
+            if (metadata.CollectionDate.HasValue)
+                PropertiesPanel.DrawProperty("Collection Date", metadata.CollectionDate.Value.ToShortDateString());
+            if (!string.IsNullOrWhiteSpace(metadata.Collector))
+                PropertiesPanel.DrawProperty("Collector", metadata.Collector);
+            if (!string.IsNullOrWhiteSpace(metadata.Notes))
+                PropertiesPanel.DrawProperty("Notes", metadata.Notes);
+            if (metadata.CustomFields.Count > 0)
+            {
+                ImGui.SeparatorText("Custom Fields");
+                foreach (var kvp in metadata.CustomFields)
+                    PropertiesPanel.DrawProperty(kvp.Key, kvp.Value);
+            }
             ImGui.Unindent();
         }
     }

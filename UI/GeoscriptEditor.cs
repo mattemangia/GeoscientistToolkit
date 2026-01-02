@@ -27,6 +27,8 @@ public class GeoScriptEditor
     private static readonly GeoScriptEngine _engine = new();
     private readonly List<Suggestion> _suggestions = new();
     private int _activeSuggestionIndex = -1;
+    private bool _hasPendingSuggestion;
+    private Suggestion _pendingSuggestion;
 
     // Context for suggestions
     private Dataset _associatedDataset;
@@ -183,6 +185,13 @@ public class GeoScriptEditor
     private unsafe int HandleInputCallback(ImGuiInputTextCallbackData* data)
     {
         // This is the core of the keyboard interaction for the suggestion popup
+        if (_hasPendingSuggestion)
+        {
+            InsertSuggestion(_pendingSuggestion, data);
+            _hasPendingSuggestion = false;
+            return 0;
+        }
+
         if (!_showSuggestionsPopup) return 0;
 
         switch (data->EventKey)
@@ -411,9 +420,8 @@ public class GeoScriptEditor
 
                 if (ImGui.Selectable(suggestion.DisplayText, isSelected))
                 {
-                    // This block is for mouse clicks. Keyboard is handled in the callback.
-                    // We need to request the insertion to happen after the draw loop.
-                    Logger.LogWarning("Mouse click on suggestions not yet implemented. Use Enter/Tab.");
+                    _pendingSuggestion = suggestion;
+                    _hasPendingSuggestion = true;
                     _showSuggestionsPopup = false;
                 }
 

@@ -1,5 +1,6 @@
 // GeoscientistToolkit/Data/AcousticVolume/CalibrationManagerUI.cs
 
+using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
 using GeoscientistToolkit.Data.AcousticVolume;
@@ -17,11 +18,13 @@ public class CalibrationManagerUI
 {
     private const string DefaultExportBaseName = "calibration";
     private static readonly string[] ImportExtensions = new[] { ".json" };
+    private static readonly string[] CsvImportExtensions = new[] { ".csv" };
     private readonly CtImageStackDataset _dataset;
     private readonly ImGuiExportFileDialog _exportDialog;
 
     // File dialogs
     private readonly ImGuiFileDialog _importDialog;
+    private readonly ImGuiFileDialog _csvImportDialog;
 
     // Comparison mode
     private float _comparisonDensity = 2700f;
@@ -49,6 +52,7 @@ public class CalibrationManagerUI
         CalibrationData = new CalibrationData();
 
         _importDialog = new ImGuiFileDialog("ImportCalibration", FileDialogType.OpenFile, "Import Calibration");
+        _csvImportDialog = new ImGuiFileDialog("ImportCalibrationCsv", FileDialogType.OpenFile, "Import Calibration CSV");
         _exportDialog = new ImGuiExportFileDialog("ExportCalibration", "Export Calibration");
 
         // Reasonable defaults
@@ -211,8 +215,9 @@ public class CalibrationManagerUI
 
         ImGui.SameLine();
         if (ImGui.Button("Import from CSV"))
-            // (Optional future work) CSV import could go here.
-            Logger.Log("[CalibrationUI] CSV import not yet implemented");
+            _csvImportDialog.Open(
+                _lastImportDir,
+                CsvImportExtensions);
     }
 
     private void DrawCalibrationPointsTab()
@@ -557,6 +562,16 @@ public class CalibrationManagerUI
             }
         }
 
+        if (_csvImportDialog.Submit())
+        {
+            var path = _csvImportDialog.SelectedPath;
+            if (!string.IsNullOrEmpty(path))
+            {
+                _lastImportDir = Path.GetDirectoryName(path) ?? _lastImportDir;
+                ImportCalibrationCsv(path);
+            }
+        }
+
         // EXPORT
         if (_exportDialog.Submit())
         {
@@ -619,5 +634,139 @@ public class CalibrationManagerUI
     public void LoadCalibration(CalibrationData calibrationData)
     {
         CalibrationData = calibrationData ?? new CalibrationData();
+    }
+
+    private void ImportCalibrationCsv(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                Logger.LogWarning($"[CalibrationUI] CSV import file not found: {path}");
+                return;
+            }
+
+            var lines = File.ReadAllLines(path);
+            if (lines.Length < 2)
+            {
+                Logger.LogWarning("[CalibrationUI] CSV import file is empty.");
+                return;
+            }
+
+            var header = ParseCsvLine(lines[0]);
+            var headerLookup = header
+                .Select((name, idx) => new { Name = name.Trim(), Index = idx })
+                .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+                .ToDictionary(item => item.Name, item => item.Index, StringComparer.OrdinalIgnoreCase);
+
+            var points = new List<CalibrationPoint>();
+            for (var i = 1; i < lines.Length; i++)
+            {
+                if (string.IsNullOrWhiteSpace(lines[i]))
+                    continue;
+
+                var values = ParseCsvLine(lines[i]);
+                var point = new CalibrationPoint
+                {
+                    MaterialName = GetStringValue(values, headerLookup, "MaterialName") ?? "Unknown",
+                    MaterialID = (byte)GetIntValue(values, headerLookup, "MaterialID"),
+                    Density = GetFloatValue(values, headerLookup, "Density"),
+                    ConfiningPressureMPa = GetFloatValue(values, headerLookup, "ConfiningPressureMPa", "Pressure"),
+                    YoungsModulusMPa = GetFloatValue(values, headerLookup, "YoungsModulusMPa", "YoungsModulus"),
+                    PoissonRatio = GetFloatValue(values, headerLookup, "PoissonRatio"),
+                    MeasuredVp = GetDoubleValue(values, headerLookup, "MeasuredVp", "LabVp"),
+                    MeasuredVs = GetDoubleValue(values, headerLookup, "MeasuredVs", "LabVs"),
+                    SimulatedVp = GetDoubleValue(values, headerLookup, "SimulatedVp", "SimVp"),
+                    SimulatedVs = GetDoubleValue(values, headerLookup, "SimulatedVs", "SimVs"),
+                    Notes = GetStringValue(values, headerLookup, "Notes") ?? string.Empty,
+                    Timestamp = GetDateValue(values, headerLookup, "Timestamp")
+                };
+
+                if (point.MeasuredVs > 0)
+                    point.MeasuredVpVsRatio = point.MeasuredVp / point.MeasuredVs;
+                if (point.SimulatedVs > 0)
+                    point.SimulatedVpVsRatio = point.SimulatedVp / point.SimulatedVs;
+
+                points.Add(point);
+            }
+
+            CalibrationData.Points = points;
+            CalibrationData.LastUpdated = DateTime.Now;
+            CalibrationData.CalibrationMethod = "CSV Import";
+
+            Logger.Log($"[CalibrationUI] Imported {points.Count} calibration points from CSV.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[CalibrationUI] Failed to import calibration CSV: {ex.Message}");
+        }
+    }
+
+    private static string[] ParseCsvLine(string line)
+    {
+        var values = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var inQuotes = false;
+
+        foreach (var ch in line)
+        {
+            if (ch == '"' )
+            {
+                inQuotes = !inQuotes;
+                continue;
+            }
+
+            if (ch == ',' && !inQuotes)
+            {
+                values.Add(current.ToString());
+                current.Clear();
+            }
+            else
+            {
+                current.Append(ch);
+            }
+        }
+
+        values.Add(current.ToString());
+        return values.ToArray();
+    }
+
+    private static string GetStringValue(IReadOnlyList<string> values, Dictionary<string, int> headers,
+        params string[] keys)
+    {
+        foreach (var key in keys)
+            if (headers.TryGetValue(key, out var index) && index < values.Count)
+                return values[index];
+        return null;
+    }
+
+    private static float GetFloatValue(IReadOnlyList<string> values, Dictionary<string, int> headers,
+        params string[] keys)
+    {
+        var text = GetStringValue(values, headers, keys);
+        return float.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var result) ? result : 0f;
+    }
+
+    private static int GetIntValue(IReadOnlyList<string> values, Dictionary<string, int> headers,
+        params string[] keys)
+    {
+        var text = GetStringValue(values, headers, keys);
+        return int.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var result) ? result : 0;
+    }
+
+    private static double GetDoubleValue(IReadOnlyList<string> values, Dictionary<string, int> headers,
+        params string[] keys)
+    {
+        var text = GetStringValue(values, headers, keys);
+        return double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var result) ? result : 0d;
+    }
+
+    private static DateTime GetDateValue(IReadOnlyList<string> values, Dictionary<string, int> headers,
+        params string[] keys)
+    {
+        var text = GetStringValue(values, headers, keys);
+        return DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var result)
+            ? result
+            : DateTime.Now;
     }
 }

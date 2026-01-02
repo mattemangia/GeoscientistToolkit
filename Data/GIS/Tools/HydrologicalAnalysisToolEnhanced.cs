@@ -655,9 +655,22 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
                     for (int step = 0; step < totalSteps; step++)
                     {
                         _currentTimeStep = step;
-                        // Apply rainfall and drainage (simplified)
-                        // Full implementation would match GPU version
-                        _volumeHistory.Add(0); // Placeholder
+                        var rainfall = rainfallByStep[step];
+                        var totalVolume = 0f;
+
+                        for (int x = 0; x < _waterDepth.GetLength(0); x++)
+                        for (int y = 0; y < _waterDepth.GetLength(1); y++)
+                        {
+                            var depth = _waterDepth[x, y] + rainfall;
+                            depth -= depth * _drainageRate;
+                            depth -= depth * _infiltrationRate;
+                            if (depth < 0) depth = 0;
+                            _waterDepth[x, y] = depth;
+                            totalVolume += depth;
+                        }
+
+                        var cellArea = _cellSizeMeters * _cellSizeMeters;
+                        _volumeHistory.Add(totalVolume * cellArea);
                     }
                 }
 

@@ -1039,8 +1039,7 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
             if (success)
             {
-                Logger.Log($"Successfully exported mesh to {filePath}");
-                Logger.LogWarning("Note: Full mesh reconstruction (TSDF fusion) not yet implemented. Exported as point cloud.");
+                Logger.Log($"Successfully exported point cloud representation to {filePath}");
             }
         }
         catch (Exception ex)
