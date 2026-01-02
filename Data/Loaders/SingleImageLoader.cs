@@ -11,6 +11,13 @@ public class SingleImageLoader : IDataLoader
     public float PixelSize { get; set; } = 1.0f;
     public PixelSizeUnit Unit { get; set; } = PixelSizeUnit.Micrometers;
     public string Name => "Single Image";
+
+    public SingleImageLoader() { }
+
+    public SingleImageLoader(string imagePath)
+    {
+        ImagePath = imagePath;
+    }
     public string Description => "Import a single image file (PNG, JPG, TIFF, etc.)";
 
     public bool CanImport => !string.IsNullOrEmpty(ImagePath) && File.Exists(ImagePath);

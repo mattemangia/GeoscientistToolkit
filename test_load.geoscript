@@ -1,0 +1,4 @@
+LOAD "test.tif" TYPE=CtImageStack
+COPY AS "Backup"
+SAVE "backup.tif"
+DELETE

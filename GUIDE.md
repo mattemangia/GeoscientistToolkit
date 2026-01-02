@@ -983,9 +983,9 @@ LOAD_IMAGE $dataset_name
 - `COMPUTE_AMPLITUDE` - Amplitude analysis
 
 #### Miscellaneous Dataset Commands
-- `LOAD path` - Load dataset from file
-- `SAVE path format` - Export dataset
-- `COPY` - Duplicate dataset
+- `LOAD path [AS "Name"] [TYPE=Type]` - Load dataset from file with optional name and type
+- `SAVE path [FORMAT="fmt"]` - Export dataset to file
+- `COPY [AS "Name"]` - Duplicate dataset
 - `RENAME new_name` - Change name
 - `DELETE` - Remove from project
 

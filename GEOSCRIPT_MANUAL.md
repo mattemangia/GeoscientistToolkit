@@ -1520,6 +1520,65 @@ UNLOAD
 
 ---
 
+#### 5.9.6 SAVE
+
+Saves a dataset to a file.
+
+**Syntax**:
+```geoscript
+SAVE "path/to/file" [FORMAT="fmt"]
+```
+
+**Parameters**:
+- `path`: Destination file path.
+- `FORMAT`: Optional format specifier (e.g., "png", "csv", "shp").
+
+**Examples**:
+```geoscript
+SAVE "output_image.png"
+SAVE "results.csv" FORMAT="csv"
+```
+
+**Returns**: The saved dataset.
+
+---
+
+#### 5.9.7 COPY
+
+Duplicates the current dataset.
+
+**Syntax**:
+```geoscript
+COPY [AS "NewName"]
+```
+
+**Parameters**:
+- `AS`: Optional new name for the copy. If omitted, appends "_Copy" to the original name.
+
+**Examples**:
+```geoscript
+COPY AS "BackupData"
+```
+
+**Returns**: The duplicated dataset.
+
+---
+
+#### 5.9.8 DELETE
+
+Removes the dataset from the project.
+
+**Syntax**:
+```geoscript
+DELETE
+```
+
+**Description**: Removes the dataset from the project manager. It remains in memory if referenced by variables but is removed from the UI project list.
+
+**Returns**: The removed dataset.
+
+---
+
 ## 6. Advanced Features
 
 ### 6.1 Pipeline Composition

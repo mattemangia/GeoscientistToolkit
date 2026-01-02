@@ -72,4 +72,11 @@ public abstract class Dataset
     public abstract long GetSizeInBytes();
     public abstract void Load();
     public abstract void Unload();
+
+    public virtual Dataset Clone()
+    {
+        // Default shallow clone implementation
+        // Subclasses should override this for deep cloning
+        return (Dataset)this.MemberwiseClone();
+    }
 }
