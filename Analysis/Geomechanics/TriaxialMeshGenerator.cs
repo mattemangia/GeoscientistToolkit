@@ -278,4 +278,12 @@ public class TriaxialMeshGenerator
 
         return mesh;
     }
+
+    /// <summary>
+    /// Generate a simple cylinder (wrapper for GenerateCylindricalMesh)
+    /// </summary>
+    public static TriaxialMesh GenerateCylinder(float diameter, float height, int resolution)
+    {
+        return GenerateCylindricalMesh(diameter / 2f, height, resolution / 2, resolution, resolution);
+    }
 }

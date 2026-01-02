@@ -1,5 +1,6 @@
 using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Settings;
+using GeoscientistToolkit.NodeEndpoint.Services;
 
 namespace GeoscientistToolkit.NodeEndpoint;
 
@@ -10,12 +11,14 @@ public class NodeEndpointService
 {
     private readonly NodeManager _nodeManager;
     private readonly JobTracker _jobTracker;
+    private readonly JobExecutor _jobExecutor; // Add JobExecutor
     private bool _initialized = false;
 
     public NodeEndpointService(JobTracker jobTracker)
     {
         _nodeManager = NodeManager.Instance;
         _jobTracker = jobTracker;
+        _jobExecutor = new JobExecutor(_nodeManager); // Initialize JobExecutor
 
         // Subscribe to NodeManager events
         _nodeManager.JobReceived += OnJobReceived;
@@ -74,6 +77,10 @@ public class NodeEndpointService
     {
         Console.WriteLine($"Job received: {job.JobId} - Type: {job.JobType}");
         _jobTracker.RegisterJob(job);
+
+        // Execute the job using JobExecutor
+        // We run it asynchronously to avoid blocking the network thread
+        _ = _jobExecutor.ExecuteJob(job);
     }
 
     private void OnJobCompleted(JobResultMessage result)
