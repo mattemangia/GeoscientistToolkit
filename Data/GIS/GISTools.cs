@@ -637,10 +637,11 @@ public class GISTools : IDatasetTools
             if (_exportProgressDialog.IsCancellationRequested) _exportCts?.Cancel();
             if (_shpExportDialog.Submit())
                 StartExportTask(GISExporter.ExportToShapefileAsync(dataset, _shpExportDialog.SelectedPath,
-                    CreateProgressHandler(), _exportCts.Token));
+                    dataset.Layers.FirstOrDefault()?.Name ?? "Layer1",
+                    new Progress<float>(p => CreateProgressHandler().Report((p, "Exporting..."))), _exportCts.Token));
             if (_geoTiffExportDialog.Submit())
                 StartExportTask(GISExporter.ExportToGeoTiffAsync(dataset, _geoTiffExportDialog.SelectedPath,
-                    CreateProgressHandler(), _exportCts.Token));
+                    new Progress<float>(p => CreateProgressHandler().Report((p, "Exporting..."))), _exportCts.Token));
             if (_geoJsonExportDialog.Submit())
             {
                 dataset.SaveAsGeoJSON(_geoJsonExportDialog.SelectedPath);

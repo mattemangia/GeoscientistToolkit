@@ -15,7 +15,7 @@ namespace GeoscientistToolkit.Business.GeoScriptMiscDatasetCommands
         public string HelpText => "Saves a dataset to a file.";
         public string Usage => "SAVE \"path/to/file\" [FORMAT=\"format\"]";
 
-        public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+        public async Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
         {
             if (context.InputDataset == null)
                 throw new InvalidOperationException("No input dataset provided to SAVE.");
@@ -49,14 +49,47 @@ namespace GeoscientistToolkit.Business.GeoScriptMiscDatasetCommands
 
             Logger.Log($"Saving dataset '{context.InputDataset.Name}' to '{path}'" + (format != null ? $" (Format: {format})" : "") + "...");
 
-            // Logic to actually save would go here (delegating to dataset export logic or similar)
-            // For now, we simulate success as many export implementations might be UI driven or specific to types not fully exposed here.
-            // In a real implementation, we would call something like:
-            // ExporterFactory.GetExporter(context.InputDataset.Type).Export(context.InputDataset, path, format);
+            if (context.InputDataset is Data.Image.ImageDataset imageDs)
+            {
+                await Task.Run(() =>
+                {
+                    var exporter = new Data.Image.ImageExporter();
+                    exporter.Export(imageDs, path, false, false);
+                });
+                Logger.Log("Image export completed.");
+            }
+            else if (context.InputDataset is Data.GIS.GISDataset gisDs)
+            {
+                if (path.EndsWith(".shp", StringComparison.OrdinalIgnoreCase))
+                {
+                    await Data.GIS.GISExporter.ExportToShapefileAsync(gisDs, path, gisDs.Layers.FirstOrDefault()?.Name ?? "Layer1", new Progress<float>());
+                    Logger.Log("Shapefile export completed.");
+                }
+                else if (path.EndsWith(".tif", StringComparison.OrdinalIgnoreCase))
+                {
+                    await Data.GIS.GISExporter.ExportToGeoTiffAsync(gisDs, path, new Progress<float>());
+                    Logger.Log("GeoTIFF export completed.");
+                }
+                else
+                {
+                    throw new NotSupportedException("Unsupported GIS export format. Use .shp or .tif");
+                }
+            }
+            else if (context.InputDataset is Data.PhysicoChem.PhysicoChemDataset pcDs)
+            {
+                await Task.Run(() =>
+                {
+                    var exporter = new Data.Exporters.Tough2Exporter();
+                    exporter.Export(pcDs, path);
+                });
+                Logger.Log("Tough2 export completed.");
+            }
+            else
+            {
+                Logger.LogWarning($"SAVE not fully implemented for dataset type {context.InputDataset.Type}. Simulation only.");
+            }
 
-            Logger.Log("Save completed (Simulation).");
-
-            return Task.FromResult(context.InputDataset);
+            return context.InputDataset;
         }
     }
 
@@ -90,14 +123,15 @@ namespace GeoscientistToolkit.Business.GeoScriptMiscDatasetCommands
             // Since Dataset doesn't have a Clone method in the snippet, we'll assume we can't fully clone it here without more logic.
             // But to satisfy the command existence:
 
-            // Note: A true copy requires deep cloning data which depends on specific dataset types.
-            // Here we just log it as a placeholder for the feature.
-            Logger.LogWarning("Deep copy not fully implemented for all dataset types. Creating reference copy.");
+            // Use the Clone method from Dataset base class
+            // It defaults to shallow copy but can be overridden by specific types for deep copy
+            var copy = context.InputDataset.Clone();
+            copy.Name = newName;
 
-            // We can't really return a new dataset without cloning.
-            // We'll return the input to avoid breaking pipelines, but log that it's not a true copy.
+            ProjectManager.Instance.AddDataset(copy);
+            Logger.Log($"Dataset duplicated as: {copy.Name}");
 
-            return Task.FromResult(context.InputDataset);
+            return Task.FromResult(copy);
         }
     }
 

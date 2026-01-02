@@ -8,7 +8,7 @@ using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 using OSGeo.GDAL;
 
-namespace GeoscientistToolkit.Business.GIS;
+namespace GeoscientistToolkit.Data.GIS;
 
 /// <summary>
 ///     Provides functionality to export GIS datasets to various formats.
@@ -22,14 +22,15 @@ public static class GISExporter
     /// </summary>
     /// <param name="dataset">The dataset to export.</param>
     /// <param name="path">The file path for the exported shapefile.</param>
+    /// <param name="layerName">The specific layer name to export (optional).</param>
     /// <param name="progress">Handler for reporting progress updates.</param>
     /// <param name="token">A cancellation token to observe.</param>
-    public static async Task ExportToShapefileAsync(GISDataset dataset, string path,
-        IProgress<(float progress, string message)> progress, CancellationToken token = default)
+    public static async Task ExportToShapefileAsync(GISDataset dataset, string path, string layerName,
+        IProgress<float> progress, CancellationToken token = default)
     {
         await Task.Run(() =>
         {
-            progress?.Report((0.0f, "Preparing features..."));
+            progress?.Report(0.0f);
             token.ThrowIfCancellationRequested();
 
             var allFeatures = new List<IFeature>();
@@ -46,12 +47,12 @@ public static class GISExporter
 
             if (allFeatures.Count == 0)
             {
-                progress?.Report((1.0f, "No vector features found to export."));
+                progress?.Report(1.0f);
                 Logger.LogWarning("No vector features found to export to shapefile.");
                 return;
             }
 
-            progress?.Report((0.2f, $"Writing {allFeatures.Count} features..."));
+            progress?.Report(0.2f);
             token.ThrowIfCancellationRequested();
 
             var writer = new ShapefileDataWriter(path, _geometryFactory)
@@ -60,14 +61,14 @@ public static class GISExporter
             };
             writer.Write(allFeatures);
 
-            progress?.Report((0.9f, "Writing projection file..."));
+            progress?.Report(0.9f);
             token.ThrowIfCancellationRequested();
 
             var prjPath = Path.ChangeExtension(path, ".prj");
             File.WriteAllText(prjPath, GetProjectionWKT());
 
 
-            progress?.Report((1.0f, "Shapefile export complete."));
+            progress?.Report(1.0f);
             Logger.Log($"Exported {allFeatures.Count} features to shapefile: {path}");
         }, token);
     }
@@ -80,34 +81,34 @@ public static class GISExporter
     /// <param name="progress">Handler for reporting progress updates.</param>
     /// <param name="token">A cancellation token to observe.</param>
     public static async Task ExportToGeoTiffAsync(GISDataset dataset, string path,
-        IProgress<(float progress, string message)> progress, CancellationToken token = default)
+        IProgress<float> progress, CancellationToken token = default)
     {
         await Task.Run(() =>
         {
-            progress?.Report((0.0f, "Finding raster layer..."));
+            progress?.Report(0.0f);
             var rasterLayer = dataset.Layers.FirstOrDefault(l =>
                 l.Type == LayerType.Raster && !string.IsNullOrEmpty(l.RasterPath) && File.Exists(l.RasterPath));
 
             if (rasterLayer == null)
             {
-                progress?.Report((1.0f, "Error: No valid raster layer found."));
+                progress?.Report(1.0f);
                 Logger.LogError("Could not find a valid raster layer with a file path to export.");
                 return;
             }
 
             token.ThrowIfCancellationRequested();
-            progress?.Report((0.1f, $"Loading source GeoTIFF: {Path.GetFileName(rasterLayer.RasterPath)}"));
+            progress?.Report(0.1f);
 
             var geoTiffData = BasemapManager.Instance.LoadGeoTiff(rasterLayer.RasterPath);
             if (geoTiffData == null)
             {
-                progress?.Report((1.0f, "Error: Failed to load raster data."));
+                progress?.Report(1.0f);
                 Logger.LogError($"Failed to load GeoTIFF data from {rasterLayer.RasterPath} for export.");
                 return;
             }
 
             token.ThrowIfCancellationRequested();
-            progress?.Report((0.3f, "Creating new GeoTIFF file..."));
+            progress?.Report(0.3f);
 
             using var driver = Gdal.GetDriverByName("GTiff");
             using var destDataset = driver.Create(path, geoTiffData.Width, geoTiffData.Height, geoTiffData.BandCount,
@@ -124,7 +125,7 @@ public static class GISExporter
             {
                 token.ThrowIfCancellationRequested();
                 var progressValue = 0.3f + 0.7f * b / geoTiffData.BandCount;
-                progress?.Report((progressValue, $"Writing band {b} of {geoTiffData.BandCount}..."));
+                progress?.Report(progressValue);
 
                 using var band = destDataset.GetRasterBand(b);
 
@@ -140,7 +141,7 @@ public static class GISExporter
             }
 
             destDataset.FlushCache();
-            progress?.Report((1.0f, "GeoTIFF export complete."));
+            progress?.Report(1.0f);
             Logger.Log($"Exported raster layer to GeoTIFF: {path}");
         }, token);
     }
