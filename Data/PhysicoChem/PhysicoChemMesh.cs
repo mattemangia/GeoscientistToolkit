@@ -90,6 +90,65 @@ namespace GeoscientistToolkit.Data.PhysicoChem
                        z >= Center.Z - Size.Z / 2 && z <= Center.Z + Size.Z / 2;
             }
         }
+
+        /// <summary>
+        /// Gets the top Z coordinate of the object
+        /// </summary>
+        public double GetTopZ()
+        {
+            if (IsCylinder)
+                return Center.Z + Height / 2;
+            else
+                return Center.Z + Size.Z / 2;
+        }
+
+        /// <summary>
+        /// Gets the bottom Z coordinate of the object
+        /// </summary>
+        public double GetBottomZ()
+        {
+            if (IsCylinder)
+                return Center.Z - Height / 2;
+            else
+                return Center.Z - Size.Z / 2;
+        }
+
+        /// <summary>
+        /// Checks if the object contacts the surface (top of mesh) given mesh bounds.
+        /// Heat exchangers must contact surface for fluid inlet/outlet.
+        /// </summary>
+        /// <param name="meshTopZ">The Z coordinate of the mesh top surface</param>
+        /// <param name="tolerance">Tolerance for contact check</param>
+        public bool ContactsSurface(double meshTopZ, double tolerance = 0.01)
+        {
+            double objectTopZ = GetTopZ();
+            return Math.Abs(objectTopZ - meshTopZ) <= tolerance || objectTopZ >= meshTopZ;
+        }
+
+        /// <summary>
+        /// Validates heat exchanger placement: must contact surface for inlet/outlet.
+        /// </summary>
+        /// <param name="meshTopZ">The Z coordinate of the mesh top surface</param>
+        /// <param name="errorMessage">Error message if validation fails</param>
+        public bool ValidateHeatExchangerPlacement(double meshTopZ, out string errorMessage)
+        {
+            errorMessage = null;
+
+            if (Type != "HeatExchanger")
+            {
+                // Non-heat exchanger objects don't require surface contact
+                return true;
+            }
+
+            if (!ContactsSurface(meshTopZ))
+            {
+                errorMessage = $"Heat exchanger '{Name}' must contact the surface (top of mesh at Z={meshTopZ:F2}). " +
+                              $"Current top is at Z={GetTopZ():F2}. Adjust position or height.";
+                return false;
+            }
+
+            return true;
+        }
     }
 
     /// <summary>
@@ -130,6 +189,46 @@ namespace GeoscientistToolkit.Data.PhysicoChem
         /// </summary>
         [JsonProperty]
         public List<NucleationPoint> NucleationPoints { get; set; } = new List<NucleationPoint>();
+
+        /// <summary>
+        ///     Gets the top Z coordinate of the mesh (surface level).
+        /// </summary>
+        public double GetMeshTopZ()
+        {
+            if (Cells.Count == 0) return 0;
+            return Cells.Values.Max(c => c.Center.Z + Math.Pow(c.Volume, 1.0 / 3.0) / 2.0);
+        }
+
+        /// <summary>
+        ///     Gets the bottom Z coordinate of the mesh.
+        /// </summary>
+        public double GetMeshBottomZ()
+        {
+            if (Cells.Count == 0) return 0;
+            return Cells.Values.Min(c => c.Center.Z - Math.Pow(c.Volume, 1.0 / 3.0) / 2.0);
+        }
+
+        /// <summary>
+        ///     Embeds a reactor object into the mesh, updating cell materials.
+        ///     Validates that heat exchangers contact the surface.
+        /// </summary>
+        /// <param name="obj">The reactor object to embed</param>
+        /// <param name="errorMessage">Error message if validation fails</param>
+        /// <returns>True if embedding succeeded, false if validation failed</returns>
+        public bool TryEmbedObject(ReactorObject obj, out string errorMessage)
+        {
+            errorMessage = null;
+
+            // Validate heat exchanger placement
+            double meshTopZ = GetMeshTopZ();
+            if (!obj.ValidateHeatExchangerPlacement(meshTopZ, out errorMessage))
+            {
+                return false;
+            }
+
+            EmbedObject(obj);
+            return true;
+        }
 
         /// <summary>
         ///     Embeds a reactor object into the mesh, updating cell materials.

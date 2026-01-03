@@ -765,6 +765,339 @@ public class SimulationVerificationTests
         writer.WritePng(imageData, nx, nz, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
     }
 
+    /// <summary>
+    /// ORC (Organic Rankine Cycle) test with coaxial heat exchanger for geothermal energy production.
+    /// Tests: Heat extraction from coaxial exchanger, ORC thermodynamic cycle, power output calculation.
+    /// Generates PNG showing the working model scheme with tubing (coaxial warm fluid with ORC condenser).
+    /// </summary>
+    [Fact]
+    public void PhysicoChem_ORC_HeatTransferAndEnergyProduction()
+    {
+        // ==================== ORC CONFIGURATION ====================
+        // Geothermal reservoir parameters
+        const int nx = 12, ny = 12, nz = 12;
+        const double domainSize = 50.0; // meters (50m x 50m x 50m)
+        const double dx = domainSize / nx;
+        const double dt = 0.5; // seconds
+        const int simulationSteps = 200;
+
+        // Coaxial heat exchanger parameters
+        const double exchangerDepth = 40.0; // meters depth
+        const double outerRadius = 0.15; // meters (6 inch pipe)
+        const double innerRadius = 0.075; // meters (3 inch pipe)
+        const double waterFlowRate = 2.0; // kg/s circulation rate
+        const double inletTemp = 15.0 + 273.15; // 15°C inlet (Kelvin)
+
+        // ORC parameters (isobutane as working fluid)
+        const double orcWorkingFluidFlowRate = 0.5; // kg/s
+        const double orcEvaporatorTemp = 80.0 + 273.15; // 80°C evaporator temp
+        const double orcCondenserTemp = 30.0 + 273.15; // 30°C condenser temp
+        const double orcWorkingFluidCp = 2300.0; // J/(kg·K) isobutane specific heat
+        const double orcEvaporatorEfficiency = 0.85; // 85% heat transfer efficiency
+        const double orcTurbineEfficiency = 0.80; // 80% turbine isentropic efficiency
+        const double orcPumpEfficiency = 0.75; // 75% pump efficiency
+
+        // ==================== CREATE GEOTHERMAL RESERVOIR STATE ====================
+        var state = new PhysicoChemState((nx, ny, nz));
+        var thermalConductivity = new float[nx, ny, nz];
+
+        // Initialize reservoir with geothermal gradient
+        for (int i = 0; i < nx; i++)
+        for (int j = 0; j < ny; j++)
+        for (int k = 0; k < nz; k++)
+        {
+            double depth = k * dx;
+            double T_surface = 15.0 + 273.15; // 15°C at surface
+            double T_gradient = 0.035; // 35°C/km = 0.035°C/m
+            state.Temperature[i, j, k] = (float)(T_surface + depth * T_gradient);
+
+            // Hydrostatic pressure
+            state.Pressure[i, j, k] = (float)(101325.0 + 1000.0 * 9.81 * depth);
+
+            // Rock properties
+            state.Porosity[i, j, k] = 0.15f;
+            state.Permeability[i, j, k] = 5e-14f; // 50 mD
+
+            // Thermal conductivity increases with depth (compaction)
+            double depthFraction = (double)k / (nz - 1);
+            thermalConductivity[i, j, k] = (float)(2.0 + depthFraction * 1.5);
+
+            state.LiquidSaturation[i, j, k] = 1.0f;
+        }
+
+        // ==================== COAXIAL HEAT EXCHANGER SETUP ====================
+        int probeX = nx / 2, probeY = ny / 2;
+        int exchangerCells = (int)(exchangerDepth / dx);
+
+        // Configure heat transfer solver
+        var heatSolver = new HeatTransferSolver();
+        heatSolver.ThermalConductivity = thermalConductivity;
+        heatSolver.HeatParams.GridSpacing = dx;
+        heatSolver.HeatParams.Density = 2650.0;
+        heatSolver.HeatParams.SpecificHeat = 850.0;
+
+        // ==================== SIMULATION LOOP ====================
+        double[] extractedHeatHistory = new double[simulationSteps];
+        double totalExtractedHeat = 0;
+        double currentOutletTemp = inletTemp;
+
+        for (int step = 0; step < simulationSteps; step++)
+        {
+            state.CurrentTime = step * dt;
+
+            // Simulate coaxial heat exchanger:
+            // Inner pipe: cold water flows DOWN
+            // Annulus: warmed water flows UP
+            double exchangerHeatExtracted = 0;
+
+            for (int k = exchangerCells - 1; k >= 0; k--)
+            {
+                double rockTemp = state.Temperature[probeX, probeY, k];
+                double fluidTemp = currentOutletTemp;
+
+                // Heat transfer coefficient (simplified convective + conductive)
+                double U = 500.0; // W/(m²·K) overall heat transfer coefficient
+                double area = 2 * Math.PI * outerRadius * dx; // m²
+
+                // Heat extracted from rock to fluid
+                double Q = U * area * (rockTemp - fluidTemp);
+                if (Q > 0)
+                {
+                    exchangerHeatExtracted += Q;
+
+                    // Update fluid temperature (simplified)
+                    double dT = Q / (waterFlowRate * 4186.0); // water Cp = 4186 J/(kg·K)
+                    currentOutletTemp += dT * 0.1; // Damped update
+
+                    // Cool the rock
+                    double rockCooling = Q * dt / (2650.0 * 850.0 * dx * dx * dx);
+                    state.Temperature[probeX, probeY, k] -= (float)(rockCooling * 0.01);
+                }
+            }
+
+            // Store heat extraction rate
+            extractedHeatHistory[step] = exchangerHeatExtracted;
+            totalExtractedHeat += exchangerHeatExtracted * dt;
+
+            // Run heat transfer solver for thermal diffusion
+            heatSolver.SolveHeat(state, dt, new List<BoundaryCondition>());
+        }
+
+        // ==================== ORC CYCLE CALCULATION ====================
+        // Average outlet temperature from heat exchanger
+        double hotWaterOutletTemp = currentOutletTemp;
+
+        // Heat input to ORC evaporator
+        double Q_evaporator = waterFlowRate * 4186.0 * (hotWaterOutletTemp - inletTemp) * orcEvaporatorEfficiency;
+
+        // ORC cycle efficiency (simplified Carnot-based)
+        double T_hot = Math.Min(hotWaterOutletTemp, orcEvaporatorTemp);
+        double T_cold = orcCondenserTemp;
+        double carnotEfficiency = 1.0 - (T_cold / T_hot);
+        double actualEfficiency = carnotEfficiency * orcTurbineEfficiency * 0.6; // Account for irreversibilities
+
+        // Gross power output from turbine
+        double W_turbine = Q_evaporator * actualEfficiency;
+
+        // Pump work (much smaller than turbine output)
+        double W_pump = Q_evaporator * 0.02 / orcPumpEfficiency; // ~2% of heat for pump
+
+        // Net power output
+        double W_net = W_turbine - W_pump;
+
+        // ==================== GENERATE ORC SCHEMATIC PNG ====================
+        string outputDir = Path.Combine(Path.GetTempPath(), "ORCTest");
+        Directory.CreateDirectory(outputDir);
+        string orcSchematicPath = Path.Combine(outputDir, "orc_working_model_scheme.png");
+
+        GenerateORCSchematicImage(
+            orcSchematicPath,
+            inletTemp - 273.15,
+            hotWaterOutletTemp - 273.15,
+            orcEvaporatorTemp - 273.15,
+            orcCondenserTemp - 273.15,
+            Q_evaporator,
+            W_net,
+            actualEfficiency * 100
+        );
+
+        // ==================== ASSERTIONS ====================
+        // 1. Verify heat extraction occurred
+        Assert.True(hotWaterOutletTemp > inletTemp,
+            $"Outlet temp ({hotWaterOutletTemp - 273.15:F1}°C) should be higher than inlet ({inletTemp - 273.15:F1}°C)");
+
+        // 2. Verify ORC produces positive net power
+        Assert.True(W_net > 0,
+            $"ORC should produce positive net power, got {W_net:F0} W");
+
+        // 3. Verify efficiency is reasonable (typically 5-15% for low-temp ORC)
+        Assert.InRange(actualEfficiency * 100, 1.0, 20.0);
+
+        // 4. Verify heat was extracted from reservoir (temperature dropped near probe)
+        double tempNearProbe = state.Temperature[probeX + 1, probeY, nz / 2];
+        double tempFar = state.Temperature[0, 0, nz / 2];
+        Assert.True(tempNearProbe < tempFar,
+            "Temperature near coaxial exchanger should be lower than far field");
+
+        // 5. Verify PNG was created
+        Assert.True(File.Exists(orcSchematicPath),
+            $"ORC schematic PNG should exist at {orcSchematicPath}");
+
+        // ==================== LOG RESULTS ====================
+        Console.WriteLine("=== ORC Geothermal Energy Production Test Results ===");
+        Console.WriteLine($"Grid: {nx}x{ny}x{nz}, Domain: {domainSize}m³");
+        Console.WriteLine($"Coaxial Exchanger: {exchangerDepth}m depth, Ø{outerRadius * 2000:F0}mm");
+        Console.WriteLine($"Water Flow Rate: {waterFlowRate} kg/s");
+        Console.WriteLine($"Inlet Temperature: {inletTemp - 273.15:F1}°C");
+        Console.WriteLine($"Outlet Temperature: {hotWaterOutletTemp - 273.15:F1}°C");
+        Console.WriteLine($"Heat Extracted: {Q_evaporator / 1000:F1} kW");
+        Console.WriteLine($"ORC Evaporator: {orcEvaporatorTemp - 273.15:F0}°C");
+        Console.WriteLine($"ORC Condenser: {orcCondenserTemp - 273.15:F0}°C");
+        Console.WriteLine($"Turbine Output: {W_turbine / 1000:F2} kW");
+        Console.WriteLine($"Pump Work: {W_pump / 1000:F3} kW");
+        Console.WriteLine($"Net Power: {W_net / 1000:F2} kW ({W_net:F0} W)");
+        Console.WriteLine($"Cycle Efficiency: {actualEfficiency * 100:F1}%");
+        Console.WriteLine($"PNG Output: {orcSchematicPath}");
+    }
+
+    /// <summary>
+    /// Generates a PNG schematic showing the ORC working model with coaxial heat exchanger.
+    /// Shows: Reservoir, Coaxial HX (annulus+inner pipe), ORC evaporator, turbine, condenser, pump.
+    /// </summary>
+    private static void GenerateORCSchematicImage(
+        string filePath,
+        double inletTempC,
+        double outletTempC,
+        double evapTempC,
+        double condTempC,
+        double heatInput,
+        double powerOutput,
+        double efficiency)
+    {
+        const int width = 400;
+        const int height = 300;
+        var imageData = new byte[width * height * 4];
+
+        // Fill background with light gray
+        for (int i = 0; i < width * height; i++)
+        {
+            imageData[i * 4] = 240;     // R
+            imageData[i * 4 + 1] = 240; // G
+            imageData[i * 4 + 2] = 245; // B
+            imageData[i * 4 + 3] = 255; // A
+        }
+
+        // Draw reservoir (brown rectangle at bottom-left)
+        DrawFilledRect(imageData, width, 20, 180, 80, 100, 139, 90, 43); // Brown
+
+        // Draw coaxial heat exchanger (vertical pipe from reservoir to surface)
+        // Outer pipe (annulus - warm water going up - orange/red)
+        DrawFilledRect(imageData, width, 50, 80, 20, 100, 255, 100, 50); // Orange
+        // Inner pipe (cold water going down - blue)
+        DrawFilledRect(imageData, width, 55, 85, 10, 90, 50, 100, 255); // Blue
+
+        // Draw ORC Evaporator (heat exchange from water to ORC fluid)
+        DrawFilledRect(imageData, width, 100, 60, 60, 40, 255, 200, 100); // Yellow-orange
+
+        // Draw Turbine (circle-ish shape)
+        DrawFilledRect(imageData, width, 200, 50, 40, 40, 100, 150, 200); // Blue-gray
+
+        // Draw Generator (rectangle next to turbine)
+        DrawFilledRect(imageData, width, 250, 55, 30, 30, 50, 200, 50); // Green
+
+        // Draw Condenser (at right side)
+        DrawFilledRect(imageData, width, 300, 120, 60, 40, 100, 180, 255); // Light blue
+
+        // Draw Pump (small rectangle at bottom)
+        DrawFilledRect(imageData, width, 200, 180, 30, 25, 150, 100, 150); // Purple
+
+        // Draw working fluid cycle arrows (simplified as colored lines)
+        // Hot vapor: Evaporator -> Turbine (red line)
+        DrawHorizontalLine(imageData, width, 160, 70, 40, 255, 50, 50);
+        // Exhaust: Turbine -> Condenser (orange line)
+        DrawHorizontalLine(imageData, width, 240, 70, 60, 255, 150, 50);
+        // Liquid: Condenser -> Pump (blue line)
+        DrawVerticalLine(imageData, width, 330, 160, 40, 50, 100, 255);
+        DrawHorizontalLine(imageData, width, 230, 190, 100, 50, 100, 255);
+        // Pump -> Evaporator (blue line going up and left)
+        DrawVerticalLine(imageData, width, 130, 100, 80, 50, 100, 255);
+
+        // Draw labels area (text would require font rendering, so we use color blocks)
+        // Data display area at bottom
+        DrawFilledRect(imageData, width, 20, 230, 360, 60, 255, 255, 255); // White info box
+
+        // Add colored indicators for temperatures
+        // Inlet temp indicator (blue dot)
+        DrawFilledRect(imageData, width, 30, 240, 10, 10, 50, 100, 255);
+        // Outlet temp indicator (red dot)
+        DrawFilledRect(imageData, width, 30, 255, 10, 10, 255, 100, 50);
+        // Power indicator (green dot)
+        DrawFilledRect(imageData, width, 30, 270, 10, 10, 50, 200, 50);
+
+        // Draw title bar
+        DrawFilledRect(imageData, width, 0, 0, 400, 20, 60, 60, 80);
+
+        // Write PNG
+        using var stream = File.Create(filePath);
+        var writer = new StbImageWriteSharp.ImageWriter();
+        writer.WritePng(imageData, width, height, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
+    }
+
+    private static void DrawFilledRect(byte[] data, int imgWidth, int x, int y, int w, int h, byte r, byte g, byte b)
+    {
+        for (int j = y; j < y + h && j < data.Length / (imgWidth * 4); j++)
+        for (int i = x; i < x + w && i < imgWidth; i++)
+        {
+            if (i >= 0 && j >= 0)
+            {
+                int idx = (j * imgWidth + i) * 4;
+                if (idx >= 0 && idx + 3 < data.Length)
+                {
+                    data[idx] = r;
+                    data[idx + 1] = g;
+                    data[idx + 2] = b;
+                    data[idx + 3] = 255;
+                }
+            }
+        }
+    }
+
+    private static void DrawHorizontalLine(byte[] data, int imgWidth, int x, int y, int length, byte r, byte g, byte b)
+    {
+        for (int i = x; i < x + length && i < imgWidth; i++)
+        {
+            for (int thickness = 0; thickness < 3; thickness++)
+            {
+                int idx = ((y + thickness) * imgWidth + i) * 4;
+                if (idx >= 0 && idx + 3 < data.Length)
+                {
+                    data[idx] = r;
+                    data[idx + 1] = g;
+                    data[idx + 2] = b;
+                    data[idx + 3] = 255;
+                }
+            }
+        }
+    }
+
+    private static void DrawVerticalLine(byte[] data, int imgWidth, int x, int y, int length, byte r, byte g, byte b)
+    {
+        for (int j = y; j < y + length; j++)
+        {
+            for (int thickness = 0; thickness < 3; thickness++)
+            {
+                int idx = (j * imgWidth + x + thickness) * 4;
+                if (idx >= 0 && idx + 3 < data.Length)
+                {
+                    data[idx] = r;
+                    data[idx + 1] = g;
+                    data[idx + 2] = b;
+                    data[idx + 3] = 255;
+                }
+            }
+        }
+    }
+
     private static Block CreateCubeBlock(int id, Vector3 center, float size, float density)
     {
         float half = size / 2f;
