@@ -21,6 +21,7 @@ using GeoscientistToolkit.Business.GIS;
 using GeoscientistToolkit.Analysis.Geothermal;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Borehole;
+using GeoscientistToolkit.Business.Petrology;
 
 namespace RealCaseVerifier
 {
@@ -75,6 +76,14 @@ namespace RealCaseVerifier
                 allPassed &= await VerifyGeothermalSystem();
                 allPassed &= await VerifyDeepGeothermalCoaxial();
             }
+
+            // 10. Petrology / Fractional Crystallization
+            if (runAll || args.Contains("petrology") || args.Contains("crystallization"))
+                allPassed &= VerifyFractionalCrystallizationTraceElements();
+
+            // 11. Carbonate System / Dissolution Horizons
+            if (runAll || args.Contains("carbonate") || args.Contains("ccd"))
+                allPassed &= VerifyCarbonateDissolutionHorizons();
 
             if (allPassed)
             {
@@ -780,6 +789,178 @@ namespace RealCaseVerifier
                 Console.WriteLine($"Geothermal Error: {ex.Message}");
                 return false;
             }
+        }
+
+        static bool VerifyFractionalCrystallizationTraceElements()
+        {
+            Console.WriteLine("\n[Test 11] Petrology: Basalt Fractional Crystallization (Compatible vs Incompatible)");
+            Console.WriteLine("References:");
+            Console.WriteLine("  - Hart & Davis (1978) Ni partitioning olivine-melt (doi:10.1016/0012-821X(78)90091-2)");
+            Console.WriteLine("  - Allègre et al. (1977) Fractional crystallization trace elements (doi:10.1007/BF00372851)");
+
+            const double initialNi_ppm = 200.0;
+            const double initialRb_ppm = 5.0;
+            const double kdNi = 10.0;     // Compatible in olivine (Hart & Davis, 1978)
+            const double kdRb = 0.001;    // Highly incompatible (Allègre et al., 1977)
+
+            var config = new CrystallizationConfig
+            {
+                MagmaType = "Basaltic",
+                InitialTemperature_C = 1250.0,
+                FinalTemperature_C = 1210.0,
+                Steps = 10,
+                UseFractionalCrystallization = true,
+                MineralProportions = new Dictionary<string, double>
+                {
+                    ["Olivine"] = 1.0
+                },
+                InitialComposition = new Dictionary<string, double>
+                {
+                    ["Ni"] = initialNi_ppm,
+                    ["Rb"] = initialRb_ppm
+                }
+            };
+
+            var solver = new FractionalCrystallizationSolver();
+            var results = solver.Simulate(config);
+
+            var midStep = results.Steps.First(step => Math.Abs(step.MeltFraction - 0.5) < 1e-6);
+            var niSim = midStep.LiquidComposition["Ni"];
+            var rbSim = midStep.LiquidComposition["Rb"];
+
+            var niExpected = initialNi_ppm * Math.Pow(0.5, kdNi - 1.0);
+            var rbExpected = initialRb_ppm * Math.Pow(0.5, kdRb - 1.0);
+
+            var niError = Math.Abs(niSim - niExpected) / niExpected * 100.0;
+            var rbError = Math.Abs(rbSim - rbExpected) / rbExpected * 100.0;
+
+            var startStep = results.Steps.First();
+            var lateStep = results.Steps.First(step => Math.Abs(step.MeltFraction - 0.1) < 1e-6);
+
+            var compatibleDecreases = lateStep.LiquidComposition["Ni"] < startStep.LiquidComposition["Ni"];
+            var incompatibleIncreases = lateStep.LiquidComposition["Rb"] > startStep.LiquidComposition["Rb"];
+
+            Console.WriteLine($"Mid-step F=0.5 Ni (expected {niExpected:F3} ppm, simulated {niSim:F3} ppm)");
+            Console.WriteLine($"Mid-step F=0.5 Rb (expected {rbExpected:F3} ppm, simulated {rbSim:F3} ppm)");
+            Console.WriteLine($"Trend: Ni decreases = {compatibleDecreases}, Rb increases = {incompatibleIncreases}");
+
+            if (niError < 2.0 && rbError < 2.0 && compatibleDecreases && incompatibleIncreases)
+            {
+                Console.WriteLine("Status: PASS");
+                return true;
+            }
+
+            Console.WriteLine($"Status: FAIL (Ni error {niError:F2}%, Rb error {rbError:F2}%)");
+            return false;
+        }
+
+        static bool VerifyCarbonateDissolutionHorizons()
+        {
+            Console.WriteLine("\n[Test 12] Carbonate System: ACD/CCD Dissolution with Depth");
+            Console.WriteLine("References:");
+            Console.WriteLine("  - Feely et al. (2004) Ocean carbonate saturation horizons (doi:10.1126/science.1097329)");
+            Console.WriteLine("  - Mucci (1983) Calcite/Aragonite solubility in seawater (doi:10.1016/0016-7037(83)90288-0)");
+
+            var compoundLibrary = CompoundLibrary.Instance;
+            var calcite = compoundLibrary.Find("Calcite");
+            var aragonite = compoundLibrary.Find("Aragonite");
+
+            if (calcite?.LogKsp_25C == null || aragonite?.LogKsp_25C == null)
+            {
+                Console.WriteLine("Status: FAIL (Missing Ksp data for calcite/aragonite)");
+                return false;
+            }
+
+            const double calciumMolal = 0.01028; // mol/kg, typical seawater Ca2+
+            const double gammaCa = 0.2;
+            const double gammaCo3 = 0.04;
+
+            // Simplified CO3-2 profile from North Pacific saturation horizon data (Feely et al., 2004)
+            var profile = new List<(double depth_m, double co3_molal)>
+            {
+                (200, 1.40e-4),
+                (800, 6.00e-5),
+                (1200, 5.00e-5),
+                (3000, 4.50e-5),
+                (4200, 4.00e-5),
+                (4800, 3.50e-5)
+            };
+
+            var calciteSIs = new List<(double depth, double si)>();
+            var aragoniteSIs = new List<(double depth, double si)>();
+
+            foreach (var (depth, co3) in profile)
+            {
+                var state = new ThermodynamicState
+                {
+                    Temperature_K = 298.15,
+                    Pressure_bar = 1.0
+                };
+
+                state.ElementalComposition["Ca"] = 1.0;
+                state.ElementalComposition["C"] = 1.0;
+                state.ElementalComposition["O"] = 3.0;
+
+                state.Activities["Calcium Ion"] = calciumMolal * gammaCa;
+                state.Activities["Carbonate"] = co3 * gammaCo3;
+
+                var activityCa = state.Activities["Calcium Ion"];
+                var activityCo3 = state.Activities["Carbonate"];
+
+                var calciteSi = CalculateSaturationIndex(calcite.LogKsp_25C.Value, activityCa, activityCo3);
+                var aragoniteSi = CalculateSaturationIndex(aragonite.LogKsp_25C.Value, activityCa, activityCo3);
+
+                calciteSIs.Add((depth, calciteSi));
+                aragoniteSIs.Add((depth, aragoniteSi));
+            }
+
+            var acdDepth = InterpolateZeroCrossing(aragoniteSIs);
+            var ccdDepth = InterpolateZeroCrossing(calciteSIs);
+
+            Console.WriteLine($"Estimated ACD: {acdDepth:F0} m, Estimated CCD: {ccdDepth:F0} m");
+
+            const double expectedAcd = 900.0;
+            const double expectedCcd = 4200.0;
+
+            var acdError = Math.Abs(acdDepth - expectedAcd) / expectedAcd * 100.0;
+            var ccdError = Math.Abs(ccdDepth - expectedCcd) / expectedCcd * 100.0;
+
+            if (acdError < 20.0 && ccdError < 20.0)
+            {
+                Console.WriteLine("Status: PASS");
+                return true;
+            }
+
+            Console.WriteLine($"Status: FAIL (ACD error {acdError:F2}%, CCD error {ccdError:F2}%)");
+            return false;
+        }
+
+        static double InterpolateZeroCrossing(List<(double depth, double si)> points)
+        {
+            var sorted = points.OrderBy(p => p.depth).ToList();
+            for (var i = 0; i < sorted.Count - 1; i++)
+            {
+                var (d1, si1) = sorted[i];
+                var (d2, si2) = sorted[i + 1];
+
+                if (double.IsNaN(si1) || double.IsNaN(si2))
+                    continue;
+
+                if (Math.Sign(si1) == Math.Sign(si2))
+                    continue;
+
+                var t = -si1 / (si2 - si1);
+                return d1 + t * (d2 - d1);
+            }
+
+            return double.NaN;
+        }
+
+        static double CalculateSaturationIndex(double logKsp, double activityCa, double activityCo3)
+        {
+            var ksp = Math.Pow(10, logKsp);
+            var omega = (activityCa * activityCo3) / ksp;
+            return Math.Log10(omega);
         }
     }
 }

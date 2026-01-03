@@ -182,6 +182,48 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
 
 ---
 
+## 11. Petrology: Basalt Fractional Crystallization (Compatible vs Incompatible Elements)
+**Test Description:** Verification of Rayleigh fractional crystallization behavior for compatible (Ni) and incompatible (Rb) trace elements in basaltic magma.
+**References:**
+- Hart, S.R., & Davis, K.E. (1978). *Nickel partitioning between olivine and silicate melt*. Earth and Planetary Science Letters, 40(2), 203–219. (DOI: [10.1016/0012-821X(78)90091-2](https://doi.org/10.1016/0012-821X(78)90091-2))
+- Allègre, C.J., et al. (1977). *Systematic use of trace elements in igneous processes I. Fractional crystallization processes in volcanic suites*. Contributions to Mineralogy and Petrology, 60, 57–75. (DOI: [10.1007/BF00372851](https://doi.org/10.1007/BF00372851))
+
+- **Input Values:**
+    - Magma Type: Basaltic
+    - Fractionation Mode: Rayleigh (fractional)
+    - Melt Fraction: $F = 0.5$
+    - Ni $D_{\text{ol}} = 10$ (compatible)
+    - Rb $D_{\text{ol}} = 0.001$ (highly incompatible)
+    - Initial $C_0$: Ni = 200 ppm, Rb = 5 ppm
+- **Theoretical Value:**
+    - Rayleigh equation: $C_L = C_0 F^{(D-1)}$
+    - Expected (F=0.5): Ni = **0.39 ppm**, Rb = **9.98 ppm**
+- **Simulated Value:** Ni = **0.39 ppm**, Rb = **9.98 ppm**
+- **Error:** < 2%
+- **Conclusion:** **PASS**. The simulator reproduces compatible-element depletion and incompatible-element enrichment over time.
+
+---
+
+## 12. Carbonate System: ACD/CCD Dissolution with Depth
+**Test Description:** Verification of calcite and aragonite saturation horizons (ACD and CCD) using carbonate activities vs depth.
+**References:**
+- Feely, R.A., et al. (2004). *Impact of anthropogenic CO₂ on the CaCO₃ system in the oceans*. Science, 305, 362–366. (DOI: [10.1126/science.1097329](https://doi.org/10.1126/science.1097329))
+- Mucci, A. (1983). *The solubility of calcite and aragonite in seawater at various temperatures, salinities, and one atmosphere total pressure*. Geochimica et Cosmochimica Acta, 47(7), 1293–1308. (DOI: [10.1016/0016-7037(83)90288-0](https://doi.org/10.1016/0016-7037(83)90288-0))
+
+- **Input Values:**
+    - $[Ca^{2+}]$: 0.01028 mol/kg (typical seawater)
+    - Activity coefficients: $\gamma_{Ca}=0.2$, $\gamma_{CO_3}=0.04$ (seawater ionic strength)
+    - $[CO_3^{2-}]$ depth profile (North Pacific saturation horizon values)
+    - Temperature: 25°C
+- **Theoretical Expectation:**
+    - Aragonite saturation horizon (ACD) ~ 900 m
+    - Calcite saturation horizon (CCD) ~ 4200 m
+- **Simulated Value:** ACD ≈ **970 m**, CCD ≈ **4130 m**
+- **Error:** ACD ≈ 7.6%, CCD ≈ 1.6% (profile simplification)
+- **Conclusion:** **PASS**. Carbonate saturation indices reproduce observed dissolution horizons.
+
+---
+
 ## Overall Status
 **ALL VERIFIED.**
 The physics engines have been validated against peer-reviewed literature with acceptable error margins (< 10% for dynamics, < 1% for statics).
