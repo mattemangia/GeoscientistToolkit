@@ -592,7 +592,7 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     }
 
     /// <summary>
-    /// Solve energy equation: φ*ρ*c_p*∂T/∂t = ∇·(κ∇T) + sources
+    /// Solve energy equation: φ*ρ*c_p*∂T/∂t = ∇·(κ∇T) - ρ*c_f*v·∇T + sources
     /// </summary>
     private void SolveEnergyEquation(PhysicoChemState state, double dt, MultiphaseParameters parameters)
     {
@@ -600,37 +600,60 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
         int ny = state.Temperature.GetLength(1);
         int nz = state.Temperature.GetLength(2);
 
+        double dx = parameters.GridSpacing.X;
+        double dy = parameters.GridSpacing.Y;
+        double dz = parameters.GridSpacing.Z;
+
+        // Rock properties
+        double rho_rock = 2650.0; // kg/m³
+        double c_rock = 800.0; // J/(kg·K)
+
+        // Fluid properties (approximate for advection)
+        double rho_fluid = 1000.0;
+        double c_fluid = 4180.0; // Water J/(kg·K)
+
         for (int i = 1; i < nx - 1; i++)
         for (int j = 1; j < ny - 1; j++)
         for (int k = 1; k < nz - 1; k++)
         {
-            double dx = parameters.GridSpacing.X;
-            double dy = parameters.GridSpacing.Y;
-            double dz = parameters.GridSpacing.Z;
-
             // Thermal conductivity (mixture)
             double kappa = parameters.ThermalConductivity; // W/(m·K)
 
-            // Heat capacity (mixture)
+            // Effective Heat capacity
             double phi = state.Porosity[i, j, k];
-            double rho_rock = 2650.0; // kg/m³
-            double c_rock = 800.0; // J/(kg·K)
+            double rho_c_eff = (1 - phi) * rho_rock * c_rock + phi * rho_fluid * c_fluid;
 
-            double c_eff = (1 - phi) * rho_rock * c_rock; // Simplified
-
-            // Laplacian of temperature
+            // 1. Conduction: ∇·(κ∇T)
             double d2T_dx2 = (state.Temperature[i + 1, j, k] - 2 * state.Temperature[i, j, k] + state.Temperature[i - 1, j, k]) / (dx * dx);
             double d2T_dy2 = (state.Temperature[i, j + 1, k] - 2 * state.Temperature[i, j, k] + state.Temperature[i, j - 1, k]) / (dy * dy);
             double d2T_dz2 = (state.Temperature[i, j, k + 1] - 2 * state.Temperature[i, j, k] + state.Temperature[i, j, k - 1]) / (dz * dz);
 
-            double laplacian_T = d2T_dx2 + d2T_dy2 + d2T_dz2;
+            double conduction = kappa * (d2T_dx2 + d2T_dy2 + d2T_dz2);
 
-            double dT_dt = (kappa / c_eff) * laplacian_T;
+            // 2. Advection: -ρ_f * c_f * v · ∇T
+            // Using upwind scheme
+            double vx = state.VelocityX[i, j, k]; // Total Darcy velocity
+            double vy = state.VelocityY[i, j, k];
+            double vz = state.VelocityZ[i, j, k];
+
+            double dT_dx = vx > 0 ? (state.Temperature[i, j, k] - state.Temperature[i - 1, j, k]) / dx :
+                                    (state.Temperature[i + 1, j, k] - state.Temperature[i, j, k]) / dx;
+
+            double dT_dy = vy > 0 ? (state.Temperature[i, j, k] - state.Temperature[i, j - 1, k]) / dy :
+                                    (state.Temperature[i + 1, j, k] - state.Temperature[i, j, k]) / dy;
+
+            double dT_dz = vz > 0 ? (state.Temperature[i, j, k] - state.Temperature[i, j, k - 1]) / dz :
+                                    (state.Temperature[i, j, k + 1] - state.Temperature[i, j, k]) / dz;
+
+            double advection = -rho_fluid * c_fluid * (vx * dT_dx + vy * dT_dy + vz * dT_dz);
+
+            // Total change
+            double dT_dt = (conduction + advection) / rho_c_eff;
 
             state.Temperature[i, j, k] += (float)(dt * dT_dt);
 
             // Clamp to reasonable range
-            state.Temperature[i, j, k] = Math.Clamp(state.Temperature[i, j, k], 273.15f, 673.15f);
+            state.Temperature[i, j, k] = Math.Clamp(state.Temperature[i, j, k], 200.0f, 1000.0f);
         }
     }
 
