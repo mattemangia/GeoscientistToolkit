@@ -32,8 +32,8 @@ namespace RealCaseVerifier
                 // Simulation Parameters
                 dataset.SimulationParams.EnableMultiphaseFlow = true;
                 dataset.SimulationParams.MultiphaseEOSType = "WaterCO2";
-                dataset.SimulationParams.TotalTime = 2000.0; // Time for fluid to circulate
-                dataset.SimulationParams.TimeStep = 5.0;
+                dataset.SimulationParams.TotalTime = 2000.0;
+                dataset.SimulationParams.TimeStep = 1.0; // Reduced for stability
                 dataset.SimulationParams.Mode = SimulationMode.TimeBased;
 
                 // Generate Mesh
@@ -46,12 +46,14 @@ namespace RealCaseVerifier
                 var state = dataset.CurrentState;
 
                 // --- Geometry & Properties Setup ---
-                // Center of grid
                 int cx = res / 2; // 8
                 int cy = res / 2; // 8
 
-                float k_pipe = 1e-9f;
-                float k_rock = 1e-14f;
+                // Reduced Permeability to ensure stable explicit transport (CFL < 1)
+                // v ~ k/mu * dP/dz ~ 1e-11 / 1e-3 * (60e5/16) ~ 1e-8 * 4e5 ~ 0.004 m/s
+                // dt*v/dx = 1.0 * 0.004 / 1.0 = 0.004 << 1. Stable.
+                float k_pipe = 1e-11f;
+                float k_rock = 1e-15f;
                 float k_casing = 1e-19f;
 
                 for(int i=0; i<res; i++)
@@ -62,10 +64,25 @@ namespace RealCaseVerifier
                     float dy = j - (cy - 0.5f);
                     float r = (float)Math.Sqrt(dx*dx + dy*dy);
 
+                    // Initial Rock Conditions (Gradient)
+                    // Z=0 (Bottom) -> 400K, Z=15 (Top) -> 300K
+                    float depthFactor = 1.0f - (float)k / (res - 1);
+                    state.Temperature[i,j,k] = 300.0f + depthFactor * 100.0f;
+                    state.Pressure[i,j,k] = 300e5f + depthFactor * 1000.0f * 9.81f * res; // Hydrostatic baseline
+                    state.LiquidSaturation[i,j,k] = 1.0f;
+                    state.GasSaturation[i,j,k] = 0.0f;
+
+                    // Structure Definition
                     if (r < 1.5f) // Inner Pipe (Production)
                     {
                         state.Permeability[i,j,k] = k_pipe;
                         state.Porosity[i,j,k] = 0.99f;
+                        // Pre-fill well with fluid?
+                        // Let's assume equilibrium initially, but we want to SEE the structure.
+                        // So let's fill Inner with slightly warmer fluid (350K) to distinguish?
+                        // Or just let it be gradient.
+                        // User wants "Outer annulus with heating fluid... inner annulus with hot water".
+                        // Let's initialize Annulus with COLD injection fluid (300K) to show contrast.
                     }
                     else if (r < 2.5f) // Casing
                     {
@@ -76,6 +93,8 @@ namespace RealCaseVerifier
                     {
                         state.Permeability[i,j,k] = k_pipe;
                         state.Porosity[i,j,k] = 0.99f;
+                        // Initialize Annulus with Cold Fluid (300K) down to bottom
+                        state.Temperature[i,j,k] = 300.0f;
                     }
                     else // Rock
                     {
@@ -88,77 +107,51 @@ namespace RealCaseVerifier
                     {
                         state.Permeability[i,j,k] = k_pipe;
                         state.Porosity[i,j,k] = 0.99f;
+                        // Mixing zone T?
                     }
-
-                    // Initial Conditions
-                    float depthFactor = 1.0f - (float)k / (res - 1); // 1.0 at bottom, 0.0 at top
-                    state.Temperature[i,j,k] = 300.0f + depthFactor * 100.0f; // 300-400K Gradient
-                    state.Pressure[i,j,k] = 300e5f + depthFactor * 1000.0f * 9.81f * res;
-
-                    state.LiquidSaturation[i,j,k] = 1.0f;
-                    state.GasSaturation[i,j,k] = 0.0f;
                 }
 
+                // Inject Gas Bubble (Initial Condition)
+                // Inject at bottom of rock (outside well)
+                // Z=1 (near bottom)
+                state.GasSaturation[1, 1, 1] = 0.8f;
+                state.LiquidSaturation[1, 1, 1] = 0.2f;
+
                 // --- Boundary Conditions ---
-                // Inlet: Cold Injection at Annulus Top (Z=15)
-                // Need high pressure to drive flow DOWN
-                var inletP = new BoundaryCondition
+                // Add BCs to drive the simulation (Pump/Chiller)
+
+                // Inlet Pressure (High) at Annulus Top
+                dataset.BoundaryConditions.Add(new BoundaryCondition
                 {
-                    Name = "InletPressure",
-                    Type = BoundaryType.FixedValue,
-                    Variable = BoundaryVariable.Pressure,
-                    Value = 350e5, // 350 bar (vs ~300 hydrostatic)
-                    Location = BoundaryLocation.Custom,
-                    RegionMin = (0, 0, res-1), // Top slice
-                    RegionMax = (res*1.0, res*1.0, res*1.0),
-                    CustomRegion = (x, y, z) =>
-                    {
-                        // Annulus logic (2.5 < r < 4.0) at Top
-                        double dx = x - (cx - 0.5); // Grid coord approx
-                        double dy = y - (cy - 0.5);
-                        double r = Math.Sqrt(dx*dx + dy*dy);
+                    Name = "InletP", Type = BoundaryType.FixedValue, Variable = BoundaryVariable.Pressure, Value = 350e5, // 350 bar
+                    Location = BoundaryLocation.Custom, CustomRegionCenter = (0,0,0), CustomRegionRadius = 1.0, // Radius check handled below
+                    CustomRegion = (x,y,z) => {
+                        double dx = x - (cx - 0.5); double dy = y - (cy - 0.5); double r = Math.Sqrt(dx*dx + dy*dy);
                         return z >= (res-1) && r >= 2.5 && r < 4.0;
                     }
-                };
+                });
 
-                var inletT = new BoundaryCondition
+                // Inlet Temperature (Cold) at Annulus Top
+                dataset.BoundaryConditions.Add(new BoundaryCondition
                 {
-                    Name = "InletTemp",
-                    Type = BoundaryType.FixedValue,
-                    Variable = BoundaryVariable.Temperature,
-                    Value = 300.0, // Cold
-                    Location = BoundaryLocation.Custom,
-                    RegionMin = (0, 0, res-1),
-                    RegionMax = (res*1.0, res*1.0, res*1.0),
-                    CustomRegion = inletP.CustomRegion // Same region
-                };
+                    Name = "InletT", Type = BoundaryType.FixedValue, Variable = BoundaryVariable.Temperature, Value = 300.0,
+                    Location = BoundaryLocation.Custom, CustomRegion = (x,y,z) => {
+                        double dx = x - (cx - 0.5); double dy = y - (cy - 0.5); double r = Math.Sqrt(dx*dx + dy*dy);
+                        return z >= (res-1) && r >= 2.5 && r < 4.0;
+                    }
+                });
 
-                // Outlet: Production at Inner Pipe Top (Z=15)
-                var outletP = new BoundaryCondition
+                // Outlet Pressure (Low) at Inner Top
+                dataset.BoundaryConditions.Add(new BoundaryCondition
                 {
-                    Name = "OutletPressure",
-                    Type = BoundaryType.FixedValue,
-                    Variable = BoundaryVariable.Pressure,
-                    Value = 290e5, // Low pressure (290 bar) to drive return flow UP
-                    Location = BoundaryLocation.Custom,
-                    RegionMin = (0, 0, res-1),
-                    RegionMax = (res*1.0, res*1.0, res*1.0),
-                    CustomRegion = (x, y, z) =>
-                    {
-                        // Inner logic (r < 1.5) at Top
-                        double dx = x - (cx - 0.5);
-                        double dy = y - (cy - 0.5);
-                        double r = Math.Sqrt(dx*dx + dy*dy);
+                    Name = "OutletP", Type = BoundaryType.FixedValue, Variable = BoundaryVariable.Pressure, Value = 290e5, // 290 bar
+                    Location = BoundaryLocation.Custom, CustomRegion = (x,y,z) => {
+                        double dx = x - (cx - 0.5); double dy = y - (cy - 0.5); double r = Math.Sqrt(dx*dx + dy*dy);
                         return z >= (res-1) && r < 1.5;
                     }
-                };
+                });
 
-                // Add BCs to dataset
-                dataset.BoundaryConditions.Add(inletP);
-                dataset.BoundaryConditions.Add(inletT);
-                dataset.BoundaryConditions.Add(outletP);
-
-                // Save Initial State
+                // Save Initial State (Now includes Gradient + Cold Annulus + Gas)
                 PhysicoChemState initialState = state.Clone();
 
                 // 2. Run Simulation
@@ -168,17 +161,9 @@ namespace RealCaseVerifier
 
                 Console.WriteLine("Starting Interactive Simulation...");
 
-                int steps = 100;
+                int steps = 2000; // 2000 * 1.0s = 2000s
                 for (int t = 0; t < steps; t++)
                 {
-                    // Gas Injection Pulse (Simulating fracture intrusion)
-                    // Inject at bottom of rock (outside well)
-                    if (t < 20)
-                    {
-                        state.GasSaturation[1, 1, 1] = 0.8f;
-                        state.LiquidSaturation[1, 1, 1] = 0.2f;
-                    }
-
                     solver.RunSimulation();
                 }
 
@@ -197,7 +182,7 @@ namespace RealCaseVerifier
             }
         }
 
-        // ... (Visualization helpers same as before, ensuring scale matches 300-400K)
+        // ... (Visualization helpers)
         private static void SaveCompositeCrossSection(PhysicoChemState state1, PhysicoChemState state2, string filename, int sliceIndex, string title, string label1, string label2)
         {
             int nx = state1.Temperature.GetLength(0);
@@ -223,7 +208,7 @@ namespace RealCaseVerifier
             if (filename.Contains("pressure"))
                 SimpleBitmapFont.DrawString(pixels, totalW, totalH, "Green=Gas, Red=Pressure", margin, totalH - 15, 0, 100, 0);
             else
-                SimpleBitmapFont.DrawString(pixels, totalW, totalH, "Blue=300K, Red=400K", margin, totalH - 15, 0, 0, 150);
+                SimpleBitmapFont.DrawString(pixels, totalW, totalH, "Blue=300K, Red=400K+", margin, totalH - 15, 0, 0, 150);
 
             using var stream = File.OpenWrite(filename);
             var writer = new ImageWriter();
