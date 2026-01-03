@@ -56,6 +56,13 @@ public class BoundaryCondition
     [JsonProperty]
     public double CustomRegionRadius { get; set; }
 
+    // For box regions (Min/Max)
+    [JsonProperty]
+    public (double X, double Y, double Z) RegionMin { get; set; }
+
+    [JsonProperty]
+    public (double X, double Y, double Z) RegionMax { get; set; }
+
     // Enable/disable flag
     [JsonProperty]
     public bool IsActive { get; set; } = true;
@@ -161,10 +168,20 @@ public class BoundaryCondition
                 else
                 {
                     // Check if within custom region radius
-                    double dx = x - CustomRegionCenter.X;
-                    double dy = y - CustomRegionCenter.Y;
-                    double dz = z - CustomRegionCenter.Z;
-                    return Math.Sqrt(dx * dx + dy * dy + dz * dz) <= CustomRegionRadius;
+                    if (CustomRegionRadius > 0)
+                    {
+                        double dx = x - CustomRegionCenter.X;
+                        double dy = y - CustomRegionCenter.Y;
+                        double dz = z - CustomRegionCenter.Z;
+                        return Math.Sqrt(dx * dx + dy * dy + dz * dz) <= CustomRegionRadius;
+                    }
+                    else
+                    {
+                        // Check box region
+                        return x >= RegionMin.X && x <= RegionMax.X &&
+                               y >= RegionMin.Y && y <= RegionMax.Y &&
+                               z >= RegionMin.Z && z <= RegionMax.Z;
+                    }
                 }
             default:
                 return false;
