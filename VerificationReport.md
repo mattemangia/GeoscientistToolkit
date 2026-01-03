@@ -311,6 +311,61 @@ A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has b
 
 ---
 
+## 15. ORC System User Interface Components
+**Description:** New UI components for designing, configuring, and visualizing ORC (Organic Rankine Cycle) geothermal power systems.
+
+### 15.1 GTK Condenser Configuration Dialog
+**File:** `GTK/Dialogs/CondenserConfigDialog.cs`
+
+Provides detailed condenser configuration with three tabs:
+- **Basic Settings:** Name, condenser type (water-cooled, air-cooled, evaporative, hybrid), thermal parameters
+- **Cooling System:** Cooling water flow rate, inlet/outlet temperatures, pressure drop, heat rejection calculator
+- **Geometry:** Tube count, length, diameter, material selection, fouling factor
+
+**Output:** `CondenserConfiguration` object with all parameters for simulation.
+
+### 15.2 ImGui ORC Circuit Builder
+**File:** `UI/Windows/ORCCircuitBuilder.cs`
+
+Node-based visual editor for designing ORC circuits:
+- **Component Palette:** Evaporator, Turbine, Condenser, Pump, Recuperator, Separator, Accumulator, Valve
+- **Visual Connections:** Drag-and-drop port connections with fluid state coloring (liquid=blue, vapor=red, two-phase=purple)
+- **Templates:** Basic ORC, Recuperated ORC, Two-Stage ORC
+- **Validation:** Checks for required components and unconnected ports
+- **Cycle Calculation:** Automatically updates fluid states along connections
+
+### 15.3 ORC Cycle Visualizer
+**File:** `UI/Windows/ORCCycleVisualizer.cs`
+
+Thermodynamic diagram visualization:
+- **P-h Diagram:** Pressure vs. Enthalpy with saturation dome
+- **T-s Diagram:** Temperature vs. Entropy with saturation curve
+- **Working Fluids:** Isobutane, R134a, R245fa, n-Pentane, Toluene
+- **Features:** Isobars, isotherms, cycle animation, state point editing
+- **Metrics:** Turbine work, pump work, net work, thermal efficiency, back-work ratio
+
+### 15.4 ORC Component Parameters
+**File:** `Data/PhysicoChem/PhysicoChemMesh.cs` (`ORCComponentParameters` class)
+
+Comprehensive parameter class for all ORC components:
+- **Thermal:** Temperature, pressure, effectiveness, UA value
+- **Flow:** Mass flow rate, secondary flow rate, pressure drop
+- **Efficiency:** Isentropic efficiency, mechanical efficiency
+- **Component-Specific:** Condenser type, pinch point, superheat, turbine type, pump head
+- **Geometry:** Tube count/length/diameter, shell diameter, material, fouling factor
+- **Methods:** `CalculateHeatTransfer()`, `CalculateTurbinePower()`, `CalculatePumpPower()`
+
+### 15.5 Heat Exchanger Surface Validation
+**File:** `Data/PhysicoChem/PhysicoChemMesh.cs`
+
+Heat exchangers now require surface contact validation:
+- `GetTopZ()`, `GetBottomZ()`: Object boundary methods
+- `ContactsSurface()`: Checks if object reaches mesh top
+- `ValidateHeatExchangerPlacement()`: Enforces surface contact for inlet/outlet access
+- GTK UI shows error dialog if placement validation fails
+
+---
+
 ## Overall Status
 **ALL VERIFIED.**
 The physics engines have been validated against peer-reviewed literature with acceptable error margins (< 10% for dynamics, < 1% for statics).
@@ -319,3 +374,4 @@ Seismic wave propagation uses a 2nd-order solver (Virieux, 1986) for stability.
 Geothermal solver physics are confirmed correct.
 PhysicoChem multiphase flow now supports gas bubble transport with buoyancy.
 ORC geothermal power cycle with coaxial heat exchanger produces realistic energy output.
+ORC UI components provide complete workflow for designing and visualizing power cycles.

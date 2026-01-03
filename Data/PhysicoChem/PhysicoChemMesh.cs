@@ -59,13 +59,13 @@ namespace GeoscientistToolkit.Data.PhysicoChem
     }
 
     /// <summary>
-    ///     Represents an object inside the reactor (e.g., Heat Exchanger, Baffle).
+    ///     Represents an object inside the reactor (e.g., Heat Exchanger, Baffle, ORC components).
     /// </summary>
     public class ReactorObject
     {
         public string Name { get; set; }
         public string MaterialID { get; set; }
-        public string Type { get; set; } // "HeatExchanger", "Baffle", "Obstacle"
+        public string Type { get; set; } // "HeatExchanger", "Baffle", "Obstacle", "Condenser", "Evaporator", "Turbine", "Pump"
 
         // Simplified Geometry (Box or Cylinder for now)
         public (double X, double Y, double Z) Center { get; set; }
@@ -73,6 +73,9 @@ namespace GeoscientistToolkit.Data.PhysicoChem
         public double Radius { get; set; } // For Cylinder
         public double Height { get; set; } // For Cylinder
         public bool IsCylinder { get; set; }
+
+        // ORC-specific parameters
+        public ORCComponentParameters? ORCParams { get; set; }
 
         public bool IsPointInside(double x, double y, double z)
         {
@@ -479,6 +482,144 @@ namespace GeoscientistToolkit.Data.PhysicoChem
 
                 Cells[id] = newCell;
             }
+        }
+    }
+
+    /// <summary>
+    /// ORC (Organic Rankine Cycle) component parameters for reactor objects.
+    /// Used when Type is "Condenser", "Evaporator", "Turbine", or "Pump".
+    /// </summary>
+    public class ORCComponentParameters
+    {
+        /// <summary>Component type for ORC circuit</summary>
+        public string ComponentType { get; set; } = "Generic"; // Evaporator, Turbine, Condenser, Pump, Recuperator
+
+        // === Thermal Parameters ===
+        /// <summary>Operating temperature (°C)</summary>
+        public double Temperature { get; set; } = 30.0;
+
+        /// <summary>Operating pressure (bar)</summary>
+        public double Pressure { get; set; } = 2.0;
+
+        /// <summary>Heat transfer effectiveness (0-1)</summary>
+        public double Effectiveness { get; set; } = 0.85;
+
+        /// <summary>UA value - overall heat transfer coefficient × area (kW/K)</summary>
+        public double UAValue { get; set; } = 50.0;
+
+        // === Flow Parameters ===
+        /// <summary>Working fluid mass flow rate (kg/s)</summary>
+        public double MassFlowRate { get; set; } = 1.0;
+
+        /// <summary>Cooling/heating fluid flow rate (kg/s)</summary>
+        public double SecondaryFlowRate { get; set; } = 5.0;
+
+        /// <summary>Pressure drop across component (kPa)</summary>
+        public double PressureDrop { get; set; } = 10.0;
+
+        // === Efficiency Parameters ===
+        /// <summary>Isentropic efficiency (for turbine/pump) (0-1)</summary>
+        public double IsentropicEfficiency { get; set; } = 0.80;
+
+        /// <summary>Mechanical efficiency (0-1)</summary>
+        public double MechanicalEfficiency { get; set; } = 0.95;
+
+        // === Condenser-Specific ===
+        /// <summary>Condenser type: WaterCooled, AirCooled, Evaporative, Hybrid</summary>
+        public string CondenserType { get; set; } = "WaterCooled";
+
+        /// <summary>Cooling water inlet temperature (°C)</summary>
+        public double CoolingInletTemp { get; set; } = 15.0;
+
+        /// <summary>Cooling water outlet temperature (°C)</summary>
+        public double CoolingOutletTemp { get; set; } = 25.0;
+
+        /// <summary>Subcooling degrees (°C)</summary>
+        public double Subcooling { get; set; } = 2.0;
+
+        // === Evaporator-Specific ===
+        /// <summary>Pinch point temperature difference (°C)</summary>
+        public double PinchPoint { get; set; } = 5.0;
+
+        /// <summary>Superheat degrees (°C)</summary>
+        public double Superheat { get; set; } = 5.0;
+
+        // === Turbine-Specific ===
+        /// <summary>Turbine type: Radial, Axial, Screw</summary>
+        public string TurbineType { get; set; } = "Radial";
+
+        /// <summary>Rotational speed (RPM)</summary>
+        public double RotationalSpeed { get; set; } = 3000.0;
+
+        /// <summary>Power output (kW)</summary>
+        public double PowerOutput { get; set; } = 0.0;
+
+        // === Pump-Specific ===
+        /// <summary>Pump type: Centrifugal, PositiveDisplacement</summary>
+        public string PumpType { get; set; } = "Centrifugal";
+
+        /// <summary>Pump head (m)</summary>
+        public double PumpHead { get; set; } = 100.0;
+
+        /// <summary>Power consumption (kW)</summary>
+        public double PowerConsumption { get; set; } = 0.0;
+
+        // === Geometry ===
+        /// <summary>Number of tubes (for shell-tube HX)</summary>
+        public int TubeCount { get; set; } = 100;
+
+        /// <summary>Tube length (m)</summary>
+        public double TubeLength { get; set; } = 3.0;
+
+        /// <summary>Tube diameter (m)</summary>
+        public double TubeDiameter { get; set; } = 0.019;
+
+        /// <summary>Shell diameter (m)</summary>
+        public double ShellDiameter { get; set; } = 0.5;
+
+        /// <summary>Material of construction</summary>
+        public string Material { get; set; } = "Stainless Steel 316";
+
+        /// <summary>Fouling factor (m²K/kW)</summary>
+        public double FoulingFactor { get; set; } = 0.05;
+
+        // === Connection Info ===
+        /// <summary>ID of upstream component</summary>
+        public string UpstreamComponentId { get; set; }
+
+        /// <summary>ID of downstream component</summary>
+        public string DownstreamComponentId { get; set; }
+
+        /// <summary>
+        /// Calculate heat transfer rate for heat exchangers (kW)
+        /// </summary>
+        public double CalculateHeatTransfer(double hotInletTemp, double coldInletTemp)
+        {
+            double LMTD = (hotInletTemp - CoolingOutletTemp - (Temperature - CoolingInletTemp)) /
+                          Math.Log((hotInletTemp - CoolingOutletTemp) / (Temperature - CoolingInletTemp + 1e-10) + 1e-10);
+            return UAValue * LMTD;
+        }
+
+        /// <summary>
+        /// Calculate turbine power output (kW) given inlet/outlet conditions
+        /// </summary>
+        public double CalculateTurbinePower(double enthalpyIn, double enthalpyOutIsentropic)
+        {
+            double deltaH_isentropic = enthalpyIn - enthalpyOutIsentropic;
+            double deltaH_actual = deltaH_isentropic * IsentropicEfficiency;
+            PowerOutput = MassFlowRate * deltaH_actual * MechanicalEfficiency;
+            return PowerOutput;
+        }
+
+        /// <summary>
+        /// Calculate pump power consumption (kW)
+        /// </summary>
+        public double CalculatePumpPower(double densityFluid)
+        {
+            // P = (ṁ × g × H) / (η_pump × η_mech)
+            double g = 9.81;
+            PowerConsumption = (MassFlowRate * g * PumpHead) / (IsentropicEfficiency * MechanicalEfficiency * 1000.0);
+            return PowerConsumption;
         }
     }
 }
