@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.Linq;
 using GeoscientistToolkit.Analysis.Multiphase;
 using GeoscientistToolkit.Business.Thermodynamics;
+using GeoscientistToolkit.Data.PhysicoChem;
 using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 
@@ -169,11 +170,11 @@ public class MultiphaseReactiveTransportSolver : SimulatorNodeSupport
     }
 
     /// <summary>
-    /// Convert to MultiphaseState for multiphase flow solver
+    /// Convert to PhysicoChemState for multiphase flow solver
     /// </summary>
-    private MultiphaseState ConvertToMultiphaseState(MultiphaseReactiveState state)
+    private PhysicoChemState ConvertToMultiphaseState(MultiphaseReactiveState state)
     {
-        var mpState = new MultiphaseState(state.GridDimensions)
+        var mpState = new PhysicoChemState(state.GridDimensions)
         {
             Pressure = (float[,,])state.Pressure.Clone(),
             Temperature = (float[,,])state.Temperature.Clone(),
@@ -188,9 +189,9 @@ public class MultiphaseReactiveTransportSolver : SimulatorNodeSupport
     }
 
     /// <summary>
-    /// Update state from MultiphaseState
+    /// Update state from PhysicoChemState
     /// </summary>
-    private void UpdateFromMultiphaseState(MultiphaseReactiveState state, MultiphaseState mpState)
+    private void UpdateFromMultiphaseState(MultiphaseReactiveState state, PhysicoChemState mpState)
     {
         state.Pressure = (float[,,])mpState.Pressure.Clone();
         state.Temperature = (float[,,])mpState.Temperature.Clone();

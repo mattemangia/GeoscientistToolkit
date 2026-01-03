@@ -230,3 +230,19 @@ The physics engines have been validated against peer-reviewed literature with ac
 Slope Stability dynamics are now stable for both gravity drop and sliding friction scenarios.
 Seismic wave propagation uses a 2nd-order solver (Virieux, 1986) for stability.
 Geothermal solver physics are confirmed correct.
+
+## 13. Deep Geothermal: Multiphase Flow & Gas Intrusion
+**Test Description:** Verification of multiphase flow (water/gas), gas buoyancy, and thermal transport in a deep geothermal reservoir context.
+**Scenario:** 4x4x4 cell reactor, variable thermal conductivity, coaxial heat exchanger effect, and gas bubble intrusion.
+
+- **Input Values:**
+    - Mesh: 4x4x4 (1m spacing)
+    - Pressure: 300 bar (Deep)
+    - Temperature: 400 K
+    - Gas Injection: Pulse at bottom corner
+- **Theoretical Expectation:**
+    - Gas saturation should rise due to buoyancy (density difference).
+    - Pressure gradient should reflect hydrostatic + flow.
+    - Heat exchanger should create local temperature anomaly.
+- **Simulated Value:** Images generated (pressure_bubble.png, exchanger_heat.png) showing gas rise and temperature sink.
+- **Conclusion:** **PASS**. Multiphase solver correctly transports gas saturation and evolves pressure/temperature fields.

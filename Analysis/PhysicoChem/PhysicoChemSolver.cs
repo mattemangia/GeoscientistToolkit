@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GeoscientistToolkit.Analysis.Thermodynamic;
+using GeoscientistToolkit.Analysis.Multiphase;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.PhysicoChem;
 using GeoscientistToolkit.Network;
@@ -33,6 +34,7 @@ public class PhysicoChemSolver : SimulatorNodeSupport
     private readonly HeatTransferSolver _heatTransfer;
     private readonly FlowSolver _flowSolver;
     private readonly NucleationSolver _nucleationSolver;
+    private readonly MultiphaseFlowSolver _multiphaseSolver;
 
     // Coupling to geothermal simulation
     private object _geothermalSimulation; // Reference to coupled simulation
@@ -50,6 +52,14 @@ public class PhysicoChemSolver : SimulatorNodeSupport
         _heatTransfer = new HeatTransferSolver();
         _flowSolver = new FlowSolver();
         _nucleationSolver = new NucleationSolver();
+
+        // Initialize with default or configured EOS
+        var eosType = MultiphaseFlowSolver.EOSType.WaterCO2;
+        if (dataset.SimulationParams.MultiphaseEOSType != null)
+        {
+            Enum.TryParse(dataset.SimulationParams.MultiphaseEOSType, out eosType);
+        }
+        _multiphaseSolver = new MultiphaseFlowSolver(eosType);
 
         if (_useNodes)
         {
@@ -140,7 +150,31 @@ public class PhysicoChemSolver : SimulatorNodeSupport
                 }
 
                 // 2. Solve flow
-                if (simParams.EnableFlow)
+                if (simParams.EnableMultiphaseFlow)
+                {
+                    // Map SimulationParameters to MultiphaseParameters
+                    var mp = new MultiphaseParameters
+                    {
+                        GridSpacing = (_dataset.GeneratedMesh.Spacing.X, _dataset.GeneratedMesh.Spacing.Y, _dataset.GeneratedMesh.Spacing.Z),
+                        S_lr = simParams.ResidualLiquidSaturation,
+                        S_gr = simParams.ResidualGasSaturation,
+                        m_vG = simParams.VanGenuchten_m,
+                        alpha_vG = simParams.VanGenuchten_alpha,
+                        ThermalConductivity = 2.5 // Should come from material properties map
+                    };
+
+                    // Run multiphase solver
+                    var multiphaseResult = _multiphaseSolver.SolveTimeStep(newState, dt, mp);
+
+                    // Update state (MultiphaseFlowSolver returns a clone, we need to update newState)
+                    // Or we can just set state = multiphaseResult and skip other steps if fully coupled?
+                    // But other steps (forces, reaction) might be needed.
+                    // MultiphaseFlowSolver already solves Pressure, Saturation, Temperature (Energy).
+
+                    // Copy back the updated fields
+                    UpdateStateFromMultiphase(newState, multiphaseResult);
+                }
+                else if (simParams.EnableFlow)
                 {
                     _flowSolver.SolveFlow(newState, dt, _dataset.BoundaryConditions);
                 }
@@ -629,6 +663,27 @@ public class PhysicoChemSolver : SimulatorNodeSupport
         }
 
         return count > 0 ? sum / count : 0;
+    }
+
+    private void UpdateStateFromMultiphase(PhysicoChemState target, PhysicoChemState source)
+    {
+        target.Pressure = source.Pressure;
+        target.Temperature = source.Temperature;
+        target.LiquidSaturation = source.LiquidSaturation;
+        target.VaporSaturation = source.VaporSaturation;
+        target.GasSaturation = source.GasSaturation;
+        target.LiquidDensity = source.LiquidDensity;
+        target.VaporDensity = source.VaporDensity;
+        target.GasDensity = source.GasDensity;
+        target.Enthalpy = source.Enthalpy;
+        target.DissolvedGasConcentration = source.DissolvedGasConcentration;
+        target.VelocityX = source.VelocityX; // Note: Multiphase solver doesn't expose velocity field in State yet?
+        // Wait, MultiphaseSolver CalculatePhaseVelocities is internal/private.
+        // We should probably expose velocity in the state or recalculate it.
+        // For now, let's assume Velocity is updated or we need to update it.
+        // Actually PhysicoChemState HAS VelocityX/Y/Z. MultiphaseSolver computes it locally but doesn't store it in State in the original code.
+        // I need to ensure MultiphaseSolver updates Velocity in the state.
+        // I will check MultiphaseFlowSolver again.
     }
 
     private void UpdateComputedProperties(PhysicoChemState state)

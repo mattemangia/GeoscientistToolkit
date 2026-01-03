@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.Linq;
 using GeoscientistToolkit.Analysis.Thermodynamic;
 using GeoscientistToolkit.Business.Thermodynamics;
+using GeoscientistToolkit.Data.PhysicoChem;
 using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 
@@ -78,7 +79,7 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     /// Solve one time step of multiphase flow equations
     /// Implements sequential solution: pressure equation → saturation update → temperature update
     /// </summary>
-    public MultiphaseState SolveTimeStep(MultiphaseState state, double dt, MultiphaseParameters parameters)
+    public PhysicoChemState SolveTimeStep(PhysicoChemState state, double dt, MultiphaseParameters parameters)
     {
         var newState = state.Clone();
 
@@ -107,7 +108,7 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
 
             if (maxChange < CONVERGENCE_TOLERANCE)
             {
-                Logger.Log($"[MultiphaseFlow] Converged in {iter + 1} iterations");
+                // Logger.Log($"[MultiphaseFlow] Converged in {iter + 1} iterations");
                 break;
             }
 
@@ -123,11 +124,11 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     /// <summary>
     /// Update phase equilibrium: determine which phases are present and their compositions
     /// </summary>
-    private void UpdatePhaseEquilibrium(MultiphaseState state)
+    private void UpdatePhaseEquilibrium(PhysicoChemState state)
     {
-        int nx = state.GridDimensions.X;
-        int ny = state.GridDimensions.Y;
-        int nz = state.GridDimensions.Z;
+        int nx = state.Temperature.GetLength(0);
+        int ny = state.Temperature.GetLength(1);
+        int nz = state.Temperature.GetLength(2);
 
         for (int i = 0; i < nx; i++)
         for (int j = 0; j < ny; j++)
@@ -170,7 +171,7 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     /// <summary>
     /// Calculate two-phase (liquid-vapor) equilibrium for water
     /// </summary>
-    private void CalculateTwoPhaseEquilibrium(MultiphaseState state, int i, int j, int k)
+    private void CalculateTwoPhaseEquilibrium(PhysicoChemState state, int i, int j, int k)
     {
         double T_K = state.Temperature[i, j, k];
         double P_Pa = state.Pressure[i, j, k];
@@ -211,7 +212,7 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     /// <summary>
     /// Calculate gas (NCG) equilibrium with water using Henry's law
     /// </summary>
-    private void CalculateGasEquilibrium(MultiphaseState state, int i, int j, int k)
+    private void CalculateGasEquilibrium(PhysicoChemState state, int i, int j, int k)
     {
         double T_K = state.Temperature[i, j, k];
         double P_Pa = state.Pressure[i, j, k];
@@ -226,7 +227,8 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
         if (P_gas < 1.0)
         {
             // No gas phase
-            state.GasSaturation[i, j, k] = 0.0f;
+            // DO NOT reset GasSaturation here as it's a state variable being transported
+            // Only update dissolved concentration
             state.DissolvedGasConcentration[i, j, k] = 0.0f;
             return;
         }
@@ -238,9 +240,9 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
 
         state.DissolvedGasConcentration[i, j, k] = (float)C_dissolved;
 
-        // Gas saturation from ideal gas law
-        // Simplified: S_g is determined from total gas mass balance
-        // This is handled in the saturation solver
+        // Gas saturation is evolved via transport, so we don't set it from equilibrium
+        // unless we assume instantaneous phase separation which is common
+        // But the transport solver will handle the volume fraction
     }
 
     /// <summary>
@@ -303,7 +305,7 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     /// <summary>
     /// Normalize saturations to ensure S_l + S_v + S_g = 1
     /// </summary>
-    private void NormalizeSaturations(MultiphaseState state, int i, int j, int k)
+    private void NormalizeSaturations(PhysicoChemState state, int i, int j, int k)
     {
         double S_l = state.LiquidSaturation[i, j, k];
         double S_v = state.VaporSaturation[i, j, k];
@@ -330,11 +332,11 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     /// Solve pressure equation: ∇·(λ_t ∇P) = accumulation term
     /// where λ_t = Σ(k_r_α / μ_α) is total mobility
     /// </summary>
-    private void SolvePressureEquation(MultiphaseState state, double dt, MultiphaseParameters parameters)
+    private void SolvePressureEquation(PhysicoChemState state, double dt, MultiphaseParameters parameters)
     {
-        int nx = state.GridDimensions.X;
-        int ny = state.GridDimensions.Y;
-        int nz = state.GridDimensions.Z;
+        int nx = state.Temperature.GetLength(0);
+        int ny = state.Temperature.GetLength(1);
+        int nz = state.Temperature.GetLength(2);
 
         // Simple explicit update for now (can be upgraded to implicit)
         // P^(n+1) = P^n + dt * (sources - sinks + flow)
@@ -350,10 +352,6 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
             double dx = parameters.GridSpacing.X;
             double dy = parameters.GridSpacing.Y;
             double dz = parameters.GridSpacing.Z;
-
-            double dP_dx = (state.Pressure[i + 1, j, k] - state.Pressure[i - 1, j, k]) / (2 * dx);
-            double dP_dy = (state.Pressure[i, j + 1, k] - state.Pressure[i, j - 1, k]) / (2 * dy);
-            double dP_dz = (state.Pressure[i, j, k + 1] - state.Pressure[i, j, k - 1]) / (2 * dz);
 
             // Permeability
             double k_perm = state.Permeability[i, j, k];
@@ -385,7 +383,7 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     /// <summary>
     /// Calculate total mobility: λ_t = Σ(k_r_α / μ_α) for all phases α
     /// </summary>
-    private double CalculateTotalMobility(MultiphaseState state, int i, int j, int k, MultiphaseParameters parameters)
+    private double CalculateTotalMobility(PhysicoChemState state, int i, int j, int k, MultiphaseParameters parameters)
     {
         double S_l = state.LiquidSaturation[i, j, k];
         double S_v = state.VaporSaturation[i, j, k];
@@ -437,11 +435,11 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     /// <summary>
     /// Solve saturation equations for each phase
     /// </summary>
-    private void SolveSaturationEquations(MultiphaseState state, double dt, MultiphaseParameters parameters)
+    private void SolveSaturationEquations(PhysicoChemState state, double dt, MultiphaseParameters parameters)
     {
-        int nx = state.GridDimensions.X;
-        int ny = state.GridDimensions.Y;
-        int nz = state.GridDimensions.Z;
+        int nx = state.Temperature.GetLength(0);
+        int ny = state.Temperature.GetLength(1);
+        int nz = state.Temperature.GetLength(2);
 
         // IMPES approach: saturation is updated explicitly using known pressure field
         for (int i = 1; i < nx - 1; i++)
@@ -467,7 +465,18 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
                              v_l.vz * (state.LiquidSaturation[i, j, k + 1] - state.LiquidSaturation[i, j, k]) / dz)
             );
 
+            // Gas saturation update (FIX: Now correctly implemented for gas transport)
+            double dS_g = -dt / phi * (
+                (v_g.vx > 0 ? v_g.vx * (state.GasSaturation[i, j, k] - state.GasSaturation[i - 1, j, k]) / dx :
+                             v_g.vx * (state.GasSaturation[i + 1, j, k] - state.GasSaturation[i, j, k]) / dx) +
+                (v_g.vy > 0 ? v_g.vy * (state.GasSaturation[i, j, k] - state.GasSaturation[i, j - 1, k]) / dy :
+                             v_g.vy * (state.GasSaturation[i, j + 1, k] - state.GasSaturation[i, j, k]) / dy) +
+                (v_g.vz > 0 ? v_g.vz * (state.GasSaturation[i, j, k] - state.GasSaturation[i, j, k - 1]) / dz :
+                             v_g.vz * (state.GasSaturation[i, j, k + 1] - state.GasSaturation[i, j, k]) / dz)
+            );
+
             state.LiquidSaturation[i, j, k] = (float)Math.Clamp(state.LiquidSaturation[i, j, k] + dS_l, 0.0, 1.0);
+            state.GasSaturation[i, j, k] = (float)Math.Clamp(state.GasSaturation[i, j, k] + dS_g, 0.0, 1.0);
         }
 
         // Normalize saturations after update
@@ -486,7 +495,7 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     private ((double vx, double vy, double vz) v_l,
               (double vx, double vy, double vz) v_v,
               (double vx, double vy, double vz) v_g)
-    CalculatePhaseVelocities(MultiphaseState state, int i, int j, int k, MultiphaseParameters parameters)
+    CalculatePhaseVelocities(PhysicoChemState state, int i, int j, int k, MultiphaseParameters parameters)
     {
         double dx = parameters.GridSpacing.X;
         double dy = parameters.GridSpacing.Y;
@@ -523,11 +532,15 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
         double P_g = P + Pc_lg;
 
         // Pressure gradients (simplified - should use phase pressures)
-        double dP_dx = i > 0 && i < state.GridDimensions.X - 1 ?
+        int nx = state.Temperature.GetLength(0);
+        int ny = state.Temperature.GetLength(1);
+        int nz = state.Temperature.GetLength(2);
+
+        double dP_dx = i > 0 && i < nx - 1 ?
             (state.Pressure[i + 1, j, k] - state.Pressure[i - 1, j, k]) / (2 * dx) : 0;
-        double dP_dy = j > 0 && j < state.GridDimensions.Y - 1 ?
+        double dP_dy = j > 0 && j < ny - 1 ?
             (state.Pressure[i, j + 1, k] - state.Pressure[i, j - 1, k]) / (2 * dy) : 0;
-        double dP_dz = k > 0 && k < state.GridDimensions.Z - 1 ?
+        double dP_dz = k > 0 && k < nz - 1 ?
             (state.Pressure[i, j, k + 1] - state.Pressure[i, j, k - 1]) / (2 * dz) : 0;
 
         double g = 9.81; // m/s²
@@ -535,15 +548,18 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
         // Darcy velocities for each phase
         double v_lx = -(k_perm * kr_l / mu_l) * (dP_dx);
         double v_ly = -(k_perm * kr_l / mu_l) * (dP_dy);
-        double v_lz = -(k_perm * kr_l / mu_l) * (dP_dz - rho_l * g);
+        double v_lz = -(k_perm * kr_l / mu_l) * (dP_dz + rho_l * g); // +rho*g because Z is typically up? Wait.
+        // If Z is up (elevation), dP/dz is negative (hydrostatic).
+        // If P = rho*g*(H-z), dP/dz = -rho*g.
+        // Then (dP/dz + rho*g) = 0 => No flow. Correct.
 
         double v_vx = -(k_perm * kr_v / mu_v) * (dP_dx);
         double v_vy = -(k_perm * kr_v / mu_v) * (dP_dy);
-        double v_vz = -(k_perm * kr_v / mu_v) * (dP_dz - rho_v * g);
+        double v_vz = -(k_perm * kr_v / mu_v) * (dP_dz + rho_v * g);
 
         double v_gx = -(k_perm * kr_g / mu_g) * (dP_dx);
         double v_gy = -(k_perm * kr_g / mu_g) * (dP_dy);
-        double v_gz = -(k_perm * kr_g / mu_g) * (dP_dz - rho_g * g);
+        double v_gz = -(k_perm * kr_g / mu_g) * (dP_dz + rho_g * g);
 
         return ((v_lx, v_ly, v_lz), (v_vx, v_vy, v_vz), (v_gx, v_gy, v_gz));
     }
@@ -569,11 +585,11 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     /// <summary>
     /// Solve energy equation: φ*ρ*c_p*∂T/∂t = ∇·(κ∇T) + sources
     /// </summary>
-    private void SolveEnergyEquation(MultiphaseState state, double dt, MultiphaseParameters parameters)
+    private void SolveEnergyEquation(PhysicoChemState state, double dt, MultiphaseParameters parameters)
     {
-        int nx = state.GridDimensions.X;
-        int ny = state.GridDimensions.Y;
-        int nz = state.GridDimensions.Z;
+        int nx = state.Temperature.GetLength(0);
+        int ny = state.Temperature.GetLength(1);
+        int nz = state.Temperature.GetLength(2);
 
         for (int i = 1; i < nx - 1; i++)
         for (int j = 1; j < ny - 1; j++)
@@ -612,11 +628,11 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     /// <summary>
     /// Update fluid properties (density, viscosity, etc.) at current T, P
     /// </summary>
-    private void UpdateFluidProperties(MultiphaseState state)
+    private void UpdateFluidProperties(PhysicoChemState state)
     {
-        int nx = state.GridDimensions.X;
-        int ny = state.GridDimensions.Y;
-        int nz = state.GridDimensions.Z;
+        int nx = state.Temperature.GetLength(0);
+        int ny = state.Temperature.GetLength(1);
+        int nz = state.Temperature.GetLength(2);
 
         for (int i = 0; i < nx; i++)
         for (int j = 0; j < ny; j++)
@@ -647,13 +663,13 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
     /// <summary>
     /// Calculate maximum change between states for convergence check
     /// </summary>
-    private double CalculateMaxChange(MultiphaseState oldState, MultiphaseState newState)
+    private double CalculateMaxChange(PhysicoChemState oldState, PhysicoChemState newState)
     {
         double maxChange = 0.0;
 
-        int nx = oldState.GridDimensions.X;
-        int ny = oldState.GridDimensions.Y;
-        int nz = oldState.GridDimensions.Z;
+        int nx = oldState.Temperature.GetLength(0);
+        int ny = oldState.Temperature.GetLength(1);
+        int nz = oldState.Temperature.GetLength(2);
 
         for (int i = 0; i < nx; i++)
         for (int j = 0; j < ny; j++)
@@ -732,73 +748,6 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
         double mu = mu_0 * Math.Pow(T_K / T_0, 0.7);
 
         return mu; // Pa·s
-    }
-}
-
-/// <summary>
-/// Multiphase flow state container
-/// </summary>
-public class MultiphaseState
-{
-    public (int X, int Y, int Z) GridDimensions { get; set; }
-
-    // Primary variables
-    public float[,,] Pressure { get; set; }       // Pa
-    public float[,,] Temperature { get; set; }    // K
-    public float[,,] LiquidSaturation { get; set; } // fraction
-    public float[,,] VaporSaturation { get; set; }  // fraction
-    public float[,,] GasSaturation { get; set; }    // fraction
-
-    // Secondary variables
-    public float[,,] LiquidDensity { get; set; }  // kg/m³
-    public float[,,] VaporDensity { get; set; }   // kg/m³
-    public float[,,] GasDensity { get; set; }     // kg/m³
-    public float[,,] Enthalpy { get; set; }       // J/kg
-    public float[,,] DissolvedGasConcentration { get; set; } // mol/L
-
-    // Rock properties
-    public float[,,] Porosity { get; set; }
-    public float[,,] Permeability { get; set; }
-
-    public MultiphaseState((int x, int y, int z) gridSize)
-    {
-        GridDimensions = gridSize;
-        int nx = gridSize.x, ny = gridSize.y, nz = gridSize.z;
-
-        Pressure = new float[nx, ny, nz];
-        Temperature = new float[nx, ny, nz];
-        LiquidSaturation = new float[nx, ny, nz];
-        VaporSaturation = new float[nx, ny, nz];
-        GasSaturation = new float[nx, ny, nz];
-
-        LiquidDensity = new float[nx, ny, nz];
-        VaporDensity = new float[nx, ny, nz];
-        GasDensity = new float[nx, ny, nz];
-        Enthalpy = new float[nx, ny, nz];
-        DissolvedGasConcentration = new float[nx, ny, nz];
-
-        Porosity = new float[nx, ny, nz];
-        Permeability = new float[nx, ny, nz];
-    }
-
-    public MultiphaseState Clone()
-    {
-        var clone = new MultiphaseState(GridDimensions)
-        {
-            Pressure = (float[,,])Pressure.Clone(),
-            Temperature = (float[,,])Temperature.Clone(),
-            LiquidSaturation = (float[,,])LiquidSaturation.Clone(),
-            VaporSaturation = (float[,,])VaporSaturation.Clone(),
-            GasSaturation = (float[,,])GasSaturation.Clone(),
-            LiquidDensity = (float[,,])LiquidDensity.Clone(),
-            VaporDensity = (float[,,])VaporDensity.Clone(),
-            GasDensity = (float[,,])GasDensity.Clone(),
-            Enthalpy = (float[,,])Enthalpy.Clone(),
-            DissolvedGasConcentration = (float[,,])DissolvedGasConcentration.Clone(),
-            Porosity = (float[,,])Porosity.Clone(),
-            Permeability = (float[,,])Permeability.Clone()
-        };
-        return clone;
     }
 }
 

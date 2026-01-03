@@ -682,6 +682,13 @@ public class PhysicoChemState
     public float[,,] VaporSaturation { get; set; }
     public float[,,] GasSaturation { get; set; }
 
+    // Multiphase properties
+    public float[,,] LiquidDensity { get; set; } // kg/m³
+    public float[,,] VaporDensity { get; set; } // kg/m³
+    public float[,,] GasDensity { get; set; } // kg/m³
+    public float[,,] Enthalpy { get; set; } // J/kg (Mixture)
+    public float[,,] DissolvedGasConcentration { get; set; } // mol/L
+
     // Force field contributions
     public float[,,] ForceX { get; set; } // N/m³
     public float[,,] ForceY { get; set; }
@@ -716,6 +723,12 @@ public class PhysicoChemState
         VaporSaturation = new float[nx, ny, nz];
         GasSaturation = new float[nx, ny, nz];
 
+        LiquidDensity = new float[nx, ny, nz];
+        VaporDensity = new float[nx, ny, nz];
+        GasDensity = new float[nx, ny, nz];
+        Enthalpy = new float[nx, ny, nz];
+        DissolvedGasConcentration = new float[nx, ny, nz];
+
         ForceX = new float[nx, ny, nz];
         ForceY = new float[nx, ny, nz];
         ForceZ = new float[nx, ny, nz];
@@ -739,6 +752,11 @@ public class PhysicoChemState
             LiquidSaturation = (float[,,])LiquidSaturation.Clone(),
             VaporSaturation = (float[,,])VaporSaturation.Clone(),
             GasSaturation = (float[,,])GasSaturation.Clone(),
+            LiquidDensity = (float[,,])LiquidDensity.Clone(),
+            VaporDensity = (float[,,])VaporDensity.Clone(),
+            GasDensity = (float[,,])GasDensity.Clone(),
+            Enthalpy = (float[,,])Enthalpy.Clone(),
+            DissolvedGasConcentration = (float[,,])DissolvedGasConcentration.Clone(),
             ForceX = (float[,,])ForceX.Clone(),
             ForceY = (float[,,])ForceY.Clone(),
             ForceZ = (float[,,])ForceZ.Clone()
