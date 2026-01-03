@@ -585,10 +585,10 @@ namespace GeoscientistToolkit.Data.PhysicoChem
 
         // === Connection Info ===
         /// <summary>ID of upstream component</summary>
-        public string UpstreamComponentId { get; set; }
+        public string UpstreamComponentId { get; set; } = "";
 
         /// <summary>ID of downstream component</summary>
-        public string DownstreamComponentId { get; set; }
+        public string DownstreamComponentId { get; set; } = "";
 
         /// <summary>
         /// Calculate heat transfer rate for heat exchangers (kW)
