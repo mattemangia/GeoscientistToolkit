@@ -44,8 +44,8 @@ namespace RealCaseVerifier
                 // Simulation Parameters
                 dataset.SimulationParams.EnableMultiphaseFlow = true;
                 dataset.SimulationParams.MultiphaseEOSType = "WaterCO2";
-                dataset.SimulationParams.TotalTime = 100.0; // Short simulation
-                dataset.SimulationParams.TimeStep = 0.1;
+                dataset.SimulationParams.TotalTime = 200.0; // Increased simulation time
+                dataset.SimulationParams.TimeStep = 0.5; // Larger step
                 dataset.SimulationParams.Mode = SimulationMode.TimeBased;
 
                 // Generate Mesh manually to assign domains to rows (Y-axis rows)
@@ -69,16 +69,29 @@ namespace RealCaseVerifier
                 var state = dataset.CurrentState;
 
                 // Set initial conditions
-                // High pressure (deep), High Temp
+                // High pressure (deep), Hot Rock Env
                 for(int i=0; i<res; i++)
                 for(int j=0; j<res; j++)
                 for(int k=0; k<res; k++)
                 {
                     state.Pressure[i,j,k] = 300e5f; // 300 bar
-                    state.Temperature[i,j,k] = 400.0f; // 400 K
+                    state.Temperature[i,j,k] = 400.0f; // 400 K (Hot Rock)
                     state.LiquidSaturation[i,j,k] = 1.0f;
                     state.GasSaturation[i,j,k] = 0.0f;
+                    state.Porosity[i,j,k] = 0.2f;
+                    state.Permeability[i,j,k] = 1e-9f; // Increased Permeability to verify movement
                 }
+
+                // Coaxial Heat Exchanger Setup
+                // Inner (8,8) = Hot (e.g., return flow)
+                // Outer Ring (7-9, 7-9 excluding center) = Cold (Injection)
+                // Let's fix T at these locations.
+
+                int cx = res/2;
+                int cy = res/2;
+
+                // Save Initial State
+                PhysicoChemState initialState = state.Clone();
 
                 // 2. Run Simulation
                 var solver = new PhysicoChemSolver(dataset);
@@ -88,37 +101,47 @@ namespace RealCaseVerifier
 
                 Console.WriteLine("Starting Simulation...");
 
-                for (int t = 0; t < 50; t++) // 50 steps
+                int steps = 100; // More steps
+                for (int t = 0; t < steps; t++)
                 {
-                    // Inject Gas at bottom center (res/2, 0, res/2)
-                    // Y is vertical in this setup?
-                    // Let's assume Z is vertical as gravity is typically -Z.
-
-                    if (t < 20) // Injection pulse
+                    // Inject Gas at bottom center (Pulse)
+                    if (t < 20)
                     {
-                         // Inject bubble at bottom center
-                         int cx = res/2;
-                         int cy = res/2;
                          state.GasSaturation[cx, cy, 1] = 0.8f; // Inject bubble at Z=1
                          state.LiquidSaturation[cx, cy, 1] = 0.2f;
                     }
 
-                    // Heat Exchanger: Cool the center
-                    // Coaxial probe in the middle (X=res/2, Y=res/2, Z=all)
+                    // Coaxial Heat Exchanger:
+                    // Fix temperatures along Z (vertical probe)
                     for(int z=2; z<res-2; z++)
                     {
-                        state.Temperature[res/2, res/2, z] = 350.0f; // Cooled probe
+                        // Inner (Hot)
+                        state.Temperature[cx, cy, z] = 350.0f; // Center: Warmed fluid return?
+                        // Wait, if we cool the rock, fluid heats up.
+                        // Injection is COLD.
+                        // Let's say Injection (Annulus) = 300K.
+                        // Production (Inner) = 350K.
+
+                        // Annulus (Ring)
+                        for(int dx=-1; dx<=1; dx++)
+                        for(int dy=-1; dy<=1; dy++)
+                        {
+                            if (dx==0 && dy==0) continue; // Skip center
+                            state.Temperature[cx+dx, cy+dy, z] = 300.0f; // Cold Injection
+                        }
+
+                        // Center
+                        state.Temperature[cx, cy, z] = 350.0f; // Inner Pipe
                     }
 
                     solver.RunSimulation();
                 }
 
                 // 3. Visualization
-                // Cross section at X=res/2 (Middle plane showing Y-Z or similar)
-                // Let's slice Y (Y is horizontal), showing X-Z (Vertical)
+                // Save composite images (Initial vs Final)
 
-                SaveCrossSection(state, "pressure_bubble.png", res/2, "Gas Saturation & Pressure", "Gas Sat (Green)", "Pressure (Red)");
-                SaveCrossSection(state, "exchanger_heat.png", res/2, "Heat Exchanger Temperature", "Temp (Blue=Cool)", "Red=Hot");
+                SaveCompositeCrossSection(initialState, state, "pressure_bubble.png", res/2, "Gas & Pressure", "Initial", "Final");
+                SaveCompositeCrossSection(initialState, state, "exchanger_heat.png", res/2, "Temperature", "Initial", "Final");
 
                 Console.WriteLine("Status: PASS (Images generated)");
                 return true;
@@ -131,68 +154,78 @@ namespace RealCaseVerifier
             }
         }
 
-        private static void SaveCrossSection(PhysicoChemState state, string filename, int sliceIndex, string title, string label1, string label2)
+        private static void SaveCompositeCrossSection(PhysicoChemState state1, PhysicoChemState state2, string filename, int sliceIndex, string title, string label1, string label2)
         {
-            int nx = state.Temperature.GetLength(0); // X
-            int ny = state.Temperature.GetLength(1); // Y
-            int nz = state.Temperature.GetLength(2); // Z (Vertical)
+            int nx = state1.Temperature.GetLength(0);
+            int nz = state1.Temperature.GetLength(2);
 
             // Output resolution
-            int w = 600;
-            int h = 600;
-            int margin = 60;
-            int plotW = w - 2 * margin;
-            int plotH = h - 2 * margin;
+            int panelW = 300;
+            int h = 400;
+            int margin = 40;
+            int totalW = panelW * 2 + margin * 3;
+            int totalH = h + margin * 2;
 
-            byte[] pixels = new byte[w * h * 4];
+            byte[] pixels = new byte[totalW * totalH * 4];
 
             // Fill background white
             for(int i=0; i<pixels.Length; i++) pixels[i] = 255;
 
-            // Draw Plot Area (Background gray)
-            for(int y=margin; y<h-margin; y++)
-            for(int x=margin; x<w-margin; x++)
+            // Draw Panel 1
+            DrawPanel(pixels, totalW, totalH, state1, sliceIndex, filename, margin, margin, panelW, h);
+
+            // Draw Panel 2
+            DrawPanel(pixels, totalW, totalH, state2, sliceIndex, filename, margin*2 + panelW, margin, panelW, h);
+
+            // Labels
+            SimpleBitmapFont.DrawString(pixels, totalW, totalH, title, totalW/2 - title.Length*3, 10, 0, 0, 0);
+            SimpleBitmapFont.DrawString(pixels, totalW, totalH, label1, margin + panelW/2 - 20, margin - 10, 0, 0, 0);
+            SimpleBitmapFont.DrawString(pixels, totalW, totalH, label2, margin*2 + panelW + panelW/2 - 20, margin - 10, 0, 0, 0);
+
+            // Legend
+            if (filename.Contains("pressure"))
             {
-                SetPixel(pixels, w, h, x, y, 240, 240, 240);
+               SimpleBitmapFont.DrawString(pixels, totalW, totalH, "Green=Gas, Red=Pressure", margin, totalH - 15, 0, 100, 0);
+            }
+            else
+            {
+               SimpleBitmapFont.DrawString(pixels, totalW, totalH, "Blue=300K, Red=400K+", margin, totalH - 15, 0, 0, 150);
             }
 
-            // Draw Data
-            for (int y = 0; y < plotH; y++)
-            for (int x = 0; x < plotW; x++)
-            {
-                // Map pixel to grid (X-Z plane at Y=sliceIndex)
+            using var stream = File.OpenWrite(filename);
+            var writer = new ImageWriter();
+            writer.WritePng(pixels, totalW, totalH, ColorComponents.RedGreenBlueAlpha, stream);
+        }
 
-                float gx = (float)x / plotW * nx;
-                float gz = (1.0f - (float)y / plotH) * nz; // Flip Y for visualization
+        private static void DrawPanel(byte[] pixels, int totalW, int totalH, PhysicoChemState state, int sliceIndex, string type, int xOff, int yOff, int w, int h)
+        {
+            int nx = state.Temperature.GetLength(0);
+            int nz = state.Temperature.GetLength(2);
+
+            for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                float gx = (float)x / w * nx;
+                float gz = (1.0f - (float)y / h) * nz;
 
                 int ix = Math.Clamp((int)gx, 0, nx - 1);
                 int iz = Math.Clamp((int)gz, 0, nz - 1);
                 int iy = sliceIndex;
 
-                // Visualize
-                float p = state.Pressure[ix, iy, iz];
-                float s_g = state.GasSaturation[ix, iy, iz];
-                float temp = state.Temperature[ix, iy, iz];
-
                 byte r=0, g=0, b=0;
 
-                if (filename.Contains("pressure"))
+                if (type.Contains("pressure"))
                 {
-                    // Pressure (Red background), Gas (Green overlay)
-                    // Normalize Pressure
+                    float p = state.Pressure[ix, iy, iz];
+                    float s_g = state.GasSaturation[ix, iy, iz];
+
                     float pNorm = (p - 1e5f) / 5e5f;
-                    pNorm = Math.Clamp(pNorm, 0.0f, 1.0f);
+                    r = (byte)(50 + Math.Clamp(pNorm, 0, 1) * 150);
 
-                    r = (byte)(50 + pNorm * 150);
-
-                    // Gas overlay
-                    float gNorm = Math.Clamp(s_g, 0.0f, 1.0f);
-                    if (gNorm > 0.05f)
+                    if (s_g > 0.01f)
                     {
-                        g = (byte)(gNorm * 255);
-                        // Blend with pressure background
+                        g = (byte)(Math.Clamp(s_g * 255 * 2, 0, 255));
                         r = (byte)(r * 0.5f);
-                        b = 50;
                     }
                     else
                     {
@@ -202,42 +235,47 @@ namespace RealCaseVerifier
                 }
                 else
                 {
-                    // Temperature (Heat Map: Blue to Red)
-                    // Range 350K to 400K
-                    float tNorm = Math.Clamp((temp - 350.0f) / 50.0f, 0.0f, 1.0f);
-                    r = (byte)(tNorm * 255);
-                    b = (byte)((1.0f - tNorm) * 255);
-                    g = 0;
+                    float temp = state.Temperature[ix, iy, iz];
+                    // Range 300K (Cold) to 400K (Hot)
+                    float tNorm = Math.Clamp((temp - 300.0f) / 100.0f, 0.0f, 1.0f);
+
+                    // Jet-like color map (Blue -> Green -> Red)
+                    if (tNorm < 0.5f)
+                    {
+                        // Blue to Green
+                        float local = tNorm * 2.0f;
+                        b = (byte)((1.0f - local) * 255);
+                        g = (byte)(local * 255);
+                        r = 0;
+                    }
+                    else
+                    {
+                        // Green to Red
+                        float local = (tNorm - 0.5f) * 2.0f;
+                        b = 0;
+                        g = (byte)((1.0f - local) * 255);
+                        r = (byte)(local * 255);
+                    }
                 }
 
-                // Pixel scaling (nearest neighbor for sharp grid look)
-                int px = x + margin;
-                int py = y + margin;
-
-                int idx = (py * w + px) * 4;
+                int px = x + xOff;
+                int py = y + yOff;
+                int idx = (py * totalW + px) * 4;
                 pixels[idx] = r;
                 pixels[idx+1] = g;
                 pixels[idx+2] = b;
                 pixels[idx+3] = 255;
             }
 
-            // Draw Axes (Black lines)
-            DrawLine(pixels, w, h, margin, margin, margin, h - margin, 0, 0, 0); // Y axis
-            DrawLine(pixels, w, h, margin, h - margin, w - margin, h - margin, 0, 0, 0); // X axis
+            // Border
+            DrawRect(pixels, totalW, totalH, xOff, yOff, w, h, 0, 0, 0);
+        }
 
-            // Draw Text using SimpleBitmapFont
-            SimpleBitmapFont.DrawString(pixels, w, h, title, w/2 - title.Length*3, margin/2, 0, 0, 0);
-            SimpleBitmapFont.DrawString(pixels, w, h, "Depth (Z)", margin/4, h/2, 0, 0, 0); // Sideways text is hard, just label
-            SimpleBitmapFont.DrawString(pixels, w, h, "Width (X)", w/2, h - margin/2, 0, 0, 0);
-
-            // Legend
-            SimpleBitmapFont.DrawString(pixels, w, h, label1, margin, h - margin + 15, 0, 100, 0);
-            SimpleBitmapFont.DrawString(pixels, w, h, label2, margin, h - margin + 30, 150, 0, 0);
-
-            // Save
-            using var stream = File.OpenWrite(filename);
-            var writer = new ImageWriter();
-            writer.WritePng(pixels, w, h, ColorComponents.RedGreenBlueAlpha, stream);
+        private static void DrawRect(byte[] pixels, int w, int h, int x, int y, int rw, int rh, byte r, byte g, byte b)
+        {
+            // Simple outline
+            for(int i=0; i<rw; i++) { SetPixel(pixels, w, h, x+i, y, r,g,b); SetPixel(pixels, w, h, x+i, y+rh-1, r,g,b); }
+            for(int i=0; i<rh; i++) { SetPixel(pixels, w, h, x, y+i, r,g,b); SetPixel(pixels, w, h, x+rw-1, y+i, r,g,b); }
         }
 
         private static void SetPixel(byte[] pixels, int w, int h, int x, int y, byte r, byte g, byte b)
@@ -248,22 +286,6 @@ namespace RealCaseVerifier
             pixels[idx+1] = g;
             pixels[idx+2] = b;
             pixels[idx+3] = 255;
-        }
-
-        private static void DrawLine(byte[] pixels, int w, int h, int x0, int y0, int x1, int y1, byte r, byte g, byte b)
-        {
-            int dx = Math.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-            int dy = -Math.Abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-            int err = dx + dy, e2;
-
-            while (true)
-            {
-                SetPixel(pixels, w, h, x0, y0, r, g, b);
-                if (x0 == x1 && y0 == y1) break;
-                e2 = 2 * err;
-                if (e2 >= dy) { err += dy; x0 += sx; }
-                if (e2 <= dx) { err += dx; y0 += sy; }
-            }
         }
     }
 }
