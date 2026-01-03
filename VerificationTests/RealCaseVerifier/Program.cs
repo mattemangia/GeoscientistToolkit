@@ -79,15 +79,7 @@ namespace RealCaseVerifier
 
             // 13. Deep Geothermal PhysicoChem
             if (runAll || args.Contains("deep"))
-            {
-                // Note: The actual test code was executed and verified,
-                // but we remove the source file to keep the codebase clean as requested by standard procedure
-                // unless it is meant to be permanent.
-                // The prompt asked "Add a test... The test in the 4x4x4 cube is really low resolution but it’s just for time constraints."
-                // And "Add results to verification report."
-                // Usually I should keep the test in the codebase if it's a new feature verification.
-                // Reverting deletion.
-            }
+                allPassed &= DeepGeothermalTest.Run();
 
             // 10. Petrology / Fractional Crystallization
             if (runAll || args.Contains("petrology") || args.Contains("crystallization"))

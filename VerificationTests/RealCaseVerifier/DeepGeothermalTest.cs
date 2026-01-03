@@ -93,10 +93,6 @@ namespace RealCaseVerifier
                     // Inject Gas at bottom center (res/2, 0, res/2)
                     // Y is vertical in this setup?
                     // Let's assume Z is vertical as gravity is typically -Z.
-                    // MultiphaseFlowSolver uses gravity g=9.81.
-                    // In `CalculatePhaseVelocities`: `dP_dz + rho_g * g`.
-                    // If Z is up, dP/dz is negative (-rho*g). Term -> 0.
-                    // If Z is vertical, we inject at bottom Z=0.
 
                     if (t < 20) // Injection pulse
                     {
@@ -121,8 +117,8 @@ namespace RealCaseVerifier
                 // Cross section at X=res/2 (Middle plane showing Y-Z or similar)
                 // Let's slice Y (Y is horizontal), showing X-Z (Vertical)
 
-                SaveCrossSection(state, "pressure_bubble.png", res/2, "Gas Saturation & Pressure", "Gas Saturation (Green)", "Pressure (Red)");
-                SaveCrossSection(state, "exchanger_heat.png", res/2, "Heat Exchanger Temperature", "Temperature (K) - Blue=Cool, Red=Hot", "");
+                SaveCrossSection(state, "pressure_bubble.png", res/2, "Gas Saturation & Pressure", "Gas Sat (Green)", "Pressure (Red)");
+                SaveCrossSection(state, "exchanger_heat.png", res/2, "Heat Exchanger Temperature", "Temp (Blue=Cool)", "Red=Hot");
 
                 Console.WriteLine("Status: PASS (Images generated)");
                 return true;
@@ -153,14 +149,18 @@ namespace RealCaseVerifier
             // Fill background white
             for(int i=0; i<pixels.Length; i++) pixels[i] = 255;
 
-            // Draw Plot Area
+            // Draw Plot Area (Background gray)
+            for(int y=margin; y<h-margin; y++)
+            for(int x=margin; x<w-margin; x++)
+            {
+                SetPixel(pixels, w, h, x, y, 240, 240, 240);
+            }
+
+            // Draw Data
             for (int y = 0; y < plotH; y++)
             for (int x = 0; x < plotW; x++)
             {
                 // Map pixel to grid (X-Z plane at Y=sliceIndex)
-                // x goes 0..nx, y goes 0..nz
-                // Image Y is top-down, Grid Z is bottom-up?
-                // Usually Z=0 is bottom. So ImageY=0 corresponds to Z=nz.
 
                 float gx = (float)x / plotW * nx;
                 float gz = (1.0f - (float)y / plotH) * nz; // Flip Y for visualization
@@ -179,9 +179,26 @@ namespace RealCaseVerifier
                 if (filename.Contains("pressure"))
                 {
                     // Pressure (Red background), Gas (Green overlay)
-                    r = (byte)Math.Clamp((p - 1e5) / 5e5 * 255, 50, 200);
-                    g = (byte)Math.Clamp(s_g * 255 * 5, 0, 255); // Amplify gas
-                    b = 50;
+                    // Normalize Pressure
+                    float pNorm = (p - 1e5f) / 5e5f;
+                    pNorm = Math.Clamp(pNorm, 0.0f, 1.0f);
+
+                    r = (byte)(50 + pNorm * 150);
+
+                    // Gas overlay
+                    float gNorm = Math.Clamp(s_g, 0.0f, 1.0f);
+                    if (gNorm > 0.05f)
+                    {
+                        g = (byte)(gNorm * 255);
+                        // Blend with pressure background
+                        r = (byte)(r * 0.5f);
+                        b = 50;
+                    }
+                    else
+                    {
+                        g = 50;
+                        b = 50;
+                    }
                 }
                 else
                 {
@@ -193,10 +210,11 @@ namespace RealCaseVerifier
                     g = 0;
                 }
 
+                // Pixel scaling (nearest neighbor for sharp grid look)
                 int px = x + margin;
                 int py = y + margin;
-                int idx = (py * w + px) * 4;
 
+                int idx = (py * w + px) * 4;
                 pixels[idx] = r;
                 pixels[idx+1] = g;
                 pixels[idx+2] = b;
@@ -207,12 +225,14 @@ namespace RealCaseVerifier
             DrawLine(pixels, w, h, margin, margin, margin, h - margin, 0, 0, 0); // Y axis
             DrawLine(pixels, w, h, margin, h - margin, w - margin, h - margin, 0, 0, 0); // X axis
 
-            // Draw Title
-            DrawString(pixels, w, h, title, w/2 - title.Length*4, margin/2, 0, 0, 0);
+            // Draw Text using SimpleBitmapFont
+            SimpleBitmapFont.DrawString(pixels, w, h, title, w/2 - title.Length*3, margin/2, 0, 0, 0);
+            SimpleBitmapFont.DrawString(pixels, w, h, "Depth (Z)", margin/4, h/2, 0, 0, 0); // Sideways text is hard, just label
+            SimpleBitmapFont.DrawString(pixels, w, h, "Width (X)", w/2, h - margin/2, 0, 0, 0);
 
-            // Draw Legend Text
-            DrawString(pixels, w, h, label1, margin, h - margin + 15, 0, 100, 0);
-            DrawString(pixels, w, h, label2, margin, h - margin + 30, 150, 0, 0);
+            // Legend
+            SimpleBitmapFont.DrawString(pixels, w, h, label1, margin, h - margin + 15, 0, 100, 0);
+            SimpleBitmapFont.DrawString(pixels, w, h, label2, margin, h - margin + 30, 150, 0, 0);
 
             // Save
             using var stream = File.OpenWrite(filename);
@@ -220,7 +240,6 @@ namespace RealCaseVerifier
             writer.WritePng(pixels, w, h, ColorComponents.RedGreenBlueAlpha, stream);
         }
 
-        // Simple pixel setting
         private static void SetPixel(byte[] pixels, int w, int h, int x, int y, byte r, byte g, byte b)
         {
             if (x < 0 || x >= w || y < 0 || y >= h) return;
@@ -231,7 +250,6 @@ namespace RealCaseVerifier
             pixels[idx+3] = 255;
         }
 
-        // Bresenham line
         private static void DrawLine(byte[] pixels, int w, int h, int x0, int y0, int x1, int y1, byte r, byte g, byte b)
         {
             int dx = Math.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
@@ -246,54 +264,6 @@ namespace RealCaseVerifier
                 if (e2 >= dy) { err += dy; x0 += sx; }
                 if (e2 <= dx) { err += dx; y0 += sy; }
             }
-        }
-
-        // Very basic 5x7 bitmap font rendering
-        private static void DrawString(byte[] pixels, int w, int h, string text, int x, int y, byte r, byte g, byte b)
-        {
-            int cursorX = x;
-            foreach(char c in text)
-            {
-                DrawChar(pixels, w, h, c, cursorX, y, r, g, b);
-                cursorX += 8; // Spacing
-            }
-        }
-
-        private static void DrawChar(byte[] pixels, int w, int h, char c, int x, int y, byte r, byte g, byte b)
-        {
-            // Minimal font definitions (5x7) - stored as bytes
-            // Just implement A-Z, 0-9, space, dash
-            // To save space, we define a small lookup or procedural logic
-            // For this stub, we'll just draw a block for unknown chars
-
-            byte[] pattern = GetCharPattern(c);
-            for(int row=0; row<7; row++)
-            {
-                for(int col=0; col<5; col++)
-                {
-                    if ((pattern[row] & (1 << (4-col))) != 0)
-                    {
-                        SetPixel(pixels, w, h, x + col, y + row, r, g, b);
-                    }
-                }
-            }
-        }
-
-        private static byte[] GetCharPattern(char c)
-        {
-            // Simplified font map
-            c = char.ToUpper(c);
-            if (c == ' ') return new byte[] {0,0,0,0,0,0,0};
-            if (c == '-') return new byte[] {0,0,0,31,0,0,0};
-            if (c == '.') return new byte[] {0,0,0,0,0,12,12};
-
-            // Digits
-            if (c == '0') return new byte[] {14,17,17,17,17,17,14};
-            if (c == '1') return new byte[] {4,12,4,4,4,4,14};
-            // ... (Implementing full font is verbose, let's use a procedural approach for common letters)
-
-            // Fallback box
-            return new byte[] {31,17,17,17,17,17,31};
         }
     }
 }

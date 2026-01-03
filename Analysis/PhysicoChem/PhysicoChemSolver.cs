@@ -166,11 +166,6 @@ public class PhysicoChemSolver : SimulatorNodeSupport
                     // Run multiphase solver
                     var multiphaseResult = _multiphaseSolver.SolveTimeStep(newState, dt, mp);
 
-                    // Update state (MultiphaseFlowSolver returns a clone, we need to update newState)
-                    // Or we can just set state = multiphaseResult and skip other steps if fully coupled?
-                    // But other steps (forces, reaction) might be needed.
-                    // MultiphaseFlowSolver already solves Pressure, Saturation, Temperature (Energy).
-
                     // Copy back the updated fields
                     UpdateStateFromMultiphase(newState, multiphaseResult);
                 }
@@ -678,12 +673,10 @@ public class PhysicoChemSolver : SimulatorNodeSupport
         target.Enthalpy = source.Enthalpy;
         target.DissolvedGasConcentration = source.DissolvedGasConcentration;
 
-        // Copy velocities (Liquid phase velocity is primary transport velocity)
         target.VelocityX = source.VelocityX;
         target.VelocityY = source.VelocityY;
         target.VelocityZ = source.VelocityZ;
 
-        // Copy gas velocities
         target.GasVelocityX = source.GasVelocityX;
         target.GasVelocityY = source.GasVelocityY;
         target.GasVelocityZ = source.GasVelocityZ;
