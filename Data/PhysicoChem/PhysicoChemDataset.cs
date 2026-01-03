@@ -689,6 +689,11 @@ public class PhysicoChemState
     public float[,,] Enthalpy { get; set; } // J/kg (Mixture)
     public float[,,] DissolvedGasConcentration { get; set; } // mol/L
 
+    // Multiphase Velocities
+    public float[,,] GasVelocityX { get; set; } // m/s
+    public float[,,] GasVelocityY { get; set; }
+    public float[,,] GasVelocityZ { get; set; }
+
     // Force field contributions
     public float[,,] ForceX { get; set; } // N/m³
     public float[,,] ForceY { get; set; }
@@ -729,6 +734,10 @@ public class PhysicoChemState
         Enthalpy = new float[nx, ny, nz];
         DissolvedGasConcentration = new float[nx, ny, nz];
 
+        GasVelocityX = new float[nx, ny, nz];
+        GasVelocityY = new float[nx, ny, nz];
+        GasVelocityZ = new float[nx, ny, nz];
+
         ForceX = new float[nx, ny, nz];
         ForceY = new float[nx, ny, nz];
         ForceZ = new float[nx, ny, nz];
@@ -757,6 +766,9 @@ public class PhysicoChemState
             GasDensity = (float[,,])GasDensity.Clone(),
             Enthalpy = (float[,,])Enthalpy.Clone(),
             DissolvedGasConcentration = (float[,,])DissolvedGasConcentration.Clone(),
+            GasVelocityX = (float[,,])GasVelocityX.Clone(),
+            GasVelocityY = (float[,,])GasVelocityY.Clone(),
+            GasVelocityZ = (float[,,])GasVelocityZ.Clone(),
             ForceX = (float[,,])ForceX.Clone(),
             ForceY = (float[,,])ForceY.Clone(),
             ForceZ = (float[,,])ForceZ.Clone()

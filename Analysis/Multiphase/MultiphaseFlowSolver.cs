@@ -449,6 +449,15 @@ public class MultiphaseFlowSolver : SimulatorNodeSupport
             // Calculate phase velocities using Darcy's law with gravity
             var (v_l, v_v, v_g) = CalculatePhaseVelocities(state, i, j, k, parameters);
 
+            // Update state velocities (No stubs!)
+            state.VelocityX[i, j, k] = (float)v_l.vx;
+            state.VelocityY[i, j, k] = (float)v_l.vy;
+            state.VelocityZ[i, j, k] = (float)v_l.vz;
+
+            state.GasVelocityX[i, j, k] = (float)v_g.vx;
+            state.GasVelocityY[i, j, k] = (float)v_g.vy;
+            state.GasVelocityZ[i, j, k] = (float)v_g.vz;
+
             // Update saturations using upwind scheme
             double dx = parameters.GridSpacing.X;
             double dy = parameters.GridSpacing.Y;

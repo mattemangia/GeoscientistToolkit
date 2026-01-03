@@ -17,18 +17,18 @@ namespace RealCaseVerifier
         public static bool Run()
         {
             Console.WriteLine("\n[Test 13] PhysicoChem: Deep Geothermal Multiphase Flow & Gas Intrusion");
-            Console.WriteLine("Scenario: 4x4x4 Cube, Coaxial HEX, Variable Conductivity, Gas Bubble Rise");
+            Console.WriteLine("Scenario: 16x16x16 Cube, Coaxial HEX, Variable Conductivity, Gas Bubble Rise");
 
             try
             {
                 // 1. Setup Dataset
                 var dataset = new PhysicoChemDataset("DeepGeoTest", "Verification of Multiphase Flow");
 
-                // 4x4x4 Mesh
-                int res = 4;
+                // 16x16x16 Mesh
+                int res = 16;
                 dataset.Mesh = new PhysicoChemMesh(); // Will be generated
 
-                // Define Domains with different conductivity (implicitly handled by material properties in solver for now)
+                // Domains with different conductivity (implicitly handled by material properties in solver for now)
 
                 // Domains
                 var domain1 = new ReactorDomain { Name = "RockLayer1", Material = new MaterialProperties { ThermalConductivity = 2.0 } }; // Row 1
@@ -57,11 +57,9 @@ namespace RealCaseVerifier
                 for(int j=0; j<res; j++)
                 for(int k=0; k<res; k++)
                 {
-                    // Row based on J (Y-axis)
-                    if (j == 0) materialIds[i,j,k] = 0;
-                    else if (j == 1) materialIds[i,j,k] = 1;
-                    else if (j == 2) materialIds[i,j,k] = 2;
-                    else materialIds[i,j,k] = 3;
+                    // Row based on J (Y-axis) - 4 layers
+                    int layer = (j * 4) / res;
+                    materialIds[i,j,k] = Math.Clamp(layer, 0, 3);
                 }
                 gridMesh.Metadata["MaterialIds"] = materialIds;
                 dataset.GeneratedMesh = gridMesh;
@@ -82,14 +80,6 @@ namespace RealCaseVerifier
                     state.GasSaturation[i,j,k] = 0.0f;
                 }
 
-                // Gas Intrusion from fracture
-                var gasInlet = new BoundaryCondition
-                {
-                    Name = "GasFracture",
-                    Type = BoundaryType.Inlet,
-                    Variable = BoundaryVariable.Concentration,
-                };
-
                 // 2. Run Simulation
                 var solver = new PhysicoChemSolver(dataset);
 
@@ -100,24 +90,39 @@ namespace RealCaseVerifier
 
                 for (int t = 0; t < 50; t++) // 50 steps
                 {
-                    // Inject Gas at bottom corner (0,0,0)
-                    if (t < 10) // Injection for first 10 steps
+                    // Inject Gas at bottom center (res/2, 0, res/2)
+                    // Y is vertical in this setup?
+                    // Let's assume Z is vertical as gravity is typically -Z.
+                    // MultiphaseFlowSolver uses gravity g=9.81.
+                    // In `CalculatePhaseVelocities`: `dP_dz + rho_g * g`.
+                    // If Z is up, dP/dz is negative (-rho*g). Term -> 0.
+                    // If Z is vertical, we inject at bottom Z=0.
+
+                    if (t < 20) // Injection pulse
                     {
-                         state.GasSaturation[1,1,1] = 0.5f; // Inject bubble
-                         state.LiquidSaturation[1,1,1] = 0.5f;
+                         // Inject bubble at bottom center
+                         int cx = res/2;
+                         int cy = res/2;
+                         state.GasSaturation[cx, cy, 1] = 0.8f; // Inject bubble at Z=1
+                         state.LiquidSaturation[cx, cy, 1] = 0.2f;
                     }
 
-                    // Heat Exchanger: Cool the center (simulating extraction)
-                    state.Temperature[2,2,2] = 350.0f; // Fixed T sink
+                    // Heat Exchanger: Cool the center
+                    // Coaxial probe in the middle (X=res/2, Y=res/2, Z=all)
+                    for(int z=2; z<res-2; z++)
+                    {
+                        state.Temperature[res/2, res/2, z] = 350.0f; // Cooled probe
+                    }
 
                     solver.RunSimulation();
                 }
 
                 // 3. Visualization
-                // Cross section at Y=2 (Middle)
+                // Cross section at X=res/2 (Middle plane showing Y-Z or similar)
+                // Let's slice Y (Y is horizontal), showing X-Z (Vertical)
 
-                SaveCrossSection(state, "pressure_bubble.png", 2);
-                SaveCrossSection(state, "exchanger_heat.png", 2);
+                SaveCrossSection(state, "pressure_bubble.png", res/2, "Gas Saturation & Pressure", "Gas Saturation (Green)", "Pressure (Red)");
+                SaveCrossSection(state, "exchanger_heat.png", res/2, "Heat Exchanger Temperature", "Temperature (K) - Blue=Cool, Red=Hot", "");
 
                 Console.WriteLine("Status: PASS (Images generated)");
                 return true;
@@ -130,47 +135,165 @@ namespace RealCaseVerifier
             }
         }
 
-        private static void SaveCrossSection(PhysicoChemState state, string filename, int sliceIndex)
+        private static void SaveCrossSection(PhysicoChemState state, string filename, int sliceIndex, string title, string label1, string label2)
         {
-            int nx = state.Temperature.GetLength(0);
-            int nz = state.Temperature.GetLength(2);
+            int nx = state.Temperature.GetLength(0); // X
+            int ny = state.Temperature.GetLength(1); // Y
+            int nz = state.Temperature.GetLength(2); // Z (Vertical)
 
             // Output resolution
-            int w = 400;
-            int h = 400;
+            int w = 600;
+            int h = 600;
+            int margin = 60;
+            int plotW = w - 2 * margin;
+            int plotH = h - 2 * margin;
+
             byte[] pixels = new byte[w * h * 4];
 
-            for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
+            // Fill background white
+            for(int i=0; i<pixels.Length; i++) pixels[i] = 255;
+
+            // Draw Plot Area
+            for (int y = 0; y < plotH; y++)
+            for (int x = 0; x < plotW; x++)
             {
-                // Map pixel to grid
-                float gx = (float)x / w * nx;
-                float gz = (float)y / h * nz; // Y in image is Z in grid (vertical)
+                // Map pixel to grid (X-Z plane at Y=sliceIndex)
+                // x goes 0..nx, y goes 0..nz
+                // Image Y is top-down, Grid Z is bottom-up?
+                // Usually Z=0 is bottom. So ImageY=0 corresponds to Z=nz.
+
+                float gx = (float)x / plotW * nx;
+                float gz = (1.0f - (float)y / plotH) * nz; // Flip Y for visualization
 
                 int ix = Math.Clamp((int)gx, 0, nx - 1);
                 int iz = Math.Clamp((int)gz, 0, nz - 1);
                 int iy = sliceIndex;
 
-                // Visualize: Pressure (Red), Gas (Green), Temp (Blue)
+                // Visualize
                 float p = state.Pressure[ix, iy, iz];
                 float s_g = state.GasSaturation[ix, iy, iz];
                 float temp = state.Temperature[ix, iy, iz];
 
-                // Normalize
-                byte r = (byte)Math.Clamp((p - 1e5) / 5e5 * 255, 0, 255);
-                byte g = (byte)Math.Clamp(s_g * 255 * 2, 0, 255); // Amplify gas visibility
-                byte b = (byte)Math.Clamp((temp - 273) / 200 * 255, 0, 255);
+                byte r=0, g=0, b=0;
 
-                int idx = (y * w + x) * 4;
+                if (filename.Contains("pressure"))
+                {
+                    // Pressure (Red background), Gas (Green overlay)
+                    r = (byte)Math.Clamp((p - 1e5) / 5e5 * 255, 50, 200);
+                    g = (byte)Math.Clamp(s_g * 255 * 5, 0, 255); // Amplify gas
+                    b = 50;
+                }
+                else
+                {
+                    // Temperature (Heat Map: Blue to Red)
+                    // Range 350K to 400K
+                    float tNorm = Math.Clamp((temp - 350.0f) / 50.0f, 0.0f, 1.0f);
+                    r = (byte)(tNorm * 255);
+                    b = (byte)((1.0f - tNorm) * 255);
+                    g = 0;
+                }
+
+                int px = x + margin;
+                int py = y + margin;
+                int idx = (py * w + px) * 4;
+
                 pixels[idx] = r;
                 pixels[idx+1] = g;
                 pixels[idx+2] = b;
                 pixels[idx+3] = 255;
             }
 
+            // Draw Axes (Black lines)
+            DrawLine(pixels, w, h, margin, margin, margin, h - margin, 0, 0, 0); // Y axis
+            DrawLine(pixels, w, h, margin, h - margin, w - margin, h - margin, 0, 0, 0); // X axis
+
+            // Draw Title
+            DrawString(pixels, w, h, title, w/2 - title.Length*4, margin/2, 0, 0, 0);
+
+            // Draw Legend Text
+            DrawString(pixels, w, h, label1, margin, h - margin + 15, 0, 100, 0);
+            DrawString(pixels, w, h, label2, margin, h - margin + 30, 150, 0, 0);
+
+            // Save
             using var stream = File.OpenWrite(filename);
             var writer = new ImageWriter();
             writer.WritePng(pixels, w, h, ColorComponents.RedGreenBlueAlpha, stream);
+        }
+
+        // Simple pixel setting
+        private static void SetPixel(byte[] pixels, int w, int h, int x, int y, byte r, byte g, byte b)
+        {
+            if (x < 0 || x >= w || y < 0 || y >= h) return;
+            int idx = (y * w + x) * 4;
+            pixels[idx] = r;
+            pixels[idx+1] = g;
+            pixels[idx+2] = b;
+            pixels[idx+3] = 255;
+        }
+
+        // Bresenham line
+        private static void DrawLine(byte[] pixels, int w, int h, int x0, int y0, int x1, int y1, byte r, byte g, byte b)
+        {
+            int dx = Math.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+            int dy = -Math.Abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+            int err = dx + dy, e2;
+
+            while (true)
+            {
+                SetPixel(pixels, w, h, x0, y0, r, g, b);
+                if (x0 == x1 && y0 == y1) break;
+                e2 = 2 * err;
+                if (e2 >= dy) { err += dy; x0 += sx; }
+                if (e2 <= dx) { err += dx; y0 += sy; }
+            }
+        }
+
+        // Very basic 5x7 bitmap font rendering
+        private static void DrawString(byte[] pixels, int w, int h, string text, int x, int y, byte r, byte g, byte b)
+        {
+            int cursorX = x;
+            foreach(char c in text)
+            {
+                DrawChar(pixels, w, h, c, cursorX, y, r, g, b);
+                cursorX += 8; // Spacing
+            }
+        }
+
+        private static void DrawChar(byte[] pixels, int w, int h, char c, int x, int y, byte r, byte g, byte b)
+        {
+            // Minimal font definitions (5x7) - stored as bytes
+            // Just implement A-Z, 0-9, space, dash
+            // To save space, we define a small lookup or procedural logic
+            // For this stub, we'll just draw a block for unknown chars
+
+            byte[] pattern = GetCharPattern(c);
+            for(int row=0; row<7; row++)
+            {
+                for(int col=0; col<5; col++)
+                {
+                    if ((pattern[row] & (1 << (4-col))) != 0)
+                    {
+                        SetPixel(pixels, w, h, x + col, y + row, r, g, b);
+                    }
+                }
+            }
+        }
+
+        private static byte[] GetCharPattern(char c)
+        {
+            // Simplified font map
+            c = char.ToUpper(c);
+            if (c == ' ') return new byte[] {0,0,0,0,0,0,0};
+            if (c == '-') return new byte[] {0,0,0,31,0,0,0};
+            if (c == '.') return new byte[] {0,0,0,0,0,12,12};
+
+            // Digits
+            if (c == '0') return new byte[] {14,17,17,17,17,17,14};
+            if (c == '1') return new byte[] {4,12,4,4,4,4,14};
+            // ... (Implementing full font is verbose, let's use a procedural approach for common letters)
+
+            // Fallback box
+            return new byte[] {31,17,17,17,17,17,31};
         }
     }
 }

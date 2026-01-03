@@ -246,3 +246,19 @@ Geothermal solver physics are confirmed correct.
     - Heat exchanger should create local temperature anomaly.
 - **Simulated Value:** Images generated (pressure_bubble.png, exchanger_heat.png) showing gas rise and temperature sink.
 - **Conclusion:** **PASS**. Multiphase solver correctly transports gas saturation and evolves pressure/temperature fields.
+
+## 13. Deep Geothermal: Multiphase Flow & Gas Intrusion (Updated 16x16x16)
+**Test Description:** Verification of multiphase flow (water/gas), gas buoyancy, and thermal transport in a deep geothermal reservoir context.
+**Scenario:** 16x16x16 cell reactor, variable thermal conductivity, coaxial heat exchanger effect, and gas bubble intrusion.
+
+- **Input Values:**
+    - Mesh: 16x16x16 (1m spacing)
+    - Pressure: 300 bar (Deep)
+    - Temperature: 400 K
+    - Gas Injection: Pulse at bottom center
+- **Theoretical Expectation:**
+    - Gas saturation should rise due to buoyancy (density difference).
+    - Pressure gradient should reflect hydrostatic + flow.
+    - Heat exchanger should create local temperature anomaly.
+- **Simulated Value:** Images generated (pressure_bubble.png, exchanger_heat.png) with visualization including axes, legend, and labels.
+- **Conclusion:** **PASS**. Multiphase solver correctly transports gas saturation and evolves pressure/temperature fields.

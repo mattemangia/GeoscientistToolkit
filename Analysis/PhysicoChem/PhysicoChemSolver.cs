@@ -677,13 +677,16 @@ public class PhysicoChemSolver : SimulatorNodeSupport
         target.GasDensity = source.GasDensity;
         target.Enthalpy = source.Enthalpy;
         target.DissolvedGasConcentration = source.DissolvedGasConcentration;
-        target.VelocityX = source.VelocityX; // Note: Multiphase solver doesn't expose velocity field in State yet?
-        // Wait, MultiphaseSolver CalculatePhaseVelocities is internal/private.
-        // We should probably expose velocity in the state or recalculate it.
-        // For now, let's assume Velocity is updated or we need to update it.
-        // Actually PhysicoChemState HAS VelocityX/Y/Z. MultiphaseSolver computes it locally but doesn't store it in State in the original code.
-        // I need to ensure MultiphaseSolver updates Velocity in the state.
-        // I will check MultiphaseFlowSolver again.
+
+        // Copy velocities (Liquid phase velocity is primary transport velocity)
+        target.VelocityX = source.VelocityX;
+        target.VelocityY = source.VelocityY;
+        target.VelocityZ = source.VelocityZ;
+
+        // Copy gas velocities
+        target.GasVelocityX = source.GasVelocityX;
+        target.GasVelocityY = source.GasVelocityY;
+        target.GasVelocityZ = source.GasVelocityZ;
     }
 
     private void UpdateComputedProperties(PhysicoChemState state)
