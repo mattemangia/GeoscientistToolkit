@@ -197,6 +197,12 @@ namespace GeoscientistToolkit.Data.PhysicoChem
         public List<NucleationPoint> NucleationPoints { get; set; } = new List<NucleationPoint>();
 
         /// <summary>
+        ///     Probe manager for simulation measurement and visualization.
+        /// </summary>
+        [JsonProperty]
+        public ProbeManager Probes { get; set; } = new ProbeManager();
+
+        /// <summary>
         ///     Gets the top Z coordinate of the mesh (surface level).
         /// </summary>
         public double GetMeshTopZ()
@@ -1287,6 +1293,497 @@ namespace GeoscientistToolkit.Data.PhysicoChem
                 ControlRodPositions = (double[])ControlRodPositions.Clone(),
                 BoronConcentrationPPM = BoronConcentrationPPM
             };
+        }
+    }
+
+    // ============================================================================
+    // SIMULATION PROBE SYSTEM
+    // ============================================================================
+
+    /// <summary>
+    /// Available variables that can be tracked by probes
+    /// </summary>
+    public enum ProbeVariable
+    {
+        // Thermal
+        Temperature,
+        Pressure,
+        HeatFlux,
+
+        // Flow
+        Velocity,
+        MassFlowRate,
+        Density,
+        Viscosity,
+
+        // Chemical
+        Concentration,
+        pH,
+        Salinity,
+        DissolvedOxygen,
+
+        // Geothermal
+        ThermalConductivity,
+        HeatCapacity,
+        Enthalpy,
+
+        // Nuclear
+        NeutronFlux,
+        PowerDensity,
+        FuelTemperature,
+        CoolantTemperature,
+        CladTemperature,
+        XenonConcentration,
+        Reactivity,
+        DNBR,
+
+        // ORC
+        ORCEfficiency,
+        TurbinePower,
+        CondenserDuty,
+
+        // Custom
+        Custom
+    }
+
+    /// <summary>
+    /// Plane orientation for planar probes
+    /// </summary>
+    public enum ProbePlaneOrientation
+    {
+        XY,
+        XZ,
+        YZ
+    }
+
+    /// <summary>
+    /// Data point recorded by a probe at a specific time
+    /// </summary>
+    public class ProbeDataPoint
+    {
+        public double Time { get; set; }
+        public double Value { get; set; }
+        public double? Min { get; set; }  // For line/plane probes
+        public double? Max { get; set; }  // For line/plane probes
+        public double? StdDev { get; set; }  // Standard deviation for averaging
+    }
+
+    /// <summary>
+    /// 2D field data for planar probe cross-section visualization
+    /// </summary>
+    public class ProbeFieldData
+    {
+        public double Time { get; set; }
+        public double[,] Values { get; set; } = new double[0, 0];
+        public double MinValue { get; set; }
+        public double MaxValue { get; set; }
+        public int ResolutionX { get; set; }
+        public int ResolutionY { get; set; }
+    }
+
+    /// <summary>
+    /// Base class for simulation probes
+    /// </summary>
+    public abstract class SimulationProbe
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
+        public string Name { get; set; } = "Probe";
+        public bool IsActive { get; set; } = true;
+        public ProbeVariable Variable { get; set; } = ProbeVariable.Temperature;
+        public string CustomVariableName { get; set; } = "";
+        public uint Color { get; set; } = 0xFF00FF00; // Green (ABGR)
+        public List<ProbeDataPoint> History { get; set; } = new();
+        public int MaxHistoryPoints { get; set; } = 10000;
+
+        /// <summary>
+        /// Record a new data point
+        /// </summary>
+        public void RecordValue(double time, double value, double? min = null, double? max = null, double? stdDev = null)
+        {
+            History.Add(new ProbeDataPoint
+            {
+                Time = time,
+                Value = value,
+                Min = min,
+                Max = max,
+                StdDev = stdDev
+            });
+
+            // Trim history if needed
+            while (History.Count > MaxHistoryPoints)
+                History.RemoveAt(0);
+        }
+
+        /// <summary>
+        /// Clear all recorded data
+        /// </summary>
+        public void ClearHistory() => History.Clear();
+
+        /// <summary>
+        /// Get the display name for the variable
+        /// </summary>
+        public string GetVariableDisplayName()
+        {
+            if (Variable == ProbeVariable.Custom)
+                return CustomVariableName;
+            return Variable.ToString();
+        }
+
+        /// <summary>
+        /// Get units for the variable
+        /// </summary>
+        public string GetVariableUnits() => Variable switch
+        {
+            ProbeVariable.Temperature => "°C",
+            ProbeVariable.Pressure => "MPa",
+            ProbeVariable.HeatFlux => "W/m²",
+            ProbeVariable.Velocity => "m/s",
+            ProbeVariable.MassFlowRate => "kg/s",
+            ProbeVariable.Density => "kg/m³",
+            ProbeVariable.Viscosity => "Pa·s",
+            ProbeVariable.Concentration => "mol/L",
+            ProbeVariable.pH => "",
+            ProbeVariable.Salinity => "ppt",
+            ProbeVariable.DissolvedOxygen => "mg/L",
+            ProbeVariable.ThermalConductivity => "W/(m·K)",
+            ProbeVariable.HeatCapacity => "J/(kg·K)",
+            ProbeVariable.Enthalpy => "kJ/kg",
+            ProbeVariable.NeutronFlux => "n/(cm²·s)",
+            ProbeVariable.PowerDensity => "kW/L",
+            ProbeVariable.FuelTemperature => "°C",
+            ProbeVariable.CoolantTemperature => "°C",
+            ProbeVariable.CladTemperature => "°C",
+            ProbeVariable.XenonConcentration => "atoms/cm³",
+            ProbeVariable.Reactivity => "pcm",
+            ProbeVariable.DNBR => "",
+            ProbeVariable.ORCEfficiency => "%",
+            ProbeVariable.TurbinePower => "kW",
+            ProbeVariable.CondenserDuty => "kW",
+            _ => ""
+        };
+
+        public abstract string GetProbeTypeDescription();
+    }
+
+    /// <summary>
+    /// Point probe - tracks variable at a single location over time
+    /// </summary>
+    public class PointProbe : SimulationProbe
+    {
+        public double X { get; set; }
+        public double Y { get; set; }
+        public double Z { get; set; }
+
+        public PointProbe() { }
+
+        public PointProbe(double x, double y, double z, string name = "Point Probe")
+        {
+            X = x;
+            Y = y;
+            Z = z;
+            Name = name;
+        }
+
+        public (double X, double Y, double Z) Position
+        {
+            get => (X, Y, Z);
+            set { X = value.X; Y = value.Y; Z = value.Z; }
+        }
+
+        public override string GetProbeTypeDescription() => $"Point at ({X:F2}, {Y:F2}, {Z:F2})";
+    }
+
+    /// <summary>
+    /// Line probe - tracks averaged variable along a line over time
+    /// </summary>
+    public class LineProbe : SimulationProbe
+    {
+        public double StartX { get; set; }
+        public double StartY { get; set; }
+        public double StartZ { get; set; }
+        public double EndX { get; set; }
+        public double EndY { get; set; }
+        public double EndZ { get; set; }
+        public int SamplePoints { get; set; } = 50;
+
+        public LineProbe() { }
+
+        public LineProbe(double x1, double y1, double z1, double x2, double y2, double z2, string name = "Line Probe")
+        {
+            StartX = x1; StartY = y1; StartZ = z1;
+            EndX = x2; EndY = y2; EndZ = z2;
+            Name = name;
+        }
+
+        public (double X, double Y, double Z) StartPoint
+        {
+            get => (StartX, StartY, StartZ);
+            set { StartX = value.X; StartY = value.Y; StartZ = value.Z; }
+        }
+
+        public (double X, double Y, double Z) EndPoint
+        {
+            get => (EndX, EndY, EndZ);
+            set { EndX = value.X; EndY = value.Y; EndZ = value.Z; }
+        }
+
+        public double Length => Math.Sqrt(
+            Math.Pow(EndX - StartX, 2) +
+            Math.Pow(EndY - StartY, 2) +
+            Math.Pow(EndZ - StartZ, 2));
+
+        /// <summary>
+        /// Get sample positions along the line
+        /// </summary>
+        public IEnumerable<(double X, double Y, double Z)> GetSamplePositions()
+        {
+            for (int i = 0; i < SamplePoints; i++)
+            {
+                double t = SamplePoints > 1 ? (double)i / (SamplePoints - 1) : 0.5;
+                yield return (
+                    StartX + t * (EndX - StartX),
+                    StartY + t * (EndY - StartY),
+                    StartZ + t * (EndZ - StartZ)
+                );
+            }
+        }
+
+        public override string GetProbeTypeDescription() =>
+            $"Line from ({StartX:F2}, {StartY:F2}, {StartZ:F2}) to ({EndX:F2}, {EndY:F2}, {EndZ:F2})";
+    }
+
+    /// <summary>
+    /// Planar probe - creates 2D cross-section views with colormap
+    /// </summary>
+    public class PlaneProbe : SimulationProbe
+    {
+        public double CenterX { get; set; }
+        public double CenterY { get; set; }
+        public double CenterZ { get; set; }
+        public double Width { get; set; } = 1.0;
+        public double Height { get; set; } = 1.0;
+        public ProbePlaneOrientation Orientation { get; set; } = ProbePlaneOrientation.XY;
+        public int ResolutionX { get; set; } = 64;
+        public int ResolutionY { get; set; } = 64;
+
+        // Store 2D field snapshots
+        public List<ProbeFieldData> FieldHistory { get; set; } = new();
+        public int MaxFieldSnapshots { get; set; } = 100;
+
+        public PlaneProbe() { }
+
+        public PlaneProbe(double cx, double cy, double cz, double width, double height,
+            ProbePlaneOrientation orientation, string name = "Plane Probe")
+        {
+            CenterX = cx; CenterY = cy; CenterZ = cz;
+            Width = width; Height = height;
+            Orientation = orientation;
+            Name = name;
+        }
+
+        public (double X, double Y, double Z) Center
+        {
+            get => (CenterX, CenterY, CenterZ);
+            set { CenterX = value.X; CenterY = value.Y; CenterZ = value.Z; }
+        }
+
+        /// <summary>
+        /// Record a 2D field snapshot
+        /// </summary>
+        public void RecordField(double time, double[,] values)
+        {
+            double minVal = double.MaxValue, maxVal = double.MinValue;
+            for (int i = 0; i < values.GetLength(0); i++)
+            {
+                for (int j = 0; j < values.GetLength(1); j++)
+                {
+                    minVal = Math.Min(minVal, values[i, j]);
+                    maxVal = Math.Max(maxVal, values[i, j]);
+                }
+            }
+
+            FieldHistory.Add(new ProbeFieldData
+            {
+                Time = time,
+                Values = (double[,])values.Clone(),
+                MinValue = minVal,
+                MaxValue = maxVal,
+                ResolutionX = values.GetLength(0),
+                ResolutionY = values.GetLength(1)
+            });
+
+            while (FieldHistory.Count > MaxFieldSnapshots)
+                FieldHistory.RemoveAt(0);
+
+            // Also record average to scalar history
+            double sum = 0;
+            int count = values.GetLength(0) * values.GetLength(1);
+            foreach (var v in values) sum += v;
+            RecordValue(time, sum / count, minVal, maxVal);
+        }
+
+        /// <summary>
+        /// Get sample positions on the plane
+        /// </summary>
+        public IEnumerable<(double X, double Y, double Z, int i, int j)> GetSamplePositions()
+        {
+            for (int i = 0; i < ResolutionX; i++)
+            {
+                for (int j = 0; j < ResolutionY; j++)
+                {
+                    double u = ResolutionX > 1 ? (double)i / (ResolutionX - 1) - 0.5 : 0;
+                    double v = ResolutionY > 1 ? (double)j / (ResolutionY - 1) - 0.5 : 0;
+
+                    double x = CenterX, y = CenterY, z = CenterZ;
+
+                    switch (Orientation)
+                    {
+                        case ProbePlaneOrientation.XY:
+                            x += u * Width;
+                            y += v * Height;
+                            break;
+                        case ProbePlaneOrientation.XZ:
+                            x += u * Width;
+                            z += v * Height;
+                            break;
+                        case ProbePlaneOrientation.YZ:
+                            y += u * Width;
+                            z += v * Height;
+                            break;
+                    }
+
+                    yield return (x, y, z, i, j);
+                }
+            }
+        }
+
+        public override string GetProbeTypeDescription() =>
+            $"Plane {Orientation} at ({CenterX:F2}, {CenterY:F2}, {CenterZ:F2}), {Width:F2}x{Height:F2}m";
+    }
+
+    /// <summary>
+    /// Manager for simulation probes - handles collection and data recording
+    /// </summary>
+    public class ProbeManager
+    {
+        public List<PointProbe> PointProbes { get; set; } = new();
+        public List<LineProbe> LineProbes { get; set; } = new();
+        public List<PlaneProbe> PlaneProbes { get; set; } = new();
+
+        /// <summary>
+        /// Get all probes as a single enumerable
+        /// </summary>
+        public IEnumerable<SimulationProbe> AllProbes =>
+            PointProbes.Cast<SimulationProbe>()
+                .Concat(LineProbes)
+                .Concat(PlaneProbes);
+
+        /// <summary>
+        /// Get all active probes
+        /// </summary>
+        public IEnumerable<SimulationProbe> ActiveProbes =>
+            AllProbes.Where(p => p.IsActive);
+
+        /// <summary>
+        /// Total number of probes
+        /// </summary>
+        public int Count => PointProbes.Count + LineProbes.Count + PlaneProbes.Count;
+
+        /// <summary>
+        /// Add a point probe
+        /// </summary>
+        public PointProbe AddPointProbe(double x, double y, double z, string name = "Point Probe")
+        {
+            var probe = new PointProbe(x, y, z, name);
+            PointProbes.Add(probe);
+            return probe;
+        }
+
+        /// <summary>
+        /// Add a line probe
+        /// </summary>
+        public LineProbe AddLineProbe(double x1, double y1, double z1, double x2, double y2, double z2, string name = "Line Probe")
+        {
+            var probe = new LineProbe(x1, y1, z1, x2, y2, z2, name);
+            LineProbes.Add(probe);
+            return probe;
+        }
+
+        /// <summary>
+        /// Add a plane probe
+        /// </summary>
+        public PlaneProbe AddPlaneProbe(double cx, double cy, double cz, double width, double height,
+            ProbePlaneOrientation orientation, string name = "Plane Probe")
+        {
+            var probe = new PlaneProbe(cx, cy, cz, width, height, orientation, name);
+            PlaneProbes.Add(probe);
+            return probe;
+        }
+
+        /// <summary>
+        /// Remove a probe by ID
+        /// </summary>
+        public bool RemoveProbe(string id)
+        {
+            var point = PointProbes.FirstOrDefault(p => p.Id == id);
+            if (point != null) return PointProbes.Remove(point);
+
+            var line = LineProbes.FirstOrDefault(p => p.Id == id);
+            if (line != null) return LineProbes.Remove(line);
+
+            var plane = PlaneProbes.FirstOrDefault(p => p.Id == id);
+            if (plane != null) return PlaneProbes.Remove(plane);
+
+            return false;
+        }
+
+        /// <summary>
+        /// Get a probe by ID
+        /// </summary>
+        public SimulationProbe? GetProbe(string id) =>
+            AllProbes.FirstOrDefault(p => p.Id == id);
+
+        /// <summary>
+        /// Clear all probe history
+        /// </summary>
+        public void ClearAllHistory()
+        {
+            foreach (var probe in AllProbes)
+            {
+                probe.ClearHistory();
+                if (probe is PlaneProbe plane)
+                    plane.FieldHistory.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Clear all probes
+        /// </summary>
+        public void ClearAllProbes()
+        {
+            PointProbes.Clear();
+            LineProbes.Clear();
+            PlaneProbes.Clear();
+        }
+
+        /// <summary>
+        /// Export probe data to CSV
+        /// </summary>
+        public string ExportToCSV(SimulationProbe probe)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"# Probe: {probe.Name}");
+            sb.AppendLine($"# Type: {probe.GetProbeTypeDescription()}");
+            sb.AppendLine($"# Variable: {probe.GetVariableDisplayName()} ({probe.GetVariableUnits()})");
+            sb.AppendLine();
+            sb.AppendLine("Time,Value,Min,Max,StdDev");
+
+            foreach (var point in probe.History)
+            {
+                sb.AppendLine($"{point.Time:G6},{point.Value:G6},{point.Min?.ToString("G6") ?? ""},{point.Max?.ToString("G6") ?? ""},{point.StdDev?.ToString("G6") ?? ""}");
+            }
+
+            return sb.ToString();
         }
     }
 }
