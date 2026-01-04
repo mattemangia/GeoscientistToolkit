@@ -389,7 +389,7 @@ namespace GeoscientistToolkit.UI.Windows
             }
 
             // Labels
-            float z = _params.CoreHeight * _slicePosition / 100f;
+            float z = (float)(_params.CoreHeight * _slicePosition / 100f);
             drawList.AddText(origin + new Vector2(10, 10), 0xFFFFFFFF, $"Radial Slice at Z={z:F2}m");
             drawList.AddText(origin + new Vector2(10, 30), 0xFFCCCCCC, $"Assemblies: {_params.FuelAssemblies.Count}");
         }

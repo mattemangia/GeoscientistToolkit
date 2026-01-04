@@ -1025,7 +1025,7 @@ namespace GeoscientistToolkit.UI.Windows
             // Write PNG using StbImageWrite
             using var stream = System.IO.File.OpenWrite(path);
             var writer = new ImageWriter();
-            writer.WritePng(pixels, width, height, ColorComponents.RedGreenBlueAlpha, stream);
+            writer.WritePng(pixels, width, height, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
         }
 
         private void DrawChartToBuffer(byte[] pixels, int width, int height)
