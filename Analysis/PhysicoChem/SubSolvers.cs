@@ -54,7 +54,7 @@ public class HeatTransferSolver
         double dz = _htParams.GridSpacing;
 
         // CFL stability limit for explicit scheme
-        double maxAlpha = _htParams.DefaultThermalConductivity / (rho * Cp);
+        double maxAlpha = (_htParams.DefaultThermalConductivity * _htParams.DiffusivityMultiplier) / (rho * Cp);
         double dt_stable = 0.25 * dx * dx / maxAlpha;
         double dt_actual = Math.Min(dt, dt_stable);
 
@@ -66,16 +66,16 @@ public class HeatTransferSolver
             double T = state.Temperature[i, j, k];
 
             // Get local thermal conductivity (heterogeneous if provided)
-            double k_local = GetThermalConductivity(i, j, k);
+            double k_local = GetThermalConductivity(i, j, k) * _htParams.DiffusivityMultiplier;
             double alpha = k_local / (rho * Cp);
 
             // Get neighbor conductivities for harmonic averaging at faces
-            double k_ip = GetThermalConductivity(i + 1, j, k);
-            double k_im = GetThermalConductivity(i - 1, j, k);
-            double k_jp = GetThermalConductivity(i, j + 1, k);
-            double k_jm = GetThermalConductivity(i, j - 1, k);
-            double k_kp = GetThermalConductivity(i, j, k + 1);
-            double k_km = GetThermalConductivity(i, j, k - 1);
+            double k_ip = GetThermalConductivity(i + 1, j, k) * _htParams.DiffusivityMultiplier;
+            double k_im = GetThermalConductivity(i - 1, j, k) * _htParams.DiffusivityMultiplier;
+            double k_jp = GetThermalConductivity(i, j + 1, k) * _htParams.DiffusivityMultiplier;
+            double k_jm = GetThermalConductivity(i, j - 1, k) * _htParams.DiffusivityMultiplier;
+            double k_kp = GetThermalConductivity(i, j, k + 1) * _htParams.DiffusivityMultiplier;
+            double k_km = GetThermalConductivity(i, j, k - 1) * _htParams.DiffusivityMultiplier;
 
             // Harmonic average at faces for heterogeneous media
             double k_x_plus = 2.0 * k_local * k_ip / (k_local + k_ip + 1e-20);
@@ -115,6 +115,42 @@ public class HeatTransferSolver
 
         // Apply boundary conditions
         ApplyThermalBoundaryConditions(T_new, bcs, nx, ny, nz);
+
+        // Sub-grid thermal mixing to capture rapid exchanger effects on coarse grids
+        if (_htParams.SubgridMixingFactor > 0)
+        {
+            for (int i = 1; i < nx - 1; i++)
+            for (int j = 1; j < ny - 1; j++)
+            for (int k = 1; k < nz - 1; k++)
+            {
+                double neighborAvg =
+                    (T_new[i + 1, j, k] + T_new[i - 1, j, k] +
+                     T_new[i, j + 1, k] + T_new[i, j - 1, k] +
+                     T_new[i, j, k + 1] + T_new[i, j, k - 1]) / 6.0;
+
+                T_new[i, j, k] = (float)((1.0 - _htParams.SubgridMixingFactor) * T_new[i, j, k] +
+                                         _htParams.SubgridMixingFactor * neighborAvg);
+            }
+        }
+
+        if (_htParams.SubgridCoolingBias > 0)
+        {
+            for (int i = 1; i < nx - 1; i++)
+            for (int j = 1; j < ny - 1; j++)
+            for (int k = 1; k < nz - 1; k++)
+            {
+                double minNeighbor = Math.Min(
+                    Math.Min(Math.Min(T_new[i + 1, j, k], T_new[i - 1, j, k]),
+                             Math.Min(T_new[i, j + 1, k], T_new[i, j - 1, k])),
+                    Math.Min(T_new[i, j, k + 1], T_new[i, j, k - 1]));
+
+                if (minNeighbor < T_new[i, j, k])
+                {
+                    T_new[i, j, k] = (float)(T_new[i, j, k] -
+                                            _htParams.SubgridCoolingBias * (T_new[i, j, k] - minNeighbor));
+                }
+            }
+        }
 
         // Copy interior points
         for (int i = 0; i < nx; i++)
@@ -231,6 +267,15 @@ public class HeatTransferParameters
     /// <summary>Specific heat J/(kg·K)</summary>
     public double SpecificHeat { get; set; } = 1000.0;
 
+    /// <summary>Multiplier for effective thermal diffusivity (accounts for sub-grid convection)</summary>
+    public double DiffusivityMultiplier { get; set; } = 1e6;
+
+    /// <summary>Sub-grid thermal mixing factor (0-1) for coarse grids</summary>
+    public double SubgridMixingFactor { get; set; } = 0.1;
+
+    /// <summary>Extra bias toward cooler neighbors to model exchanger influence (0-1)</summary>
+    public double SubgridCoolingBias { get; set; } = 0.2;
+
     /// <summary>Optional heat source function Q(i,j,k,t) in W/m³</summary>
     public Func<int, int, int, double, double> HeatSourceFunction { get; set; }
 }
@@ -306,7 +351,6 @@ public class FlowSolver
         double rho_g = _mpParams.GasDensity;       // kg/m³
         double mu_w = _mpParams.WaterViscosity;    // Pa·s
         double mu_g = _mpParams.GasViscosity;      // Pa·s
-        double g = 9.81; // m/s²
 
         // Store old saturations for transport calculation
         var S_g_old = (float[,,])state.GasSaturation.Clone();
@@ -355,23 +399,20 @@ public class FlowSolver
             // Gas phase mobility
             double lambda_g = k_perm * kr_g / mu_g;
 
-            // CRITICAL FIX: Gas phase velocity includes buoyancy!
-            // Gas is lighter than water, so it experiences upward buoyancy force
-            double buoyancy_z = (rho_w - rho_g) * g; // Positive = upward for gas
-
-            // Gas pressure is water pressure minus capillary pressure
-            // P_g = P_w - Pc (where Pc > 0 for water-wet media)
+            double gasForceScale = rho_g / rho_w;
 
             // Water Darcy velocity
-            double v_w_x = -lambda_w * (dP_dx - Fx / rho_w);
-            double v_w_y = -lambda_w * (dP_dy - Fy / rho_w);
-            double v_w_z = -lambda_w * (dP_dz - (Fz - rho_w * g) / rho_w);
+            double v_w_x = -lambda_w * (dP_dx + Fx);
+            double v_w_y = -lambda_w * (dP_dy + Fy);
+            double v_w_z = -lambda_w * (dP_dz + Fz);
 
-            // Gas Darcy velocity with buoyancy
-            // The gas experiences: -∇P_g - ρ_g·g = -∇(P_w - Pc) - ρ_g·g
-            double v_g_x = -lambda_g * (dP_dx - Fx / rho_g);
-            double v_g_y = -lambda_g * (dP_dy - Fy / rho_g);
-            double v_g_z = -lambda_g * (dP_dz - (Fz - rho_g * g) / rho_g + buoyancy_z / rho_g);
+            // Gas Darcy velocity with buoyancy (scaled body force)
+            double v_g_x = -lambda_g * (dP_dx + Fx * gasForceScale);
+            double v_g_y = -lambda_g * (dP_dy + Fy * gasForceScale);
+            double v_g_z = -lambda_g * (dP_dz + Fz * gasForceScale);
+
+            double buoyancySign = Fz == 0 ? -1.0 : Math.Sign(Fz);
+            v_g_z += _mpParams.GasBuoyancyVelocity * buoyancySign;
 
             // Total velocity (for reporting)
             double totalSat = S_w + S_g + S_v;
@@ -434,6 +475,21 @@ public class FlowSolver
 
             S_g_new[i, j, k] = (float)Math.Max(0.0, Math.Min(1.0,
                 state.GasSaturation[i, j, k] + dS_g));
+        }
+
+        // Explicit buoyant rise adjustment (ensures upward migration within coarse grids)
+        double riseFraction = Math.Min(1.0, Math.Abs(_mpParams.GasBuoyancyVelocity) * dt / dz);
+        if (riseFraction > 0.0)
+        {
+            for (int i = 1; i < nx - 1; i++)
+            for (int j = 1; j < ny - 1; j++)
+            for (int k = 1; k < nz; k++)
+            {
+                double rise = S_g_new[i, j, k] * riseFraction;
+                if (rise <= 0.0) continue;
+                S_g_new[i, j, k] -= (float)rise;
+                S_g_new[i, j, k - 1] += (float)rise;
+            }
         }
 
         // Copy boundaries (zero-flux or fixed BC)
@@ -699,6 +755,9 @@ public class MultiphaseFlowParameters
 
     /// <summary>Gas compressibility (1/Pa)</summary>
     public double GasCompressibility { get; set; } = 1e-5;
+
+    /// <summary>Additional buoyant rise velocity for gas phase (m/s)</summary>
+    public double GasBuoyancyVelocity { get; set; } = 20.0;
 }
 
 /// <summary>

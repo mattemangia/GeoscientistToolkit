@@ -26,6 +26,10 @@ public class GeothermalConfigDialog : Dialog
     private readonly SpinButton _timeStepInput;
     private readonly CheckButton _multiphaseCheckbox;
     private readonly CheckButton _reactiveTransportCheckbox;
+    private readonly SpinButton _heatDiffusivityMultiplierInput;
+    private readonly SpinButton _heatSubgridMixingInput;
+    private readonly SpinButton _heatSubgridCoolingInput;
+    private readonly SpinButton _gasBuoyancyVelocityInput;
 
     // Deep wells specific
     private readonly SpinButton _numberOfZonesInput;
@@ -60,6 +64,10 @@ public class GeothermalConfigDialog : Dialog
         _timeStepInput = new SpinButton(0.001, 1, 0.01) { Value = 0.1 }; // days
         _multiphaseCheckbox = new CheckButton("Enable multiphase flow (water-steam)") { Active = false };
         _reactiveTransportCheckbox = new CheckButton("Enable reactive transport") { Active = false };
+        _heatDiffusivityMultiplierInput = new SpinButton(1, 1e8, 1000) { Value = 1e6 };
+        _heatSubgridMixingInput = new SpinButton(0, 1, 0.01) { Value = 0.1 };
+        _heatSubgridCoolingInput = new SpinButton(0, 1, 0.01) { Value = 0.2 };
+        _gasBuoyancyVelocityInput = new SpinButton(0, 100, 0.1) { Value = 20.0 };
         _numberOfZonesInput = new SpinButton(1, 100, 1) { Value = 10 };
         _heatExchangerTypeSelector = new ComboBoxText();
         _rockTypeEntry = new Entry { PlaceholderText = "e.g., Granite, Sandstone" };
@@ -194,6 +202,18 @@ public class GeothermalConfigDialog : Dialog
 
         simGrid.Attach(_multiphaseCheckbox, 0, row++, 2, 1);
         simGrid.Attach(_reactiveTransportCheckbox, 0, row++, 2, 1);
+
+        simGrid.Attach(new Label("Heat Diffusivity Multiplier:") { Xalign = 0 }, 0, row, 1, 1);
+        simGrid.Attach(_heatDiffusivityMultiplierInput, 1, row++, 1, 1);
+
+        simGrid.Attach(new Label("Subgrid Mixing Factor:") { Xalign = 0 }, 0, row, 1, 1);
+        simGrid.Attach(_heatSubgridMixingInput, 1, row++, 1, 1);
+
+        simGrid.Attach(new Label("Subgrid Cooling Bias:") { Xalign = 0 }, 0, row, 1, 1);
+        simGrid.Attach(_heatSubgridCoolingInput, 1, row++, 1, 1);
+
+        simGrid.Attach(new Label("Gas Buoyancy Velocity (m/s):") { Xalign = 0 }, 0, row, 1, 1);
+        simGrid.Attach(_gasBuoyancyVelocityInput, 1, row++, 1, 1);
 
         simFrame.Add(simGrid);
         contentBox.PackStart(simFrame, false, false, 0);
@@ -421,6 +441,10 @@ public class GeothermalConfigDialog : Dialog
         dataset.SimulationParams.EnableFlow = true;
         dataset.SimulationParams.EnableHeatTransfer = true;
         dataset.SimulationParams.EnableReactiveTransport = _reactiveTransportCheckbox.Active;
+        dataset.SimulationParams.HeatDiffusivityMultiplier = _heatDiffusivityMultiplierInput.Value;
+        dataset.SimulationParams.HeatSubgridMixingFactor = _heatSubgridMixingInput.Value;
+        dataset.SimulationParams.HeatSubgridCoolingBias = _heatSubgridCoolingInput.Value;
+        dataset.SimulationParams.GasBuoyancyVelocity = _gasBuoyancyVelocityInput.Value;
 
         dataset.EnableBTESMode = _btesModeCheckbox.Active;
         if (dataset.EnableBTESMode)
@@ -451,6 +475,10 @@ public class GeothermalConfigDialog : Dialog
         _timeStepInput.Value = _existingDataset.SimulationParams.TimeStep / 86400;
         _reactiveTransportCheckbox.Active = _existingDataset.SimulationParams.EnableReactiveTransport;
         _multiphaseCheckbox.Active = _existingDataset.SimulationParams.EnableMultiphaseFlow;
+        _heatDiffusivityMultiplierInput.Value = _existingDataset.SimulationParams.HeatDiffusivityMultiplier;
+        _heatSubgridMixingInput.Value = _existingDataset.SimulationParams.HeatSubgridMixingFactor;
+        _heatSubgridCoolingInput.Value = _existingDataset.SimulationParams.HeatSubgridCoolingBias;
+        _gasBuoyancyVelocityInput.Value = _existingDataset.SimulationParams.GasBuoyancyVelocity;
 
         if (_existingDataset.Materials.Any())
         {
