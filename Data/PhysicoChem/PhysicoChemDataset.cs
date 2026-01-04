@@ -398,7 +398,11 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
             ConvergenceTolerance = SimulationParams.ConvergenceTolerance,
             MaxIterations = SimulationParams.MaxIterations,
             UseGPU = SimulationParams.UseGPU,
-            SolverType = SimulationParams.SolverType
+            SolverType = SimulationParams.SolverType,
+            HeatDiffusivityMultiplier = SimulationParams.HeatDiffusivityMultiplier,
+            HeatSubgridMixingFactor = SimulationParams.HeatSubgridMixingFactor,
+            HeatSubgridCoolingBias = SimulationParams.HeatSubgridCoolingBias,
+            GasBuoyancyVelocity = SimulationParams.GasBuoyancyVelocity
         };
 
         dto.Mesh = Mesh;
@@ -522,6 +526,10 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
         SimulationParams.MaxIterations = dto.SimulationParams.MaxIterations;
         SimulationParams.UseGPU = dto.SimulationParams.UseGPU;
         SimulationParams.SolverType = dto.SimulationParams.SolverType;
+        SimulationParams.HeatDiffusivityMultiplier = dto.SimulationParams.HeatDiffusivityMultiplier;
+        SimulationParams.HeatSubgridMixingFactor = dto.SimulationParams.HeatSubgridMixingFactor;
+        SimulationParams.HeatSubgridCoolingBias = dto.SimulationParams.HeatSubgridCoolingBias;
+        SimulationParams.GasBuoyancyVelocity = dto.SimulationParams.GasBuoyancyVelocity;
 
         Mesh = dto.Mesh;
 
@@ -634,6 +642,20 @@ public class SimulationParameters
 
     [JsonProperty]
     public string CapillaryPressureModel { get; set; } = "VanGenuchten"; // VanGenuchten, BrooksCorey, Linear, Leverett
+
+    // ==================== COARSE-GRID HEAT/BUOYANCY TUNING ====================
+
+    [JsonProperty]
+    public double HeatDiffusivityMultiplier { get; set; } = 1e6;
+
+    [JsonProperty]
+    public double HeatSubgridMixingFactor { get; set; } = 0.1;
+
+    [JsonProperty]
+    public double HeatSubgridCoolingBias { get; set; } = 0.2;
+
+    [JsonProperty]
+    public double GasBuoyancyVelocity { get; set; } = 20.0;
 }
 
 /// <summary>

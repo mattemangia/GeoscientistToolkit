@@ -1041,6 +1041,10 @@ public class PhysicoChemTools : IDatasetTools
         float timeStep = (float)simParams.TimeStep;
         float outputInterval = (float)simParams.OutputInterval;
         float convergenceTolerance = (float)simParams.ConvergenceTolerance;
+        float heatDiffusivityMultiplier = (float)simParams.HeatDiffusivityMultiplier;
+        float heatSubgridMixingFactor = (float)simParams.HeatSubgridMixingFactor;
+        float heatSubgridCoolingBias = (float)simParams.HeatSubgridCoolingBias;
+        float gasBuoyancyVelocity = (float)simParams.GasBuoyancyVelocity;
 
         if (ImGui.DragFloat("Total Time (s)", ref totalTime, 10.0f, 1.0f, 1e6f))
             simParams.TotalTime = totalTime;
@@ -1082,6 +1086,24 @@ public class PhysicoChemTools : IDatasetTools
 
         if (ImGui.InputInt("Max Iterations", ref maxIterations))
             simParams.MaxIterations = maxIterations;
+
+        ImGui.Separator();
+        ImGui.Text("Heat Transfer Tuning");
+
+        if (ImGui.InputFloat("Diffusivity Multiplier", ref heatDiffusivityMultiplier, 0, 0, "%.2e"))
+            simParams.HeatDiffusivityMultiplier = Math.Max(0.0, heatDiffusivityMultiplier);
+
+        if (ImGui.DragFloat("Subgrid Mixing Factor", ref heatSubgridMixingFactor, 0.01f, 0.0f, 1.0f))
+            simParams.HeatSubgridMixingFactor = Math.Clamp(heatSubgridMixingFactor, 0.0f, 1.0f);
+
+        if (ImGui.DragFloat("Subgrid Cooling Bias", ref heatSubgridCoolingBias, 0.01f, 0.0f, 1.0f))
+            simParams.HeatSubgridCoolingBias = Math.Clamp(heatSubgridCoolingBias, 0.0f, 1.0f);
+
+        ImGui.Separator();
+        ImGui.Text("Multiphase Gas Tuning");
+
+        if (ImGui.InputFloat("Gas Buoyancy Velocity (m/s)", ref gasBuoyancyVelocity, 0, 0, "%.3f"))
+            simParams.GasBuoyancyVelocity = Math.Max(0.0, gasBuoyancyVelocity);
     }
 
     private void DrawSimulationControls(PhysicoChemDataset dataset)

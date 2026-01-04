@@ -529,6 +529,10 @@ public class SimulationParametersDTO
     public int MaxIterations { get; set; }
     public bool UseGPU { get; set; }
     public string SolverType { get; set; }
+    public double HeatDiffusivityMultiplier { get; set; }
+    public double HeatSubgridMixingFactor { get; set; }
+    public double HeatSubgridCoolingBias { get; set; }
+    public double GasBuoyancyVelocity { get; set; }
 }
 
 public class ParameterSweepConfigDTO

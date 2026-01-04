@@ -96,6 +96,11 @@ public class PhysicoChemSolver : SimulatorNodeSupport
             _heatTransfer.HeatParams.GridSpacing = gridSpacing;
         }
 
+        _heatTransfer.HeatParams.DiffusivityMultiplier = simParams.HeatDiffusivityMultiplier;
+        _heatTransfer.HeatParams.SubgridMixingFactor = simParams.HeatSubgridMixingFactor;
+        _heatTransfer.HeatParams.SubgridCoolingBias = simParams.HeatSubgridCoolingBias;
+        _flowSolver.MultiphaseParams.GasBuoyancyVelocity = simParams.GasBuoyancyVelocity;
+
         // Initialize tracking if enabled
         if (simParams.EnableTracking && _dataset.TrackingManager != null)
         {
