@@ -452,9 +452,10 @@ public class FlowSolver
         for (int i = 0; i < nx; i++)
         for (int j = 0; j < ny; j++)
         {
-            // Bottom: can inject gas, top: gas can escape
-            S_g_new[i, j, 0] = S_g_new[i, j, 1];
-            S_g_new[i, j, nz - 1] = 0.0f; // Gas escapes at top
+            // In this coordinate system, k=0 is surface (top), k=nz-1 is bottom (deep)
+            // Gas rises toward surface (low k) due to buoyancy and can escape there
+            S_g_new[i, j, 0] = 0.0f; // Gas escapes at surface (top)
+            S_g_new[i, j, nz - 1] = S_g_new[i, j, nz - 2]; // Zero-gradient at bottom
         }
 
         // Apply boundary conditions for gas
