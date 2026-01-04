@@ -830,7 +830,7 @@ namespace GeoscientistToolkit.Data.PhysicoChem
                 InletTemperature = 266,
                 OutletTemperature = 310,
                 Pressure = 10.0,
-                MassFlowRate = 7600
+                MassFlowRate = 9100 // Adjusted to match thermal power: 2064 MW / (5200 J/kg·K × 44 K)
             };
 
             InitializeFuelAssemblies(1, 380, 37, 0.71); // Natural uranium
