@@ -79,6 +79,23 @@ public class PhysicoChemSolver : SimulatorNodeSupport
         int step = 0;
         int outputStep = 0;
 
+        // Configure flow solver with mesh parameters
+        if (_dataset.GeneratedMesh != null)
+        {
+            var spacing = _dataset.GeneratedMesh.Spacing;
+            double gridSpacing = Math.Min(spacing.X, Math.Min(spacing.Y, spacing.Z));
+
+            // Configure flow solver
+            _flowSolver.MultiphaseParams.GridSpacing = gridSpacing;
+            _flowSolver.MultiphaseParams.ResidualLiquidSaturation = simParams.ResidualLiquidSaturation;
+            _flowSolver.MultiphaseParams.ResidualGasSaturation = simParams.ResidualGasSaturation;
+            _flowSolver.MultiphaseParams.VanGenuchten_m = simParams.VanGenuchten_m;
+            _flowSolver.MultiphaseParams.VanGenuchten_alpha = simParams.VanGenuchten_alpha;
+
+            // Configure heat transfer solver
+            _heatTransfer.HeatParams.GridSpacing = gridSpacing;
+        }
+
         // Initialize tracking if enabled
         if (simParams.EnableTracking && _dataset.TrackingManager != null)
         {

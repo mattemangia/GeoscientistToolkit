@@ -1860,9 +1860,19 @@ public class MainGtkWindow : Gtk.Window
 
         if (response == ResponseType.Ok && dialog.CreatedObject != null)
         {
-            physico.Mesh.EmbedObject(dialog.CreatedObject);
-            _meshViewport.QueueDraw();
-            SetStatus($"Added reactor object: {dialog.CreatedObject.Name} ({dialog.CreatedObject.Type})");
+            // Use validated embedding - heat exchangers must contact surface
+            if (physico.Mesh.TryEmbedObject(dialog.CreatedObject, out string errorMessage))
+            {
+                _meshViewport.QueueDraw();
+                SetStatus($"Added reactor object: {dialog.CreatedObject.Name} ({dialog.CreatedObject.Type})");
+            }
+            else
+            {
+                var errorDialog = new MessageDialog(this, DialogFlags.Modal, MessageType.Error, ButtonsType.Ok,
+                    $"Cannot place heat exchanger:\n\n{errorMessage}");
+                errorDialog.Run();
+                errorDialog.Destroy();
+            }
         }
     }
 
