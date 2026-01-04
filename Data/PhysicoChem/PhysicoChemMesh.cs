@@ -65,7 +65,7 @@ namespace GeoscientistToolkit.Data.PhysicoChem
     {
         public string Name { get; set; }
         public string MaterialID { get; set; }
-        public string Type { get; set; } // "HeatExchanger", "Baffle", "Obstacle", "Condenser", "Evaporator", "Turbine", "Pump"
+        public string Type { get; set; } // "HeatExchanger", "Baffle", "Obstacle", "Condenser", "Evaporator", "Turbine", "Pump", "NuclearCore", "FuelAssembly", "ControlRod", "Moderator"
 
         // Simplified Geometry (Box or Cylinder for now)
         public (double X, double Y, double Z) Center { get; set; }
@@ -76,6 +76,9 @@ namespace GeoscientistToolkit.Data.PhysicoChem
 
         // ORC-specific parameters
         public ORCComponentParameters? ORCParams { get; set; }
+
+        // Nuclear reactor parameters (for NuclearCore, FuelAssembly, ControlRod, Moderator types)
+        public NuclearReactorParameters? NuclearParams { get; set; }
 
         public bool IsPointInside(double x, double y, double z)
         {
@@ -265,6 +268,50 @@ namespace GeoscientistToolkit.Data.PhysicoChem
                     }
                 }
             }
+        }
+
+        /// <summary>
+        ///     Embeds a nuclear reactor core into the mesh using thermodynamic reactor builder pattern.
+        /// </summary>
+        /// <param name="nuclearParams">Nuclear reactor configuration</param>
+        /// <param name="center">Center position of the reactor core</param>
+        /// <returns>The created ReactorObject representing the nuclear core</returns>
+        public ReactorObject EmbedNuclearReactor(NuclearReactorParameters nuclearParams, (double X, double Y, double Z) center)
+        {
+            var coreObject = new ReactorObject
+            {
+                Name = $"NuclearCore_{nuclearParams.ReactorType}",
+                MaterialID = "NuclearFuel",
+                Type = "NuclearCore",
+                Center = center,
+                IsCylinder = true,
+                Radius = nuclearParams.CoreDiameter / 2,
+                Height = nuclearParams.CoreHeight,
+                NuclearParams = nuclearParams
+            };
+
+            EmbedObject(coreObject);
+            return coreObject;
+        }
+
+        /// <summary>
+        ///     Gets all nuclear reactor objects from the mesh.
+        /// </summary>
+        public IEnumerable<ReactorObject> GetNuclearReactorObjects()
+        {
+            return ReactorObjects.Where(obj => obj.NuclearParams != null ||
+                obj.Type == "NuclearCore" || obj.Type == "FuelAssembly" ||
+                obj.Type == "ControlRod" || obj.Type == "Moderator");
+        }
+
+        /// <summary>
+        ///     Gets all ORC (Organic Rankine Cycle) objects from the mesh.
+        /// </summary>
+        public IEnumerable<ReactorObject> GetORCObjects()
+        {
+            return ReactorObjects.Where(obj => obj.ORCParams != null ||
+                obj.Type == "Condenser" || obj.Type == "Evaporator" ||
+                obj.Type == "Turbine" || obj.Type == "Pump");
         }
 
         /// <summary>
