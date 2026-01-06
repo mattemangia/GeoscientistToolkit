@@ -182,18 +182,62 @@ public class FluidGeothermalVisualizationRenderer : IDisposable
         if (_showVelocityVectors && results.FluidVelocityX != null)
             DrawVelocityVectors(canvas, results, z, imageW, imageH, w, h);
 
-        // Copy to ImGui
-        using var image = surface.Snapshot();
-        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
-        var bytes = data.ToArray();
+        // Render the SkiaSharp bitmap directly to ImGui using AddImage with pixel data
+        // Since ImGui doesn't directly support SkiaSharp textures, we render pixel-by-pixel
+        // to the ImGui draw list for immediate mode rendering
 
-        // This is a simplified version - in production you'd use ImGui texture upload
-        // For now, just show a placeholder with info
         var displayPos = new Vector2(canvasPos.X + (canvasSize.X - imageW) / 2,
             canvasPos.Y + (canvasSize.Y - imageH) / 2);
 
-        drawList.AddText(displayPos, ImGui.GetColorU32(new Vector4(1, 1, 1, 1)),
-            $"Field visualization would be displayed here\n{imageW}x{imageH} pixels");
+        // Read pixels from surface and draw directly
+        using var pixmap = surface.PeekPixels();
+        if (pixmap != null)
+        {
+            var pixels = pixmap.GetPixelSpan();
+            int stride = pixmap.RowBytes;
+
+            // Draw the visualization using colored rectangles for each data cell
+            // This is more efficient than pixel-by-pixel for field data
+            var cellW = (float)imageW / w;
+            var cellH = (float)imageH / h;
+
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    // Sample the center of each cell from the rendered image
+                    int px = (int)(x * cellW + cellW / 2);
+                    int py = (int)(y * cellH + cellH / 2);
+                    px = Math.Clamp(px, 0, imageW - 1);
+                    py = Math.Clamp(py, 0, imageH - 1);
+
+                    int pixelOffset = py * stride + px * 4;
+                    if (pixelOffset + 3 < pixels.Length)
+                    {
+                        byte b = pixels[pixelOffset];
+                        byte g = pixels[pixelOffset + 1];
+                        byte r = pixels[pixelOffset + 2];
+                        byte a = pixels[pixelOffset + 3];
+
+                        if (a > 10) // Skip mostly transparent pixels
+                        {
+                            uint color = (uint)((a << 24) | (b << 16) | (g << 8) | r);
+                            var cellPos = new Vector2(displayPos.X + x * cellW, displayPos.Y + y * cellH);
+                            drawList.AddRectFilled(cellPos, cellPos + new Vector2(cellW + 1, cellH + 1), color);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Draw border around the visualization
+        drawList.AddRect(displayPos, displayPos + new Vector2(imageW, imageH),
+            ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 1.0f)));
+
+        // Draw info text
+        var infoText = $"Slice Z={_selectedSliceZ} | {w}x{h} cells";
+        drawList.AddText(new Vector2(displayPos.X, displayPos.Y + imageH + 5),
+            ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.8f, 1.0f)), infoText);
     }
 
     private void DrawPressureField(SKCanvas canvas, float[,,] pressure, byte[,,] labels, int z,

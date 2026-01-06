@@ -95,7 +95,7 @@ public class AcceleratedProcessor : IDisposable
                 {
                     AccelerationType.GPU when _gpuAvailable => LabelComponents3DGpu(mask, cancellationToken),
                     AccelerationType.SIMD when Vector.IsHardwareAccelerated => LabelComponents3DParallel(mask,
-                        cancellationToken), // Placeholder
+                        cancellationToken),
                     _ => LabelComponents3DParallel(mask, cancellationToken)
                 };
             else
