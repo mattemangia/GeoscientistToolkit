@@ -600,12 +600,6 @@ public class DualPNMGeneratorTool
     {
         var imageDataset = semInfo.ImageDataset;
 
-        // For now, create a placeholder micro-network
-        // In a full implementation, this would:
-        // 1. Segment the SEM image
-        // 2. Extract pore network from segmentation
-        // 3. Calculate micro-scale properties
-
         var microNet = new MicroPoreNetwork
         {
             MacroPoreID = semInfo.MacroPoreID,
@@ -613,8 +607,6 @@ public class DualPNMGeneratorTool
             SEMImagePath = imageDataset.FilePath,
             SEMImagePosition = Vector2.Zero
         };
-
-        // Implement threshold-based PNM extraction from SEM image
 
         // 1. Get pixel data
         byte[] pixels = imageDataset.ImageData;
@@ -633,16 +625,14 @@ public class DualPNMGeneratorTool
 
         int width = imageDataset.Width;
         int height = imageDataset.Height;
+        float pixelSizeUM = imageDataset.PixelSize > 0 ? imageDataset.PixelSize : 1.0f;
 
-        // 2. Thresholding (Simple heuristic: Darker = Pore, Lighter = Solid)
-        // Assume grayscale or use luminance
-        // Calculate Otsu's threshold or use fixed value for now
-        float threshold = 100f; // Typical for pores in SEM
+        // 2. Calculate Otsu's threshold for automatic binarization
+        float threshold = CalculateOtsuThreshold(pixels, width, height);
 
         var poreMap = new bool[width, height];
         int porePixelCount = 0;
 
-        // Process only a subset if image is huge to save time, or full image
         for(int y=0; y<height; y++)
         {
             for(int x=0; x<width; x++)
@@ -658,10 +648,15 @@ public class DualPNMGeneratorTool
             }
         }
 
+        // Calculate actual porosity from image
+        int totalPixels = width * height;
+        float imagePorosity = (float)porePixelCount / totalPixels;
+
         // 3. Grid-based node generation
-        // Place nodes in pore centers
-        int gridSize = 20; // Sampling grid size in pixels
+        int gridSize = Math.Max(10, Math.Min(width, height) / 50); // Adaptive grid size
         int nodeId = 0;
+        float totalPoreRadiusSum = 0;
+        int poreCount = 0;
 
         for(int y=gridSize/2; y<height; y+=gridSize)
         {
@@ -670,53 +665,141 @@ public class DualPNMGeneratorTool
                 // Check if this block has enough pore pixels
                 if (poreMap[x, y])
                 {
-                    // Create a pore node
-                    // Estimate radius based on local clearance
+                    // Estimate radius based on local clearance using distance transform approximation
                     float radius = CalculateLocalPoreRadius(poreMap, x, y, width, height, maxSearch: gridSize);
 
-                    float pixelSizeUM = imageDataset.PixelSize > 0 ? imageDataset.PixelSize : 1.0f;
-
-                    microNet.MicroPores.Add(new Pore
+                    if (radius > 0.5f) // Minimum 0.5 pixel radius
                     {
-                        ID = nodeId++,
-                        Position = new Vector3(x * pixelSizeUM, y * pixelSizeUM, 0), // 2D position in micro coordinates
-                        Radius = radius * pixelSizeUM,
-                        Area = MathF.PI * (radius * pixelSizeUM) * (radius * pixelSizeUM),
-                        VolumeVoxels = radius * radius * radius, // Simplified sphere approx
-                        VolumePhysical = (4f/3f) * MathF.PI * MathF.Pow(radius * pixelSizeUM, 3),
-                        Connections = 0
-                    });
+                        microNet.MicroPores.Add(new Pore
+                        {
+                            ID = nodeId++,
+                            Position = new Vector3(x * pixelSizeUM, y * pixelSizeUM, 0),
+                            Radius = radius * pixelSizeUM,
+                            Area = MathF.PI * (radius * pixelSizeUM) * (radius * pixelSizeUM),
+                            VolumeVoxels = radius * radius * radius,
+                            VolumePhysical = (4f/3f) * MathF.PI * MathF.Pow(radius * pixelSizeUM, 3),
+                            Connections = 0
+                        });
+
+                        totalPoreRadiusSum += radius * pixelSizeUM;
+                        poreCount++;
+                    }
                 }
             }
         }
 
-        // 4. Link nodes (Simple distance-based connectivity)
-        // In a real extraction, we would check if the path is clear of solid pixels
-        // Here we use a proximity heuristic
-        float maxLinkDist = gridSize * 1.5f * (imageDataset.PixelSize > 0 ? imageDataset.PixelSize : 1.0f);
+        // 4. Link nodes and calculate coordination number
+        float maxLinkDist = gridSize * 1.5f * pixelSizeUM;
+        int totalConnections = 0;
 
         foreach(var pore in microNet.MicroPores)
         {
-            // Find neighbors
             var neighbors = microNet.MicroPores
                 .Where(p => p.ID != pore.ID && Vector3.Distance(p.Position, pore.Position) < maxLinkDist)
                 .ToList();
 
             pore.Connections = neighbors.Count;
-            // Note: We don't store explicit throat objects in this simplified micro-model structure,
-            // but the connectivity count is used for permeability estimation.
+            totalConnections += neighbors.Count;
         }
 
-        // Calculate micro-network properties
+        float avgCoordinationNumber = poreCount > 0 ? (float)totalConnections / (2 * poreCount) : 0;
+        float meanPoreRadius = poreCount > 0 ? totalPoreRadiusSum / poreCount : 1.0f;
+
+        // 5. Calculate micro-network properties from actual image data
         microNet.MicroVolume = microNet.MicroPores.Sum(p => p.VolumePhysical);
         microNet.MicroSurfaceArea = microNet.MicroPores.Sum(p => p.Area);
-        microNet.MicroPorosity = 0.15f; // Placeholder
-        microNet.MicroPermeability = 0.1f; // Placeholder (mD)
+
+        // Porosity: use the actual image-derived porosity
+        microNet.MicroPorosity = imagePorosity;
+
+        // Permeability estimation using Kozeny-Carman equation:
+        // k = (φ³ × d²) / (180 × (1-φ)²)
+        // where φ = porosity, d = characteristic pore diameter
+        // Result in m², convert to mD (1 mD = 9.869233e-16 m²)
+        float phi = imagePorosity;
+        float d = 2 * meanPoreRadius * 1e-6f; // Convert µm to m
+
+        if (phi > 0.01f && phi < 0.99f)
+        {
+            float k_m2 = (phi * phi * phi * d * d) / (180 * (1 - phi) * (1 - phi));
+            // Apply tortuosity correction factor based on coordination number
+            float tortuosityFactor = avgCoordinationNumber > 0 ? 1.0f / (1.0f + 1.0f / avgCoordinationNumber) : 0.5f;
+            k_m2 *= tortuosityFactor;
+
+            // Convert to millidarcy (1 mD = 9.869233e-16 m²)
+            microNet.MicroPermeability = k_m2 / 9.869233e-16f;
+        }
+        else
+        {
+            // Edge cases: very low or very high porosity
+            microNet.MicroPermeability = phi > 0.5f ? 100.0f : 0.001f;
+        }
+
+        // Clamp to reasonable range for micro-porosity (0.0001 - 100 mD)
+        microNet.MicroPermeability = Math.Clamp(microNet.MicroPermeability, 0.0001f, 100.0f);
 
         Logger.Log($"Generated micro-network for macro-pore {semInfo.MacroPoreID}: " +
-                  $"{microNet.MicroPores.Count} pores, {microNet.MicroPermeability:F3} mD");
+                  $"{microNet.MicroPores.Count} pores, porosity={microNet.MicroPorosity:P1}, " +
+                  $"mean radius={meanPoreRadius:F2} µm, k={microNet.MicroPermeability:F4} mD");
 
         return microNet;
+    }
+
+    /// <summary>
+    /// Calculates Otsu's threshold for automatic image binarization.
+    /// </summary>
+    private float CalculateOtsuThreshold(byte[] pixels, int width, int height)
+    {
+        // Build histogram
+        int[] histogram = new int[256];
+        int totalPixels = width * height;
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int idx = (y * width + x) * 4;
+                int lum = (int)(0.299f * pixels[idx] + 0.587f * pixels[idx + 1] + 0.114f * pixels[idx + 2]);
+                lum = Math.Clamp(lum, 0, 255);
+                histogram[lum]++;
+            }
+        }
+
+        // Calculate total sum
+        float sum = 0;
+        for (int i = 0; i < 256; i++)
+            sum += i * histogram[i];
+
+        float sumB = 0;
+        int wB = 0;
+        int wF = 0;
+
+        float maxVariance = 0;
+        float threshold = 0;
+
+        for (int t = 0; t < 256; t++)
+        {
+            wB += histogram[t];
+            if (wB == 0) continue;
+
+            wF = totalPixels - wB;
+            if (wF == 0) break;
+
+            sumB += t * histogram[t];
+
+            float mB = sumB / wB;
+            float mF = (sum - sumB) / wF;
+
+            float variance = (float)wB * wF * (mB - mF) * (mB - mF);
+
+            if (variance > maxVariance)
+            {
+                maxVariance = variance;
+                threshold = t;
+            }
+        }
+
+        return threshold;
     }
 
     private void DrawCouplingConfigurationUI(ProjectManager projectManager)

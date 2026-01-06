@@ -274,7 +274,7 @@ namespace GeoscientistToolkit.GTK.Dialogs
             planeBox.PackStart(planeFrame, false, false, 0);
             stack.AddNamed(planeBox, "plane");
 
-            // Empty placeholder
+            // Default state when no probe is selected
             stack.AddNamed(new Label("Select a probe to edit"), "empty");
             stack.VisibleChildName = "empty";
 

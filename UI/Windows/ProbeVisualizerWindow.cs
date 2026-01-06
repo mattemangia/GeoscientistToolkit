@@ -57,6 +57,11 @@ namespace GeoscientistToolkit.UI.Windows
         private string? _exportProbeId;
         private bool _exportingImage = false;
 
+        // Rename dialog
+        private bool _showRenameDialog = false;
+        private string? _renameProbeId;
+        private string _renameNewName = "";
+
         // Mesh bounds for coordinate mapping
         private Vector3 _meshMin = new(-5, -5, -5);
         private Vector3 _meshMax = new(5, 5, 5);
@@ -142,6 +147,60 @@ namespace GeoscientistToolkit.UI.Windows
                     PerformExport(_exportDialog.SelectedPath);
                     _exportDialog = null;
                 }
+            }
+
+            // Handle rename dialog
+            DrawRenameDialog();
+        }
+
+        private void DrawRenameDialog()
+        {
+            if (!_showRenameDialog) return;
+
+            ImGui.OpenPopup("Rename Probe");
+
+            var center = ImGui.GetMainViewport().GetCenter();
+            ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+
+            if (ImGui.BeginPopupModal("Rename Probe", ref _showRenameDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                var probe = _renameProbeId != null ? _probeManager.GetProbe(_renameProbeId) : null;
+                if (probe != null)
+                {
+                    ImGui.Text("Enter new name for probe:");
+                    ImGui.SetNextItemWidth(250);
+
+                    // Focus on first appearance
+                    if (ImGui.IsWindowAppearing())
+                        ImGui.SetKeyboardFocusHere();
+
+                    bool enterPressed = ImGui.InputText("##RenameInput", ref _renameNewName, 64,
+                        ImGuiInputTextFlags.EnterReturnsTrue);
+
+                    ImGui.Spacing();
+
+                    if (ImGui.Button("OK", new Vector2(120, 0)) || enterPressed)
+                    {
+                        if (!string.IsNullOrWhiteSpace(_renameNewName))
+                        {
+                            probe.Name = _renameNewName;
+                        }
+                        _showRenameDialog = false;
+                        ImGui.CloseCurrentPopup();
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Cancel", new Vector2(120, 0)))
+                    {
+                        _showRenameDialog = false;
+                        ImGui.CloseCurrentPopup();
+                    }
+                }
+                else
+                {
+                    _showRenameDialog = false;
+                    ImGui.CloseCurrentPopup();
+                }
+                ImGui.EndPopup();
             }
         }
 
@@ -313,7 +372,9 @@ namespace GeoscientistToolkit.UI.Windows
             {
                 if (ImGui.MenuItem("Rename"))
                 {
-                    // TODO: Show rename dialog
+                    _renameProbeId = probe.Id;
+                    _renameNewName = probe.Name;
+                    _showRenameDialog = true;
                 }
                 if (ImGui.MenuItem(inChart ? "Remove from Chart" : "Add to Chart"))
                 {

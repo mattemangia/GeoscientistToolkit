@@ -262,14 +262,10 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             _projectionMatrix = Matrix4x4.CreatePerspectiveFieldOfView(
                 MathF.PI / 4.0f, aspectRatio, 0.1f, 1000.0f);
 
-            // Render 3D scene
-            // NOTE: Actual rendering would use Veldrid like other viewers in the project
-            // For now, we show a placeholder
-
+            // Render 3D scene using ImGui draw primitives
             // Create a child window for 3D rendering
             ImGui.BeginChild("3DView", availableSize, ImGuiChildFlags.Border);
 
-            // Draw placeholder text (actual rendering would use Veldrid)
             var drawList = ImGui.GetWindowDrawList();
             var windowPos = ImGui.GetCursorScreenPos();
 
@@ -285,7 +281,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         }
 
         /// <summary>
-        /// Draws the 3D scene (simplified - actual implementation would use Veldrid).
+        /// Draws the 3D scene using ImGui draw primitives with isometric projection.
         /// </summary>
         private void DrawScene(ImDrawListPtr drawList, Vector2 windowPos, Vector2 size)
         {

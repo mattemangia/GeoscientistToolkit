@@ -670,7 +670,7 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
         }
     }
 
-    // Placeholder operations for transformation
+    // Image transformation operations
     public class ResizeOperation : ImageOperationBase
     {
         public override string Name => "RESIZE";

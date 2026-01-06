@@ -91,30 +91,242 @@ public static class LabDataCalibration
     {
         Logger.Log($"[LabDataCalibration] Importing Bruker format from: {filePath}");
 
-        // Bruker format: binary data with parameter files
         var data = new LabNMRData
         {
             SampleName = Path.GetFileNameWithoutExtension(filePath),
             InstrumentType = "Bruker"
         };
 
-        // Read acqus file for parameters
         var directory = Path.GetDirectoryName(filePath);
+        if (string.IsNullOrEmpty(directory))
+            directory = Path.GetDirectoryName(Path.GetFullPath(filePath));
+
+        // Parse acquisition parameters from acqus file
         var acqusFile = Path.Combine(directory, "acqus");
+        double dwellTime = 1.0; // Default dwell time in µs
+        int numPoints = 0;
+        double spectralWidth = 0;
 
         if (File.Exists(acqusFile))
         {
             var acqusLines = File.ReadAllLines(acqusFile);
             foreach (var line in acqusLines)
+            {
                 if (line.StartsWith("##$TE="))
-                    data.Temperature = double.Parse(line.Substring(6)) - 273.15; // K to °C
-            // Parse other parameters as needed
+                {
+                    if (double.TryParse(line.Substring(6).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var temp))
+                        data.Temperature = temp - 273.15; // K to °C
+                }
+                else if (line.StartsWith("##$TD="))
+                {
+                    if (int.TryParse(line.Substring(6).Trim(), out var td))
+                        numPoints = td / 2; // TD is total points (real + imaginary)
+                }
+                else if (line.StartsWith("##$DW="))
+                {
+                    if (double.TryParse(line.Substring(6).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var dw))
+                        dwellTime = dw; // Dwell time in µs
+                }
+                else if (line.StartsWith("##$SW_h="))
+                {
+                    if (double.TryParse(line.Substring(8).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var sw))
+                        spectralWidth = sw;
+                }
+                else if (line.StartsWith("##$PULPROG="))
+                {
+                    data.Metadata["PulseProgram"] = line.Substring(11).Trim().Trim('<', '>');
+                }
+                else if (line.StartsWith("##$NS="))
+                {
+                    data.Metadata["NumScans"] = line.Substring(6).Trim();
+                }
+            }
         }
 
-        // For now, return placeholder - full Bruker parser would be complex
-        Logger.LogWarning("[LabDataCalibration] Bruker format import is simplified - use CSV for full support");
+        // Try to load processed data first (pdata/1/1r for real part)
+        var pdataPath = Path.Combine(directory, "pdata", "1");
+        var proc1rPath = Path.Combine(pdataPath, "1r");
+        var proc1iPath = Path.Combine(pdataPath, "1i");
+
+        if (File.Exists(proc1rPath))
+        {
+            // Read processed spectrum data
+            var (t2Bins, t2Dist) = ReadBrukerProcessedData(pdataPath, proc1rPath);
+            if (t2Bins != null && t2Dist != null)
+            {
+                data.T2Bins = t2Bins;
+                data.T2Distribution = t2Dist;
+                Logger.Log($"[LabDataCalibration] Loaded processed T2 distribution: {t2Bins.Length} bins");
+            }
+        }
+
+        // Try to load raw FID data
+        var fidPath = Path.Combine(directory, "fid");
+        if (!File.Exists(fidPath))
+            fidPath = Path.Combine(directory, "ser"); // Series file for 2D experiments
+
+        if (File.Exists(fidPath))
+        {
+            var (timePoints, magnetization) = ReadBrukerFID(fidPath, numPoints, dwellTime);
+            if (timePoints != null && magnetization != null)
+            {
+                data.TimePoints = timePoints;
+                data.Magnetization = magnetization;
+                Logger.Log($"[LabDataCalibration] Loaded FID data: {timePoints.Length} points");
+            }
+        }
+
+        // Check if we got any data
+        if ((data.TimePoints == null || data.TimePoints.Length == 0) &&
+            (data.T2Bins == null || data.T2Bins.Length == 0))
+        {
+            Logger.LogWarning("[LabDataCalibration] No decay or T2 data found in Bruker dataset");
+        }
+        else
+        {
+            Logger.Log($"[LabDataCalibration] Bruker import complete: {data.TimePoints?.Length ?? 0} decay points, {data.T2Bins?.Length ?? 0} T2 bins");
+        }
 
         return data;
+    }
+
+    /// <summary>
+    ///     Reads Bruker FID (Free Induction Decay) binary data
+    /// </summary>
+    private static (double[]? timePoints, double[]? magnetization) ReadBrukerFID(string fidPath, int numPoints, double dwellTime)
+    {
+        try
+        {
+            var fileBytes = File.ReadAllBytes(fidPath);
+
+            // Bruker FID files are typically 32-bit integers, big-endian
+            // Each complex point has real and imaginary parts
+            var pointsInFile = fileBytes.Length / 4; // 4 bytes per int32
+
+            if (numPoints <= 0 || numPoints > pointsInFile / 2)
+                numPoints = pointsInFile / 2;
+
+            var timePoints = new double[numPoints];
+            var magnetization = new double[numPoints];
+
+            using var ms = new MemoryStream(fileBytes);
+            using var br = new BinaryReader(ms);
+
+            // Detect endianness by checking if first few values are reasonable
+            var testBytes = new byte[4];
+            Array.Copy(fileBytes, 0, testBytes, 0, 4);
+            var littleEndian = BitConverter.ToInt32(testBytes, 0);
+            Array.Reverse(testBytes);
+            var bigEndian = BitConverter.ToInt32(testBytes, 0);
+
+            bool useBigEndian = Math.Abs(bigEndian) < Math.Abs(littleEndian) * 10;
+
+            for (int i = 0; i < numPoints; i++)
+            {
+                // Time in milliseconds
+                timePoints[i] = i * dwellTime / 1000.0;
+
+                // Read real part (skip imaginary for magnitude calculation)
+                var realBytes = br.ReadBytes(4);
+                var imagBytes = br.ReadBytes(4);
+
+                if (useBigEndian)
+                {
+                    Array.Reverse(realBytes);
+                    Array.Reverse(imagBytes);
+                }
+
+                int realPart = BitConverter.ToInt32(realBytes, 0);
+                int imagPart = BitConverter.ToInt32(imagBytes, 0);
+
+                // Calculate magnitude
+                magnetization[i] = Math.Sqrt((double)realPart * realPart + (double)imagPart * imagPart);
+            }
+
+            // Normalize magnetization to 0-1
+            var maxMag = magnetization.Max();
+            if (maxMag > 0)
+                for (int i = 0; i < magnetization.Length; i++)
+                    magnetization[i] /= maxMag;
+
+            return (timePoints, magnetization);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"[LabDataCalibration] Failed to read Bruker FID: {ex.Message}");
+            return (null, null);
+        }
+    }
+
+    /// <summary>
+    ///     Reads Bruker processed spectrum data
+    /// </summary>
+    private static (double[]? t2Bins, double[]? distribution) ReadBrukerProcessedData(string pdataPath, string dataPath)
+    {
+        try
+        {
+            // Read processing parameters
+            var procsPath = Path.Combine(pdataPath, "procs");
+            int si = 1024; // Default size
+            double sf = 1.0; // Spectrometer frequency
+            double offset = 0;
+            double sw = 1000; // Spectral width in Hz
+
+            if (File.Exists(procsPath))
+            {
+                var procsLines = File.ReadAllLines(procsPath);
+                foreach (var line in procsLines)
+                {
+                    if (line.StartsWith("##$SI="))
+                        int.TryParse(line.Substring(6).Trim(), out si);
+                    else if (line.StartsWith("##$SF="))
+                        double.TryParse(line.Substring(6).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out sf);
+                    else if (line.StartsWith("##$OFFSET="))
+                        double.TryParse(line.Substring(10).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out offset);
+                    else if (line.StartsWith("##$SW_p="))
+                        double.TryParse(line.Substring(8).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out sw);
+                }
+            }
+
+            // Read binary spectrum data
+            var fileBytes = File.ReadAllBytes(dataPath);
+            var numPoints = Math.Min(si, fileBytes.Length / 4);
+
+            var t2Bins = new double[numPoints];
+            var distribution = new double[numPoints];
+
+            using var ms = new MemoryStream(fileBytes);
+            using var br = new BinaryReader(ms);
+
+            // For T2 relaxometry, convert frequency axis to T2 time
+            // T2 bins are typically logarithmically spaced
+            double t2Min = 0.1; // ms
+            double t2Max = 10000; // ms
+            double logStep = (Math.Log10(t2Max) - Math.Log10(t2Min)) / (numPoints - 1);
+
+            for (int i = 0; i < numPoints; i++)
+            {
+                // Create logarithmic T2 bins
+                t2Bins[i] = Math.Pow(10, Math.Log10(t2Min) + i * logStep);
+
+                // Read spectrum intensity
+                var bytes = br.ReadBytes(4);
+                distribution[i] = Math.Abs(BitConverter.ToInt32(bytes, 0));
+            }
+
+            // Normalize distribution
+            var maxDist = distribution.Max();
+            if (maxDist > 0)
+                for (int i = 0; i < distribution.Length; i++)
+                    distribution[i] /= maxDist;
+
+            return (t2Bins, distribution);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"[LabDataCalibration] Failed to read processed data: {ex.Message}");
+            return (null, null);
+        }
     }
 
     /// <summary>
