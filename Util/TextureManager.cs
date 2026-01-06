@@ -11,10 +11,27 @@ namespace GeoscientistToolkit.Util;
 /// </summary>
 public class TextureManager : IDisposable
 {
+    /// <summary>
+    ///     Maximum texture dimension supported by most GPUs.
+    ///     Metal (Apple) and most modern GPUs support 16384.
+    ///     This prevents crashes from exceeding GPU limits.
+    /// </summary>
+    public const int MAX_TEXTURE_SIZE = 16384;
+
     private readonly object _lock = new();
     private readonly Dictionary<IntPtr, IntPtr> _textureIdsByContext = new();
     private Texture _texture;
     private TextureView _textureView;
+
+    /// <summary>
+    ///     The actual width of the texture (may differ from original if downsampled)
+    /// </summary>
+    public uint Width => _texture?.Width ?? 0;
+
+    /// <summary>
+    ///     The actual height of the texture (may differ from original if downsampled)
+    /// </summary>
+    public uint Height => _texture?.Height ?? 0;
 
     public bool IsValid => _texture != null && _textureView != null;
 
@@ -47,7 +64,91 @@ public class TextureManager : IDisposable
     }
 
     /// <summary>
-    ///     Creates a texture from raw pixel data
+    ///     Checks if the given dimensions exceed the maximum texture size.
+    /// </summary>
+    public static bool ExceedsMaxSize(uint width, uint height)
+    {
+        return width > MAX_TEXTURE_SIZE || height > MAX_TEXTURE_SIZE;
+    }
+
+    /// <summary>
+    ///     Calculates the scale factor needed to fit dimensions within the maximum texture size.
+    /// </summary>
+    public static float GetDownsampleFactor(uint width, uint height)
+    {
+        if (!ExceedsMaxSize(width, height))
+            return 1.0f;
+
+        return Math.Min(
+            (float)MAX_TEXTURE_SIZE / width,
+            (float)MAX_TEXTURE_SIZE / height
+        );
+    }
+
+    /// <summary>
+    ///     Calculates downsampled dimensions that fit within the maximum texture size.
+    /// </summary>
+    public static (uint newWidth, uint newHeight) GetConstrainedDimensions(uint width, uint height)
+    {
+        if (!ExceedsMaxSize(width, height))
+            return (width, height);
+
+        var scale = GetDownsampleFactor(width, height);
+        return ((uint)(width * scale), (uint)(height * scale));
+    }
+
+    /// <summary>
+    ///     Downsamples RGBA pixel data to fit within the maximum texture size.
+    ///     Uses simple bilinear-like averaging for quality.
+    /// </summary>
+    public static byte[] DownsamplePixelData(byte[] pixelData, uint srcWidth, uint srcHeight,
+        uint dstWidth, uint dstHeight, int bytesPerPixel = 4)
+    {
+        if (srcWidth == dstWidth && srcHeight == dstHeight)
+            return pixelData;
+
+        var result = new byte[dstWidth * dstHeight * bytesPerPixel];
+        var scaleX = (float)srcWidth / dstWidth;
+        var scaleY = (float)srcHeight / dstHeight;
+
+        for (uint y = 0; y < dstHeight; y++)
+        {
+            for (uint x = 0; x < dstWidth; x++)
+            {
+                // Calculate source region to sample from
+                var srcX0 = (int)(x * scaleX);
+                var srcY0 = (int)(y * scaleY);
+                var srcX1 = Math.Min((int)((x + 1) * scaleX), (int)srcWidth);
+                var srcY1 = Math.Min((int)((y + 1) * scaleY), (int)srcHeight);
+
+                // Average all pixels in the source region
+                int[] sums = new int[bytesPerPixel];
+                var count = 0;
+
+                for (var sy = srcY0; sy < srcY1; sy++)
+                {
+                    for (var sx = srcX0; sx < srcX1; sx++)
+                    {
+                        var srcIdx = (sy * (int)srcWidth + sx) * bytesPerPixel;
+                        for (var c = 0; c < bytesPerPixel; c++)
+                            sums[c] += pixelData[srcIdx + c];
+                        count++;
+                    }
+                }
+
+                // Write averaged pixel
+                var dstIdx = (y * dstWidth + x) * (uint)bytesPerPixel;
+                for (var c = 0; c < bytesPerPixel; c++)
+                    result[dstIdx + c] = (byte)(count > 0 ? sums[c] / count : 0);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    ///     Creates a texture from raw pixel data, automatically downsampling if needed
+    ///     to fit within GPU texture size limits.
     /// </summary>
     public static TextureManager CreateFromPixelData(byte[] pixelData, uint width, uint height,
         PixelFormat format = PixelFormat.R8_G8_B8_A8_UNorm)
@@ -68,12 +169,22 @@ public class TextureManager : IDisposable
                 throw new InvalidOperationException("VeldridManager.GraphicsDevice is not initialized");
             }
 
+            // Check if downsampling is needed
+            var (finalWidth, finalHeight) = GetConstrainedDimensions(width, height);
+            var finalPixelData = pixelData;
+
+            if (finalWidth != width || finalHeight != height)
+            {
+                Logger.LogWarning($"[TextureManager] Texture dimensions {width}x{height} exceed maximum {MAX_TEXTURE_SIZE}. Downsampling to {finalWidth}x{finalHeight}.");
+                finalPixelData = DownsamplePixelData(pixelData, width, height, finalWidth, finalHeight);
+            }
+
             manager._texture = factory.CreateTexture(TextureDescription.Texture2D(
-                width, height, 1, 1, format, TextureUsage.Sampled));
+                finalWidth, finalHeight, 1, 1, format, TextureUsage.Sampled));
 
             graphicsDevice.UpdateTexture(
-                manager._texture, pixelData,
-                0, 0, 0, width, height, 1, 0, 0);
+                manager._texture, finalPixelData,
+                0, 0, 0, finalWidth, finalHeight, 1, 0, 0);
 
             manager._textureView = factory.CreateTextureView(manager._texture);
             return manager;
@@ -106,6 +217,7 @@ public class TextureManager : IDisposable
     /// <summary>
     ///     Updates the texture content from raw pixel data.
     ///     Recreates the texture if dimensions change.
+    ///     Automatically downsamples if dimensions exceed GPU limits.
     /// </summary>
     public void UpdateFromPixelData(byte[] pixelData, uint width, uint height, PixelFormat format = PixelFormat.R8_G8_B8_A8_UNorm)
     {
@@ -113,8 +225,18 @@ public class TextureManager : IDisposable
         if (graphicsDevice == null)
             throw new InvalidOperationException("VeldridManager.GraphicsDevice is not initialized");
 
+        // Check if downsampling is needed
+        var (finalWidth, finalHeight) = GetConstrainedDimensions(width, height);
+        var finalPixelData = pixelData;
+
+        if (finalWidth != width || finalHeight != height)
+        {
+            Logger.LogWarning($"[TextureManager] Texture dimensions {width}x{height} exceed maximum {MAX_TEXTURE_SIZE}. Downsampling to {finalWidth}x{finalHeight}.");
+            finalPixelData = DownsamplePixelData(pixelData, width, height, finalWidth, finalHeight);
+        }
+
         // Check if we need to recreate the texture (size changed)
-        if (_texture == null || _texture.Width != width || _texture.Height != height || _texture.Format != format)
+        if (_texture == null || _texture.Width != finalWidth || _texture.Height != finalHeight || _texture.Format != format)
         {
             // Recreate texture
             _textureView?.Dispose();
@@ -125,7 +247,7 @@ public class TextureManager : IDisposable
                 throw new InvalidOperationException("VeldridManager.Factory is not initialized");
 
             _texture = factory.CreateTexture(TextureDescription.Texture2D(
-                width, height, 1, 1, format, TextureUsage.Sampled));
+                finalWidth, finalHeight, 1, 1, format, TextureUsage.Sampled));
             _textureView = factory.CreateTextureView(_texture);
 
             // Clear existing bindings as the underlying texture view has changed
@@ -155,8 +277,8 @@ public class TextureManager : IDisposable
 
         // Update texture data
         graphicsDevice.UpdateTexture(
-            _texture, pixelData,
-            0, 0, 0, width, height, 1, 0, 0);
+            _texture, finalPixelData,
+            0, 0, 0, finalWidth, finalHeight, 1, 0, 0);
     }
 
     /// <summary>
