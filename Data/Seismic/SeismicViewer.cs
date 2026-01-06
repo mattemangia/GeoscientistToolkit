@@ -22,6 +22,8 @@ public class SeismicViewer : IDatasetViewer
     private bool _needsRedraw = true;
     private int _renderedImageWidth;
     private int _renderedImageHeight;
+    private int _originalDataWidth;  // Original trace count before downsampling
+    private int _originalDataHeight; // Original sample count before downsampling
 
     // Display settings
     private float _amplitudeScale = 1.0f;
@@ -261,17 +263,28 @@ public class SeismicViewer : IDatasetViewer
                 }
             }
 
-            // Upload to GPU
+            // Upload to GPU (TextureManager will auto-downsample if needed)
             if (_seismicTexture != null)
             {
                 _seismicTexture.Dispose();
             }
 
             _seismicTexture = TextureManager.CreateFromPixelData(pixelData, (uint)numTraces, (uint)numSamples);
-            _renderedImageWidth = numTraces;
-            _renderedImageHeight = numSamples;
 
-            Logger.Log($"[SeismicViewer] Rendered seismic section: {numTraces}x{numSamples}");
+            // Track both original data dimensions and actual texture dimensions
+            _originalDataWidth = numTraces;
+            _originalDataHeight = numSamples;
+            _renderedImageWidth = (int)_seismicTexture.Width;
+            _renderedImageHeight = (int)_seismicTexture.Height;
+
+            if (_renderedImageWidth != numTraces || _renderedImageHeight != numSamples)
+            {
+                Logger.Log($"[SeismicViewer] Rendered seismic section: {numTraces}x{numSamples} (downsampled to {_renderedImageWidth}x{_renderedImageHeight})");
+            }
+            else
+            {
+                Logger.Log($"[SeismicViewer] Rendered seismic section: {numTraces}x{numSamples}");
+            }
         }
         catch (Exception ex)
         {
@@ -360,8 +373,9 @@ public class SeismicViewer : IDatasetViewer
 
     private void DrawPackageOverlays(ImDrawListPtr drawList, Vector2 cursorPos, Vector2 pan, Vector2 scaledSize, Vector2 imageSize)
     {
-        var scaleX = scaledSize.X / imageSize.X;
-        var scaleY = scaledSize.Y / imageSize.Y;
+        // Use original data dimensions for coordinate mapping (accounting for downsampling)
+        var scaleX = scaledSize.X / _originalDataWidth;
+        var scaleY = scaledSize.Y / _originalDataHeight;
 
         foreach (var package in _dataset.LinePackages)
         {
@@ -416,8 +430,10 @@ public class SeismicViewer : IDatasetViewer
         if (relativePos.X >= 0 && relativePos.X < scaledSize.X &&
             relativePos.Y >= 0 && relativePos.Y < scaledSize.Y)
         {
-            var scaleX = imageSize.X / scaledSize.X;
-            var traceIndex = (int)(relativePos.X * scaleX);
+            // Map screen position to original data coordinates (accounting for downsampling)
+            var normalizedX = relativePos.X / scaledSize.X;
+            var traceIndex = (int)(normalizedX * _originalDataWidth);
+            traceIndex = Math.Clamp(traceIndex, 0, _originalDataWidth - 1);
 
             // Show tooltip with trace info
             if (ImGui.IsMouseHoveringRect(cursorPos + pan, cursorPos + pan + scaledSize))
