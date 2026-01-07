@@ -145,7 +145,31 @@ public class SeismicViewer : IDatasetViewer
 
         ImGui.SameLine();
         ImGui.Text($"| Traces: {_dataset.GetTraceCount()} | Samples: {_dataset.GetSampleCount()} | Duration: {_dataset.GetDurationSeconds():F2}s");
+
+        ImGui.SameLine();
+        ImGui.Separator();
+        ImGui.SameLine();
+
+        // Zoom controls
+        ImGui.Text("Zoom:");
+        ImGui.SameLine();
+        if (ImGui.Button("-##ZoomOut"))
+            _pendingZoomDelta = -0.2f;
+        ImGui.SameLine();
+        if (ImGui.Button("+##ZoomIn"))
+            _pendingZoomDelta = 0.2f;
+        ImGui.SameLine();
+        if (ImGui.Button("Fit"))
+            _fitToWindow = true;
+        ImGui.SameLine();
+        if (ImGui.Button("1:1"))
+            _resetZoom = true;
     }
+
+    // Pending zoom/pan actions from toolbar
+    private float _pendingZoomDelta = 0;
+    private bool _fitToWindow = false;
+    private bool _resetZoom = false;
 
     public void DrawContent(ref float zoom, ref Vector2 pan)
     {
@@ -172,7 +196,14 @@ public class SeismicViewer : IDatasetViewer
             }
         }
 
+        // Wrap in a child window to capture mouse wheel and prevent parent scrolling
         var availableRegion = ImGui.GetContentRegionAvail();
+        ImGui.BeginChild("SeismicViewerCanvas", availableRegion, ImGuiChildFlags.None,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+
+        availableRegion = ImGui.GetContentRegionAvail();
+        var cursorPos = ImGui.GetCursorScreenPos();
+        var io = ImGui.GetIO();
 
         // Render seismic section
         if (_needsRedraw || _seismicTexture == null)
@@ -184,10 +215,47 @@ public class SeismicViewer : IDatasetViewer
         if (_seismicTexture != null && _seismicTexture.IsValid)
         {
             var imageSize = new Vector2(_renderedImageWidth, _renderedImageHeight);
-            var scaledSize = imageSize * zoom;
 
-            var cursorPos = ImGui.GetCursorScreenPos();
+            // Handle toolbar zoom actions
+            if (_fitToWindow)
+            {
+                _fitToWindow = false;
+                // Calculate zoom to fit the entire image in the available region
+                var fitZoomX = availableRegion.X / imageSize.X;
+                var fitZoomY = availableRegion.Y / imageSize.Y;
+                zoom = Math.Min(fitZoomX, fitZoomY) * 0.95f; // 95% to leave some margin
+                // Center the image
+                var scaledSize = imageSize * zoom;
+                pan = (availableRegion - scaledSize) * 0.5f;
+            }
+
+            if (_resetZoom)
+            {
+                _resetZoom = false;
+                zoom = 1.0f;
+                // Center the image
+                var scaledSize = imageSize * zoom;
+                pan = (availableRegion - scaledSize) * 0.5f;
+            }
+
+            if (_pendingZoomDelta != 0)
+            {
+                var oldZoom = zoom;
+                zoom = Math.Clamp(zoom + _pendingZoomDelta * zoom, 0.01f, 50.0f);
+                // Zoom towards center of view
+                var center = availableRegion * 0.5f;
+                pan = center - (center - pan) * (zoom / oldZoom);
+                _pendingZoomDelta = 0;
+            }
+
+            var scaledSizeFinal = imageSize * zoom;
             var drawList = ImGui.GetWindowDrawList();
+
+            // Clip to available region
+            drawList.PushClipRect(cursorPos, cursorPos + availableRegion, true);
+
+            // Draw background
+            drawList.AddRectFilled(cursorPos, cursorPos + availableRegion, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f)));
 
             // Draw the seismic image
             var textureId = _seismicTexture.GetImGuiTextureId();
@@ -196,23 +264,136 @@ public class SeismicViewer : IDatasetViewer
                 drawList.AddImage(
                     textureId,
                     cursorPos + pan,
-                    cursorPos + pan + scaledSize
+                    cursorPos + pan + scaledSizeFinal
                 );
+            }
+
+            // Draw grid overlay if enabled
+            if (_showGrid)
+            {
+                DrawGridOverlay(drawList, cursorPos, pan, scaledSizeFinal, availableRegion);
             }
 
             // Draw overlays
             if (_showPackageOverlays && _dataset.LinePackages.Count > 0)
             {
-                DrawPackageOverlays(drawList, cursorPos, pan, scaledSize, imageSize);
+                DrawPackageOverlays(drawList, cursorPos, pan, scaledSizeFinal, imageSize);
             }
 
-            // Handle mouse interaction for selection
-            HandleMouseInteraction(cursorPos, pan, scaledSize, imageSize);
+            drawList.PopClipRect();
 
-            // Create an invisible button for the entire image area for panning
+            // Create an invisible button for the entire canvas area for interaction
             ImGui.SetCursorScreenPos(cursorPos);
-            ImGui.InvisibleButton("SeismicCanvas", scaledSize);
+            ImGui.InvisibleButton("SeismicCanvas", availableRegion);
+            var isHovered = ImGui.IsItemHovered();
+            var isActive = ImGui.IsItemActive();
+
+            // Handle mouse wheel zoom (zoom towards mouse position)
+            if (isHovered && io.MouseWheel != 0)
+            {
+                var oldZoom = zoom;
+                var zoomDelta = io.MouseWheel * 0.1f;
+                var newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.01f, 50.0f);
+
+                if (newZoom != oldZoom)
+                {
+                    // Zoom towards mouse position
+                    var mousePos = io.MousePos - cursorPos;
+                    var zoomRatio = newZoom / oldZoom;
+                    pan = mousePos - (mousePos - pan) * zoomRatio;
+                    zoom = newZoom;
+                }
+            }
+
+            // Handle middle mouse button panning
+            if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
+            {
+                pan += io.MouseDelta;
+            }
+
+            // Handle right mouse button panning (alternative)
+            if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Right) && !ImGui.IsKeyDown(ImGuiKey.LeftShift))
+            {
+                pan += io.MouseDelta;
+            }
+
+            // Handle mouse interaction for selection and tooltips
+            HandleMouseInteraction(cursorPos, pan, scaledSizeFinal, imageSize);
+
+            // Draw zoom indicator
+            var zoomText = $"Zoom: {zoom * 100:F0}%";
+            var textSize = ImGui.CalcTextSize(zoomText);
+            var textPos = cursorPos + availableRegion - textSize - new Vector2(10, 10);
+            drawList.AddRectFilled(textPos - new Vector2(5, 2), textPos + textSize + new Vector2(5, 2),
+                ImGui.GetColorU32(new Vector4(0, 0, 0, 0.7f)), 3.0f);
+            drawList.AddText(textPos, ImGui.GetColorU32(new Vector4(1, 1, 1, 1)), zoomText);
         }
+
+        ImGui.EndChild();
+    }
+
+    private void DrawGridOverlay(ImDrawListPtr drawList, Vector2 cursorPos, Vector2 pan, Vector2 scaledSize, Vector2 availableRegion)
+    {
+        if (_originalDataWidth == 0 || _originalDataHeight == 0)
+            return;
+
+        var gridColor = ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 0.3f));
+        var textColor = ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.8f, 0.8f));
+
+        // Calculate grid spacing based on zoom level
+        var traceSpacing = Math.Max(1, (int)(_originalDataWidth / 10)); // Aim for ~10 grid lines
+        var sampleSpacing = Math.Max(1, (int)(_originalDataHeight / 10));
+
+        // Round to nice numbers
+        traceSpacing = GetNiceGridSpacing(traceSpacing);
+        sampleSpacing = GetNiceGridSpacing(sampleSpacing);
+
+        var scaleX = scaledSize.X / _originalDataWidth;
+        var scaleY = scaledSize.Y / _originalDataHeight;
+
+        // Draw vertical grid lines (traces)
+        for (int t = 0; t <= _originalDataWidth; t += traceSpacing)
+        {
+            var x = cursorPos.X + pan.X + t * scaleX;
+            if (x >= cursorPos.X && x <= cursorPos.X + availableRegion.X)
+            {
+                drawList.AddLine(new Vector2(x, cursorPos.Y), new Vector2(x, cursorPos.Y + availableRegion.Y), gridColor);
+                // Draw trace number at top
+                if (t > 0)
+                {
+                    var label = t.ToString();
+                    drawList.AddText(new Vector2(x + 2, cursorPos.Y + pan.Y + 2), textColor, label);
+                }
+            }
+        }
+
+        // Draw horizontal grid lines (samples/time)
+        for (int s = 0; s <= _originalDataHeight; s += sampleSpacing)
+        {
+            var y = cursorPos.Y + pan.Y + s * scaleY;
+            if (y >= cursorPos.Y && y <= cursorPos.Y + availableRegion.Y)
+            {
+                drawList.AddLine(new Vector2(cursorPos.X, y), new Vector2(cursorPos.X + availableRegion.X, y), gridColor);
+                // Draw sample number at left
+                if (s > 0)
+                {
+                    var label = s.ToString();
+                    drawList.AddText(new Vector2(cursorPos.X + pan.X + 2, y + 2), textColor, label);
+                }
+            }
+        }
+    }
+
+    private int GetNiceGridSpacing(int rawSpacing)
+    {
+        // Round to nice numbers: 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, etc.
+        var magnitude = (int)Math.Pow(10, Math.Floor(Math.Log10(rawSpacing)));
+        var normalized = rawSpacing / (float)magnitude;
+
+        if (normalized < 1.5f) return magnitude;
+        if (normalized < 3.5f) return 2 * magnitude;
+        if (normalized < 7.5f) return 5 * magnitude;
+        return 10 * magnitude;
     }
 
     private void RenderSeismicSection(int width, int height)
