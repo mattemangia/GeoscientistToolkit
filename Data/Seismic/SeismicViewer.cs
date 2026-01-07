@@ -346,46 +346,53 @@ public class SeismicViewer : IDatasetViewer
         var gridColor = ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 0.3f));
         var textColor = ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.8f, 0.8f));
 
-        // Calculate grid spacing based on zoom level
-        var traceSpacing = Math.Max(1, (int)(_originalDataWidth / 10)); // Aim for ~10 grid lines
-        var sampleSpacing = Math.Max(1, (int)(_originalDataHeight / 10));
-
-        // Round to nice numbers
-        traceSpacing = GetNiceGridSpacing(traceSpacing);
-        sampleSpacing = GetNiceGridSpacing(sampleSpacing);
-
         var scaleX = scaledSize.X / _originalDataWidth;
         var scaleY = scaledSize.Y / _originalDataHeight;
 
-        // Draw vertical grid lines (traces)
-        for (int t = 0; t <= _originalDataWidth; t += traceSpacing)
+        // Calculate grid spacing based on screen pixels (aim for ~100 pixels between lines)
+        var pixelSpacingX = 100.0f;
+        var pixelSpacingY = 80.0f;
+
+        var traceSpacing = GetNiceGridSpacing(Math.Max(1, (int)(pixelSpacingX / scaleX)));
+        var sampleSpacing = GetNiceGridSpacing(Math.Max(1, (int)(pixelSpacingY / scaleY)));
+
+        // Calculate visible range
+        var visibleStartTrace = Math.Max(0, (int)((-pan.X) / scaleX));
+        var visibleEndTrace = Math.Min(_originalDataWidth, (int)((-pan.X + availableRegion.X) / scaleX) + 1);
+        var visibleStartSample = Math.Max(0, (int)((-pan.Y) / scaleY));
+        var visibleEndSample = Math.Min(_originalDataHeight, (int)((-pan.Y + availableRegion.Y) / scaleY) + 1);
+
+        // Align to grid spacing
+        var firstTrace = (visibleStartTrace / traceSpacing) * traceSpacing;
+        var firstSample = (visibleStartSample / sampleSpacing) * sampleSpacing;
+
+        // Draw vertical grid lines (traces) - only visible ones
+        for (int t = firstTrace; t <= visibleEndTrace; t += traceSpacing)
         {
+            if (t < 0) continue;
             var x = cursorPos.X + pan.X + t * scaleX;
-            if (x >= cursorPos.X && x <= cursorPos.X + availableRegion.X)
+            if (x >= cursorPos.X - 1 && x <= cursorPos.X + availableRegion.X + 1)
             {
                 drawList.AddLine(new Vector2(x, cursorPos.Y), new Vector2(x, cursorPos.Y + availableRegion.Y), gridColor);
-                // Draw trace number at top
-                if (t > 0)
-                {
-                    var label = t.ToString();
-                    drawList.AddText(new Vector2(x + 2, cursorPos.Y + pan.Y + 2), textColor, label);
-                }
+                // Draw trace number
+                var labelY = Math.Max(cursorPos.Y + 2, cursorPos.Y + pan.Y + 2);
+                labelY = Math.Min(labelY, cursorPos.Y + availableRegion.Y - 15);
+                drawList.AddText(new Vector2(x + 2, labelY), textColor, t.ToString());
             }
         }
 
-        // Draw horizontal grid lines (samples/time)
-        for (int s = 0; s <= _originalDataHeight; s += sampleSpacing)
+        // Draw horizontal grid lines (samples/time) - only visible ones
+        for (int s = firstSample; s <= visibleEndSample; s += sampleSpacing)
         {
+            if (s < 0) continue;
             var y = cursorPos.Y + pan.Y + s * scaleY;
-            if (y >= cursorPos.Y && y <= cursorPos.Y + availableRegion.Y)
+            if (y >= cursorPos.Y - 1 && y <= cursorPos.Y + availableRegion.Y + 1)
             {
                 drawList.AddLine(new Vector2(cursorPos.X, y), new Vector2(cursorPos.X + availableRegion.X, y), gridColor);
-                // Draw sample number at left
-                if (s > 0)
-                {
-                    var label = s.ToString();
-                    drawList.AddText(new Vector2(cursorPos.X + pan.X + 2, y + 2), textColor, label);
-                }
+                // Draw sample number
+                var labelX = Math.Max(cursorPos.X + 2, cursorPos.X + pan.X + 2);
+                labelX = Math.Min(labelX, cursorPos.X + availableRegion.X - 40);
+                drawList.AddText(new Vector2(labelX, y + 2), textColor, s.ToString());
             }
         }
     }
@@ -530,91 +537,71 @@ public class SeismicViewer : IDatasetViewer
         var scaleX = scaledSize.X / _originalDataWidth;
         var scaleY = scaledSize.Y / _originalDataHeight;
 
-        // Determine trace decimation based on zoom level (don't draw too many wiggles)
-        var traceStep = Math.Max(1, (int)(1.0f / scaleX / 3)); // Aim for ~3 pixels per trace minimum
+        // Skip wiggle drawing if zoomed out too far (too many traces to draw)
+        if (scaleX < 0.5f)
+            return; // Don't draw wiggles when very zoomed out
+
+        // Determine trace decimation based on zoom level
+        var traceStep = Math.Max(1, (int)(2.0f / scaleX)); // At least 2 pixels per trace
+
+        // Sample decimation based on zoom level
+        var sampleStep = Math.Max(1, (int)(1.0f / scaleY));
 
         var (minAmp, maxAmp, rms) = _dataset.GetAmplitudeStatistics();
         var amplitudeRange = maxAmp - minAmp;
         if (amplitudeRange == 0) amplitudeRange = 1.0f;
 
         // Wiggle amplitude scale (how wide the wiggle oscillates)
-        var wiggleScale = scaleX * 0.8f * _dataset.GainValue;
+        var wiggleScale = scaleX * traceStep * 0.4f * _dataset.GainValue;
 
         var wiggleColor = ImGui.GetColorU32(new Vector4(0, 0, 0, 1)); // Black wiggles
-        var fillColor = ImGui.GetColorU32(new Vector4(0, 0, 0, 0.7f)); // Semi-transparent black fill
 
-        for (int traceIdx = 0; traceIdx < numTraces; traceIdx += traceStep)
+        // Calculate visible trace range
+        var visibleStartTrace = Math.Max(0, (int)((-pan.X) / scaleX) - 1);
+        var visibleEndTrace = Math.Min(numTraces, (int)((-pan.X + availableRegion.X) / scaleX) + 2);
+
+        // Calculate visible sample range
+        var visibleStartSample = Math.Max(0, (int)((-pan.Y) / scaleY) - 1);
+        var visibleEndSample = Math.Min(numSamples, (int)((-pan.Y + availableRegion.Y) / scaleY) + 2);
+
+        // Limit max traces to draw for performance
+        var maxTracesToDraw = 200;
+        if ((visibleEndTrace - visibleStartTrace) / traceStep > maxTracesToDraw)
         {
+            traceStep = Math.Max(traceStep, (visibleEndTrace - visibleStartTrace) / maxTracesToDraw);
+        }
+
+        for (int traceIdx = visibleStartTrace; traceIdx < visibleEndTrace; traceIdx += traceStep)
+        {
+            if (traceIdx < 0 || traceIdx >= numTraces)
+                continue;
+
             var trace = _dataset.GetTrace(traceIdx);
             if (trace == null || trace.Samples.Length == 0)
                 continue;
 
             var traceX = cursorPos.X + pan.X + (traceIdx + 0.5f) * scaleX;
 
-            // Skip if trace is outside visible area
-            if (traceX < cursorPos.X - wiggleScale * 2 || traceX > cursorPos.X + availableRegion.X + wiggleScale * 2)
-                continue;
+            // Build polyline for this trace (only visible samples)
+            Vector2? lastPoint = null;
 
-            // Build polyline for this trace
-            var points = new List<Vector2>();
-            var fillPoints = new List<Vector2>(); // For variable area fill
-
-            for (int sampleIdx = 0; sampleIdx < Math.Min(numSamples, trace.Samples.Length); sampleIdx++)
+            for (int sampleIdx = visibleStartSample; sampleIdx < Math.Min(visibleEndSample, trace.Samples.Length); sampleIdx += sampleStep)
             {
                 var y = cursorPos.Y + pan.Y + sampleIdx * scaleY;
-
-                // Skip if outside visible area
-                if (y < cursorPos.Y - 10 || y > cursorPos.Y + availableRegion.Y + 10)
-                    continue;
 
                 var amplitude = trace.Samples[sampleIdx] * _dataset.GainValue;
                 var normalized = (amplitude - _contrastMin) / amplitudeRange - 0.5f; // Center around 0
                 var x = traceX + normalized * wiggleScale * 2;
 
-                points.Add(new Vector2(x, y));
+                var currentPoint = new Vector2(x, y);
 
-                // For variable area, track positive excursions
-                if (_dataset.ShowVariableArea && normalized > 0)
+                // Draw line from last point
+                if (lastPoint.HasValue)
                 {
-                    fillPoints.Add(new Vector2(x, y));
+                    drawList.AddLine(lastPoint.Value, currentPoint, wiggleColor, 1.0f);
                 }
-                else if (_dataset.ShowVariableArea && fillPoints.Count > 0)
-                {
-                    // Close and draw the fill polygon
-                    if (fillPoints.Count >= 2)
-                    {
-                        // Add baseline points to close the polygon
-                        fillPoints.Add(new Vector2(traceX, fillPoints[fillPoints.Count - 1].Y));
-                        fillPoints.Add(new Vector2(traceX, fillPoints[0].Y));
 
-                        // Draw filled polygon
-                        for (int i = 1; i < fillPoints.Count - 1; i++)
-                        {
-                            drawList.AddTriangleFilled(fillPoints[0], fillPoints[i], fillPoints[i + 1], fillColor);
-                        }
-                    }
-                    fillPoints.Clear();
-                }
-            }
-
-            // Draw remaining fill points
-            if (_dataset.ShowVariableArea && fillPoints.Count >= 2)
-            {
-                fillPoints.Add(new Vector2(traceX, fillPoints[fillPoints.Count - 1].Y));
-                fillPoints.Add(new Vector2(traceX, fillPoints[0].Y));
-                for (int i = 1; i < fillPoints.Count - 1; i++)
-                {
-                    drawList.AddTriangleFilled(fillPoints[0], fillPoints[i], fillPoints[i + 1], fillColor);
-                }
-            }
-
-            // Draw the wiggle line
-            if (points.Count >= 2)
-            {
-                for (int i = 0; i < points.Count - 1; i++)
-                {
-                    drawList.AddLine(points[i], points[i + 1], wiggleColor, 1.0f);
-                }
+                lastPoint = currentPoint;
             }
         }
     }
