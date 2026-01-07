@@ -62,7 +62,7 @@ public class SeismicViewer : IDatasetViewer
             return;
         }
 
-        // Display mode toggles
+        // === ROW 1: Display and rendering options ===
         ImGui.Text("Display:");
         ImGui.SameLine();
 
@@ -75,44 +75,42 @@ public class SeismicViewer : IDatasetViewer
 
         ImGui.SameLine();
         bool showVariableArea = _dataset.ShowVariableArea;
-        if (ImGui.Checkbox("Variable Area", ref showVariableArea))
+        if (ImGui.Checkbox("VA", ref showVariableArea))
         {
             _dataset.ShowVariableArea = showVariableArea;
             _needsRedraw = true;
         }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Variable Area");
 
         ImGui.SameLine();
         bool showColorMap = _dataset.ShowColorMap;
-        if (ImGui.Checkbox("Color Map", ref showColorMap))
+        if (ImGui.Checkbox("Color", ref showColorMap))
         {
             _dataset.ShowColorMap = showColorMap;
             _needsRedraw = true;
         }
 
         ImGui.SameLine();
-        ImGui.Separator();
+        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
         ImGui.SameLine();
 
-        // Color map selection
+        // Color map selection (compact)
         if (_dataset.ShowColorMap)
         {
-            ImGui.Text("ColorMap:");
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(100);
+            ImGui.SetNextItemWidth(80);
             int colorMapIndex = _dataset.ColorMapIndex;
             if (ImGui.Combo("##ColorMap", ref colorMapIndex, _colorMapNames, _colorMapNames.Length))
             {
                 _dataset.ColorMapIndex = colorMapIndex;
                 _needsRedraw = true;
             }
-
             ImGui.SameLine();
         }
 
-        // Gain control
+        // Gain control (compact)
         ImGui.Text("Gain:");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(100);
+        ImGui.SetNextItemWidth(70);
         float gainValue = _dataset.GainValue;
         if (ImGui.SliderFloat("##Gain", ref gainValue, 0.1f, 10.0f, "%.1f"))
         {
@@ -121,38 +119,31 @@ public class SeismicViewer : IDatasetViewer
         }
 
         ImGui.SameLine();
-        ImGui.Separator();
+        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
         ImGui.SameLine();
 
         // Overlay toggles
-        if (ImGui.Checkbox("Packages", ref _showPackageOverlays))
+        if (ImGui.Checkbox("Pkg", ref _showPackageOverlays))
             _needsRedraw = true;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show Packages");
 
         ImGui.SameLine();
         if (ImGui.Checkbox("Grid", ref _showGrid))
             _needsRedraw = true;
 
         ImGui.SameLine();
-        ImGui.Separator();
+        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
         ImGui.SameLine();
 
         // Export button
-        if (ImGui.Button("Export Image"))
+        if (ImGui.Button("Export"))
         {
             _showExportDialog = true;
             _exportDialog.Open();
         }
 
-        ImGui.SameLine();
-        ImGui.Text($"| Traces: {_dataset.GetTraceCount()} | Samples: {_dataset.GetSampleCount()} | Duration: {_dataset.GetDurationSeconds():F2}s");
-
-        ImGui.SameLine();
-        ImGui.Separator();
-        ImGui.SameLine();
-
+        // === ROW 2: Zoom controls and info ===
         // Zoom controls
-        ImGui.Text("Zoom:");
-        ImGui.SameLine();
         if (ImGui.Button("-##ZoomOut"))
             _pendingZoomDelta = -0.2f;
         ImGui.SameLine();
@@ -161,9 +152,18 @@ public class SeismicViewer : IDatasetViewer
         ImGui.SameLine();
         if (ImGui.Button("Fit"))
             _fitToWindow = true;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Fit to window");
         ImGui.SameLine();
         if (ImGui.Button("1:1"))
             _resetZoom = true;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Reset to 100%");
+
+        ImGui.SameLine();
+        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
+        ImGui.SameLine();
+
+        // Dataset info (compact)
+        ImGui.TextDisabled($"Traces: {_dataset.GetTraceCount()} | Samples: {_dataset.GetSampleCount()} | {_dataset.GetDurationSeconds():F1}s");
     }
 
     // Pending zoom/pan actions from toolbar
