@@ -805,6 +805,14 @@ public class SeismicViewer : IDatasetViewer
         _needsRedraw = true;
     }
 
+    /// <summary>
+    /// Request a redraw of the seismic section (called when data is modified externally)
+    /// </summary>
+    public void RequestRedraw()
+    {
+        _needsRedraw = true;
+    }
+
     private void ExportImage(string filePath)
     {
         try
