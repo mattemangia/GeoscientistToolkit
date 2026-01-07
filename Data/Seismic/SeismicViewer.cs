@@ -268,6 +268,12 @@ public class SeismicViewer : IDatasetViewer
                 );
             }
 
+            // Draw wiggle traces overlay if enabled
+            if (_dataset.ShowWiggleTrace)
+            {
+                DrawWiggleTraces(drawList, cursorPos, pan, scaledSizeFinal, availableRegion);
+            }
+
             // Draw grid overlay if enabled
             if (_showGrid)
             {
@@ -420,6 +426,9 @@ public class SeismicViewer : IDatasetViewer
             var amplitudeRange = _contrastMax - _contrastMin;
             if (amplitudeRange == 0) amplitudeRange = 1.0f;
 
+            // Background color (dark gray)
+            byte bgR = 25, bgG = 25, bgB = 25, bgA = 255;
+
             // Render each trace
             for (int traceIdx = 0; traceIdx < numTraces; traceIdx++)
             {
@@ -433,14 +442,50 @@ public class SeismicViewer : IDatasetViewer
                     var normalized = (amplitude - _contrastMin) / amplitudeRange;
                     normalized = Math.Clamp(normalized, 0.0f, 1.0f);
 
-                    var color = GetColorForValue(normalized, _dataset.ColorMapIndex);
+                    byte r = bgR, g = bgG, b = bgB, a = bgA;
+
+                    // Color map mode - show colored density
+                    if (_dataset.ShowColorMap)
+                    {
+                        var color = GetColorForValue(normalized, _dataset.ColorMapIndex);
+                        r = color.r;
+                        g = color.g;
+                        b = color.b;
+                        a = color.a;
+                    }
+                    // Variable area mode - fill positive amplitudes
+                    else if (_dataset.ShowVariableArea)
+                    {
+                        if (normalized > 0.5f)
+                        {
+                            // Positive amplitude - black fill
+                            r = 0; g = 0; b = 0; a = 255;
+                        }
+                        else
+                        {
+                            // Negative amplitude - white/light background
+                            r = 240; g = 240; b = 240; a = 255;
+                        }
+                    }
+                    // Wiggle only mode - grayscale background, wiggle drawn as overlay
+                    else if (_dataset.ShowWiggleTrace)
+                    {
+                        // Light background for wiggle mode
+                        r = 240; g = 240; b = 240; a = 255;
+                    }
+                    else
+                    {
+                        // No mode selected - show grayscale
+                        var gray = (byte)(normalized * 255);
+                        r = gray; g = gray; b = gray; a = 255;
+                    }
 
                     // Set pixel in RGBA format
                     var pixelIdx = (sampleIdx * numTraces + traceIdx) * 4;
-                    pixelData[pixelIdx] = color.r;
-                    pixelData[pixelIdx + 1] = color.g;
-                    pixelData[pixelIdx + 2] = color.b;
-                    pixelData[pixelIdx + 3] = color.a;
+                    pixelData[pixelIdx] = r;
+                    pixelData[pixelIdx + 1] = g;
+                    pixelData[pixelIdx + 2] = b;
+                    pixelData[pixelIdx + 3] = a;
                 }
             }
 
@@ -470,6 +515,107 @@ public class SeismicViewer : IDatasetViewer
         catch (Exception ex)
         {
             Logger.LogError($"[SeismicViewer] Error rendering seismic section: {ex.Message}");
+        }
+    }
+
+    private void DrawWiggleTraces(ImDrawListPtr drawList, Vector2 cursorPos, Vector2 pan, Vector2 scaledSize, Vector2 availableRegion)
+    {
+        if (!_dataset.ShowWiggleTrace || _originalDataWidth == 0 || _originalDataHeight == 0)
+            return;
+
+        var numTraces = _dataset.GetTraceCount();
+        var numSamples = _dataset.GetSampleCount();
+
+        // Calculate display parameters
+        var scaleX = scaledSize.X / _originalDataWidth;
+        var scaleY = scaledSize.Y / _originalDataHeight;
+
+        // Determine trace decimation based on zoom level (don't draw too many wiggles)
+        var traceStep = Math.Max(1, (int)(1.0f / scaleX / 3)); // Aim for ~3 pixels per trace minimum
+
+        var (minAmp, maxAmp, rms) = _dataset.GetAmplitudeStatistics();
+        var amplitudeRange = maxAmp - minAmp;
+        if (amplitudeRange == 0) amplitudeRange = 1.0f;
+
+        // Wiggle amplitude scale (how wide the wiggle oscillates)
+        var wiggleScale = scaleX * 0.8f * _dataset.GainValue;
+
+        var wiggleColor = ImGui.GetColorU32(new Vector4(0, 0, 0, 1)); // Black wiggles
+        var fillColor = ImGui.GetColorU32(new Vector4(0, 0, 0, 0.7f)); // Semi-transparent black fill
+
+        for (int traceIdx = 0; traceIdx < numTraces; traceIdx += traceStep)
+        {
+            var trace = _dataset.GetTrace(traceIdx);
+            if (trace == null || trace.Samples.Length == 0)
+                continue;
+
+            var traceX = cursorPos.X + pan.X + (traceIdx + 0.5f) * scaleX;
+
+            // Skip if trace is outside visible area
+            if (traceX < cursorPos.X - wiggleScale * 2 || traceX > cursorPos.X + availableRegion.X + wiggleScale * 2)
+                continue;
+
+            // Build polyline for this trace
+            var points = new List<Vector2>();
+            var fillPoints = new List<Vector2>(); // For variable area fill
+
+            for (int sampleIdx = 0; sampleIdx < Math.Min(numSamples, trace.Samples.Length); sampleIdx++)
+            {
+                var y = cursorPos.Y + pan.Y + sampleIdx * scaleY;
+
+                // Skip if outside visible area
+                if (y < cursorPos.Y - 10 || y > cursorPos.Y + availableRegion.Y + 10)
+                    continue;
+
+                var amplitude = trace.Samples[sampleIdx] * _dataset.GainValue;
+                var normalized = (amplitude - _contrastMin) / amplitudeRange - 0.5f; // Center around 0
+                var x = traceX + normalized * wiggleScale * 2;
+
+                points.Add(new Vector2(x, y));
+
+                // For variable area, track positive excursions
+                if (_dataset.ShowVariableArea && normalized > 0)
+                {
+                    fillPoints.Add(new Vector2(x, y));
+                }
+                else if (_dataset.ShowVariableArea && fillPoints.Count > 0)
+                {
+                    // Close and draw the fill polygon
+                    if (fillPoints.Count >= 2)
+                    {
+                        // Add baseline points to close the polygon
+                        fillPoints.Add(new Vector2(traceX, fillPoints[fillPoints.Count - 1].Y));
+                        fillPoints.Add(new Vector2(traceX, fillPoints[0].Y));
+
+                        // Draw filled polygon
+                        for (int i = 1; i < fillPoints.Count - 1; i++)
+                        {
+                            drawList.AddTriangleFilled(fillPoints[0], fillPoints[i], fillPoints[i + 1], fillColor);
+                        }
+                    }
+                    fillPoints.Clear();
+                }
+            }
+
+            // Draw remaining fill points
+            if (_dataset.ShowVariableArea && fillPoints.Count >= 2)
+            {
+                fillPoints.Add(new Vector2(traceX, fillPoints[fillPoints.Count - 1].Y));
+                fillPoints.Add(new Vector2(traceX, fillPoints[0].Y));
+                for (int i = 1; i < fillPoints.Count - 1; i++)
+                {
+                    drawList.AddTriangleFilled(fillPoints[0], fillPoints[i], fillPoints[i + 1], fillColor);
+                }
+            }
+
+            // Draw the wiggle line
+            if (points.Count >= 2)
+            {
+                for (int i = 0; i < points.Count - 1; i++)
+                {
+                    drawList.AddLine(points[i], points[i + 1], wiggleColor, 1.0f);
+                }
+            }
         }
     }
 
