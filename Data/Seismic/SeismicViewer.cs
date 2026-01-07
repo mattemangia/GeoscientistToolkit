@@ -62,7 +62,7 @@ public class SeismicViewer : IDatasetViewer
             return;
         }
 
-        // Display mode toggles
+        // === ROW 1: Display and rendering options ===
         ImGui.Text("Display:");
         ImGui.SameLine();
 
@@ -75,44 +75,42 @@ public class SeismicViewer : IDatasetViewer
 
         ImGui.SameLine();
         bool showVariableArea = _dataset.ShowVariableArea;
-        if (ImGui.Checkbox("Variable Area", ref showVariableArea))
+        if (ImGui.Checkbox("VA", ref showVariableArea))
         {
             _dataset.ShowVariableArea = showVariableArea;
             _needsRedraw = true;
         }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Variable Area");
 
         ImGui.SameLine();
         bool showColorMap = _dataset.ShowColorMap;
-        if (ImGui.Checkbox("Color Map", ref showColorMap))
+        if (ImGui.Checkbox("Color", ref showColorMap))
         {
             _dataset.ShowColorMap = showColorMap;
             _needsRedraw = true;
         }
 
         ImGui.SameLine();
-        ImGui.Separator();
+        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
         ImGui.SameLine();
 
-        // Color map selection
+        // Color map selection (compact)
         if (_dataset.ShowColorMap)
         {
-            ImGui.Text("ColorMap:");
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(100);
+            ImGui.SetNextItemWidth(80);
             int colorMapIndex = _dataset.ColorMapIndex;
             if (ImGui.Combo("##ColorMap", ref colorMapIndex, _colorMapNames, _colorMapNames.Length))
             {
                 _dataset.ColorMapIndex = colorMapIndex;
                 _needsRedraw = true;
             }
-
             ImGui.SameLine();
         }
 
-        // Gain control
+        // Gain control (compact)
         ImGui.Text("Gain:");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(100);
+        ImGui.SetNextItemWidth(70);
         float gainValue = _dataset.GainValue;
         if (ImGui.SliderFloat("##Gain", ref gainValue, 0.1f, 10.0f, "%.1f"))
         {
@@ -121,31 +119,57 @@ public class SeismicViewer : IDatasetViewer
         }
 
         ImGui.SameLine();
-        ImGui.Separator();
+        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
         ImGui.SameLine();
 
         // Overlay toggles
-        if (ImGui.Checkbox("Packages", ref _showPackageOverlays))
+        if (ImGui.Checkbox("Pkg", ref _showPackageOverlays))
             _needsRedraw = true;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show Packages");
 
         ImGui.SameLine();
         if (ImGui.Checkbox("Grid", ref _showGrid))
             _needsRedraw = true;
 
         ImGui.SameLine();
-        ImGui.Separator();
+        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
         ImGui.SameLine();
 
         // Export button
-        if (ImGui.Button("Export Image"))
+        if (ImGui.Button("Export"))
         {
             _showExportDialog = true;
             _exportDialog.Open();
         }
 
+        // === ROW 2: Zoom controls and info ===
+        // Zoom controls
+        if (ImGui.Button("-##ZoomOut"))
+            _pendingZoomDelta = -0.2f;
         ImGui.SameLine();
-        ImGui.Text($"| Traces: {_dataset.GetTraceCount()} | Samples: {_dataset.GetSampleCount()} | Duration: {_dataset.GetDurationSeconds():F2}s");
+        if (ImGui.Button("+##ZoomIn"))
+            _pendingZoomDelta = 0.2f;
+        ImGui.SameLine();
+        if (ImGui.Button("Fit"))
+            _fitToWindow = true;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Fit to window");
+        ImGui.SameLine();
+        if (ImGui.Button("1:1"))
+            _resetZoom = true;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Reset to 100%");
+
+        ImGui.SameLine();
+        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
+        ImGui.SameLine();
+
+        // Dataset info (compact)
+        ImGui.TextDisabled($"Traces: {_dataset.GetTraceCount()} | Samples: {_dataset.GetSampleCount()} | {_dataset.GetDurationSeconds():F1}s");
     }
+
+    // Pending zoom/pan actions from toolbar
+    private float _pendingZoomDelta = 0;
+    private bool _fitToWindow = false;
+    private bool _resetZoom = false;
 
     public void DrawContent(ref float zoom, ref Vector2 pan)
     {
@@ -172,7 +196,14 @@ public class SeismicViewer : IDatasetViewer
             }
         }
 
+        // Wrap in a child window to capture mouse wheel and prevent parent scrolling
         var availableRegion = ImGui.GetContentRegionAvail();
+        ImGui.BeginChild("SeismicViewerCanvas", availableRegion, ImGuiChildFlags.None,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+
+        availableRegion = ImGui.GetContentRegionAvail();
+        var cursorPos = ImGui.GetCursorScreenPos();
+        var io = ImGui.GetIO();
 
         // Render seismic section
         if (_needsRedraw || _seismicTexture == null)
@@ -184,10 +215,47 @@ public class SeismicViewer : IDatasetViewer
         if (_seismicTexture != null && _seismicTexture.IsValid)
         {
             var imageSize = new Vector2(_renderedImageWidth, _renderedImageHeight);
-            var scaledSize = imageSize * zoom;
 
-            var cursorPos = ImGui.GetCursorScreenPos();
+            // Handle toolbar zoom actions
+            if (_fitToWindow)
+            {
+                _fitToWindow = false;
+                // Calculate zoom to fit the entire image in the available region
+                var fitZoomX = availableRegion.X / imageSize.X;
+                var fitZoomY = availableRegion.Y / imageSize.Y;
+                zoom = Math.Min(fitZoomX, fitZoomY) * 0.95f; // 95% to leave some margin
+                // Center the image
+                var scaledSize = imageSize * zoom;
+                pan = (availableRegion - scaledSize) * 0.5f;
+            }
+
+            if (_resetZoom)
+            {
+                _resetZoom = false;
+                zoom = 1.0f;
+                // Center the image
+                var scaledSize = imageSize * zoom;
+                pan = (availableRegion - scaledSize) * 0.5f;
+            }
+
+            if (_pendingZoomDelta != 0)
+            {
+                var oldZoom = zoom;
+                zoom = Math.Clamp(zoom + _pendingZoomDelta * zoom, 0.01f, 50.0f);
+                // Zoom towards center of view
+                var center = availableRegion * 0.5f;
+                pan = center - (center - pan) * (zoom / oldZoom);
+                _pendingZoomDelta = 0;
+            }
+
+            var scaledSizeFinal = imageSize * zoom;
             var drawList = ImGui.GetWindowDrawList();
+
+            // Clip to available region
+            drawList.PushClipRect(cursorPos, cursorPos + availableRegion, true);
+
+            // Draw background
+            drawList.AddRectFilled(cursorPos, cursorPos + availableRegion, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f)));
 
             // Draw the seismic image
             var textureId = _seismicTexture.GetImGuiTextureId();
@@ -196,23 +264,142 @@ public class SeismicViewer : IDatasetViewer
                 drawList.AddImage(
                     textureId,
                     cursorPos + pan,
-                    cursorPos + pan + scaledSize
+                    cursorPos + pan + scaledSizeFinal
                 );
+            }
+
+            // Draw wiggle traces overlay if enabled
+            if (_dataset.ShowWiggleTrace)
+            {
+                DrawWiggleTraces(drawList, cursorPos, pan, scaledSizeFinal, availableRegion);
+            }
+
+            // Draw grid overlay if enabled
+            if (_showGrid)
+            {
+                DrawGridOverlay(drawList, cursorPos, pan, scaledSizeFinal, availableRegion);
             }
 
             // Draw overlays
             if (_showPackageOverlays && _dataset.LinePackages.Count > 0)
             {
-                DrawPackageOverlays(drawList, cursorPos, pan, scaledSize, imageSize);
+                DrawPackageOverlays(drawList, cursorPos, pan, scaledSizeFinal, imageSize);
             }
 
-            // Handle mouse interaction for selection
-            HandleMouseInteraction(cursorPos, pan, scaledSize, imageSize);
+            drawList.PopClipRect();
 
-            // Create an invisible button for the entire image area for panning
+            // Create an invisible button for the entire canvas area for interaction
             ImGui.SetCursorScreenPos(cursorPos);
-            ImGui.InvisibleButton("SeismicCanvas", scaledSize);
+            ImGui.InvisibleButton("SeismicCanvas", availableRegion);
+            var isHovered = ImGui.IsItemHovered();
+            var isActive = ImGui.IsItemActive();
+
+            // Handle mouse wheel zoom (zoom towards mouse position)
+            if (isHovered && io.MouseWheel != 0)
+            {
+                var oldZoom = zoom;
+                var zoomDelta = io.MouseWheel * 0.1f;
+                var newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.01f, 50.0f);
+
+                if (newZoom != oldZoom)
+                {
+                    // Zoom towards mouse position
+                    var mousePos = io.MousePos - cursorPos;
+                    var zoomRatio = newZoom / oldZoom;
+                    pan = mousePos - (mousePos - pan) * zoomRatio;
+                    zoom = newZoom;
+                }
+            }
+
+            // Handle middle mouse button panning
+            if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
+            {
+                pan += io.MouseDelta;
+            }
+
+            // Handle right mouse button panning (alternative)
+            if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Right) && !ImGui.IsKeyDown(ImGuiKey.LeftShift))
+            {
+                pan += io.MouseDelta;
+            }
+
+            // Handle mouse interaction for selection and tooltips
+            HandleMouseInteraction(cursorPos, pan, scaledSizeFinal, imageSize);
+
+            // Draw zoom indicator
+            var zoomText = $"Zoom: {zoom * 100:F0}%";
+            var textSize = ImGui.CalcTextSize(zoomText);
+            var textPos = cursorPos + availableRegion - textSize - new Vector2(10, 10);
+            drawList.AddRectFilled(textPos - new Vector2(5, 2), textPos + textSize + new Vector2(5, 2),
+                ImGui.GetColorU32(new Vector4(0, 0, 0, 0.7f)), 3.0f);
+            drawList.AddText(textPos, ImGui.GetColorU32(new Vector4(1, 1, 1, 1)), zoomText);
         }
+
+        ImGui.EndChild();
+    }
+
+    private void DrawGridOverlay(ImDrawListPtr drawList, Vector2 cursorPos, Vector2 pan, Vector2 scaledSize, Vector2 availableRegion)
+    {
+        if (_originalDataWidth == 0 || _originalDataHeight == 0)
+            return;
+
+        var gridColor = ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 0.3f));
+        var textColor = ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.8f, 0.8f));
+
+        // Calculate grid spacing based on zoom level
+        var traceSpacing = Math.Max(1, (int)(_originalDataWidth / 10)); // Aim for ~10 grid lines
+        var sampleSpacing = Math.Max(1, (int)(_originalDataHeight / 10));
+
+        // Round to nice numbers
+        traceSpacing = GetNiceGridSpacing(traceSpacing);
+        sampleSpacing = GetNiceGridSpacing(sampleSpacing);
+
+        var scaleX = scaledSize.X / _originalDataWidth;
+        var scaleY = scaledSize.Y / _originalDataHeight;
+
+        // Draw vertical grid lines (traces)
+        for (int t = 0; t <= _originalDataWidth; t += traceSpacing)
+        {
+            var x = cursorPos.X + pan.X + t * scaleX;
+            if (x >= cursorPos.X && x <= cursorPos.X + availableRegion.X)
+            {
+                drawList.AddLine(new Vector2(x, cursorPos.Y), new Vector2(x, cursorPos.Y + availableRegion.Y), gridColor);
+                // Draw trace number at top
+                if (t > 0)
+                {
+                    var label = t.ToString();
+                    drawList.AddText(new Vector2(x + 2, cursorPos.Y + pan.Y + 2), textColor, label);
+                }
+            }
+        }
+
+        // Draw horizontal grid lines (samples/time)
+        for (int s = 0; s <= _originalDataHeight; s += sampleSpacing)
+        {
+            var y = cursorPos.Y + pan.Y + s * scaleY;
+            if (y >= cursorPos.Y && y <= cursorPos.Y + availableRegion.Y)
+            {
+                drawList.AddLine(new Vector2(cursorPos.X, y), new Vector2(cursorPos.X + availableRegion.X, y), gridColor);
+                // Draw sample number at left
+                if (s > 0)
+                {
+                    var label = s.ToString();
+                    drawList.AddText(new Vector2(cursorPos.X + pan.X + 2, y + 2), textColor, label);
+                }
+            }
+        }
+    }
+
+    private int GetNiceGridSpacing(int rawSpacing)
+    {
+        // Round to nice numbers: 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, etc.
+        var magnitude = (int)Math.Pow(10, Math.Floor(Math.Log10(rawSpacing)));
+        var normalized = rawSpacing / (float)magnitude;
+
+        if (normalized < 1.5f) return magnitude;
+        if (normalized < 3.5f) return 2 * magnitude;
+        if (normalized < 7.5f) return 5 * magnitude;
+        return 10 * magnitude;
     }
 
     private void RenderSeismicSection(int width, int height)
@@ -239,6 +426,9 @@ public class SeismicViewer : IDatasetViewer
             var amplitudeRange = _contrastMax - _contrastMin;
             if (amplitudeRange == 0) amplitudeRange = 1.0f;
 
+            // Background color (dark gray)
+            byte bgR = 25, bgG = 25, bgB = 25, bgA = 255;
+
             // Render each trace
             for (int traceIdx = 0; traceIdx < numTraces; traceIdx++)
             {
@@ -252,14 +442,50 @@ public class SeismicViewer : IDatasetViewer
                     var normalized = (amplitude - _contrastMin) / amplitudeRange;
                     normalized = Math.Clamp(normalized, 0.0f, 1.0f);
 
-                    var color = GetColorForValue(normalized, _dataset.ColorMapIndex);
+                    byte r = bgR, g = bgG, b = bgB, a = bgA;
+
+                    // Color map mode - show colored density
+                    if (_dataset.ShowColorMap)
+                    {
+                        var color = GetColorForValue(normalized, _dataset.ColorMapIndex);
+                        r = color.r;
+                        g = color.g;
+                        b = color.b;
+                        a = color.a;
+                    }
+                    // Variable area mode - fill positive amplitudes
+                    else if (_dataset.ShowVariableArea)
+                    {
+                        if (normalized > 0.5f)
+                        {
+                            // Positive amplitude - black fill
+                            r = 0; g = 0; b = 0; a = 255;
+                        }
+                        else
+                        {
+                            // Negative amplitude - white/light background
+                            r = 240; g = 240; b = 240; a = 255;
+                        }
+                    }
+                    // Wiggle only mode - grayscale background, wiggle drawn as overlay
+                    else if (_dataset.ShowWiggleTrace)
+                    {
+                        // Light background for wiggle mode
+                        r = 240; g = 240; b = 240; a = 255;
+                    }
+                    else
+                    {
+                        // No mode selected - show grayscale
+                        var gray = (byte)(normalized * 255);
+                        r = gray; g = gray; b = gray; a = 255;
+                    }
 
                     // Set pixel in RGBA format
                     var pixelIdx = (sampleIdx * numTraces + traceIdx) * 4;
-                    pixelData[pixelIdx] = color.r;
-                    pixelData[pixelIdx + 1] = color.g;
-                    pixelData[pixelIdx + 2] = color.b;
-                    pixelData[pixelIdx + 3] = color.a;
+                    pixelData[pixelIdx] = r;
+                    pixelData[pixelIdx + 1] = g;
+                    pixelData[pixelIdx + 2] = b;
+                    pixelData[pixelIdx + 3] = a;
                 }
             }
 
@@ -289,6 +515,107 @@ public class SeismicViewer : IDatasetViewer
         catch (Exception ex)
         {
             Logger.LogError($"[SeismicViewer] Error rendering seismic section: {ex.Message}");
+        }
+    }
+
+    private void DrawWiggleTraces(ImDrawListPtr drawList, Vector2 cursorPos, Vector2 pan, Vector2 scaledSize, Vector2 availableRegion)
+    {
+        if (!_dataset.ShowWiggleTrace || _originalDataWidth == 0 || _originalDataHeight == 0)
+            return;
+
+        var numTraces = _dataset.GetTraceCount();
+        var numSamples = _dataset.GetSampleCount();
+
+        // Calculate display parameters
+        var scaleX = scaledSize.X / _originalDataWidth;
+        var scaleY = scaledSize.Y / _originalDataHeight;
+
+        // Determine trace decimation based on zoom level (don't draw too many wiggles)
+        var traceStep = Math.Max(1, (int)(1.0f / scaleX / 3)); // Aim for ~3 pixels per trace minimum
+
+        var (minAmp, maxAmp, rms) = _dataset.GetAmplitudeStatistics();
+        var amplitudeRange = maxAmp - minAmp;
+        if (amplitudeRange == 0) amplitudeRange = 1.0f;
+
+        // Wiggle amplitude scale (how wide the wiggle oscillates)
+        var wiggleScale = scaleX * 0.8f * _dataset.GainValue;
+
+        var wiggleColor = ImGui.GetColorU32(new Vector4(0, 0, 0, 1)); // Black wiggles
+        var fillColor = ImGui.GetColorU32(new Vector4(0, 0, 0, 0.7f)); // Semi-transparent black fill
+
+        for (int traceIdx = 0; traceIdx < numTraces; traceIdx += traceStep)
+        {
+            var trace = _dataset.GetTrace(traceIdx);
+            if (trace == null || trace.Samples.Length == 0)
+                continue;
+
+            var traceX = cursorPos.X + pan.X + (traceIdx + 0.5f) * scaleX;
+
+            // Skip if trace is outside visible area
+            if (traceX < cursorPos.X - wiggleScale * 2 || traceX > cursorPos.X + availableRegion.X + wiggleScale * 2)
+                continue;
+
+            // Build polyline for this trace
+            var points = new List<Vector2>();
+            var fillPoints = new List<Vector2>(); // For variable area fill
+
+            for (int sampleIdx = 0; sampleIdx < Math.Min(numSamples, trace.Samples.Length); sampleIdx++)
+            {
+                var y = cursorPos.Y + pan.Y + sampleIdx * scaleY;
+
+                // Skip if outside visible area
+                if (y < cursorPos.Y - 10 || y > cursorPos.Y + availableRegion.Y + 10)
+                    continue;
+
+                var amplitude = trace.Samples[sampleIdx] * _dataset.GainValue;
+                var normalized = (amplitude - _contrastMin) / amplitudeRange - 0.5f; // Center around 0
+                var x = traceX + normalized * wiggleScale * 2;
+
+                points.Add(new Vector2(x, y));
+
+                // For variable area, track positive excursions
+                if (_dataset.ShowVariableArea && normalized > 0)
+                {
+                    fillPoints.Add(new Vector2(x, y));
+                }
+                else if (_dataset.ShowVariableArea && fillPoints.Count > 0)
+                {
+                    // Close and draw the fill polygon
+                    if (fillPoints.Count >= 2)
+                    {
+                        // Add baseline points to close the polygon
+                        fillPoints.Add(new Vector2(traceX, fillPoints[fillPoints.Count - 1].Y));
+                        fillPoints.Add(new Vector2(traceX, fillPoints[0].Y));
+
+                        // Draw filled polygon
+                        for (int i = 1; i < fillPoints.Count - 1; i++)
+                        {
+                            drawList.AddTriangleFilled(fillPoints[0], fillPoints[i], fillPoints[i + 1], fillColor);
+                        }
+                    }
+                    fillPoints.Clear();
+                }
+            }
+
+            // Draw remaining fill points
+            if (_dataset.ShowVariableArea && fillPoints.Count >= 2)
+            {
+                fillPoints.Add(new Vector2(traceX, fillPoints[fillPoints.Count - 1].Y));
+                fillPoints.Add(new Vector2(traceX, fillPoints[0].Y));
+                for (int i = 1; i < fillPoints.Count - 1; i++)
+                {
+                    drawList.AddTriangleFilled(fillPoints[0], fillPoints[i], fillPoints[i + 1], fillColor);
+                }
+            }
+
+            // Draw the wiggle line
+            if (points.Count >= 2)
+            {
+                for (int i = 0; i < points.Count - 1; i++)
+                {
+                    drawList.AddLine(points[i], points[i + 1], wiggleColor, 1.0f);
+                }
+            }
         }
     }
 
