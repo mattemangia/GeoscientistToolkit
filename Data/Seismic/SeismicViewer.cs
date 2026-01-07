@@ -107,7 +107,7 @@ public class SeismicViewer : IDatasetViewer
             ImGui.SameLine();
         }
 
-        // Gain control (compact)
+        // Gain control (compact) - only re-render on release for performance
         ImGui.Text("Gain:");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(70);
@@ -115,6 +115,11 @@ public class SeismicViewer : IDatasetViewer
         if (ImGui.SliderFloat("##Gain", ref gainValue, 0.1f, 10.0f, "%.1f"))
         {
             _dataset.GainValue = gainValue;
+            // Don't set _needsRedraw here - wait for release
+        }
+        // Only trigger expensive re-render when slider is released
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
             _needsRedraw = true;
         }
 
@@ -122,14 +127,12 @@ public class SeismicViewer : IDatasetViewer
         ImGui.TextDisabled("|");
         ImGui.SameLine();
 
-        // Overlay toggles
-        if (ImGui.Checkbox("Pkg", ref _showPackageOverlays))
-            _needsRedraw = true;
+        // Overlay toggles (these don't need texture re-render, just visual overlay)
+        ImGui.Checkbox("Pkg", ref _showPackageOverlays);
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show Packages");
 
         ImGui.SameLine();
-        if (ImGui.Checkbox("Grid", ref _showGrid))
-            _needsRedraw = true;
+        ImGui.Checkbox("Grid", ref _showGrid);
 
         ImGui.SameLine();
         ImGui.TextDisabled("|");
@@ -419,9 +422,6 @@ public class SeismicViewer : IDatasetViewer
             if (numTraces == 0 || numSamples == 0)
                 return;
 
-            // Create RGBA byte array
-            var pixelData = new byte[numTraces * numSamples * 4];
-
             // Get amplitude range
             var (minAmp, maxAmp, rms) = _dataset.GetAmplitudeStatistics();
             if (_autoContrast)
@@ -433,51 +433,54 @@ public class SeismicViewer : IDatasetViewer
             var amplitudeRange = _contrastMax - _contrastMin;
             if (amplitudeRange == 0) amplitudeRange = 1.0f;
 
-            // Background color (dark gray)
-            byte bgR = 25, bgG = 25, bgB = 25, bgA = 255;
+            // Create RGBA byte array
+            var pixelData = new byte[numTraces * numSamples * 4];
 
-            // Render each trace
-            for (int traceIdx = 0; traceIdx < numTraces; traceIdx++)
+            // Capture settings for parallel processing
+            var showColorMap = _dataset.ShowColorMap;
+            var showVariableArea = _dataset.ShowVariableArea;
+            var showWiggleTrace = _dataset.ShowWiggleTrace;
+            var colorMapIndex = _dataset.ColorMapIndex;
+            var gainValue = _dataset.GainValue;
+            var contrastMin = _contrastMin;
+
+            // Use parallel processing for faster rendering
+            System.Threading.Tasks.Parallel.For(0, numTraces, traceIdx =>
             {
                 var trace = _dataset.GetTrace(traceIdx);
                 if (trace == null || trace.Samples.Length == 0)
-                    continue;
+                    return;
 
-                for (int sampleIdx = 0; sampleIdx < Math.Min(numSamples, trace.Samples.Length); sampleIdx++)
+                var sampleCount = Math.Min(numSamples, trace.Samples.Length);
+                for (int sampleIdx = 0; sampleIdx < sampleCount; sampleIdx++)
                 {
-                    var amplitude = trace.Samples[sampleIdx] * _dataset.GainValue;
-                    var normalized = (amplitude - _contrastMin) / amplitudeRange;
+                    var amplitude = trace.Samples[sampleIdx] * gainValue;
+                    var normalized = (amplitude - contrastMin) / amplitudeRange;
                     normalized = Math.Clamp(normalized, 0.0f, 1.0f);
 
-                    byte r = bgR, g = bgG, b = bgB, a = bgA;
+                    byte r, g, b, a;
 
                     // Color map mode - show colored density
-                    if (_dataset.ShowColorMap)
+                    if (showColorMap)
                     {
-                        var color = GetColorForValue(normalized, _dataset.ColorMapIndex);
-                        r = color.r;
-                        g = color.g;
-                        b = color.b;
-                        a = color.a;
+                        var color = GetColorForValue(normalized, colorMapIndex);
+                        r = color.r; g = color.g; b = color.b; a = color.a;
                     }
                     // Variable area mode - fill positive amplitudes
-                    else if (_dataset.ShowVariableArea)
+                    else if (showVariableArea)
                     {
                         if (normalized > 0.5f)
                         {
-                            // Positive amplitude - black fill
                             r = 0; g = 0; b = 0; a = 255;
                         }
                         else
                         {
-                            // Negative amplitude - white/light background
                             r = 240; g = 240; b = 240; a = 255;
                         }
                     }
-                    // Wiggle only mode - grayscale background, wiggle drawn as overlay
-                    else if (_dataset.ShowWiggleTrace)
+                    // Wiggle only mode - light background
+                    else if (showWiggleTrace)
                     {
-                        // Light background for wiggle mode
                         r = 240; g = 240; b = 240; a = 255;
                     }
                     else
@@ -494,7 +497,7 @@ public class SeismicViewer : IDatasetViewer
                     pixelData[pixelIdx + 2] = b;
                     pixelData[pixelIdx + 3] = a;
                 }
-            }
+            });
 
             // Upload to GPU (TextureManager will auto-downsample if needed)
             if (_seismicTexture != null)
