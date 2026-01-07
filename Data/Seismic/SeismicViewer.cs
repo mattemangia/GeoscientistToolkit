@@ -91,7 +91,7 @@ public class SeismicViewer : IDatasetViewer
         }
 
         ImGui.SameLine();
-        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
+        ImGui.TextDisabled("|");
         ImGui.SameLine();
 
         // Color map selection (compact)
@@ -119,7 +119,7 @@ public class SeismicViewer : IDatasetViewer
         }
 
         ImGui.SameLine();
-        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
+        ImGui.TextDisabled("|");
         ImGui.SameLine();
 
         // Overlay toggles
@@ -132,7 +132,7 @@ public class SeismicViewer : IDatasetViewer
             _needsRedraw = true;
 
         ImGui.SameLine();
-        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
+        ImGui.TextDisabled("|");
         ImGui.SameLine();
 
         // Export button
@@ -159,7 +159,7 @@ public class SeismicViewer : IDatasetViewer
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Reset to 100%");
 
         ImGui.SameLine();
-        ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
+        ImGui.TextDisabled("|");
         ImGui.SameLine();
 
         // Dataset info (compact)
