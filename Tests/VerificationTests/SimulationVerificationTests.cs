@@ -1152,6 +1152,245 @@ public class SimulationVerificationTests
     // ============================================================================
 
     /// <summary>
+    /// Deep geothermal coaxial heat exchanger test with partial depth probe.
+    /// Tests thermal plume behavior BELOW the heat exchanger endpoint.
+    ///
+    /// This test verifies that:
+    /// 1. Coaxial heat exchanger terminates at half the domain depth
+    /// 2. Rocks with different thermal conductivities (deep geothermal reservoir preset)
+    /// 3. Thermal effects (cold fluid cooling) extend BELOW the exchanger with gradual fading
+    /// 4. No abrupt discontinuity in thermal transfer at the exchanger endpoint
+    /// 5. The thermal plume creates a gradual transition to undisturbed geothermal gradient
+    ///
+    /// BUG CONTEXT: Previously, heat transfer would abruptly stop at the exchanger endpoint,
+    /// showing an unphysical sharp boundary. The fix ensures thermal diffusion continues
+    /// below the exchanger, creating a realistic thermal plume with gradual fading.
+    /// </summary>
+    [Fact]
+    public void Geothermal_CoaxialPartialDepth_ThermalPlumeExtendsBelow()
+    {
+        // ==================== CONFIGURATION ====================
+        // Grid configuration for deep geothermal reservoir
+        const int nx = 20, ny = 20, nz = 24;
+        const double domainDepth = 120.0; // meters (vertical extent)
+        const double domainWidth = 60.0;  // meters (horizontal extent)
+        const double dx = domainWidth / nx;
+        const double dz = domainDepth / nz;
+        const double dt = 0.5; // seconds
+        const int maxSteps = 300;
+
+        // Heat exchanger terminates at HALF the domain depth (key test condition)
+        double heatExchangerDepth = domainDepth / 2.0; // 60m - stops halfway
+        double heatExchangerFeatherZone = 10.0; // meters of gradual fading below endpoint
+
+        // ==================== CREATE PHYSICOCHEM STATE ====================
+        var state = new PhysicoChemState((nx, ny, nz));
+
+        // Initialize with deep geothermal reservoir thermal conductivity profile
+        // Different thermal conductivities per layer (increasing with depth due to compaction)
+        var thermalConductivity = new float[nx, ny, nz];
+        float probeInletTemp = 10.0f + 273.15f; // 10°C inlet (cold injection)
+        int probeX = nx / 2, probeY = ny / 2;
+
+        // Layer definitions (typical deep geothermal stratigraphy)
+        // Layer 1 (0-30m): Sedimentary cover - k = 1.8 W/mK
+        // Layer 2 (30-60m): Fractured limestone - k = 2.5 W/mK
+        // Layer 3 (60-90m): Dense limestone - k = 3.0 W/mK
+        // Layer 4 (90-120m): Crystalline basement - k = 3.5 W/mK
+        for (int i = 0; i < nx; i++)
+        for (int j = 0; j < ny; j++)
+        for (int k = 0; k < nz; k++)
+        {
+            double depth = k * dz;
+
+            // Assign thermal conductivity based on depth layer
+            float k_thermal;
+            if (depth < 30) k_thermal = 1.8f;       // Sedimentary cover
+            else if (depth < 60) k_thermal = 2.5f;  // Fractured limestone
+            else if (depth < 90) k_thermal = 3.0f;  // Dense limestone
+            else k_thermal = 3.5f;                   // Crystalline basement
+
+            thermalConductivity[i, j, k] = k_thermal;
+
+            // Initialize temperature with geothermal gradient (30°C/km = 0.03°C/m)
+            double T_surface = 15.0 + 273.15; // 15°C at surface
+            double T_gradient = 0.03; // °C/m
+            state.Temperature[i, j, k] = (float)(T_surface + depth * T_gradient);
+
+            // Hydrostatic pressure
+            state.Pressure[i, j, k] = (float)(101325.0 + 1000.0 * 9.81 * depth);
+
+            // Rock properties (typical reservoir rock)
+            state.Porosity[i, j, k] = 0.15f;
+            state.Permeability[i, j, k] = 1e-13f;
+            state.InitialPermeability[i, j, k] = state.Permeability[i, j, k];
+            state.LiquidSaturation[i, j, k] = 1.0f;
+        }
+
+        // ==================== COAXIAL HEAT EXCHANGER (PARTIAL DEPTH) ====================
+        // The exchanger is in the center column but only extends to half depth
+        int exchangerEndK = (int)(heatExchangerDepth / dz); // Cell index where exchanger ends
+
+        // Set initial cold fluid temperature in the exchanger cells
+        for (int k = 0; k < nz; k++)
+        {
+            double depth = k * dz;
+
+            if (depth <= heatExchangerDepth)
+            {
+                // ACTIVE ZONE: Cold fluid circulating - steel pipe conductivity
+                thermalConductivity[probeX, probeY, k] = 50.0f;
+
+                // Cold fluid temperature (warms as it descends)
+                double fluidTempIncrease = (depth / heatExchangerDepth) * 20.0;
+                state.Temperature[probeX, probeY, k] = (float)(probeInletTemp + fluidTempIncrease);
+            }
+            else
+            {
+                // BELOW EXCHANGER: Rock only, but should still feel thermal effects
+                // No special thermal conductivity - just rock
+            }
+        }
+
+        // ==================== CREATE HEAT TRANSFER SOLVER ====================
+        var heatSolver = new HeatTransferSolver();
+        heatSolver.ThermalConductivity = thermalConductivity;
+        heatSolver.HeatParams.GridSpacing = dx;
+        heatSolver.HeatParams.Density = 2650.0;
+        heatSolver.HeatParams.SpecificHeat = 850.0;
+
+        // Heat extraction in active zone only
+        heatSolver.HeatParams.HeatSourceFunction = (i, j, k, t) =>
+        {
+            if (i == probeX && j == probeY && k * dz <= heatExchangerDepth)
+            {
+                return -30000.0; // 30 kW/m³ heat extraction in active zone
+            }
+            return 0.0;
+        };
+
+        // ==================== SIMULATION LOOP ====================
+        var bcs = new List<BoundaryCondition>();
+
+        for (int step = 0; step < maxSteps; step++)
+        {
+            state.CurrentTime = step * dt;
+
+            // Apply gravity
+            for (int i = 0; i < nx; i++)
+            for (int j = 0; j < ny; j++)
+            for (int k = 0; k < nz; k++)
+            {
+                state.ForceZ[i, j, k] = -9810f;
+            }
+
+            // Solve heat transfer
+            heatSolver.SolveHeat(state, dt, bcs);
+
+            // Maintain cold fluid in active exchanger zone
+            for (int k = 0; k < exchangerEndK; k++)
+            {
+                double depth = k * dz;
+                double fluidTempIncrease = (depth / heatExchangerDepth) * 20.0;
+                state.Temperature[probeX, probeY, k] = (float)(probeInletTemp + fluidTempIncrease);
+            }
+        }
+
+        // ==================== THERMAL PLUME ANALYSIS ====================
+        // Collect temperature profile along the center column and at edge
+        var tempProfileCenter = new double[nz];
+        var tempProfileEdge = new double[nz];
+        var tempUndisturbed = new double[nz]; // Expected undisturbed geothermal gradient
+
+        for (int k = 0; k < nz; k++)
+        {
+            tempProfileCenter[k] = state.Temperature[probeX, probeY, k] - 273.15; // °C
+            tempProfileEdge[k] = state.Temperature[0, 0, k] - 273.15; // °C
+            tempUndisturbed[k] = 15.0 + k * dz * 0.03; // Expected geothermal gradient
+        }
+
+        // ==================== ASSERTIONS ====================
+        // 1. Temperature at the exchanger endpoint (should be cooled)
+        int endpointK = exchangerEndK - 1;
+        double tempAtEndpoint = tempProfileCenter[endpointK];
+        double tempFarAtEndpoint = tempProfileEdge[endpointK];
+
+        Assert.True(tempAtEndpoint < tempFarAtEndpoint,
+            $"Temperature at exchanger endpoint ({tempAtEndpoint:F1}°C) should be cooler than far field ({tempFarAtEndpoint:F1}°C)");
+
+        // 2. CRITICAL: Temperature just below exchanger should ALSO be cooled (thermal plume extends)
+        int justBelowK = exchangerEndK + 1;
+        double tempJustBelow = tempProfileCenter[justBelowK];
+        double tempFarJustBelow = tempProfileEdge[justBelowK];
+
+        Assert.True(tempJustBelow < tempFarJustBelow,
+            $"PLUME TEST: Temperature just below exchanger ({tempJustBelow:F1}°C) should still be cooler than far field ({tempFarJustBelow:F1}°C) - thermal plume must extend below");
+
+        // 3. Temperature gradient below exchanger should be GRADUAL, not abrupt
+        // Check that the cooling effect fades progressively
+        double tempDeltaAtEndpoint = tempFarAtEndpoint - tempAtEndpoint;
+        double tempDeltaJustBelow = tempFarJustBelow - tempJustBelow;
+        double tempDeltaDeeper = tempProfileEdge[justBelowK + 3] - tempProfileCenter[justBelowK + 3];
+
+        // The cooling effect should decrease with depth below the exchanger
+        Assert.True(tempDeltaJustBelow > 0,
+            $"Cooling effect just below exchanger should be positive ({tempDeltaJustBelow:F2}°C)");
+        Assert.True(tempDeltaJustBelow < tempDeltaAtEndpoint,
+            $"Cooling effect below exchanger ({tempDeltaJustBelow:F2}°C) should be less than at endpoint ({tempDeltaAtEndpoint:F2}°C) - gradual fading");
+
+        // 4. Deep below the exchanger (in basement rock), cooling effect should be minimal
+        int deepK = nz - 3; // Near bottom of domain
+        double tempDeep = tempProfileCenter[deepK];
+        double tempFarDeep = tempProfileEdge[deepK];
+        double tempDeltaDeep = Math.Abs(tempFarDeep - tempDeep);
+
+        // Deep rock should be close to undisturbed (within 2°C)
+        Assert.True(tempDeltaDeep < 2.0,
+            $"Deep below exchanger, thermal effect should be minimal (<2°C difference), got {tempDeltaDeep:F2}°C");
+
+        // 5. Verify thermal plume shape: cooling should decrease smoothly from endpoint to deep
+        // Check for no abrupt jumps (no more than 50% change between adjacent cells)
+        for (int k = exchangerEndK; k < nz - 2; k++)
+        {
+            double deltaCurrent = Math.Abs(tempProfileEdge[k] - tempProfileCenter[k]);
+            double deltaNext = Math.Abs(tempProfileEdge[k + 1] - tempProfileCenter[k + 1]);
+
+            // Allow for small absolute differences where ratios become meaningless
+            if (deltaCurrent > 0.5)
+            {
+                double ratio = deltaNext / deltaCurrent;
+                Assert.True(ratio > 0.3,
+                    $"NO ABRUPT DISCONTINUITY: At depth {k * dz:F0}m, thermal effect dropped too sharply (ratio={ratio:F2}). Bug may not be fixed.");
+            }
+        }
+
+        // 6. Verify different thermal conductivity layers are present
+        Assert.NotEqual(thermalConductivity[probeX + 1, probeY, 2], thermalConductivity[probeX + 1, probeY, nz - 2]);
+
+        // ==================== LOG RESULTS ====================
+        Console.WriteLine("=== Geothermal Coaxial Partial Depth - Thermal Plume Test ===");
+        Console.WriteLine($"Domain: {nx}x{ny}x{nz} ({domainWidth}m x {domainWidth}m x {domainDepth}m)");
+        Console.WriteLine($"Heat exchanger depth: {heatExchangerDepth}m (terminates at cell k={exchangerEndK})");
+        Console.WriteLine($"Feather zone: {heatExchangerFeatherZone}m below endpoint");
+        Console.WriteLine();
+        Console.WriteLine("Thermal Profile (center vs edge):");
+        Console.WriteLine("Depth(m)\tCenter(°C)\tEdge(°C)\tDelta(°C)\tZone");
+        for (int k = 0; k < nz; k += 2)
+        {
+            double depth = k * dz;
+            string zone = depth <= heatExchangerDepth ? "EXCHANGER" :
+                         depth <= heatExchangerDepth + heatExchangerFeatherZone ? "PLUME" : "UNDISTURBED";
+            double delta = tempProfileEdge[k] - tempProfileCenter[k];
+            Console.WriteLine($"{depth:F0}\t\t{tempProfileCenter[k]:F1}\t\t{tempProfileEdge[k]:F1}\t\t{delta:F2}\t\t{zone}");
+        }
+        Console.WriteLine();
+        Console.WriteLine($"Cooling at exchanger endpoint: {tempDeltaAtEndpoint:F2}°C");
+        Console.WriteLine($"Cooling just below exchanger: {tempDeltaJustBelow:F2}°C");
+        Console.WriteLine($"Cooling at domain bottom: {tempDeltaDeep:F2}°C");
+        Console.WriteLine($"Test PASSED: Thermal plume extends below exchanger with gradual fading");
+    }
+
+    /// <summary>
     /// Nuclear reactor point kinetics test with delayed neutrons.
     /// Validates reactor response to step reactivity insertion using the
     /// six-group delayed neutron model.
