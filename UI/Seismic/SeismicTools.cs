@@ -1,5 +1,6 @@
 // GeoscientistToolkit/UI/Seismic/SeismicTools.cs
 
+using System;
 using System.Numerics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Seismic;
@@ -18,6 +19,12 @@ namespace GeoscientistToolkit.UI.Seismic;
 public class SeismicTools : IDatasetTools
 {
     private SeismicViewer? _activeViewer;
+
+    private readonly Dictionary<ToolCategory, string> _categoryDescriptions;
+    private readonly Dictionary<ToolCategory, string> _categoryNames;
+    private readonly Dictionary<ToolCategory, List<ToolEntry>> _toolsByCategory;
+    private ToolCategory _selectedCategory = ToolCategory.Packages;
+    private int _selectedToolIndex;
 
     // Package creation
     private string _newPackageName = "New Package";
@@ -60,6 +67,106 @@ public class SeismicTools : IDatasetTools
         _imageExportDialog.SetExtensions((".png", "PNG Image"), (".jpg", "JPEG Image"), (".bmp", "Bitmap Image"));
         _segyExportDialog = new ImGuiExportFileDialog("SeismicSegyExport", "Export SEG-Y File");
         _segyExportDialog.SetExtensions((".sgy", "SEG-Y File"), (".segy", "SEG-Y File"));
+
+        _categoryNames = new Dictionary<ToolCategory, string>
+        {
+            { ToolCategory.Packages, "Packages" },
+            { ToolCategory.Analysis, "Analysis" },
+            { ToolCategory.Processing, "Processing" },
+            { ToolCategory.Export, "Export" },
+            { ToolCategory.Borehole, "Borehole" }
+        };
+
+        _categoryDescriptions = new Dictionary<ToolCategory, string>
+        {
+            { ToolCategory.Packages, "Organize line packages and automate package creation" },
+            { ToolCategory.Analysis, "Analyze trace amplitudes and quality metrics" },
+            { ToolCategory.Processing, "Apply filters, normalization, and gain controls" },
+            { ToolCategory.Export, "Export seismic data and images" },
+            { ToolCategory.Borehole, "Integrate seismic data with borehole tools" }
+        };
+
+        _toolsByCategory = new Dictionary<ToolCategory, List<ToolEntry>>
+        {
+            {
+                ToolCategory.Packages,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Package Overview",
+                        Description = "Review packages, visibility, and trace ranges",
+                        Draw = DrawPackageOverview
+                    },
+                    new()
+                    {
+                        Name = "Create Packages",
+                        Description = "Create packages manually or from viewer selection",
+                        Draw = DrawPackageCreationPanel
+                    },
+                    new()
+                    {
+                        Name = "Auto-Detection",
+                        Description = "Automatically detect packages based on trace boundaries",
+                        Draw = DrawAutoDetectionTools
+                    },
+                    new()
+                    {
+                        Name = "Edit Package",
+                        Description = "Update the selected package details and ranges",
+                        Draw = DrawPackageEditorPanel
+                    }
+                }
+            },
+            {
+                ToolCategory.Analysis,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Analysis Tools",
+                        Description = "Evaluate statistics and detect anomalies",
+                        Draw = DrawAnalysisTools
+                    }
+                }
+            },
+            {
+                ToolCategory.Processing,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Signal Processing",
+                        Description = "Apply filters, AGC, and normalization controls",
+                        Draw = DrawSignalProcessingTools
+                    }
+                }
+            },
+            {
+                ToolCategory.Export,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Export",
+                        Description = "Export images and SEG-Y files",
+                        Draw = DrawExportTools
+                    }
+                }
+            },
+            {
+                ToolCategory.Borehole,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Borehole Integration",
+                        Description = "Move data between seismic lines and borehole tools",
+                        Draw = _ => DrawBoreholeSeismicIntegration()
+                    }
+                }
+            }
+        };
     }
 
     public void SetViewer(SeismicViewer viewer)
@@ -81,22 +188,111 @@ public class SeismicTools : IDatasetTools
             return;
         }
 
-        ImGui.Text($"Seismic Line Package Manager");
+        DrawCategorizedTools(seismicDataset);
+    }
+
+    private void DrawCategorizedTools(SeismicDataset dataset)
+    {
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(8, 4));
+        ImGui.Text("Category:");
+        ImGui.SameLine();
+
+        var currentCategoryName = _categoryNames[_selectedCategory];
+        var categoryTools = _toolsByCategory[_selectedCategory];
+        var preview = $"{currentCategoryName} ({categoryTools.Count})";
+
+        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+        if (ImGui.BeginCombo("##SeismicCategorySelector", preview))
+        {
+            foreach (var category in Enum.GetValues<ToolCategory>())
+            {
+                var tools = _toolsByCategory[category];
+                var isSelected = _selectedCategory == category;
+                var label = $"{_categoryNames[category]} ({tools.Count} tools)";
+
+                if (ImGui.Selectable(label, isSelected))
+                {
+                    _selectedCategory = category;
+                    _selectedToolIndex = 0;
+                }
+
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip(_categoryDescriptions[category]);
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.PopStyleVar();
+
+        ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), _categoryDescriptions[_selectedCategory]);
         ImGui.Separator();
-
-        // Show dataset info
-        ImGui.Text($"Total Traces: {seismicDataset.GetTraceCount()}");
-        ImGui.Text($"Packages: {seismicDataset.LinePackages.Count}");
         ImGui.Spacing();
 
-        // Package list
-        DrawPackageList(seismicDataset);
+        if (categoryTools.Count == 0)
+        {
+            ImGui.TextDisabled("No tools available in this category.");
+            return;
+        }
 
-        ImGui.Spacing();
+        if (categoryTools.Count == 1)
+        {
+            DrawToolEntry(dataset, categoryTools[0], $"SeismicTool_{categoryTools[0].Name}");
+            return;
+        }
+
+        if (ImGui.BeginTabBar($"SeismicTools_{_selectedCategory}", ImGuiTabBarFlags.None))
+        {
+            for (var i = 0; i < categoryTools.Count; i++)
+            {
+                var entry = categoryTools[i];
+                if (ImGui.BeginTabItem(entry.Name))
+                {
+                    _selectedToolIndex = i;
+                    DrawToolEntry(dataset, entry, $"SeismicTool_{entry.Name}");
+                    ImGui.EndTabItem();
+                }
+            }
+
+            ImGui.EndTabBar();
+        }
+    }
+
+    private void DrawToolEntry(SeismicDataset dataset, ToolEntry entry, string childId)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.9f, 0.9f, 0.9f, 1));
+        ImGui.Text(entry.Name);
+        ImGui.PopStyleColor();
+
+        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), entry.Description);
         ImGui.Separator();
         ImGui.Spacing();
 
-        // Package creation from selection
+        ImGui.BeginChild(childId, new Vector2(0, 0), ImGuiChildFlags.None,
+            ImGuiWindowFlags.HorizontalScrollbar);
+        {
+            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(4, 3));
+            ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(4, 5));
+
+            entry.Draw(dataset);
+
+            ImGui.PopStyleVar(2);
+        }
+        ImGui.EndChild();
+    }
+
+    private void DrawPackageOverview(SeismicDataset dataset)
+    {
+        ImGui.Text("Seismic Line Package Manager");
+        ImGui.Separator();
+        ImGui.Text($"Total Traces: {dataset.GetTraceCount()}");
+        ImGui.Text($"Packages: {dataset.LinePackages.Count}");
+        ImGui.Spacing();
+
+        DrawPackageList(dataset);
+    }
+
+    private void DrawPackageCreationPanel(SeismicDataset dataset)
+    {
         if (_activeViewer != null)
         {
             var (startTrace, endTrace) = _activeViewer.GetCurrentSelection();
@@ -108,60 +304,25 @@ public class SeismicTools : IDatasetTools
                 {
                     _newPackageStartTrace = startTrace;
                     _newPackageEndTrace = endTrace;
-                    _newPackageName = $"Package {seismicDataset.LinePackages.Count + 1}";
+                    _newPackageName = $"Package {dataset.LinePackages.Count + 1}";
                 }
 
                 ImGui.Spacing();
             }
         }
 
-        // Manual package creation
-        DrawPackageCreation(seismicDataset);
+        DrawPackageCreation(dataset);
+    }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        // Auto-detection tools
-        DrawAutoDetectionTools(seismicDataset);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        // Package editor
+    private void DrawPackageEditorPanel(SeismicDataset dataset)
+    {
         if (_selectedPackage != null)
         {
-            DrawPackageEditor(seismicDataset);
+            DrawPackageEditor(dataset);
+            return;
         }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        // Analysis tools
-        DrawAnalysisTools(seismicDataset);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        // Signal Processing tools
-        DrawSignalProcessingTools(seismicDataset);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        // Export tools
-        DrawExportTools(seismicDataset);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        // Borehole-Seismic integration
-        DrawBoreholeSeismicIntegration();
+        ImGui.TextDisabled("Select a package from the Package Overview to edit it.");
     }
 
     private void DrawPackageList(SeismicDataset dataset)
@@ -1332,5 +1493,21 @@ public class SeismicTools : IDatasetTools
                 ImGui.EndTabBar();
             }
         }
+    }
+
+    private enum ToolCategory
+    {
+        Packages,
+        Analysis,
+        Processing,
+        Export,
+        Borehole
+    }
+
+    private class ToolEntry
+    {
+        public string Name { get; set; }
+        public string Description { get; set; }
+        public Action<SeismicDataset> Draw { get; set; }
     }
 }
