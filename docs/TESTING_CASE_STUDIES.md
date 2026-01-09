@@ -17,6 +17,33 @@ dotnet test GeoscientistToolkit.sln
 
 > The verification suite accepts filters such as `geomech`, `seismo`, `slope`, `thermo`, `pnm`, `acoustic`, `heat`, `hydro`, `geothermal`, and `petrology`. See `VerificationTests/RealCaseVerifier/Program.cs` for the full list.
 
+## How to run the commercial-software benchmark suite
+
+```bash
+dotnet test Tests/BenchmarkTests/BenchmarkTests.csproj
+```
+
+> The benchmark suite is implemented in `Tests/BenchmarkTests/CommercialSoftwareBenchmarks.cs` and compares GeoscientistToolkit outputs to published reference results and professional software baselines.
+
+## Commercial-software benchmark case studies
+
+These benchmark tests validate GeoscientistToolkit against reference outputs from professional suites and published literature. They are designed to mirror common validation benchmarks used in TOUGH2, COMSOL, T2Well, PhreeqC, RocFall, and OpenGeoSys workflows.
+
+| # | Domain | Benchmark (Professional Suite) | Validation Reference |
+| --- | --- | --- | --- |
+| B1 | Geothermal | Beier Sandbox BHE experiment (TOUGH2/PetraSim, OpenGeoSys) | Beier et al. (2011) TRT sandbox benchmark, DOI 10.1016/j.geothermics.2010.10.007. |
+| B2 | Geothermal | Lauwerier fracture heat transfer (TOUGH2/COMSOL) | Lauwerier (1955) analytical solution; EGS validation study (2022), DOI 10.1007/BF03184614 / 10.1155/2022/5174456. |
+| B3 | Geothermal | Radial heat conduction similarity (TOUGH2) | TOUGH2 User’s Guide (LBNL-43134), DOI 10.2172/778134. |
+| B4 | Geothermal | Deep borehole heat exchanger (T2Well) | T2Well benchmark configuration from geothermal literature. |
+| B5 | Geothermal | Enhanced geothermal system thermal breakthrough (COMSOL) | COMSOL-style coupled THM benchmark in geothermal studies. |
+| B6 | Geochemistry | Binary water mixing (PhreeqC) | PhreeqC speciation/mixing benchmark results. |
+| B7 | Geochemistry | Calcite saturation index (PhreeqC) | PhreeqC calcite saturation reference outputs. |
+| B8 | Slope stability | Free-fall trajectory (RocFall/STONE) | RocFall-style rockfall trajectory benchmark. |
+| B9 | Slope stability | Runout statistics (RocFall/STONE) | RocFall/STONE runout distribution comparison. |
+| B10 | Hydrology | Steady-state groundwater flow (OpenGeoSys) | OpenGeoSys groundwater flow benchmark solution. |
+| B11 | Heat transport | 1D heat conduction (OpenGeoSys) | OpenGeoSys heat transport benchmark solution. |
+| B12 | Multi-physics | DEM-based terrain simulation (literature baseline) | Tucker & Hancock (2010) + Pelletier (2008) landscape evolution references. |
+
 ## Case studies, datasets, and validation standards
 
 The table below lists the real-case demonstrations, the key data inputs, and the validation baselines (published datasets, equations, or reference software) they are checked against.
@@ -54,6 +81,7 @@ If you add a new test case, please extend this document with the data source and
 
 - Al-Khoury, F., et al. (2010). Efficient numerical modeling of borehole heat exchangers. *Computers & Geosciences, 36*. https://doi.org/10.1016/j.cageo.2009.12.010
 - Allègre, C. J., et al. (1977). Systematic use of trace elements in igneous processes I. Fractional crystallization processes in volcanic suites. *Contributions to Mineralogy and Petrology, 60*, 57–75. https://doi.org/10.1007/BF00372851
+- Beier, R. A., Smith, M. D., & Spitler, J. D. (2011). Reference data sets for vertical borehole ground heat exchanger models and thermal response test analysis. *Geothermics, 40*(1), 79–85. https://doi.org/10.1016/j.geothermics.2010.10.007
 - Carslaw, H. S., & Jaeger, J. C. (1959). *Conduction of heat in solids* (2nd ed.). Oxford University Press.
 - DiPippo, R. (2015). *Geothermal power plants: Principles, applications, case studies and environmental impact* (4th ed.). Butterworth-Heinemann.
 - Dorren, L. K. (2003). A review of rockfall mechanics and modelling approaches. *Progress in Physical Geography, 27*(1), 69–87. https://doi.org/10.1191/0309133303pp359ra
@@ -66,13 +94,18 @@ If you add a new test case, please extend this document with the data source and
 - Hu, X., et al. (2020). Numerical modeling of coaxial borehole heat exchanger for geothermal energy extraction. *Energy, 199*. https://doi.org/10.1016/j.energy.2020.117414
 - International Atomic Energy Agency. (2002). *Comparative assessment of PHWR and LWR* (IAEA-TECDOC-1326).
 - International Atomic Energy Agency. (2009). *Design features to achieve defence in depth* (IAEA Nuclear Energy Series NP-T-1.1).
+- Lauwerier, H. A. (1955). The transport of heat in an oil layer caused by the injection of hot fluid. *Applied Scientific Research, Section A, 5*(2-3), 145–150. https://doi.org/10.1007/BF03184614
 - Lamarsh, J. R. (1966). *Introduction to nuclear reactor theory*. Addison-Wesley.
 - Mackenzie, K. V. (1981). Nine-term equation for sound speed in the oceans. *Journal of the Acoustical Society of America, 70*, 807. https://doi.org/10.1121/1.386920
 - Mucci, A. (1983). The solubility of calcite and aragonite in seawater at various temperatures, salinities, and one atmosphere total pressure. *Geochimica et Cosmochimica Acta, 47*(7), 1293–1308. https://doi.org/10.1016/0016-7037(83)90288-0
+- Pelletier, J. D. (2008). *Quantitative modeling of earth surface processes*. Cambridge University Press. https://doi.org/10.1017/CBO9780511813849
+- Pruess, K., Oldenburg, C., & Moridis, G. (2012). *TOUGH2 user’s guide, version 2.0* (LBNL-43134). https://doi.org/10.2172/778134
 - Quoilin, S., et al. (2013). Techno-economic survey of Organic Rankine Cycle (ORC) systems. *Renewable and Sustainable Energy Reviews, 22*, 168–186. https://doi.org/10.1016/j.rser.2013.01.028
 - Stacey, W. M. (2007). *Nuclear reactor physics* (2nd ed.). Wiley.
+- Tucker, G. E., & Hancock, G. R. (2010). Modelling landscape evolution. *Earth Surface Processes and Landforms, 35*(1), 28–50. https://doi.org/10.1002/esp.1952
 - van Genuchten, M. T. (1980). A closed-form equation for predicting the hydraulic conductivity of unsaturated soils. *Soil Science Society of America Journal, 44*(5), 892–898.
 - Wagner, W., & Pruss, A. (2002). The IAPWS formulation 1995 for the thermodynamic properties of ordinary water substance. *Journal of Physical and Chemical Reference Data, 31*. https://doi.org/10.1063/1.1461829
+- Wang, Z., Wang, F., Liu, J., et al. (2022). Influence factors on EGS geothermal reservoir extraction performance. *Geofluids, 2022*, Article 5174456. https://doi.org/10.1155/2022/5174456
 - World Nuclear Association. (2024). *Reactor database*.
 - *Mechanical Properties and Failure Mechanism of Granite with Maximum Free Water Absorption under Triaxial Compression*. (2022). *Applied Sciences*. https://doi.org/10.3390/app12083930
 
