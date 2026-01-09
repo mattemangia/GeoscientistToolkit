@@ -119,7 +119,7 @@ public static class GeothermalMeshGenerator
 
             // Mark cells within the borehole diameter as heat exchanger
             var distanceFromAxis = mesh.R[i];
-            var boreholeRadius = (float)(borehole.Diameter / 2000.0); // Convert mm to m
+            var boreholeRadius = (float)(borehole.Diameter / 2.0); // Diameter is in meters; convert to radius
 
             // --- DEFINITIVE FIX START ---
             // The Material ID for the borehole must extend to the FULL borehole depth.

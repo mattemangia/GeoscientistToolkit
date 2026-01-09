@@ -120,9 +120,9 @@ public class CommercialSoftwareBenchmarks
             FluidThermalConductivity = 0.6,
             FluidViscosity = 0.001,
 
-            // Initial temperature (sandbox ambient)
-            // The experiment started at ambient temperature (~22°C)
-            FluidInletTemperature = 295.15, // Varies during TRT, start value
+            // Initial temperature (sandbox ambient) with heater elevation
+            // TRT inlet temperatures are elevated (~28-30°C) by the circulation heater
+            FluidInletTemperature = 301.15, // Representative heated inlet temperature
             SurfaceTemperature = 295.15,
             AverageGeothermalGradient = 0.0, // No geothermal gradient in lab sandbox
 
@@ -647,6 +647,7 @@ public class CommercialSoftwareBenchmarks
             // Coaxial pipe dimensions (typical vacuum insulated tubing)
             PipeInnerDiameter = 0.089, // 3.5" tubing ID
             PipeOuterDiameter = 0.127, // 5" casing ID
+            PipeSpacing = 0.1016, // 4" OD inner tubing (prevents short-circuiting)
             InnerPipeThermalConductivity = 0.025, // VIT insulation
             PipeThermalConductivity = 45.0, // Steel outer pipe
 
