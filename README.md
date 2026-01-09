@@ -335,6 +335,7 @@ For detailed documentation, see:
 - [**Petrology System**](docs/PETROLOGY_SYSTEM.md) - Rock classification
 - [**Thermodynamics**](docs/THERMODYNAMICS_ENHANCEMENTS.md) - Phase diagrams and reactions
 - [**ONNX Models**](docs/ONNX_MODELS.md) - Setting up AI models
+- [**Testing Case Studies**](docs/TESTING_CASE_STUDIES.md) - Validation datasets and standards
 - [**Codebase Analysis**](docs/CODEBASE_ANALYSIS.md) - Developer documentation
 
 ---
