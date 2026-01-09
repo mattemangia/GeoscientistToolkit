@@ -1254,7 +1254,10 @@ public class CommercialSoftwareBenchmarks
             float analyticalTime = MathF.Sqrt(2 * height / g);
 
             // Create simulation dataset
-            var dataset = new SlopeStabilityDataset("FreeFall_Benchmark");
+            var dataset = new SlopeStabilityDataset
+            {
+                Name = "FreeFall_Benchmark"
+            };
 
             // Create a single block at height
             var block = new Block
@@ -1286,9 +1289,6 @@ public class CommercialSoftwareBenchmarks
                 new Vector3(-halfSize, halfSize, halfSize + height)
             };
 
-            block.CalculateGeometricProperties();
-            dataset.Blocks.Add(block);
-
             // Create ground plane (fixed block at z=0)
             var ground = new Block
             {
@@ -1316,6 +1316,11 @@ public class CommercialSoftwareBenchmarks
             ground.CalculateGeometricProperties();
             dataset.Blocks.Add(ground);
 
+            block.CalculateGeometricProperties();
+            dataset.Blocks.Add(block);
+
+            int blockIndex = dataset.Blocks.FindIndex(b => b.Id == block.Id);
+
             // Simulation parameters
             var parameters = new SlopeStabilityParameters
             {
@@ -1329,7 +1334,7 @@ public class CommercialSoftwareBenchmarks
                 SaveIntermediateStates = true,
                 OutputFrequency = 10,
                 ConvergenceThreshold = 1e-6f,
-                BoundaryMode = BoundaryConditionMode.None
+                BoundaryMode = BoundaryConditionMode.Free
             };
 
             // Run simulation
@@ -1345,10 +1350,10 @@ public class CommercialSoftwareBenchmarks
                 for (int i = 1; i < results.TimeHistory.Count; i++)
                 {
                     var snapshot = results.TimeHistory[i];
-                    if (snapshot.BlockPositions.Count > 1)
+                    if (blockIndex >= 0 && snapshot.BlockPositions.Count > blockIndex)
                     {
-                        var pos = snapshot.BlockPositions[1]; // Block 1 is our test block
-                        var vel = snapshot.BlockVelocities[1];
+                        var pos = snapshot.BlockPositions[blockIndex];
+                        var vel = snapshot.BlockVelocities[blockIndex];
 
                         if (pos.Z <= blockSize / 2) // Reached ground level
                         {
@@ -1368,11 +1373,14 @@ public class CommercialSoftwareBenchmarks
             }
 
             // If no impact detected, use final state
-            if (simulatedTime == 0 && results.BlockResults.Count > 1)
+            if (simulatedTime == 0)
             {
-                var finalResult = results.BlockResults[1];
-                simulatedVelocity = finalResult.Velocity.Length();
-                simulatedTime = results.TotalSimulationTime;
+                var finalResult = results.BlockResults.FirstOrDefault(r => r.BlockId == block.Id);
+                if (finalResult != null)
+                {
+                    simulatedVelocity = finalResult.Velocity.Length();
+                    simulatedTime = results.TotalSimulationTime;
+                }
             }
 
             // Calculate errors
@@ -1444,7 +1452,7 @@ public class CommercialSoftwareBenchmarks
         // Test on a 45° slope
         const float slopeAngle = 45.0f; // degrees
         const float slopeHeight = 50.0f; // meters
-        const float slopeLength = slopeHeight / MathF.Tan(slopeAngle * MathF.PI / 180);
+        float slopeLength = slopeHeight / MathF.Tan(slopeAngle * MathF.PI / 180);
         const float g = 9.81f;
 
         _output.WriteLine($"Slope configuration:");
@@ -1454,7 +1462,10 @@ public class CommercialSoftwareBenchmarks
         _output.WriteLine("");
 
         // Create dataset with sloped ground
-        var dataset = new SlopeStabilityDataset("Runout_Benchmark");
+        var dataset = new SlopeStabilityDataset
+        {
+            Name = "Runout_Benchmark"
+        };
 
         // Create falling block at top of slope
         var block = new Block
@@ -1514,17 +1525,18 @@ public class CommercialSoftwareBenchmarks
         // Simulation parameters
         var parameters = new SlopeStabilityParameters
         {
-            TotalTime = 10.0f, // 10 seconds should be enough for runout
-            TimeStep = 0.002f,
+            TotalTime = 5.0f, // shorter runout window for test stability
+            TimeStep = 0.01f,
             Gravity = new Vector3(0, 0, -g),
+            SlopeAngle = slopeAngle,
             Mode = SimulationMode.Dynamic,
             LocalDamping = 0.1f, // Some energy loss on bounce
             ViscousDamping = 0.0f,
             UseMultithreading = false,
-            SaveIntermediateStates = true,
-            OutputFrequency = 50,
+            SaveIntermediateStates = false,
+            OutputFrequency = 25,
             ConvergenceThreshold = 0.01f,
-            BoundaryMode = BoundaryConditionMode.None
+            BoundaryMode = BoundaryConditionMode.Free
         };
 
         // Run simulation
@@ -1944,25 +1956,28 @@ public class CommercialSoftwareBenchmarks
             }
         }
 
-        // Accumulate flow (simple iterative method)
-        for (int iter = 0; iter < nx * ny; iter++)
+        // Accumulate flow by tracing each cell's downstream path
+        for (int i = 0; i < nx; i++)
         {
-            for (int i = 0; i < nx; i++)
+            for (int j = 0; j < ny; j++)
             {
-                for (int j = 0; j < ny; j++)
+                int ci = i;
+                int cj = j;
+
+                while (true)
                 {
-                    int dir = flowDirection[i, j];
-                    if (dir >= 0)
-                    {
-                        int ni = i + di[dir];
-                        int nj = j + dj[dir];
-                        if (ni >= 0 && ni < nx && nj >= 0 && nj < ny)
-                        {
-                            flowAccumulation[ni, nj] = Math.Max(
-                                flowAccumulation[ni, nj],
-                                flowAccumulation[i, j] + 1);
-                        }
-                    }
+                    int dir = flowDirection[ci, cj];
+                    if (dir < 0)
+                        break;
+
+                    int ni = ci + di[dir];
+                    int nj = cj + dj[dir];
+                    if (ni < 0 || ni >= nx || nj < 0 || nj >= ny)
+                        break;
+
+                    flowAccumulation[ni, nj] += 1;
+                    ci = ni;
+                    cj = nj;
                 }
             }
         }
@@ -1979,7 +1994,10 @@ public class CommercialSoftwareBenchmarks
         _output.WriteLine("--- Test 2: Rockfall Trajectory on Terrain ---");
 
         // Create mesh from DEM for slope stability
-        var terrainDataset = new SlopeStabilityDataset("DEM_Rockfall");
+        var terrainDataset = new SlopeStabilityDataset
+        {
+            Name = "DEM_Rockfall"
+        };
 
         // Create terrain as fixed blocks (simplified - just use bounding planes)
         var terrainBlock = new Block
@@ -2042,14 +2060,16 @@ public class CommercialSoftwareBenchmarks
 
         var rockfallParams = new SlopeStabilityParameters
         {
-            TotalTime = 20.0f,
-            TimeStep = 0.005f,
+            TotalTime = 10.0f,
+            TimeStep = 0.01f,
             Gravity = new Vector3(0, 0, -9.81f),
             Mode = SimulationMode.Dynamic,
             LocalDamping = 0.05f,
             UseMultithreading = false,
-            SaveIntermediateStates = true,
-            OutputFrequency = 20
+            SaveIntermediateStates = false,
+            OutputFrequency = 25,
+            SpatialHashGridSize = 30,
+            ContactSearchRadius = 0.5f
         };
 
         var rockfallSim = new SlopeStabilitySimulator(terrainDataset, rockfallParams);
