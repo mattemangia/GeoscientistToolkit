@@ -394,19 +394,24 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         for (var k = 0; k < nz; k++)
         {
             // Thermal conductivity: clamp to reasonable range
-            _mesh.ThermalConductivities[i, j, k] = Math.Max(0.1f, Math.Min(10f, _mesh.ThermalConductivities[i, j, k]));
+            _mesh.ThermalConductivities[i, j, k] = Math.Max((float)_options.MinThermalConductivity,
+                Math.Min((float)_options.MaxThermalConductivity, _mesh.ThermalConductivities[i, j, k]));
 
             // Specific heat: clamp to reasonable range
-            _mesh.SpecificHeats[i, j, k] = Math.Max(100f, Math.Min(5000f, _mesh.SpecificHeats[i, j, k]));
+            _mesh.SpecificHeats[i, j, k] = Math.Max((float)_options.MinSpecificHeat,
+                Math.Min((float)_options.MaxSpecificHeat, _mesh.SpecificHeats[i, j, k]));
 
             // Density: clamp to reasonable range
-            _mesh.Densities[i, j, k] = Math.Max(500f, Math.Min(5000f, _mesh.Densities[i, j, k]));
+            _mesh.Densities[i, j, k] = Math.Max((float)_options.MinDensity,
+                Math.Min((float)_options.MaxDensity, _mesh.Densities[i, j, k]));
 
             // Porosity: clamp between 0 and 1
-            _mesh.Porosities[i, j, k] = Math.Max(1e-6f, Math.Min(0.99f, _mesh.Porosities[i, j, k]));
+            _mesh.Porosities[i, j, k] = Math.Max((float)_options.MinPorosity,
+                Math.Min((float)_options.MaxPorosity, _mesh.Porosities[i, j, k]));
 
             // Permeability: ensure positive
-            _mesh.Permeabilities[i, j, k] = Math.Max(1e-20f, Math.Min(1e-8f, _mesh.Permeabilities[i, j, k]));
+            _mesh.Permeabilities[i, j, k] = Math.Max((float)_options.MinPermeability,
+                Math.Min((float)_options.MaxPermeability, _mesh.Permeabilities[i, j, k]));
         }
     }
 
@@ -425,12 +430,13 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         var saveCounter = 0;
 
         // Calcola un "passo di crociera" ideale basato sulla durata totale.
-        var targetTimeStep = Math.Max(60.0, _options.SimulationTime / 5000.0);
+        var targetTimeStep = Math.Max(_options.MinTargetTimeStepSeconds,
+            _options.SimulationTime / Math.Max(1, _options.TargetTimeSteps));
         Logger.Log($"Target time step for this run: {targetTimeStep / 3600:F2} hours.");
 
         // Partenza sicura e controllata.
-        var actualTimeStep = 30.0;
-        _adaptiveRelaxation = 0.1f;
+        var actualTimeStep = _options.MinInitialAdaptiveTimeStepSeconds;
+        _adaptiveRelaxation = _options.AdaptiveRelaxationMinFallback;
         var step = 0;
 
         while (currentTime < _options.SimulationTime)
@@ -502,7 +508,8 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
                     // Fallimento Catastrofico (NaN/Infinity). L'unica opzione è tagliare il time step.
                     _temperature = (float[,,])_temperatureOld.Clone();
                     actualTimeStep *= 0.5;
-                    _adaptiveRelaxation = Math.Max(0.1f, _adaptiveRelaxation * 0.8f);
+                    _adaptiveRelaxation = Math.Max(_options.AdaptiveRelaxationMinFallback,
+                        _adaptiveRelaxation * 0.8f);
                     ConvergenceStatus = $"DIVERGENCE! Slashing dt to {actualTimeStep:F1}s";
 
                     if (actualTimeStep < 10.0) // Pavimento di emergenza
@@ -581,7 +588,7 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         // Fase 1: Partenza ultra-conservativa per i primi 30 passi per assorbire lo shock iniziale.
         if (step < 30)
         {
-            _adaptiveRelaxation = Math.Max(0.05f, _adaptiveRelaxation * 0.95f); // Mantieni il damping alto
+            _adaptiveRelaxation = Math.Max(_options.AdaptiveRelaxationMin, _adaptiveRelaxation * 0.95f);
             newDt = Math.Min(newDt * 1.1, 300); // Crescita molto lenta fino a un massimo di 5 minuti
             ConvergenceStatus = "Initial stabilization phase";
         }
@@ -606,8 +613,9 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         }
 
         // Limiti di sicurezza finali, applicati sempre.
-        _adaptiveRelaxation = Math.Clamp(_adaptiveRelaxation, 0.05f, 0.7f); // Damping sempre tra 5% e 70%
-        newDt = Math.Clamp(newDt, 30.0,
+        _adaptiveRelaxation = Math.Clamp(_adaptiveRelaxation, _options.AdaptiveRelaxationMin,
+            _options.AdaptiveRelaxationMax);
+        newDt = Math.Clamp(newDt, _options.MinInitialAdaptiveTimeStepSeconds,
             options.TimeStep); // Time step MAI sotto i 30s e mai sopra il massimo dell'utente.
 
         return newDt;
@@ -645,8 +653,9 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         }
 
         // Final Safety Clamping for all cases.
-        _adaptiveRelaxation = Math.Clamp(_adaptiveRelaxation, 0.1f, 0.8f);
-        newDt = Math.Clamp(newDt, 1.0, options.TimeStep);
+        _adaptiveRelaxation = Math.Clamp(_adaptiveRelaxation, _options.AdaptiveRelaxationMinFallback,
+            _options.AdaptiveRelaxationMaxFallback);
+        newDt = Math.Clamp(newDt, _options.MinAdaptiveTimeStepSeconds, options.TimeStep);
 
         return newDt;
     }
@@ -654,7 +663,6 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
     private double UpdateAdaptiveTimeStep(double currentDt, int step, List<double> convergenceHistory,
         GeothermalSimulationOptions options)
     {
-        const double minTimeStep = 1.0; // Minimum allowed time step in seconds.
         const double aggressiveGrowthFactor = 1.5;
         const double moderateGrowthFactor = 1.1;
         const double shrinkFactor = 0.75;
@@ -688,7 +696,7 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         }
 
         // Final Safety Clamping: Ensure the new time step is within safe, reasonable bounds.
-        newDt = Math.Max(minTimeStep, newDt);
+        newDt = Math.Max(_options.MinAdaptiveTimeStepSeconds, newDt);
         newDt = Math.Min(options.TimeStep, newDt); // Respect user's maximum setting.
 
         return newDt;
@@ -934,7 +942,7 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
                         // Load permeabilities with bounds checking (ADDED)
                         var permVals = new float[vecSize];
                         for (var v = 0; v < vecSize; v++)
-                            permVals[v] = Math.Max(1e-20f, _mesh.Permeabilities[i, j + v, k]);
+                            permVals[v] = Math.Max((float)_options.MinPermeability, _mesh.Permeabilities[i, j + v, k]);
                         var K = Vector256.Create(permVals);
 
                         // Finite difference coefficients
@@ -1089,7 +1097,7 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
     {
         var nth = _mesh.AngularPoints;
         var r = Math.Max(0.01f, _mesh.R[i]); // ADDED: avoid division by very small r
-        var K = Math.Max(1e-20f, _mesh.Permeabilities[i, j, k]); // Ensure positive
+        var K = Math.Max((float)_options.MinPermeability, _mesh.Permeabilities[i, j, k]); // Ensure positive
 
         // Safety check: if permeability is too low, don't update
         if (K < 1e-19f)
@@ -1141,7 +1149,7 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
             for (var k = 0; k < nz; k++)
             {
                 var K = _mesh.Permeabilities[i, j, k];
-                var phi = Math.Max(0.01f, _mesh.Porosities[i, j, k]); // MODIFIED: ensure positive
+                var phi = Math.Max((float)_options.MinPorosity, _mesh.Porosities[i, j, k]);
 
                 // Radial component
                 if (i > 0 && i < nr - 1)
@@ -1337,7 +1345,7 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
     /// </summary>
     private float CalculateAdaptiveTimeStep()
     {
-        const float safeInitialTimeStep = 30.0f; // Start with a safe 30-second step.
+        var safeInitialTimeStep = (float)_options.MinInitialAdaptiveTimeStepSeconds;
 
         // The user's TimeStep option now acts purely as an upper limit.
         return Math.Min(safeInitialTimeStep, (float)_options.TimeStep);
@@ -1537,9 +1545,11 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         var jm = (j - 1 + nth) % nth;
         var jp = (j + 1) % nth;
 
-        var lambda = Math.Clamp(_mesh.ThermalConductivities[i, j, k], 0.05f, 15f);
-        var rho = MathF.Max(500f, _mesh.Densities[i, j, k]);
-        var cp = MathF.Max(100f, _mesh.SpecificHeats[i, j, k]);
+        var lambda = Math.Clamp(_mesh.ThermalConductivities[i, j, k],
+            (float)_options.MinThermalConductivity, (float)_options.MaxThermalConductivity);
+        var rho = Math.Clamp(_mesh.Densities[i, j, k], (float)_options.MinDensity, (float)_options.MaxDensity);
+        var cp = Math.Clamp(_mesh.SpecificHeats[i, j, k], (float)_options.MinSpecificHeat,
+            (float)_options.MaxSpecificHeat);
         var rho_cp = MathF.Max(1f, rho * cp);
         var alpha = lambda / rho_cp;
 
@@ -1640,7 +1650,8 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
             denominator += dt * Uvol / rho_cp;
         }
 
-        var T_new = Math.Clamp(numerator / denominator, 273f, 573f);
+        var T_new = Math.Clamp(numerator / denominator, (float)_options.MinCellTemperatureKelvin,
+            (float)_options.MaxCellTemperatureKelvin);
         newTemp[i, j, k] = T_new;
         return MathF.Abs(T_new - T_old);
     }
@@ -1948,7 +1959,9 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
     {
         // Coefficiente convettivo nel fluido dell'anello esterno (annulus)
         var D_outer_casing = (float)_options.PipeOuterDiameter;
-        var D_inner_annulus = (float)_options.PipeSpacing; // Diametro esterno del tubo interno
+        var D_inner_annulus = _options.HeatExchangerType == HeatExchangerType.Coaxial
+            ? (float)_options.PipeInnerDiameter
+            : (float)_options.PipeSpacing; // Diametro esterno del tubo interno
         var D_h = D_outer_casing - D_inner_annulus; // Diametro idraulico per l'anello
         var mu = (float)_options.FluidViscosity;
         var mdot = (float)_options.FluidMassFlowRate;
@@ -3025,7 +3038,8 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         }
 
         // Clamp to reasonable values
-        _options.FluidInletTemperature = Math.Max(273.15, Math.Min(373.15, _options.FluidInletTemperature));
+        _options.FluidInletTemperature = Math.Max(_options.MinFluidInletTemperatureKelvin,
+            Math.Min(_options.MaxFluidInletTemperatureKelvin, _options.FluidInletTemperature));
 
         // Log every 30 days
         if (dayOfYear % 30 == 0)
