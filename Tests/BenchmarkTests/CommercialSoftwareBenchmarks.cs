@@ -174,12 +174,12 @@ public class CommercialSoftwareBenchmarks
         // Published results show outlet temperature reaches approximately 30-32°C
         // when inlet temperature is around 28-30°C (heated by circulation pump)
 
-        double outletTemp = results.OutletTemperatureProfile.LastOrDefault().temperature;
+        double outletTemp = results.OutletTemperature.LastOrDefault().temperature;
         double outletTempCelsius = outletTemp - 273.15;
 
         _output.WriteLine($"Results:");
         _output.WriteLine($"  Final outlet temperature: {outletTempCelsius:F2} °C ({outletTemp:F2} K)");
-        _output.WriteLine($"  Heat production: {results.HeatProductionRateWatts:F1} W");
+        _output.WriteLine($"  Heat extraction: {results.AverageHeatExtractionRate:F1} W");
 
         // Reference: After TRT, temperature difference between inlet and outlet
         // should be approximately 1-2°C for this configuration
@@ -192,7 +192,7 @@ public class CommercialSoftwareBenchmarks
 
         // The heat production rate should be within reasonable range of input
         // Note: Some heat is stored in the ground, so extraction != input in transient phase
-        double heatBalance = Math.Abs((double)results.HeatProductionRateWatts);
+        double heatBalance = Math.Abs(results.AverageHeatExtractionRate);
         _output.WriteLine($"  Heat balance check: {heatBalance:F1} W (input was 1051.6 W)");
 
         // For a properly functioning simulation, we expect the heat extraction
@@ -753,19 +753,19 @@ public class CommercialSoftwareBenchmarks
         var results = await solver.RunSimulationAsync();
 
         // Extract final results
-        double outletTempK = results.OutletTemperatureProfile.LastOrDefault().temperature;
+        double outletTempK = results.OutletTemperature.LastOrDefault().temperature;
         double outletTempC = outletTempK - 273.15;
-        double heatProduction = (double)results.HeatProductionRateWatts;
+        double heatProduction = results.AverageHeatExtractionRate;
 
         _output.WriteLine("");
         _output.WriteLine("Results:");
         _output.WriteLine($"  Final outlet temperature: {outletTempC:F2} °C");
-        _output.WriteLine($"  Heat production rate: {heatProduction / 1000:F1} kW");
+        _output.WriteLine($"  Heat extraction rate: {heatProduction / 1000:F1} kW");
         _output.WriteLine($"  Temperature lift: {outletTempC - inletTemperature:F2} °C");
         _output.WriteLine("");
         _output.WriteLine("Expected ranges from T2Well studies:");
         _output.WriteLine($"  Outlet temperature: {expectedOutletMin_1yr}-{expectedOutletMax_1yr} °C");
-        _output.WriteLine($"  Heat production: {expectedHeatMin / 1000}-{expectedHeatMax / 1000} kW");
+        _output.WriteLine($"  Heat extraction: {expectedHeatMin / 1000}-{expectedHeatMax / 1000} kW");
         _output.WriteLine("");
 
         // Validation against T2Well published results
@@ -775,7 +775,7 @@ public class CommercialSoftwareBenchmarks
 
         // Log temperature profile for debugging
         _output.WriteLine("Temperature profile (sample points):");
-        var profile = results.OutletTemperatureProfile;
+        var profile = results.OutletTemperature;
         int step = Math.Max(1, profile.Count / 10);
         for (int i = 0; i < profile.Count; i += step)
         {
@@ -797,7 +797,7 @@ public class CommercialSoftwareBenchmarks
         if (!heatInRange)
         {
             _output.WriteLine("");
-            _output.WriteLine($"WARNING: Heat production {heatProduction / 1000:F1} kW outside expected range.");
+            _output.WriteLine($"WARNING: Heat extraction {heatProduction / 1000:F1} kW outside expected range.");
         }
 
         Assert.True(tempInRange,
