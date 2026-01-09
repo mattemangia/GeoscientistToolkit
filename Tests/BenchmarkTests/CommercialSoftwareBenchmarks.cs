@@ -12,9 +12,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Analysis.PhysicoChem;
+using GeoscientistToolkit.Analysis.Thermodynamic;
 using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.PhysicoChem;
 using MathNet.Numerics;
 using Xunit;
 using Xunit.Abstractions;
@@ -40,7 +39,7 @@ public class CommercialSoftwareBenchmarks
     /// BENCHMARK 1: Beier Sandbox BHE Experiment
     ///
     /// Reference:
-    /// Beier, R.A., Smith, M.D., & Spitler, J.D. (2011). Reference data sets for vertical
+    /// Beier, R.A., Smith, M.D., and Spitler, J.D. (2011). Reference data sets for vertical
     /// borehole ground heat exchanger models and thermal response test analysis.
     /// Geothermics, 40(1), 79-85.
     /// DOI: 10.1016/j.geothermics.2010.10.007
@@ -68,25 +67,24 @@ public class CommercialSoftwareBenchmarks
     /// - Flow rate: 0.197 L/s (0.197 kg/s for water)
     /// </summary>
     [Fact]
-    public void BeierSandbox_UTubeBHE_OutletTemperatureMatchesPublishedData()
+    public async Task BeierSandbox_UTubeBHE_OutletTemperatureMatchesPublishedData()
     {
         _output.WriteLine("=== Beier Sandbox BHE Benchmark ===");
         _output.WriteLine("DOI: 10.1016/j.geothermics.2010.10.007");
         _output.WriteLine("");
 
         // Create borehole dataset for 18m sandbox
-        var boreholeDataset = new BoreholeDataset
+        var boreholeDataset = new BoreholeDataset("Beier_Sandbox_BHE", "benchmark_test", false)
         {
-            Name = "Beier_Sandbox_BHE",
             TotalDepth = 18.0f,
-            BoreholeRadius = 0.065f // 13 cm diameter
+            WellDiameter = 0.13f // 13 cm diameter
         };
 
         // Single sand layer for entire depth
         boreholeDataset.LithologyUnits.Add(new LithologyUnit
         {
-            TopDepth = 0.0f,
-            BottomDepth = 18.0f,
+            DepthFrom = 0.0f,
+            DepthTo = 18.0f,
             LithologyType = "Sand",
             Description = "Beier sandbox sand with known thermal properties"
         });
@@ -155,7 +153,7 @@ public class CommercialSoftwareBenchmarks
 
         _output.WriteLine("Simulation parameters:");
         _output.WriteLine($"  Borehole depth: {boreholeDataset.TotalDepth} m");
-        _output.WriteLine($"  Borehole diameter: {boreholeDataset.BoreholeRadius * 2} m");
+        _output.WriteLine($"  Borehole diameter: {boreholeDataset.WellDiameter} m");
         _output.WriteLine($"  Sand thermal conductivity: {options.LayerThermalConductivities["Sand"]} W/(m·K)");
         _output.WriteLine($"  Flow rate: {options.FluidMassFlowRate} kg/s");
         _output.WriteLine($"  Simulation time: {options.SimulationTime / 3600} hours");
@@ -165,7 +163,7 @@ public class CommercialSoftwareBenchmarks
         var cts = new CancellationTokenSource();
 
         var solver = new GeothermalSimulationSolver(options, mesh, progress, cts.Token);
-        var results = solver.RunSimulation();
+        var results = await solver.RunSimulationAsync();
 
         // Expected temperature rise based on heat input
         // Q = m_dot * cp * dT
@@ -194,12 +192,12 @@ public class CommercialSoftwareBenchmarks
 
         // The heat production rate should be within reasonable range of input
         // Note: Some heat is stored in the ground, so extraction != input in transient phase
-        double heatBalance = Math.Abs(results.HeatProductionRateWatts);
+        double heatBalance = Math.Abs((double)results.HeatProductionRateWatts);
         _output.WriteLine($"  Heat balance check: {heatBalance:F1} W (input was 1051.6 W)");
 
         // For a properly functioning simulation, we expect the heat extraction
         // to be within a reasonable range. During TRT, heat is being stored in ground.
-        Assert.InRange(heatBalance, 0, 2000); // Reasonable range for transient heat transfer
+        Assert.InRange(heatBalance, 0.0, 2000.0); // Reasonable range for transient heat transfer
 
         _output.WriteLine("");
         _output.WriteLine("Benchmark validation: PASSED");
@@ -264,13 +262,6 @@ public class CommercialSoftwareBenchmarks
         // Derived parameters
         double matrixDiffusivity = matrixThermalConductivity / (matrixDensity * matrixSpecificHeat);
 
-        // Lauwerier dimensionless parameter
-        // Lambda = (2 * km * sqrt(t)) / (w * rho_w * cp_w * v * sqrt(alpha_m))
-        // where km = matrix thermal conductivity
-        //       w = fracture aperture
-        //       v = fluid velocity
-        //       alpha_m = matrix thermal diffusivity
-
         _output.WriteLine("Physical parameters:");
         _output.WriteLine($"  Fracture length: {fractureLengthX} m");
         _output.WriteLine($"  Fracture aperture: {fractureWidth * 1000} mm");
@@ -301,14 +292,6 @@ public class CommercialSoftwareBenchmarks
             foreach (double x in testPositions)
             {
                 // Lauwerier analytical solution
-                // T(x,t) = Ti + (T0 - Ti) * erfc(Lambda)
-                // where Lambda = (x / (2 * v * t)) * sqrt(rho_w * cp_w * w / (km * sqrt(alpha_m * t)))
-
-                // Simplified form for semi-infinite matrix:
-                // Lambda = x / sqrt(4 * alpha_eff * t)
-                // where alpha_eff = effective thermal diffusivity accounting for heat exchange
-
-                // More accurate: Peclet number based formulation
                 double retardationFactor = 1.0 + (2.0 * matrixThermalConductivity) /
                     (fractureWidth * waterDensity * waterSpecificHeat * waterVelocity * Math.Sqrt(matrixDiffusivity));
 
@@ -345,7 +328,7 @@ public class CommercialSoftwareBenchmarks
 
                 _output.WriteLine($"  {x,10:F1} |   {time_days,8:F0} |      {analyticalTemp,12:F2} |     {numericalTemp,12:F2} |   {error,6:F2}%");
 
-                // Accept up to 10% relative error for this complex benchmark
+                // Accept up to 15% relative error for this complex benchmark
                 if (error > 15.0)
                 {
                     allTestsPassed = false;
@@ -451,7 +434,7 @@ public class CommercialSoftwareBenchmarks
     /// BENCHMARK 3: TOUGH2 Radial Heat Conduction Test Problem
     ///
     /// Reference:
-    /// Pruess, K., Oldenburg, C., & Moridis, G. (1999/2012). TOUGH2 User's Guide,
+    /// Pruess, K., Oldenburg, C., and Moridis, G. (1999/2012). TOUGH2 User's Guide,
     /// Version 2.0. Lawrence Berkeley National Laboratory. LBNL-43134.
     /// Available at: https://tough.lbl.gov/assets/docs/TOUGH2_V2_Users_Guide.pdf
     ///
@@ -497,18 +480,6 @@ public class CommercialSoftwareBenchmarks
         _output.WriteLine("");
         _output.WriteLine("Radius (m) | Time (s)   | R²/t (m²/s) | Analytical T | Numerical T | Match");
         _output.WriteLine("-----------|------------|-------------|--------------|-------------|------");
-
-        // Create borehole dataset for simulation
-        var boreholeDataset = new BoreholeDataset
-        {
-            Name = "TOUGH2_Radial_Test",
-            TotalDepth = 10.0f,
-            BoreholeRadius = 0.05f
-        };
-        boreholeDataset.LithologyUnits.Add(new LithologyUnit
-        {
-            TopDepth = 0.0f, BottomDepth = 10.0f, LithologyType = "Granite"
-        });
 
         bool allSimilar = true;
         var similarityGroups = new Dictionary<double, List<(double analytical, double numerical)>>();
@@ -631,16 +602,16 @@ public class CommercialSoftwareBenchmarks
     /// BENCHMARK 4: T2Well Deep Borehole Heat Exchanger
     ///
     /// Reference:
-    /// Pan, L., & Oldenburg, C.M. (2014). T2Well—An integrated wellbore–reservoir
-    /// simulator. Computers & Geosciences, 65, 46-55.
+    /// Pan, L., and Oldenburg, C.M. (2014). T2Well—An integrated wellbore–reservoir
+    /// simulator. Computers and Geosciences, 65, 46-55.
     /// DOI: 10.1016/j.cageo.2013.06.005
     ///
     /// Validation data from:
-    /// Caulk, R.A., & Tomac, I. (2017). Reuse of abandoned oil and gas wells for
+    /// Caulk, R.A., and Tomac, I. (2017). Reuse of abandoned oil and gas wells for
     /// geothermal energy production. Renewable Energy, 112, 388-397.
     /// DOI: 10.1016/j.renene.2017.05.042
     ///
-    /// Alimonti, C., Soldo, E., Bocchetti, D., & Berardi, D. (2018). The wellbore
+    /// Alimonti, C., Soldo, E., Bocchetti, D., and Berardi, D. (2018). The wellbore
     /// heat exchangers: A technical review. Renewable Energy, 123, 353-381.
     /// DOI: 10.1016/j.renene.2018.02.055
     ///
@@ -654,7 +625,7 @@ public class CommercialSoftwareBenchmarks
     /// - Heat extraction: 500-600 kW
     /// </summary>
     [Fact]
-    public void T2Well_DeepCoaxialBHE_OutletTemperatureMatchesPublishedRange()
+    public async Task T2Well_DeepCoaxialBHE_OutletTemperatureMatchesPublishedRange()
     {
         _output.WriteLine("=== T2Well Deep Borehole Heat Exchanger Benchmark ===");
         _output.WriteLine("DOI: 10.1016/j.cageo.2013.06.005 (T2Well)");
@@ -679,36 +650,35 @@ public class CommercialSoftwareBenchmarks
         // After 1 year: 50-55°C (higher due to initial heat extraction)
         const double expectedOutletMin_1yr = 45.0; // °C
         const double expectedOutletMax_1yr = 58.0; // °C
-        const double expectedHeatMin = 400000; // W (400 kW)
-        const double expectedHeatMax = 800000; // W (800 kW)
+        const double expectedHeatMin = 400000.0; // W (400 kW)
+        const double expectedHeatMax = 800000.0; // W (800 kW)
 
         // Create borehole with layered geology
-        var boreholeDataset = new BoreholeDataset
+        var boreholeDataset = new BoreholeDataset("T2Well_Deep_BHE", "benchmark_test", false)
         {
-            Name = "T2Well_Deep_BHE",
             TotalDepth = (float)boreholeDepth,
-            BoreholeRadius = 0.1f // 20 cm diameter
+            WellDiameter = 0.2f // 20 cm diameter
         };
 
         // Simplified stratigraphy (sedimentary basin)
         boreholeDataset.LithologyUnits.Add(new LithologyUnit
         {
-            TopDepth = 0, BottomDepth = 200, LithologyType = "Sand",
+            DepthFrom = 0, DepthTo = 200, LithologyType = "Sand",
             Description = "Quaternary sediments"
         });
         boreholeDataset.LithologyUnits.Add(new LithologyUnit
         {
-            TopDepth = 200, BottomDepth = 800, LithologyType = "Sandstone",
+            DepthFrom = 200, DepthTo = 800, LithologyType = "Sandstone",
             Description = "Tertiary sandstone"
         });
         boreholeDataset.LithologyUnits.Add(new LithologyUnit
         {
-            TopDepth = 800, BottomDepth = 1500, LithologyType = "Limestone",
+            DepthFrom = 800, DepthTo = 1500, LithologyType = "Limestone",
             Description = "Mesozoic carbonate"
         });
         boreholeDataset.LithologyUnits.Add(new LithologyUnit
         {
-            TopDepth = 1500, BottomDepth = (float)boreholeDepth, LithologyType = "Granite",
+            DepthFrom = 1500, DepthTo = (float)boreholeDepth, LithologyType = "Granite",
             Description = "Basement granite"
         });
 
@@ -780,12 +750,12 @@ public class CommercialSoftwareBenchmarks
         var cts = new CancellationTokenSource();
 
         var solver = new GeothermalSimulationSolver(options, mesh, progress, cts.Token);
-        var results = solver.RunSimulation();
+        var results = await solver.RunSimulationAsync();
 
         // Extract final results
         double outletTempK = results.OutletTemperatureProfile.LastOrDefault().temperature;
         double outletTempC = outletTempK - 273.15;
-        double heatProduction = results.HeatProductionRateWatts;
+        double heatProduction = (double)results.HeatProductionRateWatts;
 
         _output.WriteLine("");
         _output.WriteLine("Results:");
@@ -806,7 +776,8 @@ public class CommercialSoftwareBenchmarks
         // Log temperature profile for debugging
         _output.WriteLine("Temperature profile (sample points):");
         var profile = results.OutletTemperatureProfile;
-        for (int i = 0; i < Math.Min(10, profile.Count); i += profile.Count / 10 + 1)
+        int step = Math.Max(1, profile.Count / 10);
+        for (int i = 0; i < profile.Count; i += step)
         {
             double timeHours = profile[i].time / 3600.0;
             double tempC = profile[i].temperature - 273.15;
@@ -875,8 +846,8 @@ public class CommercialSoftwareBenchmarks
         const double fractureLength = 500.0; // m
         const double injectionRate = 50.0; // kg/s
         const double rockConductivity = 3.0; // W/(m·K)
-        const double rockDensity = 2700; // kg/m³
-        const double rockSpecificHeat = 1000; // J/(kg·K)
+        const double rockDensity = 2700.0; // kg/m³
+        const double rockSpecificHeat = 1000.0; // J/(kg·K)
 
         double rockDiffusivity = rockConductivity / (rockDensity * rockSpecificHeat);
 
@@ -894,9 +865,8 @@ public class CommercialSoftwareBenchmarks
 
         // Simplified analytical estimate for thermal breakthrough time
         // Based on advection time through fracture + matrix heat exchange
-        double porosity = 0.01; // Fracture porosity
         double fractureAperture = 0.001; // 1 mm
-        double fluidVelocity = injectionRate / (1000 * fractureLength * fractureAperture); // m/s
+        double fluidVelocity = injectionRate / (1000.0 * fractureLength * fractureAperture); // m/s
         double advectionTime = fractureLength / fluidVelocity; // seconds
 
         _output.WriteLine($"Estimated advection time: {advectionTime / 86400:F1} days");
