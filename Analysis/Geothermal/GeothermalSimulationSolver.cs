@@ -1960,7 +1960,7 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         // Coefficiente convettivo nel fluido dell'anello esterno (annulus)
         var D_outer_casing = (float)_options.PipeOuterDiameter;
         var D_inner_annulus = _options.HeatExchangerType == HeatExchangerType.Coaxial
-            ? (float)_options.PipeInnerDiameter
+            ? MathF.Max((float)_options.PipeSpacing, (float)_options.PipeInnerDiameter * 1.05f)
             : (float)_options.PipeSpacing; // Diametro esterno del tubo interno
         var D_h = D_outer_casing - D_inner_annulus; // Diametro idraulico per l'anello
         var mu = (float)_options.FluidViscosity;
@@ -2041,7 +2041,7 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         if (k_pipe_inner < 1e-6) return 0.0f; // Tubo perfettamente isolato, nessuno scambio
 
         var r_pipe_inner_in = D_inner_pipe / 2f;
-        var r_pipe_inner_out = (float)_options.PipeSpacing / 2f; // PipeSpacing è il diametro esterno del tubo interno
+        var r_pipe_inner_out = MathF.Max((float)_options.PipeSpacing, D_inner_pipe * 1.05f) / 2f;
 
         // 1. Resistenza convettiva del fluido DENTRO il tubo interno
         var R_conv_inner = 1f / (h_fluid_inner * MathF.PI * D_inner_pipe);

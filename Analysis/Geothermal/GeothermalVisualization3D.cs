@@ -673,7 +673,7 @@ public class GeothermalVisualization3D : IDisposable
             new Mesh3DDataset("HeatExchanger", Path.Combine(Path.GetTempPath(), "heatexchanger_temp.obj"));
 
         // Get borehole parameters
-        var boreholeRadius = (float)(_options.BoreholeDataset?.WellDiameter / 2000.0 ?? 0.1); // mm to m
+        var boreholeRadius = (float)(_options.BoreholeDataset?.WellDiameter / 2.0 ?? 0.1); // Diameter to radius (meters)
         var depth = Math.Abs(_mesh.Z[_mesh.VerticalPoints - 1] - _mesh.Z[0]);
 
         // Heat exchanger type from options
@@ -1317,7 +1317,7 @@ public class GeothermalVisualization3D : IDisposable
         if (_focusOnBoreholeView)
         {
             var boreholeRadius =
-                (float)(_options.BoreholeDataset.WellDiameter / 2000.0); // Diameter in mm to radius in m
+                (float)(_options.BoreholeDataset.WellDiameter / 2.0); // Diameter to radius (meters)
             var cropMargin = 1.0f; // Crop to 1m around the borehole radius
             var cropBoxRadius = boreholeRadius + cropMargin;
             var totalDepth = Math.Abs(_mesh.Z.Last() - _mesh.Z[0]);
@@ -1914,7 +1914,7 @@ public class GeothermalVisualization3D : IDisposable
             GenerateFluidVolumeGeometry();
 
             // 2. Frame the camera
-            var boreholeRadius = (float)(_options.BoreholeDataset.WellDiameter / 2000.0);
+            var boreholeRadius = (float)(_options.BoreholeDataset.WellDiameter / 2.0);
             var totalDepth = Math.Abs(_mesh.Z.Last() - _mesh.Z[0]);
 
             FrameDetailView(boreholeRadius * 2f, totalDepth);
@@ -1995,7 +1995,7 @@ public class GeothermalVisualization3D : IDisposable
     {
         var wireframeMesh =
             new Mesh3DDataset("BoreholeWireframe", Path.Combine(Path.GetTempPath(), "boreholewire_temp.obj"));
-        var boreholeRadius = (float)(_options.BoreholeDataset.WellDiameter / 2000.0);
+        var boreholeRadius = (float)(_options.BoreholeDataset.WellDiameter / 2.0);
         var totalDepth = Math.Abs(_mesh.Z.Last() - _mesh.Z[0]);
         var radialSegments = 24;
         var heightSegments = 10;
