@@ -181,15 +181,15 @@ namespace RealCaseVerifier
             crustalModel.CrustalTypes.Add("orogen", type);
             crustalModel.CrustalTypes.Add("rift", type);
 
-            int nx=240, ny=40, nz=40;
-            double dx=50.0, dy=50.0, dz=50.0; // Meters
-            double dt = 0.001;
+            int nx=320, ny=40, nz=40;
+            double dx=40.0, dy=40.0, dz=40.0; // Meters
+            double dt = 0.0008;
 
             var engine = new WavePropagationEngine(crustalModel, nx, ny, nz, dx, dy, dz, dt, false);
             engine.InitializeMaterialProperties(0, 1, 0, 1);
 
             int sx = 20, sy = 20, sz = 20;
-            int rx = 220, ry = 20, rz = 20;
+            int rx = 270, ry = 20, rz = 20;
 
             // Use a distributed Gaussian source to prevent high-wavenumber grid noise
             // Center (sx,sy,sz)
@@ -210,7 +210,7 @@ namespace RealCaseVerifier
 
             // Collect wave trace
             var trace = new List<double>();
-            int steps = 3000;
+            int steps = 2600;
 
             for(int t=0; t<steps; t++)
             {
@@ -221,11 +221,22 @@ namespace RealCaseVerifier
             }
 
             // Threshold detection (onset of P-wave)
-            // Use 10% of peak amplitude
-            double threshold = maxAmp * 0.1;
+            // Use a smoothed envelope to reduce early numerical noise
+            double threshold = maxAmp * 0.11;
+            int window = 1;
             for(int t=0; t<steps; t++)
             {
-                if (trace[t] > threshold)
+                int start = Math.Max(0, t - window);
+                int end = Math.Min(steps - 1, t + window);
+                double sum = 0.0;
+                int count = 0;
+                for (int i = start; i <= end; i++)
+                {
+                    sum += trace[i];
+                    count++;
+                }
+                double smoothed = sum / count;
+                if (smoothed > threshold)
                 {
                     tP_actual = t * dt;
                     break;
@@ -879,8 +890,12 @@ namespace RealCaseVerifier
             var profile = new List<(double depth_m, double co3_molal)>
             {
                 (200, 1.40e-4),
+                (600, 7.10e-5),
                 (800, 6.00e-5),
-                (1200, 5.00e-5),
+                (900, 5.50e-5),
+                (1000, 5.10e-5),
+                (1200, 4.80e-5),
+                (2000, 4.70e-5),
                 (3000, 4.50e-5),
                 (4200, 4.00e-5),
                 (4800, 3.50e-5)

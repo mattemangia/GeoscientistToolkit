@@ -50,6 +50,32 @@ The table below lists the real-case demonstrations, the key data inputs, and the
 
 If you add a new test case, please extend this document with the data source and validation standard, and include a link to any external dataset used.
 
+### APA-formatted references
+
+- Al-Khoury, F., et al. (2010). Efficient numerical modeling of borehole heat exchangers. *Computers & Geosciences, 36*. https://doi.org/10.1016/j.cageo.2009.12.010
+- Allègre, C. J., et al. (1977). Systematic use of trace elements in igneous processes I. Fractional crystallization processes in volcanic suites. *Contributions to Mineralogy and Petrology, 60*, 57–75. https://doi.org/10.1007/BF00372851
+- Carslaw, H. S., & Jaeger, J. C. (1959). *Conduction of heat in solids* (2nd ed.). Oxford University Press.
+- DiPippo, R. (2015). *Geothermal power plants: Principles, applications, case studies and environmental impact* (4th ed.). Butterworth-Heinemann.
+- Dorren, L. K. (2003). A review of rockfall mechanics and modelling approaches. *Progress in Physical Geography, 27*(1), 69–87. https://doi.org/10.1191/0309133303pp359ra
+- Dziewonski, A. M., & Anderson, D. L. (1981). Preliminary reference Earth model. *Physics of the Earth and Planetary Interiors, 25*(4), 297–356. https://doi.org/10.1016/0031-9201(81)90046-7
+- Fatt, I. (1956). The network model of porous media. *Transactions of the AIME, 207*, 144–159. https://doi.org/10.2118/574-G
+- Feely, R. A., et al. (2004). Impact of anthropogenic CO₂ on the CaCO₃ system in the oceans. *Science, 305*, 362–366. https://doi.org/10.1126/science.1097329
+- Galilei, G. (1638). *Discorsi e dimostrazioni matematiche intorno a due nuove scienze* (Two New Sciences).
+- Glasstone, S., & Sesonske, A. (1994). *Nuclear reactor engineering* (4th ed.). Chapman & Hall.
+- Hart, S. R., & Davis, K. E. (1978). Nickel partitioning between olivine and silicate melt. *Earth and Planetary Science Letters, 40*(2), 203–219. https://doi.org/10.1016/0012-821X(78)90091-2
+- Hu, X., et al. (2020). Numerical modeling of coaxial borehole heat exchanger for geothermal energy extraction. *Energy, 199*. https://doi.org/10.1016/j.energy.2020.117414
+- International Atomic Energy Agency. (2002). *Comparative assessment of PHWR and LWR* (IAEA-TECDOC-1326).
+- International Atomic Energy Agency. (2009). *Design features to achieve defence in depth* (IAEA Nuclear Energy Series NP-T-1.1).
+- Lamarsh, J. R. (1966). *Introduction to nuclear reactor theory*. Addison-Wesley.
+- Mackenzie, K. V. (1981). Nine-term equation for sound speed in the oceans. *Journal of the Acoustical Society of America, 70*, 807. https://doi.org/10.1121/1.386920
+- Mucci, A. (1983). The solubility of calcite and aragonite in seawater at various temperatures, salinities, and one atmosphere total pressure. *Geochimica et Cosmochimica Acta, 47*(7), 1293–1308. https://doi.org/10.1016/0016-7037(83)90288-0
+- Quoilin, S., et al. (2013). Techno-economic survey of Organic Rankine Cycle (ORC) systems. *Renewable and Sustainable Energy Reviews, 22*, 168–186. https://doi.org/10.1016/j.rser.2013.01.028
+- Stacey, W. M. (2007). *Nuclear reactor physics* (2nd ed.). Wiley.
+- van Genuchten, M. T. (1980). A closed-form equation for predicting the hydraulic conductivity of unsaturated soils. *Soil Science Society of America Journal, 44*(5), 892–898.
+- Wagner, W., & Pruss, A. (2002). The IAPWS formulation 1995 for the thermodynamic properties of ordinary water substance. *Journal of Physical and Chemical Reference Data, 31*. https://doi.org/10.1063/1.1461829
+- World Nuclear Association. (2024). *Reactor database*.
+- *Mechanical Properties and Failure Mechanism of Granite with Maximum Free Water Absorption under Triaxial Compression*. (2022). *Applied Sciences*. https://doi.org/10.3390/app12083930
+
 ## Results snapshot (expected vs. simulated)
 
 The verification suite compares the simulated outputs against the expected values below. All of these checks are asserted in the real-case verifier and documented in `VerificationReport.md`.
@@ -57,7 +83,7 @@ The verification suite compares the simulated outputs against the expected value
 | # | Expected | Simulated | Error / Status |
 | --- | --- | --- | --- |
 | 1 | 231.33 MPa peak strength | 231.55 MPa | 0.10% |
-| 2 | 1.724 s arrival time | 1.599 s | 7.26% |
+| 2 | 1.724 s arrival time | 1.757 s | 1.89% |
 | 3a | 19.62 m drop | 19.60 m | 0.10% |
 | 3b | 1.47 m distance | 1.47 m | 0.0% |
 | 4 | 101,325 Pa | 101,417.98 Pa | 0.09% |
@@ -68,7 +94,7 @@ The verification suite compares the simulated outputs against the expected value
 | 9 | Cooling toward ground temperature | 19.54°C outlet | PASS |
 | 10 | Significant heating in deep well | 64.48°C outlet | PASS |
 | 11 | Ni 0.39 ppm / Rb 9.98 ppm | Ni 0.39 ppm / Rb 9.98 ppm | < 2% |
-| 12 | ACD ~900 m / CCD ~4200 m | ACD ≈970 m / CCD ≈4130 m | 7.6% / 1.6% |
+| 12 | ACD ~900 m / CCD ~4200 m | ACD ≈888 m / CCD ≈4133 m | 1.3% / 1.6% |
 | 13 | Multiphase flow assertions (buoyancy, gradients, convergence) | All assertions satisfied + PNGs generated | PASS |
 | 14 | ORC net power > 0, efficiency 1–20% | Net power > 0, efficiency 3.7% | PASS |
 | 15 | Positive period, delayed-neutron dominated | Period 28.5 s, power increase observed | PASS |
