@@ -83,8 +83,16 @@ public class GeothermalSimulationOptions
     public double GeothermalHeatFlux { get; set; } = 0.065;
     public double SimulationTime { get; set; } = 31536000;
     public double TimeStep { get; set; } = 3600 * 6; // Set a reasonable MAX cap (e.g., 6 hours)
+    public int TargetTimeSteps { get; set; } = 5000;
     public int SaveInterval { get; set; } = 1;
     public double ConvergenceTolerance { get; set; } = 5e-3;
+    public double MinTargetTimeStepSeconds { get; set; } = 60.0;
+    public double MinAdaptiveTimeStepSeconds { get; set; } = 1.0;
+    public double MinInitialAdaptiveTimeStepSeconds { get; set; } = 30.0;
+    public float AdaptiveRelaxationMin { get; set; } = 0.05f;
+    public float AdaptiveRelaxationMax { get; set; } = 0.7f;
+    public float AdaptiveRelaxationMinFallback { get; set; } = 0.1f;
+    public float AdaptiveRelaxationMaxFallback { get; set; } = 0.8f;
 
     /// <summary>
     ///     DEFINITIVE FIX: Maximum iterations per time step. 30 was far too low for a complex
@@ -104,6 +112,22 @@ public class GeothermalSimulationOptions
     public float HeatExchangerDepth { get; set; }
 
     public double HeatExchangerEndFeatherMeters { get; set; } = 10.0;
+
+    // ===== Safety Bounds =====
+    public double MinThermalConductivity { get; set; } = 0.1;
+    public double MaxThermalConductivity { get; set; } = 10.0;
+    public double MinSpecificHeat { get; set; } = 100.0;
+    public double MaxSpecificHeat { get; set; } = 5000.0;
+    public double MinDensity { get; set; } = 500.0;
+    public double MaxDensity { get; set; } = 5000.0;
+    public double MinPorosity { get; set; } = 1e-6;
+    public double MaxPorosity { get; set; } = 0.99;
+    public double MinPermeability { get; set; } = 1e-20;
+    public double MaxPermeability { get; set; } = 1e-8;
+    public double MinFluidInletTemperatureKelvin { get; set; } = 273.15;
+    public double MaxFluidInletTemperatureKelvin { get; set; } = 373.15;
+    public double MinCellTemperatureKelvin { get; set; } = 273.0;
+    public double MaxCellTemperatureKelvin { get; set; } = 573.0;
 
     // ===== BTES (Borehole Thermal Energy Storage) Parameters =====
 
@@ -604,6 +628,9 @@ public class GeothermalSimulationOptions
                 { "Soil", 0.95f }, { "Clay", 0.90f }, { "Sand", 0.85f }, { "Gravel", 0.80f },
                 { "Sandstone", 0.75f }, { "Limestone", 0.70f }, { "Granite", 0.65f }, { "Basalt", 0.70f }
             }; // Dimensionless (0-1)
+
+        if (HeatExchangerDepth <= 0 && BoreholeDataset != null)
+            HeatExchangerDepth = BoreholeDataset.TotalDepth;
     }
 
     public void ApplyPreset(GeothermalSimulationPreset preset)

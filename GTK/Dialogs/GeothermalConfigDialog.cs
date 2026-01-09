@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GeoscientistToolkit.Analysis.Geothermal;
 using GeoscientistToolkit.Data.PhysicoChem;
 using GeoscientistToolkit.GtkUI.Views;
 using Gtk;
@@ -30,6 +31,30 @@ public class GeothermalConfigDialog : Dialog
     private readonly SpinButton _heatSubgridMixingInput;
     private readonly SpinButton _heatSubgridCoolingInput;
     private readonly SpinButton _gasBuoyancyVelocityInput;
+    private readonly CheckButton _showAdvancedOptionsCheckbox;
+    private readonly Frame _advancedOptionsFrame;
+    private readonly SpinButton _minTargetTimeStepInput;
+    private readonly SpinButton _targetTimeStepsInput;
+    private readonly SpinButton _minAdaptiveTimeStepInput;
+    private readonly SpinButton _minInitialTimeStepInput;
+    private readonly SpinButton _adaptiveRelaxationMinInput;
+    private readonly SpinButton _adaptiveRelaxationMaxInput;
+    private readonly SpinButton _adaptiveRelaxationMinFallbackInput;
+    private readonly SpinButton _adaptiveRelaxationMaxFallbackInput;
+    private readonly SpinButton _minThermalConductivityInput;
+    private readonly SpinButton _maxThermalConductivityInput;
+    private readonly SpinButton _minSpecificHeatInput;
+    private readonly SpinButton _maxSpecificHeatInput;
+    private readonly SpinButton _minDensityInput;
+    private readonly SpinButton _maxDensityInput;
+    private readonly SpinButton _minPorosityInput;
+    private readonly SpinButton _maxPorosityInput;
+    private readonly SpinButton _minPermeabilityInput;
+    private readonly SpinButton _maxPermeabilityInput;
+    private readonly SpinButton _minFluidInletTempInput;
+    private readonly SpinButton _maxFluidInletTempInput;
+    private readonly SpinButton _minCellTempInput;
+    private readonly SpinButton _maxCellTempInput;
 
     // Deep wells specific
     private readonly SpinButton _numberOfZonesInput;
@@ -74,6 +99,39 @@ public class GeothermalConfigDialog : Dialog
 
         _btesModeCheckbox = new CheckButton("Enable BTES Mode");
         _editSeasonalCurveButton = new Button("Edit Seasonal Curve...");
+
+        var defaults = new GeothermalSimulationOptions();
+        _showAdvancedOptionsCheckbox = new CheckButton("Show Advanced Parameters");
+        _advancedOptionsFrame = new Frame("Advanced Solver Bounds");
+        _advancedOptionsFrame.NoShowAll = true;
+        _minTargetTimeStepInput = new SpinButton(1, 86400, 1) { Value = defaults.MinTargetTimeStepSeconds };
+        _targetTimeStepsInput = new SpinButton(1, 100000, 1) { Value = defaults.TargetTimeSteps };
+        _minAdaptiveTimeStepInput = new SpinButton(0.1, 3600, 0.1) { Value = defaults.MinAdaptiveTimeStepSeconds };
+        _minInitialTimeStepInput = new SpinButton(1, 3600, 1) { Value = defaults.MinInitialAdaptiveTimeStepSeconds };
+        _adaptiveRelaxationMinInput = new SpinButton(0.01, 1.0, 0.01) { Value = defaults.AdaptiveRelaxationMin };
+        _adaptiveRelaxationMaxInput = new SpinButton(0.01, 1.0, 0.01) { Value = defaults.AdaptiveRelaxationMax };
+        _adaptiveRelaxationMinFallbackInput =
+            new SpinButton(0.01, 1.0, 0.01) { Value = defaults.AdaptiveRelaxationMinFallback };
+        _adaptiveRelaxationMaxFallbackInput =
+            new SpinButton(0.01, 1.0, 0.01) { Value = defaults.AdaptiveRelaxationMaxFallback };
+        _minThermalConductivityInput = new SpinButton(0.01, 50, 0.01) { Value = defaults.MinThermalConductivity };
+        _maxThermalConductivityInput = new SpinButton(0.01, 50, 0.01) { Value = defaults.MaxThermalConductivity };
+        _minSpecificHeatInput = new SpinButton(10, 10000, 10) { Value = defaults.MinSpecificHeat };
+        _maxSpecificHeatInput = new SpinButton(10, 10000, 10) { Value = defaults.MaxSpecificHeat };
+        _minDensityInput = new SpinButton(100, 10000, 10) { Value = defaults.MinDensity };
+        _maxDensityInput = new SpinButton(100, 10000, 10) { Value = defaults.MaxDensity };
+        _minPorosityInput = new SpinButton(0, 1, 0.0001) { Value = defaults.MinPorosity };
+        _maxPorosityInput = new SpinButton(0, 1, 0.01) { Value = defaults.MaxPorosity };
+        _minPermeabilityInput = new SpinButton(1e-24, 1e-6, 1e-20) { Value = defaults.MinPermeability };
+        _maxPermeabilityInput = new SpinButton(1e-24, 1e-6, 1e-18) { Value = defaults.MaxPermeability };
+        _minFluidInletTempInput = new SpinButton(250, 450, 1) { Value = defaults.MinFluidInletTemperatureKelvin };
+        _maxFluidInletTempInput = new SpinButton(250, 450, 1) { Value = defaults.MaxFluidInletTemperatureKelvin };
+        _minCellTempInput = new SpinButton(250, 700, 1) { Value = defaults.MinCellTemperatureKelvin };
+        _maxCellTempInput = new SpinButton(250, 700, 1) { Value = defaults.MaxCellTemperatureKelvin };
+        _minPorosityInput.Digits = 6;
+        _maxPorosityInput.Digits = 4;
+        _minPermeabilityInput.Digits = 20;
+        _maxPermeabilityInput.Digits = 18;
 
 
         BuildUI();
@@ -217,6 +275,90 @@ public class GeothermalConfigDialog : Dialog
 
         simFrame.Add(simGrid);
         contentBox.PackStart(simFrame, false, false, 0);
+
+        // Advanced bounds
+        contentBox.PackStart(_showAdvancedOptionsCheckbox, false, false, 0);
+
+        var advancedGrid = new Grid { ColumnSpacing = 8, RowSpacing = 6, BorderWidth = 6 };
+        row = 0;
+
+        advancedGrid.Attach(new Label("Min Target Time Step (s):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_minTargetTimeStepInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Target Time Steps:") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_targetTimeStepsInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Min Adaptive Time Step (s):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_minAdaptiveTimeStepInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Min Initial Time Step (s):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_minInitialTimeStepInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Adaptive Relaxation Min:") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_adaptiveRelaxationMinInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Adaptive Relaxation Max:") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_adaptiveRelaxationMaxInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Relaxation Min (Fallback):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_adaptiveRelaxationMinFallbackInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Relaxation Max (Fallback):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_adaptiveRelaxationMaxFallbackInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Min Thermal Conductivity (W/m·K):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_minThermalConductivityInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Max Thermal Conductivity (W/m·K):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_maxThermalConductivityInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Min Specific Heat (J/kg·K):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_minSpecificHeatInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Max Specific Heat (J/kg·K):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_maxSpecificHeatInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Min Density (kg/m³):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_minDensityInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Max Density (kg/m³):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_maxDensityInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Min Porosity (-):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_minPorosityInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Max Porosity (-):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_maxPorosityInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Min Permeability (m²):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_minPermeabilityInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Max Permeability (m²):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_maxPermeabilityInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Min Fluid Inlet Temp (K):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_minFluidInletTempInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Max Fluid Inlet Temp (K):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_maxFluidInletTempInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Min Cell Temperature (K):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_minCellTempInput, 1, row++, 1, 1);
+
+        advancedGrid.Attach(new Label("Max Cell Temperature (K):") { Xalign = 0 }, 0, row, 1, 1);
+        advancedGrid.Attach(_maxCellTempInput, 1, row++, 1, 1);
+
+        _advancedOptionsFrame.Add(advancedGrid);
+        _advancedOptionsFrame.Visible = false;
+        contentBox.PackStart(_advancedOptionsFrame, false, false, 0);
+
+        _showAdvancedOptionsCheckbox.Toggled += (_, _) =>
+        {
+            if (_showAdvancedOptionsCheckbox.Active)
+                _advancedOptionsFrame.ShowAll();
+            else
+                _advancedOptionsFrame.Hide();
+        };
 
         // Info panel
         var infoFrame = new Frame("Configuration Summary");
@@ -454,6 +596,35 @@ public class GeothermalConfigDialog : Dialog
         else
         {
             dataset.SeasonalEnergyCurve.Clear();
+        }
+
+        if (_showAdvancedOptionsCheckbox.Active)
+        {
+            dataset.Metadata["GeothermalAdvancedBounds"] = new Dictionary<string, double>
+            {
+                ["MinTargetTimeStepSeconds"] = _minTargetTimeStepInput.Value,
+                ["TargetTimeSteps"] = _targetTimeStepsInput.Value,
+                ["MinAdaptiveTimeStepSeconds"] = _minAdaptiveTimeStepInput.Value,
+                ["MinInitialAdaptiveTimeStepSeconds"] = _minInitialTimeStepInput.Value,
+                ["AdaptiveRelaxationMin"] = _adaptiveRelaxationMinInput.Value,
+                ["AdaptiveRelaxationMax"] = _adaptiveRelaxationMaxInput.Value,
+                ["AdaptiveRelaxationMinFallback"] = _adaptiveRelaxationMinFallbackInput.Value,
+                ["AdaptiveRelaxationMaxFallback"] = _adaptiveRelaxationMaxFallbackInput.Value,
+                ["MinThermalConductivity"] = _minThermalConductivityInput.Value,
+                ["MaxThermalConductivity"] = _maxThermalConductivityInput.Value,
+                ["MinSpecificHeat"] = _minSpecificHeatInput.Value,
+                ["MaxSpecificHeat"] = _maxSpecificHeatInput.Value,
+                ["MinDensity"] = _minDensityInput.Value,
+                ["MaxDensity"] = _maxDensityInput.Value,
+                ["MinPorosity"] = _minPorosityInput.Value,
+                ["MaxPorosity"] = _maxPorosityInput.Value,
+                ["MinPermeability"] = _minPermeabilityInput.Value,
+                ["MaxPermeability"] = _maxPermeabilityInput.Value,
+                ["MinFluidInletTemperatureKelvin"] = _minFluidInletTempInput.Value,
+                ["MaxFluidInletTemperatureKelvin"] = _maxFluidInletTempInput.Value,
+                ["MinCellTemperatureKelvin"] = _minCellTempInput.Value,
+                ["MaxCellTemperatureKelvin"] = _maxCellTempInput.Value
+            };
         }
 
         return dataset;

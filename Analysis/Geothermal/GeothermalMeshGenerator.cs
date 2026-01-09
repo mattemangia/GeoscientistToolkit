@@ -46,7 +46,7 @@ public static class GeothermalMeshGenerator
         mesh.Z = new float[nz];
 
         // Generate radial coordinates (logarithmic spacing near borehole)
-        var rMin = (float)(borehole.Diameter / 2000.0); // Convert mm to m
+        var rMin = (float)(borehole.Diameter / 2.0); // Borehole diameter is already in meters
         var rMax = (float)options.DomainRadius;
 
         // Ensure valid radius values

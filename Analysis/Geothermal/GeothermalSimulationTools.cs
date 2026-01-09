@@ -1110,6 +1110,10 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 if (ImGui.InputFloat("Time Step (hours)", ref timeStep))
                     _options.TimeStep = timeStep * 3600;
 
+                var targetSteps = _options.TargetTimeSteps;
+                if (ImGui.InputInt("Target Time Steps", ref targetSteps))
+                    _options.TargetTimeSteps = targetSteps;
+
                 var saveInterval = _options.SaveInterval;
                 if (ImGui.InputInt("Save Interval", ref saveInterval))
                     _options.SaveInterval = saveInterval;
@@ -1170,6 +1174,99 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
                     ImGui.Unindent();
                 }
+            }
+
+            if (ImGui.CollapsingHeader("Safety Bounds"))
+            {
+                var minTargetDt = (float)_options.MinTargetTimeStepSeconds;
+                if (ImGui.InputFloat("Min Target Time Step (s)", ref minTargetDt))
+                    _options.MinTargetTimeStepSeconds = minTargetDt;
+
+                var minAdaptiveDt = (float)_options.MinAdaptiveTimeStepSeconds;
+                if (ImGui.InputFloat("Min Adaptive Time Step (s)", ref minAdaptiveDt))
+                    _options.MinAdaptiveTimeStepSeconds = minAdaptiveDt;
+
+                var minInitialDt = (float)_options.MinInitialAdaptiveTimeStepSeconds;
+                if (ImGui.InputFloat("Min Initial Time Step (s)", ref minInitialDt))
+                    _options.MinInitialAdaptiveTimeStepSeconds = minInitialDt;
+
+                var relaxMin = _options.AdaptiveRelaxationMin;
+                if (ImGui.SliderFloat("Adaptive Relaxation Min", ref relaxMin, 0.01f, 1.0f))
+                    _options.AdaptiveRelaxationMin = relaxMin;
+
+                var relaxMax = _options.AdaptiveRelaxationMax;
+                if (ImGui.SliderFloat("Adaptive Relaxation Max", ref relaxMax, 0.05f, 1.0f))
+                    _options.AdaptiveRelaxationMax = relaxMax;
+
+                var relaxMinFallback = _options.AdaptiveRelaxationMinFallback;
+                if (ImGui.SliderFloat("Relaxation Min (Fallback)", ref relaxMinFallback, 0.01f, 1.0f))
+                    _options.AdaptiveRelaxationMinFallback = relaxMinFallback;
+
+                var relaxMaxFallback = _options.AdaptiveRelaxationMaxFallback;
+                if (ImGui.SliderFloat("Relaxation Max (Fallback)", ref relaxMaxFallback, 0.05f, 1.0f))
+                    _options.AdaptiveRelaxationMaxFallback = relaxMaxFallback;
+
+                ImGui.Separator();
+                ImGui.Text("Material Property Bounds");
+
+                var minK = (float)_options.MinThermalConductivity;
+                if (ImGui.InputFloat("Min Thermal Conductivity (W/m·K)", ref minK))
+                    _options.MinThermalConductivity = minK;
+
+                var maxK = (float)_options.MaxThermalConductivity;
+                if (ImGui.InputFloat("Max Thermal Conductivity (W/m·K)", ref maxK))
+                    _options.MaxThermalConductivity = maxK;
+
+                var minCp = (float)_options.MinSpecificHeat;
+                if (ImGui.InputFloat("Min Specific Heat (J/kg·K)", ref minCp))
+                    _options.MinSpecificHeat = minCp;
+
+                var maxCp = (float)_options.MaxSpecificHeat;
+                if (ImGui.InputFloat("Max Specific Heat (J/kg·K)", ref maxCp))
+                    _options.MaxSpecificHeat = maxCp;
+
+                var minRho = (float)_options.MinDensity;
+                if (ImGui.InputFloat("Min Density (kg/m³)", ref minRho))
+                    _options.MinDensity = minRho;
+
+                var maxRho = (float)_options.MaxDensity;
+                if (ImGui.InputFloat("Max Density (kg/m³)", ref maxRho))
+                    _options.MaxDensity = maxRho;
+
+                var minPhi = (float)_options.MinPorosity;
+                if (ImGui.InputFloat("Min Porosity (-)", ref minPhi, 0, 0, "%.6f"))
+                    _options.MinPorosity = minPhi;
+
+                var maxPhi = (float)_options.MaxPorosity;
+                if (ImGui.InputFloat("Max Porosity (-)", ref maxPhi, 0, 0, "%.3f"))
+                    _options.MaxPorosity = maxPhi;
+
+                var minPerm = (float)_options.MinPermeability;
+                if (ImGui.InputFloat("Min Permeability (m²)", ref minPerm, 0, 0, "%.3e"))
+                    _options.MinPermeability = minPerm;
+
+                var maxPerm = (float)_options.MaxPermeability;
+                if (ImGui.InputFloat("Max Permeability (m²)", ref maxPerm, 0, 0, "%.3e"))
+                    _options.MaxPermeability = maxPerm;
+
+                ImGui.Separator();
+                ImGui.Text("Temperature Bounds");
+
+                var minInlet = (float)_options.MinFluidInletTemperatureKelvin;
+                if (ImGui.InputFloat("Min Fluid Inlet (K)", ref minInlet))
+                    _options.MinFluidInletTemperatureKelvin = minInlet;
+
+                var maxInlet = (float)_options.MaxFluidInletTemperatureKelvin;
+                if (ImGui.InputFloat("Max Fluid Inlet (K)", ref maxInlet))
+                    _options.MaxFluidInletTemperatureKelvin = maxInlet;
+
+                var minCellTemp = (float)_options.MinCellTemperatureKelvin;
+                if (ImGui.InputFloat("Min Cell Temperature (K)", ref minCellTemp))
+                    _options.MinCellTemperatureKelvin = minCellTemp;
+
+                var maxCellTemp = (float)_options.MaxCellTemperatureKelvin;
+                if (ImGui.InputFloat("Max Cell Temperature (K)", ref maxCellTemp))
+                    _options.MaxCellTemperatureKelvin = maxCellTemp;
             }
 
             // Thermodynamics and Geochemistry Section
