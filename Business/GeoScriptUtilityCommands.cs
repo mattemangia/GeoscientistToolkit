@@ -91,7 +91,7 @@ public class ListOpsCommand : IGeoScriptCommand
         }
 
         // Utility commands work on all types
-        if (new[] { "LISTOPS", "DISPTYPE", "UNLOAD", "INFO", "SET_PIXEL_SIZE", "LOAD", "SAVE", "COPY", "DELETE" }.Contains(command.Name))
+        if (new[] { "LISTOPS", "DISPTYPE", "UNLOAD", "INFO", "SET_PIXEL_SIZE", "LOAD", "SAVE", "COPY", "DELETE", "USE" }.Contains(command.Name))
             return true;
 
         return false;
@@ -237,6 +237,35 @@ public class InfoCommand : IGeoScriptCommand
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:0.#} KB";
         if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):0.#} MB";
         return $"{bytes / (1024.0 * 1024 * 1024):0.#} GB";
+    }
+}
+
+/// <summary>
+/// USE command - Switch context to another loaded dataset
+/// Usage: USE @'DatasetName'
+/// </summary>
+public class UseCommand : IGeoScriptCommand
+{
+    public string Name => "USE";
+    public string HelpText => "Switch the active dataset to another loaded dataset by name";
+    public string Usage => "USE @'DatasetName'";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        var cmd = (CommandNode)node;
+        var useMatch = Regex.Match(cmd.FullText, @"USE\s+@'([^']+)'", RegexOptions.IgnoreCase);
+        if (!useMatch.Success)
+            throw new ArgumentException("Invalid USE syntax. Usage: USE @'DatasetName'");
+
+        if (context.AvailableDatasets == null)
+            throw new InvalidOperationException("No dataset context is available for USE.");
+
+        var datasetName = useMatch.Groups[1].Value;
+        if (!context.AvailableDatasets.TryGetValue(datasetName, out var dataset))
+            throw new ArgumentException($"Dataset '@{datasetName}' not found in the current context.");
+
+        context.InputDataset = dataset;
+        return Task.FromResult(dataset);
     }
 }
 
