@@ -247,6 +247,6 @@ Planned enhancements:
 
 ## Related Pages
 
-- [[CT Imaging and Segmentation]] - 3D imaging
-- [[User Guide]] - Application documentation
-- [[Home]] - Wiki home page
+- [CT Imaging and Segmentation](CT-Imaging-and-Segmentation) - 3D imaging
+- [User Guide](User-Guide) - Application documentation
+- [Home](Home) - Wiki home page

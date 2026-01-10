@@ -421,7 +421,7 @@ curl -H "X-API-Key: key1" http://localhost:8500/api/nodes
 
 ## Related Pages
 
-- [[API Reference]] - Direct API usage
-- [[Developer Guide]] - Extension development
-- [[User Guide]] - Application documentation
-- [[Home]] - Wiki home page
+- [API Reference](API-Reference) - Direct API usage
+- [Developer Guide](Developer-Guide) - Extension development
+- [User Guide](User-Guide) - Application documentation
+- [Home](Home) - Wiki home page

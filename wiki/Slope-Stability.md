@@ -359,7 +359,7 @@ SLOPE_ANALYZE
 
 ## Related Pages
 
-- [[Seismic Analysis]] - Earthquake simulation
-- [[User Guide]] - Application documentation
-- [[Verification and Testing]] - Benchmark results
-- [[Home]] - Wiki home page
+- [Seismic Analysis](Seismic-Analysis) - Earthquake simulation
+- [User Guide](User-Guide) - Application documentation
+- [Verification and Testing](Verification-and-Testing) - Benchmark results
+- [Home](Home) - Wiki home page

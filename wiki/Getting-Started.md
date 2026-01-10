@@ -16,7 +16,7 @@ The TUI wizard downloads and updates the toolkit automatically.
 - **Linux**: Run `./InstallerWizard`
 - **macOS**: Run `./InstallerWizard` (Intel/Apple Silicon)
 
-See [[Installation]] for detailed instructions.
+See [Installation](Installation) for detailed instructions.
 
 ### Build from Source
 
@@ -91,7 +91,7 @@ From `File → Import`, choose your data type:
    - AI Models - Automatic segmentation
 4. **Export mesh** in `Tools → Export → Mesh Extraction`
 
-**More details:** [[CT Imaging and Segmentation]]
+**More details:** [CT Imaging and Segmentation](CT-Imaging-and-Segmentation)
 
 ### Example: Seismic + Borehole Integration
 
@@ -100,7 +100,7 @@ From `File → Import`, choose your data type:
 3. **Generate synthetic seismic** in `Borehole Tools → Seismic`
 4. **Tie wells** in `Seismic Tools → Borehole Integration`
 
-**More details:** [[Seismic Analysis]]
+**More details:** [Seismic Analysis](Seismic-Analysis)
 
 ### Example: Geothermal Simulation
 
@@ -112,7 +112,7 @@ From `File → Import`, choose your data type:
 3. **Run simulation**
 4. **Visualize** temperature distribution and flow paths
 
-**More details:** [[Geothermal Simulation]]
+**More details:** [Geothermal Simulation](Geothermal-Simulation)
 
 ---
 
@@ -141,27 +141,27 @@ From `File → Import`, choose your data type:
 
 | Topic | Guide |
 |-------|-------|
-| Complete user guide | [[User Guide]] |
-| GeoScript scripting | [[GeoScript Manual]] |
-| Image processing pipelines | [[GeoScript Image Operations]] |
-| AI segmentation | [[CT Imaging and Segmentation]] |
-| Thermodynamics & geochemistry | [[Thermodynamics and Geochemistry]] |
-| Pore network modeling | [[Pore Network Modeling]] |
-| API automation | [[API Reference]] |
-| All documentation | [[Home]] |
+| Complete user guide | [User Guide](User-Guide) |
+| GeoScript scripting | [GeoScript Manual](GeoScript-Manual) |
+| Image processing pipelines | [GeoScript Image Operations](GeoScript-Image-Operations) |
+| AI segmentation | [CT Imaging and Segmentation](CT-Imaging-and-Segmentation) |
+| Thermodynamics & geochemistry | [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry) |
+| Pore network modeling | [Pore Network Modeling](Pore-Network-Modeling) |
+| API automation | [API Reference](API-Reference) |
+| All documentation | [Home](Home) |
 
 ### By Workflow
 
 | Workflow | Relevant Pages |
 |----------|----------------|
-| CT analysis & segmentation | [[CT Imaging and Segmentation]], [[User Guide]] |
-| Seismic interpretation | [[Seismic Analysis]] |
-| Geothermal modeling | [[Geothermal Simulation]] |
-| Reactive transport | [[PhysicoChem Reactors]], [[Pore Network Modeling]] |
-| Slope stability | [[Slope Stability]] |
-| 3D reconstruction | [[Photogrammetry]] |
-| Batch processing | [[GeoScript Manual]], [[API Reference]] |
-| Distributed computing | [[NodeEndpoint]] |
+| CT analysis & segmentation | [CT Imaging and Segmentation](CT-Imaging-and-Segmentation), [User Guide](User-Guide) |
+| Seismic interpretation | [Seismic Analysis](Seismic-Analysis) |
+| Geothermal modeling | [Geothermal Simulation](Geothermal-Simulation) |
+| Reactive transport | [PhysicoChem Reactors](PhysicoChem-Reactors), [Pore Network Modeling](Pore-Network-Modeling) |
+| Slope stability | [Slope Stability](Slope-Stability) |
+| 3D reconstruction | [Photogrammetry](Photogrammetry) |
+| Batch processing | [GeoScript Manual](GeoScript-Manual), [API Reference](API-Reference) |
+| Distributed computing | [NodeEndpoint](NodeEndpoint) |
 
 ---
 
@@ -231,9 +231,9 @@ Visualize temperature distribution and flow paths
 
 ## Next Steps
 
-- [[User Guide]] - Complete application documentation
-- [[GeoScript Manual]] - Learn to automate workflows
-- [[Installation]] - Detailed setup instructions
+- [User Guide](User-Guide) - Complete application documentation
+- [GeoScript Manual](GeoScript-Manual) - Learn to automate workflows
+- [Installation](Installation) - Detailed setup instructions
 
 ---
 
