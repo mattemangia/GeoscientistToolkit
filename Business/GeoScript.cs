@@ -233,6 +233,12 @@ public static class CommandRegistry
             new InvertCommand(),
             new NormalizeCommand(),
 
+            // File Commands
+            new LoadCommand(),
+            new SaveCommand(),
+            new CopyCommand(),
+            new DeleteCommand(),
+
             // Utility Commands
             new ListOpsCommand(),
             new DispTypeCommand(),

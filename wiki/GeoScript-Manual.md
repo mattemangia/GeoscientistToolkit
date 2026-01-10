@@ -182,14 +182,29 @@ SELECT INTERSECTS @'PolygonLayer'
 
 | Dataset Type | Description | Common Operations |
 |--------------|-------------|-------------------|
-| **ImageDataset** | Single 2D raster images | FILTER, THRESHOLD, GRAYSCALE |
+| **SingleImage** | Single 2D raster images | BRIGHTNESS_CONTRAST, FILTER, THRESHOLD |
 | **CtImageStack** | 3D CT scan volumes | CT_SEGMENT, CT_FILTER3D |
-| **TableDataset** | Tabular data | SELECT, GROUPBY, CALCULATE |
-| **GISDataset** | Geographic data | BUFFER, DISSOLVE, SELECT |
-| **SeismicDataset** | Seismic survey data | SEIS_FILTER, SEIS_STACK |
-| **BoreholeDataset** | Well log data | BH_ADD_LOG, BH_CALCULATE_POROSITY |
-| **PNMDataset** | Pore network models | PNM_CALCULATE_PERMEABILITY |
+| **CtBinaryFile** | CT binary volume files | LOAD, DISPTYPE |
+| **MicroXrf** | Micro-XRF maps | FILTER, INFO |
+| **PointCloud** | Point cloud datasets | INFO, SAVE |
+| **Mesh** | Legacy mesh datasets | INFO, SAVE |
+| **Group** | Dataset collections | INFO, UNLOAD |
 | **Mesh3D** | 3D surface meshes | MESH_SMOOTH, MESH_DECIMATE |
+| **Table** | Tabular data | SELECT, GROUPBY, CALCULATE |
+| **GIS** | Geographic data | BUFFER, DISSOLVE, SELECT |
+| **AcousticVolume** | Acoustic volume datasets | ACOUSTIC_THRESHOLD, ACOUSTIC_EXTRACT_TARGETS |
+| **PNM** | Pore network models | PNM_CALCULATE_PERMEABILITY, RUN_PNM_REACTIVE_TRANSPORT |
+| **DualPNM** | Dual pore network models | PNM_* (where applicable) |
+| **Borehole** | Well log data | BH_ADD_LOG, BH_CALCULATE_POROSITY |
+| **TwoDGeology** | 2D geology datasets | SAVE, INFO |
+| **SubsurfaceGIS** | Subsurface GIS layers | GIS_ADD_LAYER, GIS_REPROJECT |
+| **Earthquake** | Earthquake datasets | INFO, SAVE |
+| **Seismic** | Seismic survey data | SEIS_FILTER, SEIS_STACK |
+| **Video** | Video datasets | VIDEO_EXTRACT_FRAME, VIDEO_STABILIZE |
+| **Audio** | Audio datasets | AUDIO_TRIM, AUDIO_NORMALIZE |
+| **Text** | Text datasets | TEXT_SEARCH, TEXT_STATISTICS |
+| **Nerf** | NeRF datasets | INFO, SAVE |
+| **SlopeStability** | Slope stability models | SLOPE_GENERATE_BLOCKS, SLOPE_SIMULATE |
 
 ### Type Checking
 
@@ -248,6 +263,19 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | `ASPECT` | Calculate aspect | `ASPECT AS 'AspectMap'` |
 | `CONTOUR` | Generate contours | `CONTOUR INTERVAL 10 AS 'Contours'` |
 
+### GIS Extended Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `GIS_ADD_LAYER` | Add a layer to a GIS dataset | `GIS_ADD_LAYER path=\"layer.shp\" name=\"NewLayer\"` |
+| `GIS_REMOVE_LAYER` | Remove a layer by name | `GIS_REMOVE_LAYER name=\"OldLayer\"` |
+| `GIS_INTERSECT` | Intersect two layers | `GIS_INTERSECT layer=\"Faults\" with=\"Wells\"` |
+| `GIS_UNION` | Union two layers | `GIS_UNION layer=\"A\" with=\"B\"` |
+| `GIS_CLIP` | Clip to polygon layer | `GIS_CLIP layer=\"Contours\" clip=\"Mask\"` |
+| `GIS_CALCULATE_AREA` | Compute polygon areas | `GIS_CALCULATE_AREA` |
+| `GIS_CALCULATE_LENGTH` | Compute feature lengths | `GIS_CALCULATE_LENGTH` |
+| `GIS_REPROJECT` | Reproject to EPSG | `GIS_REPROJECT epsg=4326` |
+
 ### Thermodynamics Operations
 
 | Command | Description | Example |
@@ -258,6 +286,28 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | `BALANCE_REACTION` | Balance reactions | `BALANCE_REACTION 'Calcite'` |
 | `EVAPORATE` | Simulate evaporation | `EVAPORATE UPTO 10x STEPS 50 MINERALS 'Halite', 'Gypsum'` |
 | `REACT` | Calculate reaction products | `REACT CaCO3 + HCl TEMP 25 C` |
+| `SPECIATE` | Compute speciation for the current aqueous system | `SPECIATE` |
+| `DIAGNOSE_SPECIATE` | Speciation diagnostics output | `DIAGNOSE_SPECIATE` |
+| `DIAGNOSTIC_THERMODYNAMIC` | Run thermodynamic diagnostics | `DIAGNOSTIC_THERMODYNAMIC` |
+| `CALCULATE_PHASES` | Phase-separated outputs | `CALCULATE_PHASES` |
+| `CALCULATE_CARBONATE_ALKALINITY` | Carbonate alkalinity / pH balance | `CALCULATE_CARBONATE_ALKALINITY` |
+
+### Petrology Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `FRACTIONATE_MAGMA` | Fractional crystallization modeling | `FRACTIONATE_MAGMA` |
+| `LIQUIDUS_SOLIDUS` | Liquidus/solidus curves | `LIQUIDUS_SOLIDUS` |
+| `METAMORPHIC_PT` | Metamorphic P-T paths | `METAMORPHIC_PT` |
+
+### PhysicoChem Reactor Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `CREATE_REACTOR` | Create a PhysicoChem reactor | `CREATE_REACTOR` |
+| `RUN_SIMULATION` | Run PhysicoChem simulation | `RUN_SIMULATION` |
+| `ADD_CELL` | Add cell to reactor grid | `ADD_CELL x=10 y=12 z=4 material='Sandstone'` |
+| `SET_CELL_MATERIAL` | Set reactor cell material | `SET_CELL_MATERIAL id=12 material='Clay'` |
 
 ### CT Image Stack Operations
 
@@ -266,9 +316,23 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | `CT_SEGMENT` | 3D segmentation | `CT_SEGMENT method=threshold` |
 | `CT_FILTER3D` | 3D filters | `CT_FILTER3D type=gaussian3d size=5` |
 | `CT_ADD_MATERIAL` | Define material | `CT_ADD_MATERIAL name='Pore' density=1.0` |
+| `CT_REMOVE_MATERIAL` | Remove material | `CT_REMOVE_MATERIAL name='Pore'` |
 | `CT_ANALYZE_POROSITY` | Calculate porosity | `CT_ANALYZE_POROSITY material='Pore'` |
 | `CT_CROP` | Crop sub-volume | `CT_CROP x=0 y=0 z=0 width=100 height=100 depth=100` |
 | `CT_EXTRACT_SLICE` | Extract 2D slice | `CT_EXTRACT_SLICE index=50 axis=z` |
+| `CT_LABEL_ANALYSIS` | Label analysis summary | `CT_LABEL_ANALYSIS` |
+
+### Borehole Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `BH_ADD_LITHOLOGY` | Add lithology intervals | `BH_ADD_LITHOLOGY depth=1200 lith='Sandstone'` |
+| `BH_REMOVE_LITHOLOGY` | Remove lithology interval | `BH_REMOVE_LITHOLOGY depth=1200` |
+| `BH_ADD_LOG` | Add log curve | `BH_ADD_LOG name='GR' unit='API'` |
+| `BH_CALCULATE_POROSITY` | Compute porosity | `BH_CALCULATE_POROSITY method=neutron` |
+| `BH_CALCULATE_SATURATION` | Compute saturation | `BH_CALCULATE_SATURATION method=archie` |
+| `BH_DEPTH_SHIFT` | Shift depth reference | `BH_DEPTH_SHIFT shift=1.5` |
+| `BH_CORRELATION` | Correlate boreholes | `BH_CORRELATION method=dtw` |
 
 ### PNM Operations
 
@@ -281,6 +345,10 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | `PNM_IMBIBITION_SIMULATION` | Imbibition simulation | `PNM_IMBIBITION_SIMULATION contact_angle=60` |
 | `PNM_EXTRACT_LARGEST_CLUSTER` | Extract main cluster | `PNM_EXTRACT_LARGEST_CLUSTER` |
 | `PNM_STATISTICS` | Network statistics | `PNM_STATISTICS` |
+| `SET_PNM_SPECIES` | Set reactive species concentrations | `SET_PNM_SPECIES Ca2+ 0.01 0.005` |
+| `SET_PNM_MINERALS` | Set initial mineral content | `SET_PNM_MINERALS Calcite 0.02` |
+| `RUN_PNM_REACTIVE_TRANSPORT` | Reactive transport simulation | `RUN_PNM_REACTIVE_TRANSPORT 1000 0.01 298 1.5e7 1.0e7` |
+| `EXPORT_PNM_RESULTS` | Export reactive transport results | `EXPORT_PNM_RESULTS \"results.csv\"` |
 
 ### Seismic Operations
 
@@ -292,6 +360,61 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | `SEIS_NMO_CORRECTION` | NMO correction | `SEIS_NMO_CORRECTION velocity=2000` |
 | `SEIS_STACK` | Stack traces | `SEIS_STACK method=mean` |
 | `SEIS_MIGRATION` | Seismic migration | `SEIS_MIGRATION method=kirchhoff aperture=1000` |
+| `SEIS_PICK_HORIZON` | Pick seismic horizons | `SEIS_PICK_HORIZON method=auto` |
+
+### Acoustic Volume Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `ACOUSTIC_THRESHOLD` | Threshold acoustic volume | `ACOUSTIC_THRESHOLD min=0.1 max=0.8` |
+| `ACOUSTIC_EXTRACT_TARGETS` | Extract acoustic targets | `ACOUSTIC_EXTRACT_TARGETS threshold=0.7` |
+
+### Mesh Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `MESH_SMOOTH` | Smooth mesh surfaces | `MESH_SMOOTH iterations=10` |
+| `MESH_DECIMATE` | Decimate mesh | `MESH_DECIMATE target=0.5` |
+| `MESH_REPAIR` | Repair mesh topology | `MESH_REPAIR` |
+| `MESH_CALCULATE_VOLUME` | Compute mesh volume | `MESH_CALCULATE_VOLUME` |
+
+### Video Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `VIDEO_EXTRACT_FRAME` | Extract frame | `VIDEO_EXTRACT_FRAME index=120` |
+| `VIDEO_STABILIZE` | Stabilize video | `VIDEO_STABILIZE smoothing=0.8` |
+
+### Audio Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `AUDIO_TRIM` | Trim audio | `AUDIO_TRIM start=2.5 end=10.0` |
+| `AUDIO_NORMALIZE` | Normalize audio | `AUDIO_NORMALIZE target=-3` |
+
+### Text Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `TEXT_SEARCH` | Search text datasets | `TEXT_SEARCH pattern=\"permeability\"` |
+| `TEXT_REPLACE` | Replace text | `TEXT_REPLACE pattern=\"calcite\" with=\"dolomite\"` |
+| `TEXT_STATISTICS` | Text statistics | `TEXT_STATISTICS` |
+
+### Slope Stability Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `SLOPE_GENERATE_BLOCKS` | Generate blocks | `SLOPE_GENERATE_BLOCKS` |
+| `SLOPE_ADD_JOINT_SET` | Add joint set | `SLOPE_ADD_JOINT_SET dip=45 dip_dir=180 spacing=2.0 friction=30 cohesion=0.5` |
+| `SLOPE_SET_MATERIAL` | Set material properties | `SLOPE_SET_MATERIAL preset=granite` |
+| `SLOPE_SET_ANGLE` | Set slope angle | `SLOPE_SET_ANGLE degrees=35` |
+| `SLOPE_ADD_EARTHQUAKE` | Add earthquake load | `SLOPE_ADD_EARTHQUAKE magnitude=6.5 depth=10` |
+| `SLOPE_SET_WATER` | Set groundwater parameters | `SLOPE_SET_WATER level=12` |
+| `SLOPE_FILTER_BLOCKS` | Filter blocks | `SLOPE_FILTER_BLOCKS min_volume=1.0` |
+| `SLOPE_TRACK_BLOCKS` | Track block motion | `SLOPE_TRACK_BLOCKS` |
+| `SLOPE_CALCULATE_FOS` | Compute factor of safety | `SLOPE_CALCULATE_FOS` |
+| `SLOPE_SIMULATE` | Run slope simulation | `SLOPE_SIMULATE mode=dynamic time=10` |
+| `SLOPE_EXPORT` | Export slope results | `SLOPE_EXPORT path=\"results.json\"` |
 
 ### Utility Operations
 
@@ -301,6 +424,7 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | `SAVE` | Save dataset | `SAVE "output.csv" FORMAT="csv"` |
 | `COPY` | Duplicate dataset | `COPY AS "Backup"` |
 | `DELETE` | Remove from project | `DELETE` |
+| `SET_PIXEL_SIZE` | Update pixel size metadata | `SET_PIXEL_SIZE value=5 unit="µm"` |
 | `INFO` | Show summary | `INFO` |
 | `LISTOPS` | List operations | `LISTOPS` |
 | `DISPTYPE` | Show type info | `DISPTYPE` |
@@ -497,7 +621,7 @@ Solution: Ensure dataset exists before using @'DatasetName'
 
 ---
 
-**Total Commands:** 88+
+**Total Commands:** 117
 
 **Document Version:** 1.0
 **Last Updated:** January 2026

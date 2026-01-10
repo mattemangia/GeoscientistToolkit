@@ -243,25 +243,15 @@ Interactive restoration with:
 
 ```geoscript
 # Define materials
-SLOPE_ADD_MATERIAL
-    NAME 'Rock'
-    DENSITY 2650
-    COHESION 50
-    FRICTION 35
+SLOPE_SET_MATERIAL preset=granite
 
 # Define joint set
-SLOPE_ADD_JOINTSET
-    DIP 45
-    DIP_DIRECTION 180
-    SPACING 2.0
-    FRICTION 30
+SLOPE_ADD_JOINT_SET dip=45 dip_dir=180 spacing=2.0 friction=30 cohesion=0.5
 
-# Run analysis
-SLOPE_ANALYZE
-    DEM 'dem_dataset'
-    MODE dynamic
-    TIME 10
-    EARTHQUAKE magnitude=6.5 depth=10
+# Generate blocks and run analysis
+SLOPE_GENERATE_BLOCKS
+SLOPE_ADD_EARTHQUAKE magnitude=6.5 depth=10
+SLOPE_SIMULATE mode=dynamic time=10
 ```
 
 ---

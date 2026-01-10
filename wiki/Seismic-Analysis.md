@@ -290,17 +290,12 @@ Seismic migration.
 SEIS_MIGRATION method=kirchhoff aperture=1000
 ```
 
-### SIMULATE_EARTHQUAKE
+### SEIS_PICK_HORIZON
 
-Run earthquake simulation (extended GeoScript).
+Pick seismic horizons.
 
 ```geoscript
-SIMULATE_EARTHQUAKE
-    FAULT 'fault_gis_dataset'
-    MAGNITUDE 7.5
-    DEPTH 15
-    HYPOCENTER_LAT -33.5 HYPOCENTER_LON 150.2
-    RAKE 90
+SEIS_PICK_HORIZON method=auto
 ```
 
 ---
