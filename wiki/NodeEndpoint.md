@@ -1,5 +1,9 @@
 # NodeEndpoint
 
+<div align="center">
+<img src="../NodeEndpoint.png" alt="NodeEndpoint" width="400"/>
+</div>
+
 Documentation for the NodeEndpoint network service for distributed computing.
 
 ---
