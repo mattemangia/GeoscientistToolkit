@@ -431,8 +431,8 @@ Complete simulation configuration and results.
 
 ## References & Next Steps
 
-- [[Thermodynamics and Geochemistry]] - Chemical systems
-- [[Pore Network Modeling]] - PNM coupling
-- [[Geothermal Simulation]] - Heat transfer
-- [[User Guide]] - Application documentation
-- [[Home]] - Wiki home page
+- [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry) - Chemical systems
+- [Pore Network Modeling](Pore-Network-Modeling) - PNM coupling
+- [Geothermal Simulation](Geothermal-Simulation) - Heat transfer
+- [User Guide](User-Guide) - Application documentation
+- [Home](Home) - Wiki home page

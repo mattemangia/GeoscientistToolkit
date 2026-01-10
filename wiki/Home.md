@@ -1,6 +1,8 @@
-# Geoscientist's Toolkit
-
 <div align="center">
+
+![Geoscientist's Toolkit Logo](../image.png)
+
+# Geoscientist's Toolkit
 
 **A comprehensive desktop application for geoscientific data analysis, visualization, and simulation**
 
@@ -22,10 +24,10 @@ This wiki contains comprehensive documentation for the Geoscientist's Toolkit ap
 
 | Getting Started | Core Features | Advanced Topics |
 |----------------|---------------|-----------------|
-| [[Getting Started]] | [[User Guide]] | [[GeoScript Manual]] |
-| [[Installation]] | [[CT Imaging and Segmentation]] | [[API Reference]] |
-| | [[Seismic Analysis]] | [[NodeEndpoint]] |
-| | [[Geothermal Simulation]] | [[Developer Guide]] |
+| [Getting Started](Getting-Started) | [User Guide](User-Guide) | [GeoScript Manual](GeoScript-Manual) |
+| [Installation](Installation) | [CT Imaging and Segmentation](CT-Imaging-and-Segmentation) | [API Reference](API-Reference) |
+| | [Seismic Analysis](Seismic-Analysis) | [NodeEndpoint](NodeEndpoint) |
+| | [Geothermal Simulation](Geothermal-Simulation) | [Developer Guide](Developer-Guide) |
 
 ---
 
@@ -66,7 +68,7 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 - Material definition and interpolation between slices
 - Export to 3D meshes via Marching Cubes/Surface Nets
 
-**Learn more:** [[CT Imaging and Segmentation]]
+**Learn more:** [CT Imaging and Segmentation](CT-Imaging-and-Segmentation)
 
 #### Seismic Analysis
 - SEG-Y file loading and comprehensive visualization
@@ -74,7 +76,7 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 - Borehole-Seismic Integration with synthetic seismograms
 - Well-to-seismic tie with correlation analysis
 
-**Learn more:** [[Seismic Analysis]]
+**Learn more:** [Seismic Analysis](Seismic-Analysis)
 
 #### Physical Property Simulations
 - **Thermal Conductivity** - Finite element heat transfer analysis
@@ -85,14 +87,14 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 - **Pore Network Modeling** - Permeability, tortuosity, flow simulation
 - **Geothermal Simulation** - Heat transfer and fluid flow in boreholes
 
-**Learn more:** [[Geothermal Simulation]] | [[Slope Stability]] | [[Pore Network Modeling]]
+**Learn more:** [Geothermal Simulation](Geothermal-Simulation) | [Slope Stability](Slope-Stability) | [Pore Network Modeling](Pore-Network-Modeling)
 
 #### Thermodynamics & Geochemistry
 - Extended compound library (60+ species)
 - GeoScript thermo commands for phase calculations
 - Equilibrium workflow with Gibbs energy minimization
 
-**Learn more:** [[Thermodynamics and Geochemistry]] | [[PhysicoChem Reactors]]
+**Learn more:** [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry) | [PhysicoChem Reactors](PhysicoChem-Reactors)
 
 ### Performance Features
 - GPU-accelerated simulations using OpenCL
@@ -108,7 +110,7 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 - **Cross-platform installer** (recommended): Use the TUI wizard
 - **Build from source**: Clone and run `dotnet build`
 
-See [[Installation]] for detailed instructions.
+See [Installation](Installation) for detailed instructions.
 
 ### 2. Create Your First Project
 1. Launch the application
@@ -124,7 +126,7 @@ From `File → Import`, select your data format:
 - Images: PNG, JPG, BMP, TIFF
 - Tables: CSV, Excel
 
-See [[Getting Started]] for a complete walkthrough.
+See [Getting Started](Getting-Started) for a complete walkthrough.
 
 ---
 
@@ -147,7 +149,7 @@ mesh = ct.ExtractMesh(material, algorithm="MarchingCubes")
 mesh.Export("output.obj")
 ```
 
-**Learn more:** [[GeoScript Manual]] | [[GeoScript Image Operations]]
+**Learn more:** [GeoScript Manual](GeoScript-Manual) | [GeoScript Image Operations](GeoScript-Image-Operations)
 
 ---
 
@@ -168,33 +170,33 @@ mesh.Export("output.obj")
 ## Documentation Categories
 
 ### Getting Started
-- [[Getting Started]] - Linear onboarding path
-- [[Installation]] - System requirements and setup
+- [Getting Started](Getting-Started) - Linear onboarding path
+- [Installation](Installation) - System requirements and setup
 
 ### User Guides
-- [[User Guide]] - Comprehensive application guide
-- [[GeoScript Manual]] - Complete scripting reference
-- [[GeoScript Image Operations]] - Image processing pipelines
+- [User Guide](User-Guide) - Comprehensive application guide
+- [GeoScript Manual](GeoScript-Manual) - Complete scripting reference
+- [GeoScript Image Operations](GeoScript-Image-Operations) - Image processing pipelines
 
 ### Analysis Modules
-- [[CT Imaging and Segmentation]] - 3D imaging and AI segmentation
-- [[Seismic Analysis]] - Seismic data and earthquake simulation
-- [[Geothermal Simulation]] - Heat transfer and BHE modeling
-- [[Pore Network Modeling]] - PNM generation and flow simulation
-- [[Slope Stability]] - DEM-based stability analysis
-- [[Photogrammetry]] - 3D reconstruction from images
+- [CT Imaging and Segmentation](CT-Imaging-and-Segmentation) - 3D imaging and AI segmentation
+- [Seismic Analysis](Seismic-Analysis) - Seismic data and earthquake simulation
+- [Geothermal Simulation](Geothermal-Simulation) - Heat transfer and BHE modeling
+- [Pore Network Modeling](Pore-Network-Modeling) - PNM generation and flow simulation
+- [Slope Stability](Slope-Stability) - DEM-based stability analysis
+- [Photogrammetry](Photogrammetry) - 3D reconstruction from images
 
 ### Simulations
-- [[Thermodynamics and Geochemistry]] - Phase diagrams and reactions
-- [[PhysicoChem Reactors]] - Multiphysics reactor simulation
+- [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry) - Phase diagrams and reactions
+- [PhysicoChem Reactors](PhysicoChem-Reactors) - Multiphysics reactor simulation
 
 ### Developer Resources
-- [[API Reference]] - External automation API
-- [[NodeEndpoint]] - Distributed computing service
-- [[Developer Guide]] - Architecture and extension points
+- [API Reference](API-Reference) - External automation API
+- [NodeEndpoint](NodeEndpoint) - Distributed computing service
+- [Developer Guide](Developer-Guide) - Architecture and extension points
 
 ### Quality Assurance
-- [[Verification and Testing]] - Test cases and benchmarks
+- [Verification and Testing](Verification-and-Testing) - Test cases and benchmarks
 
 ---
 
@@ -267,6 +269,6 @@ This project is licensed under the MIT License.
 
 **Built for the geoscience community**
 
-[[Getting Started]] | [[User Guide]] | [[GeoScript Manual]]
+[Getting Started](Getting-Started) | [User Guide](User-Guide) | [GeoScript Manual](GeoScript-Manual)
 
 </div>

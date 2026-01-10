@@ -151,7 +151,7 @@ For AI-powered segmentation (SAM2, MicroSAM):
 3. Place in the `ONNX/` folder
 4. Restart the application
 
-See [[CT Imaging and Segmentation]] for detailed AI setup.
+See [CT Imaging and Segmentation](CT-Imaging-and-Segmentation) for detailed AI setup.
 
 ---
 
@@ -294,6 +294,6 @@ Run the installer wizard again - it will detect the existing installation and of
 
 ## Next Steps
 
-- [[Getting Started]] - Begin using the application
-- [[User Guide]] - Complete documentation
-- [[Home]] - Return to wiki home
+- [Getting Started](Getting-Started) - Begin using the application
+- [User Guide](User-Guide) - Complete documentation
+- [Home](Home) - Return to wiki home
