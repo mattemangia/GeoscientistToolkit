@@ -223,6 +223,23 @@ INFO
 UNLOAD
 ```
 
+#### 3.2.4 Dataset References
+
+GeoScript can reference other loaded datasets by name using the `@'DatasetName'` syntax. These dataset references come from the current project context (all loaded datasets in the GeoScript editor/terminal).
+
+Common usage patterns:
+```geoscript
+# Switch the active dataset to another loaded dataset
+USE @'WellLogs'
+
+# Join a GIS layer with a table dataset by key
+SELECT WHERE 'Zone' = 'A' |>
+  JOIN @'LithologyTable' ON 'WellID' = 'WellID'
+
+# Spatial selection against another GIS layer
+SELECT INTERSECTS @'FaultPolygons'
+```
+
 ### 3.3 Parameter Syntax
 
 #### 3.3.1 Named Parameters (Recommended)
@@ -263,13 +280,29 @@ SELECT WHERE 'Value' > 100
 RENAME 'OldName' TO 'NewName'
 ```
 
-#### 3.4.2 Dataset References
+#### 3.4.2 Dataset and Property References
 
-Reference other datasets using the `@` symbol:
+GeoScript can reference datasets and dataset properties using dot notation. When you enter a property reference by itself, GeoScript prints the resolved value.
+
+Rules:
+- `DatasetName.Property.SubProperty` resolves from any loaded dataset by name.
+- `Property.SubProperty` resolves from the current context dataset.
+- If the reference is just a dataset name, GeoScript prints the dataset summary.
+- Lists can be indexed with numbers (e.g., `Materials.0`) and lists of named objects can be resolved by name (e.g., `Materials.Basalt`).
 
 ```geoscript
+# Use another dataset directly
 JOIN @'OtherDataset' ON 'LeftKey' = 'RightKey'
 SELECT INTERSECTS @'PolygonLayer'
+
+# Print a property from the current dataset
+permeability
+
+# Print a property from another dataset
+PNM.permeability
+
+# Traverse deeper properties
+CT.Materials.Basalt.VoxelCount
 ```
 
 ### 3.5 Expression Evaluation
@@ -1869,7 +1902,26 @@ LOAD "image.tif" AS "ThinSection" PIXELSIZE=0.8 UNIT="mm"
 
 ---
 
-#### 5.11.4 INFO
+#### 5.11.4 USE
+
+Switches the active dataset to another loaded dataset by name.
+
+**Syntax**:
+```geoscript
+USE @'DatasetName'
+```
+
+**Examples**:
+```geoscript
+USE @'WellLogs' |> SELECT WHERE 'Depth' > 2500
+USE @'InterpretationPolygons'
+```
+
+**Returns**: The referenced dataset.
+
+---
+
+#### 5.11.5 INFO
 
 Shows dataset summary information.
 
@@ -1884,7 +1936,7 @@ INFO
 
 ---
 
-#### 5.11.5 UNLOAD
+#### 5.11.6 UNLOAD
 
 Unloads dataset from memory.
 
@@ -1899,7 +1951,7 @@ UNLOAD
 
 ---
 
-#### 5.11.6 SAVE
+#### 5.11.7 SAVE
 
 Saves a dataset to a file.
 
@@ -1923,7 +1975,7 @@ SAVE "borehole.las" FORMAT="las"
 
 ---
 
-#### 5.11.7 SET_PIXEL_SIZE
+#### 5.11.8 SET_PIXEL_SIZE
 
 Updates pixel size metadata on image or CT datasets.
 
@@ -1941,7 +1993,7 @@ SET_PIXEL_SIZE value=1.2 UNIT="um"
 
 ---
 
-#### 5.11.8 COPY
+#### 5.11.9 COPY
 
 Duplicates the current dataset.
 
@@ -1962,7 +2014,7 @@ COPY AS "BackupData"
 
 ---
 
-#### 5.11.9 DELETE
+#### 5.11.10 DELETE
 
 Removes the dataset from the project.
 
@@ -2804,7 +2856,7 @@ Manages available operations for each dataset type.
 GEOSCRIPT lexer recognizes the following token types:
 
 - `WITH`, `DO`, `TO`, `THEN` - Statement keywords
-- `LISTOPS`, `DISPTYPE`, `INFO`, `UNLOAD` - Utility keywords
+- `LISTOPS`, `DISPTYPE`, `INFO`, `UNLOAD`, `USE` - Utility keywords
 - `PIPE` (`|>`) - Pipeline operator
 - `COMMA` (`,`) - Parameter separator
 - `STRING` - String literal
@@ -2874,10 +2926,10 @@ TEXT_SEARCH, TEXT_REPLACE, TEXT_STATISTICS
 ### Slope Stability (11 commands)
 SLOPE_GENERATE_BLOCKS, SLOPE_ADD_JOINT_SET, SLOPE_SET_MATERIAL, SLOPE_SET_ANGLE, SLOPE_ADD_EARTHQUAKE, SLOPE_SET_WATER, SLOPE_FILTER_BLOCKS, SLOPE_TRACK_BLOCKS, SLOPE_CALCULATE_FOS, SLOPE_SIMULATE, SLOPE_EXPORT
 
-### Utility (9 commands)
-LOAD, SAVE, COPY, DELETE, SET_PIXEL_SIZE, LISTOPS, DISPTYPE, INFO, UNLOAD
+### Utility (10 commands)
+LOAD, SAVE, COPY, DELETE, SET_PIXEL_SIZE, LISTOPS, DISPTYPE, INFO, UNLOAD, USE
 
-**Total: 117 Commands**
+**Total: 118 Commands**
 
 ---
 

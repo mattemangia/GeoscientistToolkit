@@ -106,6 +106,7 @@ Reserved words in GeoScript:
 - `LISTOPS` - List available operations
 - `DISPTYPE` - Display dataset type information
 - `UNLOAD` - Remove dataset from memory
+- `USE` - Switch active dataset
 
 #### Operators
 
@@ -168,10 +169,20 @@ CALCULATE 'NewField' = 'OldField' * 2
 SELECT WHERE 'Value' > 100
 ```
 
-Reference other datasets using `@`:
+Reference other loaded datasets using `@'DatasetName'`, or read dataset properties with dot notation. When you enter a property reference by itself, GeoScript prints the resolved value. These references are resolved from the current project context (all datasets loaded in the GeoScript editor or terminal):
 ```geoscript
+USE @'WellLogs'
 JOIN @'OtherDataset' ON 'LeftKey' = 'RightKey'
 SELECT INTERSECTS @'PolygonLayer'
+
+# Property access (current dataset)
+permeability
+
+# Property access (named dataset)
+PNM.permeability
+
+# Deep property access
+CT.Materials.Basalt.VoxelCount
 ```
 
 ---
@@ -421,6 +432,7 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | Command | Description | Example |
 |---------|-------------|---------|
 | `LOAD` | Load dataset | `LOAD "file.csv" AS "MyData"` |
+| `USE` | Switch active dataset | `USE @'OtherDataset'` |
 | `SAVE` | Save dataset | `SAVE "output.csv" FORMAT="csv"` |
 | `COPY` | Duplicate dataset | `COPY AS "Backup"` |
 | `DELETE` | Remove from project | `DELETE` |

@@ -87,7 +87,7 @@ GeoScript recognizes the following tokens:
 
 **Keywords:**
 - `WITH`, `DO`, `TO`, `THEN` - Statement control keywords
-- `LISTOPS`, `DISPTYPE`, `UNLOAD` - Utility keywords
+- `LISTOPS`, `DISPTYPE`, `UNLOAD`, `USE` - Utility keywords
 
 **Operators:**
 - `|>` - Pipeline operator (chains operations)
@@ -161,6 +161,7 @@ LISTOPS
 DISPTYPE
 UNLOAD
 INFO
+USE @'OtherDataset'
 ```
 
 ### Parameter Syntax
@@ -201,13 +202,23 @@ SELECT WHERE 'Value' > 100
 RENAME 'OldName' TO 'NewName'
 ```
 
-### Dataset References
+### Dataset and Property References
 
-Reference other datasets using the `@` symbol:
+Reference other loaded datasets using the `@'DatasetName'` syntax, or read dataset properties with dot notation. When you enter a property reference by itself, GeoScript prints the resolved value. These references are resolved from the current project context (all datasets loaded in the GeoScript editor or terminal).
 
 ```geoscript
+USE @'WellLogs'
 JOIN @'OtherDataset' ON 'LeftKey' = 'RightKey'
 SELECT INTERSECTS @'PolygonLayer'
+
+# Property access (current dataset)
+permeability
+
+# Property access (named dataset)
+PNM.permeability
+
+# Deep property access
+CT.Materials.Basalt.VoxelCount
 ```
 
 ### Expression Evaluation
@@ -1394,7 +1405,7 @@ Calculate text statistics.
 
 ---
 
-### Utility Commands (7 commands)
+### Utility Commands (8 commands)
 
 #### LOAD
 
@@ -1408,6 +1419,20 @@ LOAD "path/to/file" [AS "DatasetName"] [TYPE=<DatasetType>] [PIXELSIZE=<value>] 
 **Description:**
 Loads a dataset using the appropriate loader. Use `TYPE` to disambiguate formats and `PIXELSIZE`/`UNIT`
 to override image/CT spacing metadata.
+
+---
+
+#### USE
+
+Switch the active dataset to another loaded dataset by name.
+
+**Syntax:**
+```geoscript
+USE @'DatasetName'
+```
+
+**Description:**
+Pulls a dataset from the current project context so it can be used in the pipeline.
 
 ---
 
@@ -1848,7 +1873,7 @@ BH_ADD_LITHOLOGY, BH_REMOVE_LITHOLOGY, BH_ADD_LOG, BH_CALCULATE_POROSITY, BH_CAL
 ACOUSTIC_THRESHOLD, ACOUSTIC_EXTRACT_TARGETS, MESH_SMOOTH, MESH_DECIMATE, MESH_REPAIR, MESH_CALCULATE_VOLUME, VIDEO_EXTRACT_FRAME, VIDEO_STABILIZE, AUDIO_TRIM, AUDIO_NORMALIZE, TEXT_SEARCH, TEXT_REPLACE, TEXT_STATISTICS
 
 **Utility (7):**
-LOAD, SAVE, SET_PIXEL_SIZE, LISTOPS, DISPTYPE, INFO, UNLOAD
+LOAD, USE, SAVE, SET_PIXEL_SIZE, LISTOPS, DISPTYPE, INFO, UNLOAD
 
 **Total: 88+ Commands**
 
