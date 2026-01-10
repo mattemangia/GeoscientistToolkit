@@ -1,0 +1,272 @@
+# Geoscientist's Toolkit
+
+<div align="center">
+
+**A comprehensive desktop application for geoscientific data analysis, visualization, and simulation**
+
+**Current Version: 1.0.0**
+
+[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=.net)](https://dotnet.microsoft.com/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#installation)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+</div>
+
+---
+
+## Welcome to the Wiki
+
+This wiki contains comprehensive documentation for the Geoscientist's Toolkit application. Whether you're a new user getting started or an experienced researcher looking for advanced features, you'll find the information you need here.
+
+### Quick Navigation
+
+| Getting Started | Core Features | Advanced Topics |
+|----------------|---------------|-----------------|
+| [[Getting Started]] | [[User Guide]] | [[GeoScript Manual]] |
+| [[Installation]] | [[CT Imaging and Segmentation]] | [[API Reference]] |
+| | [[Seismic Analysis]] | [[NodeEndpoint]] |
+| | [[Geothermal Simulation]] | [[Developer Guide]] |
+
+---
+
+## Overview
+
+Geoscientist's Toolkit is an advanced, cross-platform desktop application built with C# and .NET 8.0 that provides an integrated environment for working with diverse geophysical and geochemical datasets. From pore-scale (micrometers) to basin-scale (kilometers) analysis, it combines real-time 3D visualization, GPU-accelerated simulations, and a domain-specific scripting language (GeoScript) to enable sophisticated workflows across multiple geoscience disciplines.
+
+---
+
+## Key Features
+
+### Multi-Scale Analysis
+- **Pore-scale**: Micro-CT imaging, pore network modeling, NMR simulation
+- **Core-scale**: Rock physics, acoustic properties, thermal conductivity
+- **Well-scale**: Borehole/well log analysis, geothermal simulation
+- **Reservoir-scale**: Seismic analysis, 3D geological modeling
+- **Basin-scale**: Regional mapping, GIS integration
+
+### Comprehensive Data Support
+
+| Data Type | Formats | Key Capabilities |
+|-----------|---------|------------------|
+| **CT Scans** | DICOM, TIFF, .ctstack | AI-powered segmentation (SAM2, MicroSAM), 3D reconstruction |
+| **Seismic Data** | SEG-Y | Trace analysis, wiggle/variable area displays, well correlation |
+| **Well Logs** | LAS, .bhb | Lithology editing, synthetic seismic, geothermal simulation |
+| **3D Meshes** | OBJ, STL | Import/export, surface extraction from CT |
+| **GIS Data** | Shapefile, GeoJSON | Subsurface mapping, geographic integration |
+| **Images** | PNG, JPG, BMP, TIFF | Standard image processing and analysis |
+| **Tabular** | CSV, Excel | Data plotting, statistical analysis |
+| **Pore Networks** | Custom | Flow simulation, permeability calculation |
+
+### Advanced Analysis Modules
+
+#### CT Imaging & Segmentation
+- Interactive 3D/2D/slice viewers with multi-planar reconstruction
+- Manual segmentation tools (brush, lasso, magic wand)
+- AI-powered segmentation using ONNX models (SAM2, MicroSAM, Grounding DINO)
+- Material definition and interpolation between slices
+- Export to 3D meshes via Marching Cubes/Surface Nets
+
+**Learn more:** [[CT Imaging and Segmentation]]
+
+#### Seismic Analysis
+- SEG-Y file loading and comprehensive visualization
+- Multiple display modes: wiggle trace, variable area, color maps
+- Borehole-Seismic Integration with synthetic seismograms
+- Well-to-seismic tie with correlation analysis
+
+**Learn more:** [[Seismic Analysis]]
+
+#### Physical Property Simulations
+- **Thermal Conductivity** - Finite element heat transfer analysis
+- **Acoustic Properties** - P-wave and S-wave velocity simulation
+- **NMR Simulation** - T2 relaxation time calculation
+- **Geomechanical Analysis** - Stress/strain, Mohr circles, failure prediction
+- **Slope Stability (3D/2D)** - DEM-based block simulation
+- **Pore Network Modeling** - Permeability, tortuosity, flow simulation
+- **Geothermal Simulation** - Heat transfer and fluid flow in boreholes
+
+**Learn more:** [[Geothermal Simulation]] | [[Slope Stability]] | [[Pore Network Modeling]]
+
+#### Thermodynamics & Geochemistry
+- Extended compound library (60+ species)
+- GeoScript thermo commands for phase calculations
+- Equilibrium workflow with Gibbs energy minimization
+
+**Learn more:** [[Thermodynamics and Geochemistry]] | [[PhysicoChem Reactors]]
+
+### Performance Features
+- GPU-accelerated simulations using OpenCL
+- Multi-threaded processing for large datasets
+- Efficient memory management for CT stacks
+- Real-time rendering at 60+ FPS
+
+---
+
+## Quick Start
+
+### 1. Install
+- **Cross-platform installer** (recommended): Use the TUI wizard
+- **Build from source**: Clone and run `dotnet build`
+
+See [[Installation]] for detailed instructions.
+
+### 2. Create Your First Project
+1. Launch the application
+2. Go to `File → New Project`
+3. Choose a location and name for your `.gtp` project file
+
+### 3. Import Data
+From `File → Import`, select your data format:
+- CT/Volumes: DICOM, TIFF stack, `.ctstack`
+- Seismic: SEG-Y
+- Well logs: LAS, `.bhb`
+- Meshes: OBJ, STL
+- Images: PNG, JPG, BMP, TIFF
+- Tables: CSV, Excel
+
+See [[Getting Started]] for a complete walkthrough.
+
+---
+
+## GeoScript Language
+
+Geoscientist's Toolkit includes **GeoScript**, a domain-specific scripting language for automating workflows:
+
+```geoscript
+// Load and process CT data
+ct = LoadCTStack("sample.ctstack")
+ct.ApplyFilter("gaussian", sigma=2.0)
+
+// Segment using threshold
+mask = ct.Threshold(min=100, max=255)
+material = CreateMaterial("Quartz", density=2.65)
+ct.AssignMaterial(mask, material)
+
+// Extract mesh and export
+mesh = ct.ExtractMesh(material, algorithm="MarchingCubes")
+mesh.Export("output.obj")
+```
+
+**Learn more:** [[GeoScript Manual]] | [[GeoScript Image Operations]]
+
+---
+
+## Technology Stack
+
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| **UI Framework** | ImGui.NET | Immediate-mode GUI |
+| **Graphics** | Veldrid | Cross-platform graphics |
+| **3D Rendering** | OpenGL 3.3 / Vulkan / DirectX 11 | Hardware-accelerated visualization |
+| **AI/ML** | ONNX Runtime | Model inference for segmentation |
+| **Scientific Computing** | MathNet.Numerics | Linear algebra, statistics |
+| **GIS** | GDAL, NetTopologySuite | Geospatial data handling |
+| **GPU Compute** | Silk.NET.OpenCL | Parallel computation |
+
+---
+
+## Documentation Categories
+
+### Getting Started
+- [[Getting Started]] - Linear onboarding path
+- [[Installation]] - System requirements and setup
+
+### User Guides
+- [[User Guide]] - Comprehensive application guide
+- [[GeoScript Manual]] - Complete scripting reference
+- [[GeoScript Image Operations]] - Image processing pipelines
+
+### Analysis Modules
+- [[CT Imaging and Segmentation]] - 3D imaging and AI segmentation
+- [[Seismic Analysis]] - Seismic data and earthquake simulation
+- [[Geothermal Simulation]] - Heat transfer and BHE modeling
+- [[Pore Network Modeling]] - PNM generation and flow simulation
+- [[Slope Stability]] - DEM-based stability analysis
+- [[Photogrammetry]] - 3D reconstruction from images
+
+### Simulations
+- [[Thermodynamics and Geochemistry]] - Phase diagrams and reactions
+- [[PhysicoChem Reactors]] - Multiphysics reactor simulation
+
+### Developer Resources
+- [[API Reference]] - External automation API
+- [[NodeEndpoint]] - Distributed computing service
+- [[Developer Guide]] - Architecture and extension points
+
+### Quality Assurance
+- [[Verification and Testing]] - Test cases and benchmarks
+
+---
+
+## Keyboard Shortcuts
+
+### Global Commands
+| Shortcut | Action |
+|----------|--------|
+| `F11` | Toggle fullscreen |
+| `Ctrl+S` | Save project |
+| `Ctrl+O` | Open project |
+| `Ctrl+N` | New project |
+| `Ctrl+Z` | Undo |
+| `Ctrl+Y` | Redo |
+
+### CT Viewer
+| Shortcut | Tool/Action |
+|----------|-------------|
+| `B` | Brush tool |
+| `L` | Lasso tool |
+| `W` | Magic wand |
+| `Esc` | Deselect tool |
+| `Mouse Wheel` | Zoom in/out |
+| `Middle Mouse` | Pan view |
+| `Right Mouse` | Rotate (3D view) |
+
+---
+
+## Contributing
+
+We welcome contributions! See the [Contributing Guidelines](https://github.com/mattemangia/GeoscientistToolkit#contributing) for details.
+
+---
+
+## Support & Community
+
+- **Documentation**: Browse this wiki
+- **Bug Reports**: [GitHub Issues](https://github.com/mattemangia/GeoscientistToolkit/issues)
+- **Feature Requests**: [GitHub Discussions](https://github.com/mattemangia/GeoscientistToolkit/discussions)
+- **Contact**: matteo.mangia@gmail.com
+
+---
+
+## Citation
+
+If you use Geoscientist's Toolkit in your research, please cite:
+
+```bibtex
+@software{geoscientist_toolkit,
+  title = {Geoscientist's Toolkit: Integrated Geoscientific Analysis Platform},
+  author = {Mangia, Matteo},
+  year = {2026},
+  url = {https://github.com/mattemangia/GeoscientistToolkit}
+}
+```
+
+---
+
+## License
+
+This project is licensed under the MIT License.
+
+**Author:** Matteo Mangiagalli
+**Institution:** Universita degli Studi di Urbino Carlo Bo
+**Email:** m.mangiagalli@campus.uniurb.it
+
+---
+
+<div align="center">
+
+**Built for the geoscience community**
+
+[[Getting Started]] | [[User Guide]] | [[GeoScript Manual]]
+
+</div>
