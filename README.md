@@ -381,7 +381,7 @@ See the [GeoScript documentation](GUIDE.md#geoscript-scripting-language) for com
 ## Network Features
 
 <div align="center">
-<img src="NodeEndpoint.png" alt="Geoscientist's Toolkit Logo" width="400"/>
+<img src="NodeEndpoint.png" alt="NodeEndpoint Logo" width="400"/>
 </div>
 
 The **NodeEndpoint** component provides distributed computing capabilities:
