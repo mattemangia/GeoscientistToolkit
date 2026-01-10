@@ -997,7 +997,7 @@ FILTER type=median size=3 |> NORMALIZE
 
 ---
 
-### CT Image Stack Commands (8 commands)
+### CT Image Stack Commands (12 commands)
 
 #### CT_SEGMENT
 3D segmentation of CT volumes.
@@ -1022,6 +1022,43 @@ Extract a 2D slice from the 3D volume.
 
 #### CT_LABEL_ANALYSIS
 Analyze connected components in labeled volumes.
+
+#### SIMULATE_ACOUSTIC
+Run acoustic wave simulation on the current CT dataset.
+
+**Syntax:**
+```geoscript
+SIMULATE_ACOUSTIC [materials=1,2] [tx=0.1,0.5,0.5] [rx=0.9,0.5,0.5] [time_steps=1000] [use_gpu=true]
+```
+
+#### SIMULATE_NMR
+Run random-walk NMR simulation on the current CT dataset.
+
+**Syntax:**
+```geoscript
+SIMULATE_NMR [pore_material_id=1] [steps=1000] [timestep_ms=0.01] [use_opencl=false]
+```
+
+#### SIMULATE_THERMAL_CONDUCTIVITY
+Run steady-state thermal conductivity simulation on the current CT dataset.
+
+**Syntax:**
+```geoscript
+SIMULATE_THERMAL_CONDUCTIVITY [direction=z] [temperature_hot=373.15] [temperature_cold=293.15]
+```
+
+#### SIMULATE_GEOMECH
+Run geomechanical stress/strain simulation on the current CT dataset.
+
+**Syntax:**
+```geoscript
+SIMULATE_GEOMECH [sigma1=100] [sigma2=50] [sigma3=20] [use_gpu=true] [porosity=examplepnmdataset.porosity]
+```
+
+**Tip:** parameter values can reference dataset fields:
+```geoscript
+SIMULATE_GEOMECH porosity=examplepnmdataset.porosity sigma1=120 sigma2=60 sigma3=40
+```
 
 ---
 
@@ -1854,8 +1891,8 @@ CREATE_DIAGRAM, EQUILIBRATE, SATURATION, BALANCE_REACTION, EVAPORATE, REACT
 **Image Processing (7):**
 BRIGHTNESS_CONTRAST, FILTER, THRESHOLD, BINARIZE, GRAYSCALE, INVERT, NORMALIZE
 
-**CT Image Stack (8):**
-CT_SEGMENT, CT_FILTER3D, CT_ADD_MATERIAL, CT_REMOVE_MATERIAL, CT_ANALYZE_POROSITY, CT_CROP, CT_EXTRACT_SLICE, CT_LABEL_ANALYSIS
+**CT Image Stack (12):**
+CT_SEGMENT, CT_FILTER3D, CT_ADD_MATERIAL, CT_REMOVE_MATERIAL, CT_ANALYZE_POROSITY, CT_CROP, CT_EXTRACT_SLICE, CT_LABEL_ANALYSIS, SIMULATE_ACOUSTIC, SIMULATE_NMR, SIMULATE_THERMAL_CONDUCTIVITY, SIMULATE_GEOMECH
 
 **PNM (7):**
 PNM_FILTER_PORES, PNM_FILTER_THROATS, PNM_CALCULATE_PERMEABILITY, PNM_DRAINAGE_SIMULATION, PNM_IMBIBITION_SIMULATION, PNM_EXTRACT_LARGEST_CLUSTER, PNM_STATISTICS

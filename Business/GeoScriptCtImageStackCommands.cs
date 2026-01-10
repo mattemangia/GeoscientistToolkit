@@ -2,13 +2,22 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Globalization;
 using System.Linq;
+using System.Numerics;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Business.GeoScript;
+using GeoscientistToolkit.Analysis.AcousticSimulation;
+using GeoscientistToolkit.Analysis.Geomechanics;
+using GeoscientistToolkit.Analysis.NMR;
+using GeoscientistToolkit.Analysis.ThermalConductivity;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Materials;
+using GeoscientistToolkit.Data.VolumeData;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Business.GeoScriptCtImageStackCommands;
@@ -318,5 +327,353 @@ public class CtLabelAnalysisCommand : IGeoScriptCommand
     {
         var match = Regex.Match(fullText, paramName + @"\s*=\s*([-+]?[0-9]*\.?[0-9]+)", RegexOptions.IgnoreCase);
         return match.Success ? float.Parse(match.Groups[1].Value) : defaultValue;
+    }
+}
+
+/// <summary>
+/// SIMULATE_ACOUSTIC - Run acoustic simulation on CT dataset
+/// Usage: SIMULATE_ACOUSTIC materials=1,2 tx=0.1,0.5,0.5 rx=0.9,0.5,0.5 time_steps=1000
+/// </summary>
+public class SimulateAcousticCommand : IGeoScriptCommand
+{
+    public string Name => "SIMULATE_ACOUSTIC";
+    public string HelpText => "Run acoustic wave simulation for the current CT dataset";
+    public string Usage =>
+        "SIMULATE_ACOUSTIC [materials=1,2] [tx=0.1,0.5,0.5] [rx=0.9,0.5,0.5] [time_steps=1000] [use_gpu=true]";
+
+    public async Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not CtImageStackDataset ctDs)
+            throw new NotSupportedException("SIMULATE_ACOUSTIC only works with CT Image Stack datasets");
+
+        var cmd = (CommandNode)node;
+        var args = GeoScriptArgumentParser.ParseArguments(cmd.FullText);
+
+        var extent = GeoScriptSimulationHelpers.BuildAcousticExtent(ctDs, args, context);
+
+        var materials = GeoScriptArgumentParser.GetByteSet(args, "materials", context) ??
+                        ctDs.Materials.Where(m => m.ID != 0).Select(m => m.ID).ToHashSet();
+
+        var txPosition = GeoScriptArgumentParser.GetVector3(args, "tx", new Vector3(0, 0.5f, 0.5f), context);
+        var rxPosition = GeoScriptArgumentParser.GetVector3(args, "rx", new Vector3(1, 0.5f, 0.5f), context);
+
+        var parameters = new SimulationParameters
+        {
+            Width = extent.Width,
+            Height = extent.Height,
+            Depth = extent.Depth,
+            PixelSize = ctDs.PixelSize / 1_000_000.0f,
+            SimulationExtent = extent,
+            SelectedMaterialIDs = new HashSet<byte>(materials),
+            SelectedMaterialID = materials.FirstOrDefault(),
+            Axis = GeoScriptArgumentParser.GetInt(args, "axis", 2, context),
+            UseFullFaceTransducers = GeoScriptArgumentParser.GetBool(args, "use_full_face_transducers", false, context),
+            ConfiningPressureMPa = GeoScriptArgumentParser.GetFloat(args, "confining_pressure_mpa", 1.0f, context),
+            FailureAngleDeg = GeoScriptArgumentParser.GetFloat(args, "failure_angle_deg", 30.0f, context),
+            CohesionMPa = GeoScriptArgumentParser.GetFloat(args, "cohesion_mpa", 5.0f, context),
+            SourceEnergyJ = GeoScriptArgumentParser.GetFloat(args, "source_energy_j", 1.0f, context),
+            SourceFrequencyKHz = GeoScriptArgumentParser.GetFloat(args, "source_frequency_khz", 500.0f, context),
+            SourceAmplitude = GeoScriptArgumentParser.GetInt(args, "source_amplitude", 100, context),
+            TimeSteps = GeoScriptArgumentParser.GetInt(args, "time_steps", 1000, context),
+            YoungsModulusMPa = GeoScriptArgumentParser.GetFloat(args, "youngs_modulus_mpa", 30000.0f, context),
+            PoissonRatio = GeoScriptArgumentParser.GetFloat(args, "poisson_ratio", 0.25f, context),
+            UseElasticModel = GeoScriptArgumentParser.GetBool(args, "use_elastic_model", true, context),
+            UsePlasticModel = GeoScriptArgumentParser.GetBool(args, "use_plastic_model", false, context),
+            UseBrittleModel = GeoScriptArgumentParser.GetBool(args, "use_brittle_model", false, context),
+            UseGPU = GeoScriptArgumentParser.GetBool(args, "use_gpu", true, context),
+            UseRickerWavelet = GeoScriptArgumentParser.GetBool(args, "use_ricker_wavelet", true, context),
+            TxPosition = txPosition,
+            RxPosition = rxPosition,
+            EnableRealTimeVisualization = GeoScriptArgumentParser.GetBool(args, "enable_real_time_visualization", false, context),
+            SaveTimeSeries = GeoScriptArgumentParser.GetBool(args, "save_time_series", false, context),
+            SnapshotInterval = GeoScriptArgumentParser.GetInt(args, "snapshot_interval", 10, context),
+            UseChunkedProcessing = GeoScriptArgumentParser.GetBool(args, "use_chunked_processing", true, context),
+            ChunkSizeMB = GeoScriptArgumentParser.GetInt(args, "chunk_size_mb", 512, context),
+            EnableOffloading = GeoScriptArgumentParser.GetBool(args, "enable_offloading", false, context),
+            OffloadDirectory = GeoScriptArgumentParser.GetString(args, "offload_directory", string.Empty, context),
+            ArtificialDampingFactor = GeoScriptArgumentParser.GetFloat(args, "artificial_damping_factor", 0.2f, context),
+            TimeStepSeconds = GeoScriptArgumentParser.GetFloat(args, "time_step_seconds", 1e-6f, context)
+        };
+
+        var reservedKeys = new HashSet<string>
+        {
+            "materials", "tx", "rx", "extent_min_x", "extent_min_y", "extent_min_z",
+            "extent_width", "extent_height", "extent_depth", "min_x", "min_y", "min_z", "width", "height", "depth"
+        };
+        GeoScriptSimulationHelpers.ApplyArguments(parameters, args, context, reservedKeys);
+
+        var volumeLabels = await GeoScriptSimulationHelpers.ExtractAcousticLabelsAsync(ctDs, extent);
+        var densityVolume = await GeoScriptSimulationHelpers.ExtractAcousticDensityAsync(ctDs, ctDs.VolumeData, extent);
+        var (youngsModulus, poissonRatio) = await GeoScriptSimulationHelpers.ExtractAcousticMaterialPropertiesAsync(
+            ctDs, extent, parameters.YoungsModulusMPa, parameters.PoissonRatio);
+
+        using var simulator = new ChunkedAcousticSimulator(parameters);
+        simulator.SetPerVoxelMaterialProperties(youngsModulus, poissonRatio);
+
+        Logger.Log("[GeoScript] Running acoustic simulation...");
+        var results = await simulator.RunAsync(volumeLabels, densityVolume, CancellationToken.None);
+
+        ctDs.Metadata["AcousticSimulationResults"] = results;
+        Logger.Log("[GeoScript] Acoustic simulation completed.");
+
+        return ctDs;
+    }
+}
+
+/// <summary>
+/// SIMULATE_NMR - Run NMR simulation on CT dataset
+/// Usage: SIMULATE_NMR pore_material_id=1 steps=1000 timestep_ms=0.01 use_opencl=false
+/// </summary>
+public class SimulateNmrCommand : IGeoScriptCommand
+{
+    public string Name => "SIMULATE_NMR";
+    public string HelpText => "Run NMR random-walk simulation for the current CT dataset";
+    public string Usage =>
+        "SIMULATE_NMR [pore_material_id=1] [steps=1000] [timestep_ms=0.01] [use_opencl=false]";
+
+    public async Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not CtImageStackDataset ctDs)
+            throw new NotSupportedException("SIMULATE_NMR only works with CT Image Stack datasets");
+
+        var cmd = (CommandNode)node;
+        var args = GeoScriptArgumentParser.ParseArguments(cmd.FullText);
+
+        var config = new NMRSimulationConfig();
+        InitializeNmrDefaults(config, ctDs);
+
+        config.PoreMaterialID = (byte)GeoScriptArgumentParser.GetInt(args, "pore_material_id", config.PoreMaterialID, context);
+        config.NumberOfWalkers = GeoScriptArgumentParser.GetInt(args, "number_of_walkers", config.NumberOfWalkers, context);
+        config.NumberOfSteps = GeoScriptArgumentParser.GetInt(args, "steps", config.NumberOfSteps, context);
+        config.TimeStepMs = GeoScriptArgumentParser.GetDouble(args, "timestep_ms", config.TimeStepMs, context);
+        config.DiffusionCoefficient = GeoScriptArgumentParser.GetDouble(args, "diffusion_coefficient", config.DiffusionCoefficient, context);
+        config.VoxelSize = GeoScriptArgumentParser.GetDouble(args, "voxel_size_m", config.VoxelSize, context);
+        config.PoreShapeFactor = GeoScriptArgumentParser.GetDouble(args, "pore_shape_factor", config.PoreShapeFactor, context);
+        config.T2BinCount = GeoScriptArgumentParser.GetInt(args, "t2_bin_count", config.T2BinCount, context);
+        config.T2MinMs = GeoScriptArgumentParser.GetDouble(args, "t2_min_ms", config.T2MinMs, context);
+        config.T2MaxMs = GeoScriptArgumentParser.GetDouble(args, "t2_max_ms", config.T2MaxMs, context);
+        config.ComputeT1T2Map = GeoScriptArgumentParser.GetBool(args, "compute_t1t2_map", config.ComputeT1T2Map, context);
+        config.T1BinCount = GeoScriptArgumentParser.GetInt(args, "t1_bin_count", config.T1BinCount, context);
+        config.T1MinMs = GeoScriptArgumentParser.GetDouble(args, "t1_min_ms", config.T1MinMs, context);
+        config.T1MaxMs = GeoScriptArgumentParser.GetDouble(args, "t1_max_ms", config.T1MaxMs, context);
+        config.T1T2Ratio = GeoScriptArgumentParser.GetDouble(args, "t1t2_ratio", config.T1T2Ratio, context);
+        config.RandomSeed = GeoScriptArgumentParser.GetInt(args, "random_seed", config.RandomSeed, context);
+        config.UseOpenCL = GeoScriptArgumentParser.GetBool(args, "use_opencl", config.UseOpenCL, context);
+
+        var relaxivityMap = GeoScriptArgumentParser.GetByteDoubleMap(args, "relaxivities", context);
+        if (relaxivityMap != null)
+        {
+            foreach (var (materialId, relaxivity) in relaxivityMap)
+            {
+                if (!config.MaterialRelaxivities.TryGetValue(materialId, out var existing))
+                {
+                    existing = new MaterialRelaxivityConfig { MaterialName = $"Material_{materialId}" };
+                    config.MaterialRelaxivities[materialId] = existing;
+                }
+
+                existing.SurfaceRelaxivity = relaxivity;
+            }
+        }
+
+        if (GeoScriptArgumentParser.TryGetString(args, "voxel_size_um", out var voxelUm))
+        {
+            config.VoxelSize = double.Parse(voxelUm, CultureInfo.InvariantCulture) * 1e-6;
+        }
+
+        Logger.Log("[GeoScript] Running NMR simulation...");
+
+        NMRResults results;
+        if (config.UseOpenCL)
+        {
+            var tcs = new TaskCompletionSource<NMRResults>();
+            using var simulation = new NMRSimulationOpenCL(ctDs, config);
+            simulation.RunSimulationAsync(null, tcs.SetResult, tcs.SetException);
+            results = await tcs.Task;
+        }
+        else
+        {
+            var simulation = new NMRSimulation(ctDs, config);
+            results = await simulation.RunSimulationAsync(null);
+        }
+
+        ctDs.NmrResults = results;
+        Logger.Log("[GeoScript] NMR simulation completed.");
+
+        return ctDs;
+    }
+
+    private static void InitializeNmrDefaults(NMRSimulationConfig config, CtImageStackDataset dataset)
+    {
+        var voxelSizeMeters = ConvertToMeters(dataset.PixelSize, dataset.Unit);
+        config.VoxelSize = voxelSizeMeters;
+
+        config.MaterialRelaxivities.Clear();
+        foreach (var material in dataset.Materials)
+        {
+            if (material.ID == 0) continue;
+
+            config.MaterialRelaxivities[material.ID] = new MaterialRelaxivityConfig
+            {
+                MaterialName = material.Name,
+                SurfaceRelaxivity = 10.0,
+                Color = material.Color
+            };
+        }
+    }
+
+    private static double ConvertToMeters(float pixelSize, string unit)
+    {
+        if (string.IsNullOrWhiteSpace(unit))
+            return pixelSize * 1e-6f;
+
+        var unitLower = unit.ToLowerInvariant().Trim();
+        return unitLower switch
+        {
+            "m" or "meter" or "meters" => pixelSize,
+            "mm" or "millimeter" or "millimeters" => pixelSize * 1e-3f,
+            "µm" or "um" or "micrometer" or "micrometers" or "micron" or "microns" => pixelSize * 1e-6f,
+            "nm" or "nanometer" or "nanometers" => pixelSize * 1e-9f,
+            "pm" or "picometer" or "picometers" => pixelSize * 1e-12f,
+            "km" or "kilometer" or "kilometers" => pixelSize * 1e3f,
+            "cm" or "centimeter" or "centimeters" => pixelSize * 1e-2f,
+            _ => pixelSize * 1e-6f
+        };
+    }
+}
+
+/// <summary>
+/// SIMULATE_THERMAL_CONDUCTIVITY - Run thermal conductivity simulation on CT dataset
+/// Usage: SIMULATE_THERMAL_CONDUCTIVITY direction=z temperature_hot=373.15 temperature_cold=293.15
+/// </summary>
+public class SimulateThermalConductivityCommand : IGeoScriptCommand
+{
+    public string Name => "SIMULATE_THERMAL_CONDUCTIVITY";
+    public string HelpText => "Run thermal conductivity simulation for the current CT dataset";
+    public string Usage =>
+        "SIMULATE_THERMAL_CONDUCTIVITY [direction=x|y|z] [temperature_hot=373.15] [temperature_cold=293.15]";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not CtImageStackDataset ctDs)
+            throw new NotSupportedException("SIMULATE_THERMAL_CONDUCTIVITY only works with CT Image Stack datasets");
+
+        var cmd = (CommandNode)node;
+        var args = GeoScriptArgumentParser.ParseArguments(cmd.FullText);
+
+        var options = new ThermalOptions
+        {
+            Dataset = ctDs,
+            TemperatureHot = GeoScriptArgumentParser.GetDouble(args, "temperature_hot", 373.15, context),
+            TemperatureCold = GeoScriptArgumentParser.GetDouble(args, "temperature_cold", 293.15, context),
+            HeatFlowDirection = GeoScriptArgumentParser.GetEnum(args, "direction", HeatFlowDirection.Z, context),
+            SolverBackend = GeoScriptArgumentParser.GetEnum(args, "solver_backend", SolverBackend.CSharp_Parallel, context),
+            ConvergenceTolerance = GeoScriptArgumentParser.GetDouble(args, "convergence_tolerance", 1e-6, context),
+            MaxIterations = GeoScriptArgumentParser.GetInt(args, "max_iterations", 20000, context),
+            SorFactor = GeoScriptArgumentParser.GetDouble(args, "sor_factor", 1.8, context)
+        };
+
+        var conductivityOverrides = GeoScriptArgumentParser.GetByteDoubleMap(args, "material_k", context);
+        if (conductivityOverrides != null)
+        {
+            foreach (var (id, value) in conductivityOverrides)
+                options.MaterialConductivities[id] = value;
+        }
+
+        Logger.Log("[GeoScript] Running thermal conductivity simulation...");
+        var results = ThermalConductivitySolver.Solve(options, null, CancellationToken.None);
+        ctDs.ThermalResults = results;
+        Logger.Log("[GeoScript] Thermal conductivity simulation completed.");
+
+        return Task.FromResult<Dataset>(ctDs);
+    }
+}
+
+/// <summary>
+/// SIMULATE_GEOMECH - Run geomechanical simulation on CT dataset
+/// Usage: SIMULATE_GEOMECH sigma1=100 sigma2=50 sigma3=20 use_gpu=true
+/// </summary>
+public class SimulateGeomechCommand : IGeoScriptCommand
+{
+    public string Name => "SIMULATE_GEOMECH";
+    public string HelpText => "Run geomechanical simulation for the current CT dataset";
+    public string Usage =>
+        "SIMULATE_GEOMECH [sigma1=100] [sigma2=50] [sigma3=20] [use_gpu=true] [porosity=dataset.field]";
+
+    public async Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not CtImageStackDataset ctDs)
+            throw new NotSupportedException("SIMULATE_GEOMECH only works with CT Image Stack datasets");
+
+        var cmd = (CommandNode)node;
+        var args = GeoScriptArgumentParser.ParseArguments(cmd.FullText);
+
+        var extent = GeoScriptSimulationHelpers.BuildGeomechanicsExtent(ctDs, args, context);
+        var selectedMaterials = GeoScriptArgumentParser.GetByteSet(args, "materials", context) ??
+                                ctDs.Materials.Where(m => m.ID != 0).Select(m => m.ID).ToHashSet();
+
+        var parameters = new GeomechanicalParameters
+        {
+            Width = extent.Width,
+            Height = extent.Height,
+            Depth = extent.Depth,
+            PixelSize = ctDs.PixelSize,
+            SimulationExtent = extent,
+            SelectedMaterialIDs = new HashSet<byte>(selectedMaterials),
+            YoungModulus = GeoScriptArgumentParser.GetFloat(args, "young_modulus", 30000f, context),
+            PoissonRatio = GeoScriptArgumentParser.GetFloat(args, "poisson_ratio", 0.25f, context),
+            Cohesion = GeoScriptArgumentParser.GetFloat(args, "cohesion", 10f, context),
+            FrictionAngle = GeoScriptArgumentParser.GetFloat(args, "friction_angle", 30f, context),
+            TensileStrength = GeoScriptArgumentParser.GetFloat(args, "tensile_strength", 5f, context),
+            Density = GeoScriptArgumentParser.GetFloat(args, "density", 2700f, context),
+            LoadingMode = GeoScriptArgumentParser.GetEnum(args, "loading_mode", LoadingMode.Triaxial, context),
+            Sigma1 = GeoScriptArgumentParser.GetFloat(args, "sigma1", 100f, context),
+            Sigma2 = GeoScriptArgumentParser.GetFloat(args, "sigma2", 50f, context),
+            Sigma3 = GeoScriptArgumentParser.GetFloat(args, "sigma3", 20f, context),
+            Sigma1Direction = GeoScriptArgumentParser.GetVector3(args, "sigma1_direction", new Vector3(0, 0, 1), context),
+            UsePorePressure = GeoScriptArgumentParser.GetBool(args, "use_pore_pressure", false, context),
+            PorePressure = GeoScriptArgumentParser.GetFloat(args, "pore_pressure", 10f, context),
+            BiotCoefficient = GeoScriptArgumentParser.GetFloat(args, "biot_coefficient", 0.8f, context),
+            FailureCriterion = GeoScriptArgumentParser.GetEnum(args, "failure_criterion", FailureCriterion.MohrCoulomb, context),
+            DilationAngle = GeoScriptArgumentParser.GetFloat(args, "dilation_angle", 10f, context),
+            UseGPU = GeoScriptArgumentParser.GetBool(args, "use_gpu", true, context),
+            MaxIterations = GeoScriptArgumentParser.GetInt(args, "max_iterations", 1000, context),
+            Tolerance = GeoScriptArgumentParser.GetFloat(args, "tolerance", 1e-4f, context),
+            EnableDamageEvolution = GeoScriptArgumentParser.GetBool(args, "enable_damage_evolution", true, context),
+            DamageThreshold = GeoScriptArgumentParser.GetFloat(args, "damage_threshold", 0.001f, context),
+            DamageCriticalStrain = GeoScriptArgumentParser.GetFloat(args, "damage_critical_strain", 0.01f, context),
+            DamageEvolutionRate = GeoScriptArgumentParser.GetFloat(args, "damage_evolution_rate", 100f, context),
+            DamageModel = GeoScriptArgumentParser.GetEnum(args, "damage_model", DamageModel.Exponential, context),
+            ApplyDamageToStiffness = GeoScriptArgumentParser.GetBool(args, "apply_damage_to_stiffness", true, context),
+            PlasticHardeningModulus = GeoScriptArgumentParser.GetFloat(args, "plastic_hardening_modulus", 1000f, context)
+        };
+
+        var reservedKeys = new HashSet<string>
+        {
+            "materials", "extent_min_x", "extent_min_y", "extent_min_z", "extent_width", "extent_height",
+            "extent_depth", "min_x", "min_y", "min_z", "width", "height", "depth"
+        };
+        GeoScriptSimulationHelpers.ApplyArguments(parameters, args, context, reservedKeys);
+
+        var labels = await GeoScriptSimulationHelpers.ExtractLabelsAsync(ctDs, extent);
+        var density = await GeoScriptSimulationHelpers.ExtractGeomechanicsDensityAsync(ctDs, extent);
+
+        Logger.Log("[GeoScript] Running geomechanical simulation...");
+
+        GeomechanicalResults results;
+        if (parameters.UseGPU)
+        {
+            using var simulator = new GeomechanicalSimulatorGPU(parameters);
+            results = await Task.Run(() => simulator.Simulate(labels, density, null, CancellationToken.None));
+        }
+        else
+        {
+            var simulator = new GeomechanicalSimulatorCPU(parameters);
+            results = await Task.Run(() => simulator.Simulate(labels, density, null, CancellationToken.None));
+        }
+
+        ctDs.Metadata["GeomechanicalResults"] = results;
+        Logger.Log("[GeoScript] Geomechanical simulation completed.");
+
+        return ctDs;
     }
 }

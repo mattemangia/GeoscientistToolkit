@@ -16,6 +16,50 @@ The Thermodynamics module provides:
 
 ---
 
+## Core Architecture
+
+Thermodynamic workflows are built around a few core components:
+
+- **CompoundLibrary**: central database of thermodynamic species and phase metadata.
+- **ReactionGenerator**: parses formulas and builds reaction networks.
+- **ThermodynamicSolver**: Gibbs free-energy minimization and aqueous speciation.
+- **PhaseDiagramGenerator**: creates binary/ternary/P–T/energy diagrams.
+- **Kinetics/Reactive Transport**: time-stepping and coupled mass transfer tools.
+
+These are used by GeoScript commands and by higher-level modules like PhysicoChem and PNM reactive transport.
+
+---
+
+## Thermodynamic State Model
+
+Thermodynamic calculations use a state object that contains:
+
+- **Temperature (K)** and **pressure (bar)**
+- **Volume (L)** or total water amount
+- **Elemental composition** (element → moles)
+- **Species moles** (species → moles)
+- **Activities, pH, pe, ionic strength**
+
+This state is generated either from **GeoScript input** (e.g., `EQUILIBRATE`, `REACT`) or from **Table datasets** with species columns and temperature/pressure metadata.
+
+---
+
+## GeoScript Thermodynamics Commands
+
+Common commands include:
+
+- `EQUILIBRATE` – equilibrium speciation and phase separation
+- `REACT` – chemical reaction equilibrium for custom reactions
+- `SATURATION` / `SATURATION_INDEX` – mineral saturation states
+- `EVAPORATE` – progressive concentration/precipitation modeling
+- `BALANCE_REACTION` – stoichiometric balancing
+- `CREATE_DIAGRAM` – phase diagrams (binary/ternary/PT/energy)
+- `CALCULATE_PHASES` – split results into solid/aqueous/gas phases
+- `CALCULATE_CARBONATE_ALKALINITY` – carbonate speciation from alkalinity
+- `DIAGNOSTIC_THERMO` – solver diagnostics and benchmarks
+
+---
+
 ## Compound Library
 
 ### Overview
@@ -185,6 +229,18 @@ Results organized by phase:
 - Aqueous products (dissolved species)
 - Gas products
 - Moles, mass, and mole fractions
+
+---
+
+## Reactive Transport and Kinetics
+
+Thermodynamic solvers are also used in time-stepping contexts:
+
+- **Reactive transport**: coupled advection/diffusion and reaction updates
+- **Kinetics**: reaction-rate control for mineral dissolution/precipitation
+- **Multiphase coupling**: EOS-aware speciation in PhysicoChem and PNM workflows
+
+These solvers use the same compound library and phase rules, ensuring consistency between equilibrium and transient models.
 
 ---
 

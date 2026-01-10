@@ -17,6 +17,49 @@ The PhysicoChem module provides:
 
 ---
 
+## PhysicoChem Dataset Anatomy
+
+PhysicoChem simulations are driven by the **PhysicoChem dataset** (stored as a Group dataset internally). The dataset combines geometry, materials, boundary conditions, and simulation settings.
+
+### Core Dataset Components
+
+- **Mesh**: A grid or Voronoi mesh with cells and connections.
+- **Domains**: Named reactor regions with geometry, materials, and initial conditions.
+- **Materials**: Porosity, permeability, density, thermal properties, and mineral composition.
+- **Boundary Conditions**: Fixed value/flux/convective constraints (temperature, pressure, species).
+- **Forces**: Gravity, vortices, or custom forces applied per cell.
+- **Nucleation Sites**: Explicit nucleation points for crystal growth.
+- **Simulation Parameters**: Time step, solver tolerance, heat/flow/reactive transport toggles.
+- **Tracking & Parameter Sweep**: Simulation trackers and sweep configuration.
+
+### Simulation Parameters (Highlights)
+
+| Parameter | Purpose |
+|-----------|---------|
+| TotalTime / TimeStep | Time-based simulation control |
+| EnableReactiveTransport | Species transport & reactions |
+| EnableHeatTransfer | Heat equation solving |
+| EnableFlow | Fluid flow coupling |
+| EnableNucleation | Nucleation and growth physics |
+| UseGPU | GPU acceleration (when available) |
+| SolverType | Sequential vs fully-coupled solvers |
+
+---
+
+## Multiphase Flow Integration
+
+PhysicoChem can enable multiphase flow (water/steam/NCG) with EOS and relative permeability models. Multiphase parameters live under `SimulationParameters` and are typically set by GeoScript commands:
+
+- `ENABLE_MULTIPHASE` for EOS selection
+- `SET_MULTIPHASE_PARAMS` for residual saturations and van Genuchten parameters
+- `SET_KR_MODEL` for relative permeability models
+- `SET_PC_MODEL` for capillary pressure models
+- `ADD_GAS_PHASE` for gas saturation and dissolved gas
+
+See [Multiphase Flow](Multiphase-Flow.md) for full details.
+
+---
+
 ## Getting Started
 
 ### Quick Start
