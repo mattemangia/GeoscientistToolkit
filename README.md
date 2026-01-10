@@ -329,16 +329,16 @@ GeoscientistToolkit/
 
 ### Wiki
 
-**[Visit the Project Wiki](../../wiki)** for comprehensive documentation organized by topic:
+**[Visit the Project Wiki](https://github.com/mattemangia/GeoscientistToolkit/wiki)** for comprehensive documentation organized by topic:
 
 | Category | Contents |
 |----------|----------|
-| **Getting Started** | [Getting Started](../../wiki/Getting-Started), [Installation](../../wiki/Installation) |
-| **User Guides** | [User Guide](../../wiki/User-Guide), [GeoScript Manual](../../wiki/GeoScript-Manual), [GeoScript Image Operations](../../wiki/GeoScript-Image-Operations) |
-| **Analysis Modules** | [CT Imaging](../../wiki/CT-Imaging-and-Segmentation), [Seismic](../../wiki/Seismic-Analysis), [Geothermal](../../wiki/Geothermal-Simulation), [PNM](../../wiki/Pore-Network-Modeling), [Slope Stability](../../wiki/Slope-Stability), [Photogrammetry](../../wiki/Photogrammetry) |
-| **Simulations** | [Thermodynamics](../../wiki/Thermodynamics-and-Geochemistry), [PhysicoChem Reactors](../../wiki/PhysicoChem-Reactors) |
-| **Developer** | [API Reference](../../wiki/API-Reference), [NodeEndpoint](../../wiki/NodeEndpoint), [Developer Guide](../../wiki/Developer-Guide) |
-| **Quality** | [Verification & Testing](../../wiki/Verification-and-Testing) |
+| **Getting Started** | [Getting Started](https://github.com/mattemangia/GeoscientistToolkit/wiki/Getting-Started), [Installation](https://github.com/mattemangia/GeoscientistToolkit/wiki/Installation) |
+| **User Guides** | [User Guide](https://github.com/mattemangia/GeoscientistToolkit/wiki/User-Guide), [GeoScript Manual](https://github.com/mattemangia/GeoscientistToolkit/wiki/GeoScript-Manual), [GeoScript Image Operations](https://github.com/mattemangia/GeoscientistToolkit/wiki/GeoScript-Image-Operations) |
+| **Analysis Modules** | [CT Imaging](https://github.com/mattemangia/GeoscientistToolkit/wiki/CT-Imaging-and-Segmentation), [Seismic](https://github.com/mattemangia/GeoscientistToolkit/wiki/Seismic-Analysis), [Geothermal](https://github.com/mattemangia/GeoscientistToolkit/wiki/Geothermal-Simulation), [PNM](https://github.com/mattemangia/GeoscientistToolkit/wiki/Pore-Network-Modeling), [Slope Stability](https://github.com/mattemangia/GeoscientistToolkit/wiki/Slope-Stability), [Photogrammetry](https://github.com/mattemangia/GeoscientistToolkit/wiki/Photogrammetry) |
+| **Simulations** | [Thermodynamics](https://github.com/mattemangia/GeoscientistToolkit/wiki/Thermodynamics-and-Geochemistry), [PhysicoChem Reactors](https://github.com/mattemangia/GeoscientistToolkit/wiki/PhysicoChem-Reactors) |
+| **Developer** | [API Reference](https://github.com/mattemangia/GeoscientistToolkit/wiki/API-Reference), [NodeEndpoint](https://github.com/mattemangia/GeoscientistToolkit/wiki/NodeEndpoint), [Developer Guide](https://github.com/mattemangia/GeoscientistToolkit/wiki/Developer-Guide) |
+| **Quality** | [Verification & Testing](https://github.com/mattemangia/GeoscientistToolkit/wiki/Verification-and-Testing) |
 
 ### Additional Resources
 
