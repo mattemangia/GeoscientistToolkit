@@ -194,7 +194,7 @@ CT.Materials.Basalt.VoxelCount
 | Dataset Type | Description | Common Operations |
 |--------------|-------------|-------------------|
 | **SingleImage** | Single 2D raster images | BRIGHTNESS_CONTRAST, FILTER, THRESHOLD |
-| **CtImageStack** | 3D CT scan volumes | CT_SEGMENT, CT_FILTER3D |
+| **CtImageStack** | 3D CT scan volumes | CT_SEGMENT, CT_FILTER3D, SIMULATE_* |
 | **CtBinaryFile** | CT binary volume files | LOAD, DISPTYPE |
 | **MicroXrf** | Micro-XRF maps | FILTER, INFO |
 | **PointCloud** | Point cloud datasets | INFO, SAVE |
@@ -332,6 +332,16 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | `CT_CROP` | Crop sub-volume | `CT_CROP x=0 y=0 z=0 width=100 height=100 depth=100` |
 | `CT_EXTRACT_SLICE` | Extract 2D slice | `CT_EXTRACT_SLICE index=50 axis=z` |
 | `CT_LABEL_ANALYSIS` | Label analysis summary | `CT_LABEL_ANALYSIS` |
+| `SIMULATE_ACOUSTIC` | Acoustic wave simulation | `SIMULATE_ACOUSTIC materials=1,2 tx=0.1,0.5,0.5 rx=0.9,0.5,0.5` |
+| `SIMULATE_NMR` | NMR random walk simulation | `SIMULATE_NMR pore_material_id=1 steps=1000` |
+| `SIMULATE_THERMAL_CONDUCTIVITY` | Thermal conductivity solver | `SIMULATE_THERMAL_CONDUCTIVITY direction=z temperature_hot=373.15` |
+| `SIMULATE_GEOMECH` | Geomechanical simulation | `SIMULATE_GEOMECH sigma1=100 sigma2=50 sigma3=20 use_gpu=true` |
+
+**Parameter values can reference dataset fields**, for example:
+
+```geoscript
+SIMULATE_GEOMECH porosity=examplepnmdataset.porosity sigma1=100 sigma2=50 sigma3=20
+```
 
 ### Borehole Operations
 

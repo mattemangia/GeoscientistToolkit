@@ -28,6 +28,7 @@ This wiki contains comprehensive documentation for the Geoscientist's Toolkit ap
 | [Installation](Installation.md) | [CT Imaging and Segmentation](CT-Imaging-and-Segmentation.md) | [API Reference](API-Reference.md) |
 | | [Seismic Analysis](Seismic-Analysis.md) | [NodeEndpoint](NodeEndpoint.md) |
 | | [Geothermal Simulation](Geothermal-Simulation.md) | [Developer Guide](Developer-Guide.md) |
+| | [Simulation Modules](Simulation-Modules.md) | |
 
 ---
 
@@ -79,15 +80,15 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 **Learn more:** [Seismic Analysis](Seismic-Analysis.md)
 
 #### Physical Property Simulations
-- **Thermal Conductivity** - Finite element heat transfer analysis
-- **Acoustic Properties** - P-wave and S-wave velocity simulation
-- **NMR Simulation** - T2 relaxation time calculation
-- **Geomechanical Analysis** - Stress/strain, Mohr circles, failure prediction
+- **Thermal Conductivity** - Finite element heat transfer analysis ([Thermal Conductivity](Thermal-Conductivity.md))
+- **Acoustic Properties** - P-wave and S-wave velocity simulation ([Acoustic Simulation](Acoustic-Simulation.md))
+- **NMR Simulation** - T2 relaxation time calculation ([NMR Simulation](NMR-Simulation.md))
+- **Geomechanical Analysis** - Stress/strain, Mohr circles, failure prediction ([Geomechanical Simulation](Geomechanical-Simulation.md))
 - **Slope Stability (3D/2D)** - DEM-based block simulation
 - **Pore Network Modeling** - Permeability, tortuosity, flow simulation
 - **Geothermal Simulation** - Heat transfer and fluid flow in boreholes
 
-**Learn more:** [Geothermal Simulation](Geothermal-Simulation.md) | [Slope Stability](Slope-Stability.md) | [Pore Network Modeling](Pore-Network-Modeling.md)
+**Learn more:** [Simulation Modules](Simulation-Modules.md) | [Geothermal Simulation](Geothermal-Simulation.md) | [Slope Stability](Slope-Stability.md) | [Pore Network Modeling](Pore-Network-Modeling.md)
 
 #### Thermodynamics & Geochemistry
 - Extended compound library (60+ species)
@@ -185,10 +186,17 @@ mesh.Export("output.obj")
 - [Pore Network Modeling](Pore-Network-Modeling.md) - PNM generation and flow simulation
 - [Slope Stability](Slope-Stability.md) - DEM-based stability analysis
 - [Photogrammetry](Photogrammetry.md) - 3D reconstruction from images
+- [Hydrological Analysis](Hydrological-Analysis.md) - Flow routing and rainfall simulation
+- [Acoustic Simulation](Acoustic-Simulation.md) - CT-scale wave propagation
+- [NMR Simulation](NMR-Simulation.md) - T2/T1 spectra and pore-size estimation
+- [Thermal Conductivity](Thermal-Conductivity.md) - Heat flow in segmented CT volumes
+- [Geomechanical Simulation](Geomechanical-Simulation.md) - Stress/strain and failure envelopes
 
 ### Simulations
 - [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry.md) - Phase diagrams and reactions
 - [PhysicoChem Reactors](PhysicoChem-Reactors.md) - Multiphysics reactor simulation
+- [Multiphase Flow](Multiphase-Flow.md) - Water/steam/NCG EOS models
+- [Simulation Modules](Simulation-Modules.md) - Full simulation index
 
 ### Developer Resources
 - [API Reference](API-Reference.md) - External automation API

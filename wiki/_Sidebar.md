@@ -24,9 +24,14 @@
 * [CT Imaging and Segmentation](CT-Imaging-and-Segmentation.md)
 * [Seismic Analysis](Seismic-Analysis.md)
 * [Geothermal Simulation](Geothermal-Simulation.md)
+* [Hydrological Analysis](Hydrological-Analysis.md)
 * [Pore Network Modeling](Pore-Network-Modeling.md)
 * [Slope Stability](Slope-Stability.md)
 * [Photogrammetry](Photogrammetry.md)
+* [Acoustic Simulation](Acoustic-Simulation.md)
+* [NMR Simulation](NMR-Simulation.md)
+* [Thermal Conductivity](Thermal-Conductivity.md)
+* [Geomechanical Simulation](Geomechanical-Simulation.md)
 
 ---
 
@@ -34,6 +39,8 @@
 
 * [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry.md)
 * [PhysicoChem Reactors](PhysicoChem-Reactors.md)
+* [Multiphase Flow](Multiphase-Flow.md)
+* [Simulation Modules](Simulation-Modules.md)
 
 ---
 

@@ -420,6 +420,10 @@ public static class CommandRegistry
             new CtCropCommand(),
             new CtExtractSliceCommand(),
             new CtLabelAnalysisCommand(),
+            new SimulateAcousticCommand(),
+            new SimulateNmrCommand(),
+            new SimulateThermalConductivityCommand(),
+            new SimulateGeomechCommand(),
 
             // Borehole Commands
             new BhAddLithologyCommand(),
