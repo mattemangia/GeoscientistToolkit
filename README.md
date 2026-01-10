@@ -327,9 +327,23 @@ GeoscientistToolkit/
 
 ## Documentation
 
-For detailed documentation, see:
+### Wiki
+
+**[Visit the Project Wiki](../../wiki)** for comprehensive documentation organized by topic:
+
+| Category | Contents |
+|----------|----------|
+| **Getting Started** | [Getting Started](../../wiki/Getting-Started), [Installation](../../wiki/Installation) |
+| **User Guides** | [User Guide](../../wiki/User-Guide), [GeoScript Manual](../../wiki/GeoScript-Manual), [GeoScript Image Operations](../../wiki/GeoScript-Image-Operations) |
+| **Analysis Modules** | [CT Imaging](../../wiki/CT-Imaging-and-Segmentation), [Seismic](../../wiki/Seismic-Analysis), [Geothermal](../../wiki/Geothermal-Simulation), [PNM](../../wiki/Pore-Network-Modeling), [Slope Stability](../../wiki/Slope-Stability), [Photogrammetry](../../wiki/Photogrammetry) |
+| **Simulations** | [Thermodynamics](../../wiki/Thermodynamics-and-Geochemistry), [PhysicoChem Reactors](../../wiki/PhysicoChem-Reactors) |
+| **Developer** | [API Reference](../../wiki/API-Reference), [NodeEndpoint](../../wiki/NodeEndpoint), [Developer Guide](../../wiki/Developer-Guide) |
+| **Quality** | [Verification & Testing](../../wiki/Verification-and-Testing) |
+
+### Additional Resources
 
 - [**GUIDE.md**](GUIDE.md) - Comprehensive user guide
+- [**START_HERE.md**](START_HERE.md) - Quick onboarding path
 - [**Earthquake Simulation**](docs/EARTHQUAKE_SIM_QUICKSTART.md) - Earthquake modeling quickstart
 - [**AI Segmentation Guide**](docs/AI_SEGMENTATION_GUIDE.md) - Using AI models
 - [**Petrology System**](docs/PETROLOGY_SYSTEM.md) - Rock classification

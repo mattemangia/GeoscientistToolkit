@@ -1,0 +1,393 @@
+# API Reference
+
+Documentation for the Geoscientist's Toolkit API for external automation and integration.
+
+---
+
+## Overview
+
+The API provides:
+- Verification simulation access
+- Dataset loaders
+- GeoScript execution
+- Acoustic 3D velocity simulation
+- External tool integration
+
+---
+
+## Getting Started
+
+### Referencing the API
+
+Add reference to the API DLL in your C# project:
+
+```xml
+<ItemGroup>
+  <Reference Include="GeoscientistToolkit.Api">
+    <HintPath>path/to/Api.dll</HintPath>
+  </Reference>
+</ItemGroup>
+```
+
+### Basic Usage
+
+```csharp
+using GeoscientistToolkit.Api;
+
+// Initialize API
+var api = new GtkApi();
+
+// Load a dataset
+var ctData = api.LoadCtStack("path/to/data.ctstack");
+
+// Run analysis
+var results = api.CalculatePorosity(ctData, "Pore");
+
+// Export results
+api.ExportResults(results, "output.csv");
+```
+
+---
+
+## Core Classes
+
+### GtkApi
+
+Main entry point for API operations.
+
+```csharp
+public class GtkApi
+{
+    // Dataset loading
+    public CtImageStackDataset LoadCtStack(string path);
+    public BoreholeDataset LoadBorehole(string path);
+    public SeismicDataset LoadSeismic(string path);
+    public TableDataset LoadTable(string path);
+    public GISDataset LoadGIS(string path);
+
+    // Analysis
+    public PorosityResult CalculatePorosity(CtImageStackDataset ct, string material);
+    public PermeabilityResult CalculatePermeability(PNMDataset pnm, string direction);
+    public GeothermalResult RunGeothermalSimulation(GeothermalParameters params);
+
+    // GeoScript
+    public Dataset ExecuteGeoScript(string script, Dataset input);
+
+    // Export
+    public void ExportResults(object results, string path, string format = "csv");
+}
+```
+
+### Dataset Classes
+
+All datasets inherit from the base `Dataset` class:
+
+```csharp
+public abstract class Dataset
+{
+    public string Name { get; set; }
+    public DatasetType Type { get; }
+    public string FilePath { get; set; }
+    public DatasetMetadata Metadata { get; set; }
+
+    public abstract long GetSizeInBytes();
+    public abstract void Load();
+    public abstract void Unload();
+}
+```
+
+---
+
+## Dataset Types
+
+### CtImageStackDataset
+
+3D volumetric CT data.
+
+```csharp
+public class CtImageStackDataset : Dataset
+{
+    // Properties
+    public int Width { get; }
+    public int Height { get; }
+    public int Depth { get; }
+    public float VoxelSize { get; set; }
+    public byte[,,] VoxelData { get; }
+
+    // Materials
+    public List<Material> Materials { get; }
+    public void AssignMaterial(int x, int y, int z, Material material);
+    public Material GetMaterial(int x, int y, int z);
+
+    // Operations
+    public CtImageStackDataset Crop(int x, int y, int z, int w, int h, int d);
+    public ImageDataset ExtractSlice(int index, Axis axis);
+    public PNMDataset GeneratePNM(string poreMaterial);
+    public Mesh3DDataset ExtractMesh(Material material, string algorithm);
+}
+```
+
+### BoreholeDataset
+
+Well log data.
+
+```csharp
+public class BoreholeDataset : Dataset
+{
+    public List<LithologyInterval> Lithologies { get; }
+    public List<LogCurve> Curves { get; }
+    public float TopDepth { get; }
+    public float BottomDepth { get; }
+
+    public float GetValue(string curveName, float depth);
+    public void AddLithology(float top, float bottom, string name);
+    public SeismicDataset GenerateSynthetic(float frequency);
+}
+```
+
+### PNMDataset
+
+Pore network model.
+
+```csharp
+public class PNMDataset : Dataset
+{
+    public List<Pore> Pores { get; }
+    public List<Throat> Throats { get; }
+
+    public PermeabilityResult CalculatePermeability(string direction);
+    public DrainageResult SimulateDrainage(float contactAngle, float ift);
+    public PNMDataset ExtractLargestCluster();
+    public PNMStatistics GetStatistics();
+}
+```
+
+---
+
+## Analysis Functions
+
+### Porosity Calculation
+
+```csharp
+var api = new GtkApi();
+var ct = api.LoadCtStack("core.ctstack");
+
+// Calculate porosity for 'Pore' material
+var result = api.CalculatePorosity(ct, "Pore");
+
+Console.WriteLine($"Porosity: {result.Porosity:P2}");
+Console.WriteLine($"Pore Volume: {result.PoreVolume} mm³");
+Console.WriteLine($"Total Volume: {result.TotalVolume} mm³");
+```
+
+### Permeability Calculation
+
+```csharp
+var pnm = api.LoadPNM("network.pnm");
+
+// Calculate permeability in all directions
+var result = api.CalculatePermeability(pnm, "all");
+
+Console.WriteLine($"kx: {result.Kx:E3} m²");
+Console.WriteLine($"ky: {result.Ky:E3} m²");
+Console.WriteLine($"kz: {result.Kz:E3} m²");
+```
+
+### Geothermal Simulation
+
+```csharp
+var params = new GeothermalParameters
+{
+    BoreholeDepth = 100,
+    InletTemperature = 5,
+    FlowRate = 2.0,
+    SimulationTime = TimeSpan.FromDays(365),
+    TimeStep = TimeSpan.FromHours(1)
+};
+
+var result = api.RunGeothermalSimulation(params);
+
+foreach (var point in result.TemperatureHistory)
+{
+    Console.WriteLine($"{point.Time}: {point.OutletTemp:F1}°C");
+}
+```
+
+### Acoustic Simulation
+
+```csharp
+var velocityModel = api.LoadCtStack("velocity.ctstack");
+
+var params = new AcousticParameters
+{
+    SourcePosition = new Vector3(50, 50, 0),
+    Frequency = 30,  // Hz
+    Duration = 1.0   // seconds
+};
+
+var result = api.RunAcousticSimulation(velocityModel, params);
+api.ExportResults(result, "acoustic_output.segy", "segy");
+```
+
+---
+
+## GeoScript Execution
+
+### Running Scripts
+
+```csharp
+var api = new GtkApi();
+var inputData = api.LoadTable("data.csv");
+
+string script = @"
+    SELECT WHERE 'Temperature' > 25 |>
+    CALCULATE 'TempF' = 'Temperature' * 1.8 + 32 |>
+    SORTBY 'TempF' DESC |>
+    TAKE 10
+";
+
+var result = api.ExecuteGeoScript(script, inputData);
+api.ExportResults(result, "filtered.csv");
+```
+
+### Script Files
+
+```csharp
+string scriptPath = "process.geoscript";
+var result = api.ExecuteGeoScriptFile(scriptPath, inputData);
+```
+
+---
+
+## Verification Simulations
+
+### Running Verification Tests
+
+```csharp
+var verifier = new VerificationRunner();
+
+// Run all verification tests
+var results = verifier.RunAll();
+
+// Run specific test
+var beierResult = verifier.RunTest("Beier_TRT");
+
+// Generate report
+var report = verifier.GenerateReport(results);
+Console.WriteLine(report);
+```
+
+### Available Verification Cases
+
+| Case ID | Description | Module |
+|---------|-------------|--------|
+| Beier_TRT | Thermal response test | Geothermal |
+| Lauwerier | Analytical heat transport | Geothermal |
+| TOUGH2_1D | 1D flow comparison | Geothermal |
+| PhreeqC_Calcite | Calcite equilibrium | Geochemistry |
+| RocFall_Basic | Basic rockfall | Slope Stability |
+
+---
+
+## Export Functions
+
+### Supported Formats
+
+| Format | Extension | Description |
+|--------|-----------|-------------|
+| CSV | .csv | Comma-separated values |
+| Excel | .xlsx | Microsoft Excel |
+| JSON | .json | JavaScript Object Notation |
+| XML | .xml | Extensible Markup Language |
+| SEG-Y | .segy | Seismic data |
+| LAS | .las | Well log data |
+| OBJ | .obj | 3D mesh |
+| STL | .stl | 3D mesh |
+
+### Export Examples
+
+```csharp
+// Export to CSV
+api.ExportResults(results, "output.csv", "csv");
+
+// Export to Excel
+api.ExportResults(results, "output.xlsx", "excel");
+
+// Export mesh
+api.ExportMesh(mesh, "output.obj", "obj");
+
+// Export with options
+api.ExportResults(results, "output.csv", "csv", new ExportOptions
+{
+    IncludeHeaders = true,
+    DecimalPlaces = 4,
+    Delimiter = ','
+});
+```
+
+---
+
+## Error Handling
+
+### Exception Types
+
+```csharp
+try
+{
+    var ct = api.LoadCtStack("nonexistent.ctstack");
+}
+catch (DatasetNotFoundException ex)
+{
+    Console.WriteLine($"File not found: {ex.Path}");
+}
+catch (InvalidDatasetException ex)
+{
+    Console.WriteLine($"Invalid data: {ex.Message}");
+}
+catch (SimulationException ex)
+{
+    Console.WriteLine($"Simulation failed: {ex.Message}");
+}
+catch (GtkApiException ex)
+{
+    Console.WriteLine($"API error: {ex.Message}");
+}
+```
+
+### Validation
+
+```csharp
+// Validate before processing
+if (!api.ValidateDataset(ct))
+{
+    var errors = api.GetValidationErrors(ct);
+    foreach (var error in errors)
+    {
+        Console.WriteLine($"Validation error: {error}");
+    }
+}
+```
+
+---
+
+## Documentation Output
+
+The API generates XML documentation files:
+
+```
+Api/
+├── Api.dll
+├── Api.xml          # XML documentation
+└── Api.deps.json
+```
+
+Use with IntelliSense in Visual Studio for auto-completion and inline documentation.
+
+---
+
+## Related Pages
+
+- [[NodeEndpoint]] - REST API for distributed computing
+- [[GeoScript Manual]] - Scripting language reference
+- [[Developer Guide]] - Extension development
+- [[Home]] - Wiki home page
