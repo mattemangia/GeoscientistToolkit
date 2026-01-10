@@ -91,7 +91,7 @@ public class ListOpsCommand : IGeoScriptCommand
         }
 
         // Utility commands work on all types
-        if (new[] { "LISTOPS", "DISPTYPE", "UNLOAD", "INFO", "SET_PIXEL_SIZE" }.Contains(command.Name))
+        if (new[] { "LISTOPS", "DISPTYPE", "UNLOAD", "INFO", "SET_PIXEL_SIZE", "LOAD", "SAVE", "COPY", "DELETE" }.Contains(command.Name))
             return true;
 
         return false;

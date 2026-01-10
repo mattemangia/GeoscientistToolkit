@@ -317,18 +317,29 @@ Available geometric properties:
 
 | Dataset Type | Description | File Formats | Common Operations |
 |--------------|-------------|--------------|-------------------|
-| **ImageDataset** | Single 2D raster images | PNG, JPG, BMP, TIFF | FILTER, THRESHOLD, GRAYSCALE |
+| **SingleImage** | Single 2D raster images | PNG, JPG, BMP, TIFF | BRIGHTNESS_CONTRAST, FILTER, THRESHOLD |
 | **CtImageStack** | 3D CT scan volumes | DICOM, TIFF stack, .ctstack | CT_SEGMENT, CT_FILTER3D |
-| **TableDataset** | Tabular data | CSV, Excel, TXT | SELECT, GROUPBY, CALCULATE |
-| **GISDataset** | Geographic data | Shapefile, GeoJSON | BUFFER, DISSOLVE, SELECT |
-| **SeismicDataset** | Seismic survey data | SEG-Y | SEIS_FILTER, SEIS_STACK |
-| **BoreholeDataset** | Well log data | LAS, .bhb | BH_ADD_LOG, BH_CALCULATE_POROSITY |
-| **PNMDataset** | Pore network models | Custom format | PNM_CALCULATE_PERMEABILITY |
+| **CtBinaryFile** | CT binary volume files | .bin, .raw | LOAD, DISPTYPE |
+| **MicroXrf** | Micro-XRF maps | Custom format | FILTER, INFO |
+| **PointCloud** | Point clouds | LAS, LAZ, PLY | INFO, SAVE |
+| **Mesh** | Legacy mesh datasets | OBJ, STL | INFO, SAVE |
+| **Group** | Dataset collections | Project group | INFO, UNLOAD |
 | **Mesh3D** | 3D surface meshes | OBJ, STL | MESH_SMOOTH, MESH_DECIMATE |
+| **Table** | Tabular data | CSV, Excel, TXT | SELECT, GROUPBY, CALCULATE |
+| **GIS** | Geographic data | Shapefile, GeoJSON, GeoTIFF | BUFFER, DISSOLVE, GIS_* |
 | **AcousticVolume** | 3D acoustic data | Custom format | ACOUSTIC_THRESHOLD |
-| **VideoDataset** | Video files | MP4, AVI | VIDEO_EXTRACT_FRAME |
-| **AudioDataset** | Audio files | WAV, MP3 | AUDIO_NORMALIZE |
-| **TextDataset** | Text documents | TXT | TEXT_SEARCH, TEXT_REPLACE |
+| **PNM** | Pore network models | Custom format | PNM_CALCULATE_PERMEABILITY |
+| **DualPNM** | Dual pore networks | Custom format | PNM_* (where applicable) |
+| **Borehole** | Well log data | LAS, .bhb | BH_ADD_LOG, BH_CALCULATE_POROSITY |
+| **TwoDGeology** | 2D geology datasets | Custom format | SAVE, INFO |
+| **SubsurfaceGIS** | Subsurface GIS layers | Custom format | GIS_REPROJECT |
+| **Earthquake** | Earthquake datasets | Custom format | INFO, SAVE |
+| **Seismic** | Seismic survey data | SEG-Y | SEIS_FILTER, SEIS_STACK |
+| **Video** | Video files | MP4, AVI | VIDEO_EXTRACT_FRAME |
+| **Audio** | Audio files | WAV, MP3 | AUDIO_NORMALIZE |
+| **Text** | Text documents | TXT | TEXT_SEARCH, TEXT_REPLACE |
+| **Nerf** | NeRF datasets | Custom format | INFO, SAVE |
+| **SlopeStability** | Slope stability datasets | Custom format | SLOPE_GENERATE_BLOCKS, SLOPE_SIMULATE |
 
 ### 4.2 Type Checking
 
@@ -684,6 +695,94 @@ CLEAN |> BUFFER 0.1
 
 ---
 
+#### 5.2.5 GIS_ADD_LAYER
+
+Adds a layer to a GIS dataset.
+
+**Syntax**:
+```geoscript
+GIS_ADD_LAYER path="<path>" name="<layerName>"
+```
+
+---
+
+#### 5.2.6 GIS_REMOVE_LAYER
+
+Removes a layer by name.
+
+**Syntax**:
+```geoscript
+GIS_REMOVE_LAYER name="<layerName>"
+```
+
+---
+
+#### 5.2.7 GIS_INTERSECT
+
+Intersects two GIS layers.
+
+**Syntax**:
+```geoscript
+GIS_INTERSECT layer="<layerA>" with="<layerB>"
+```
+
+---
+
+#### 5.2.8 GIS_UNION
+
+Unions two GIS layers.
+
+**Syntax**:
+```geoscript
+GIS_UNION layer="<layerA>" with="<layerB>"
+```
+
+---
+
+#### 5.2.9 GIS_CLIP
+
+Clips a layer by a polygon mask.
+
+**Syntax**:
+```geoscript
+GIS_CLIP layer="<layer>" clip="<maskLayer>"
+```
+
+---
+
+#### 5.2.10 GIS_CALCULATE_AREA
+
+Calculates polygon areas.
+
+**Syntax**:
+```geoscript
+GIS_CALCULATE_AREA
+```
+
+---
+
+#### 5.2.11 GIS_CALCULATE_LENGTH
+
+Calculates line lengths.
+
+**Syntax**:
+```geoscript
+GIS_CALCULATE_LENGTH
+```
+
+---
+
+#### 5.2.12 GIS_REPROJECT
+
+Reprojects a GIS dataset to a new EPSG code.
+
+**Syntax**:
+```geoscript
+GIS_REPROJECT epsg=<code>
+```
+
+---
+
 ### 5.3 GIS Raster Operations
 
 #### 5.3.1 RECLASSIFY
@@ -909,9 +1008,178 @@ REACT Al2Si2O5(OH)4 + H2SO4 TEMP 350 K
 
 ---
 
-### 5.5 Image Processing Operations
+#### 5.4.7 SATURATION_INDEX
 
-#### 5.5.1 BRIGHTNESS_CONTRAST
+Calculates saturation indices for minerals using a compact output format.
+
+**Syntax**:
+```geoscript
+SATURATION_INDEX MINERALS 'Mineral1', 'Mineral2', ...
+```
+
+**Examples**:
+```geoscript
+SATURATION_INDEX MINERALS 'Calcite', 'Dolomite'
+```
+
+**Returns**: Table with saturation index values per mineral
+
+---
+
+#### 5.4.8 SPECIATE
+
+Runs aqueous speciation for the current chemistry dataset.
+
+**Syntax**:
+```geoscript
+SPECIATE
+```
+
+**Examples**:
+```geoscript
+SPECIATE
+```
+
+**Returns**: Speciation results with phases grouped by type
+
+---
+
+#### 5.4.9 DIAGNOSE_SPECIATE
+
+Outputs diagnostic information for speciation runs.
+
+**Syntax**:
+```geoscript
+DIAGNOSE_SPECIATE
+```
+
+**Returns**: Diagnostic speciation report
+
+---
+
+#### 5.4.10 DIAGNOSTIC_THERMODYNAMIC
+
+Runs thermodynamic diagnostics for the current dataset.
+
+**Syntax**:
+```geoscript
+DIAGNOSTIC_THERMODYNAMIC
+```
+
+**Returns**: Diagnostic report with species and phase checks
+
+---
+
+#### 5.4.11 CALCULATE_PHASES
+
+Generates phase-separated outputs from thermodynamic calculations.
+
+**Syntax**:
+```geoscript
+CALCULATE_PHASES
+```
+
+**Returns**: Dataset grouped by phase (solid, aqueous, gas)
+
+---
+
+#### 5.4.12 CALCULATE_CARBONATE_ALKALINITY
+
+Calculates carbonate alkalinity and pH adjustments.
+
+**Syntax**:
+```geoscript
+CALCULATE_CARBONATE_ALKALINITY
+```
+
+**Returns**: Carbonate alkalinity results
+
+---
+
+### 5.5 Petrology Operations
+
+#### 5.5.1 FRACTIONATE_MAGMA
+
+Models fractional crystallization for igneous systems.
+
+**Syntax**:
+```geoscript
+FRACTIONATE_MAGMA
+```
+
+---
+
+#### 5.5.2 LIQUIDUS_SOLIDUS
+
+Computes liquidus and solidus curves for a composition.
+
+**Syntax**:
+```geoscript
+LIQUIDUS_SOLIDUS
+```
+
+---
+
+#### 5.5.3 METAMORPHIC_PT
+
+Builds metamorphic P-T paths from input composition data.
+
+**Syntax**:
+```geoscript
+METAMORPHIC_PT
+```
+
+---
+
+### 5.6 PhysicoChem Reactor Operations
+
+#### 5.6.1 CREATE_REACTOR
+
+Creates a PhysicoChem reactor grid.
+
+**Syntax**:
+```geoscript
+CREATE_REACTOR
+```
+
+---
+
+#### 5.6.2 RUN_SIMULATION
+
+Runs the PhysicoChem simulation.
+
+**Syntax**:
+```geoscript
+RUN_SIMULATION
+```
+
+---
+
+#### 5.6.3 ADD_CELL
+
+Adds a cell to the reactor grid.
+
+**Syntax**:
+```geoscript
+ADD_CELL x=<int> y=<int> z=<int> material='<name>'
+```
+
+---
+
+#### 5.6.4 SET_CELL_MATERIAL
+
+Sets a material for an existing reactor cell.
+
+**Syntax**:
+```geoscript
+SET_CELL_MATERIAL id=<int> material='<name>'
+```
+
+---
+
+### 5.7 Image Processing Operations
+
+#### 5.7.1 BRIGHTNESS_CONTRAST
 
 Adjusts image brightness and contrast.
 
@@ -940,7 +1208,7 @@ BRIGHTNESS_CONTRAST brightness=10 contrast=1.2
 
 ---
 
-#### 5.5.2 FILTER
+#### 5.7.2 FILTER
 
 Applies image filters.
 
@@ -979,7 +1247,7 @@ FILTER type=median size=3 |> FILTER type=gaussian size=5
 
 ---
 
-#### 5.5.3 THRESHOLD
+#### 5.7.3 THRESHOLD
 
 Applies threshold segmentation.
 
@@ -1008,7 +1276,7 @@ GRAYSCALE |> THRESHOLD min=128 max=255
 
 ---
 
-#### 5.5.4 BINARIZE
+#### 5.7.4 BINARIZE
 
 Converts image to binary using a threshold.
 
@@ -1036,7 +1304,7 @@ FILTER type=gaussian size=3 |> BINARIZE threshold=auto
 
 ---
 
-#### 5.5.5 GRAYSCALE
+#### 5.7.5 GRAYSCALE
 
 Converts image to grayscale.
 
@@ -1058,7 +1326,7 @@ GRAYSCALE |> THRESHOLD min=100 max=200
 
 ---
 
-#### 5.5.6 INVERT
+#### 5.7.6 INVERT
 
 Inverts image colors (creates negative).
 
@@ -1080,7 +1348,7 @@ BINARIZE threshold=128 |> INVERT
 
 ---
 
-#### 5.5.7 NORMALIZE
+#### 5.7.7 NORMALIZE
 
 Normalizes image to full intensity range.
 
@@ -1104,9 +1372,9 @@ FILTER type=median size=3 |> NORMALIZE
 
 ---
 
-### 5.6 CT Image Stack Operations
+### 5.8 CT Image Stack Operations
 
-#### 5.6.1 CT_SEGMENT
+#### 5.8.1 CT_SEGMENT
 
 Performs 3D segmentation of CT volumes.
 
@@ -1124,7 +1392,7 @@ CT_SEGMENT method=<method> [parameters]
 
 ---
 
-#### 5.6.2 CT_FILTER3D
+#### 5.8.2 CT_FILTER3D
 
 Applies 3D filters to CT stacks.
 
@@ -1141,7 +1409,7 @@ CT_FILTER3D type=<filterType> [size=<value>]
 
 ---
 
-#### 5.6.3 CT_ADD_MATERIAL
+#### 5.8.3 CT_ADD_MATERIAL
 
 Defines material properties for segmented phases.
 
@@ -1154,7 +1422,20 @@ CT_ADD_MATERIAL name='<name>' density=<value> [color=<hex>]
 
 ---
 
-#### 5.6.4 CT_ANALYZE_POROSITY
+#### 5.8.4 CT_REMOVE_MATERIAL
+
+Removes a material definition from a CT stack.
+
+**Syntax**:
+```geoscript
+CT_REMOVE_MATERIAL name='<name>'
+```
+
+**Returns**: Updated CT volume without the specified material
+
+---
+
+#### 5.8.5 CT_ANALYZE_POROSITY
 
 Calculates porosity from segmented volumes.
 
@@ -1167,7 +1448,7 @@ CT_ANALYZE_POROSITY material='<name>'
 
 ---
 
-#### 5.6.5 CT_CROP
+#### 5.8.6 CT_CROP
 
 Crops a sub-volume from the CT stack.
 
@@ -1180,7 +1461,7 @@ CT_CROP x=<start> y=<start> z=<start> width=<w> height=<h> depth=<d>
 
 ---
 
-#### 5.6.6 CT_EXTRACT_SLICE
+#### 5.8.7 CT_EXTRACT_SLICE
 
 Extracts a 2D slice from the 3D volume.
 
@@ -1193,9 +1474,22 @@ CT_EXTRACT_SLICE index=<sliceNumber> [axis=<x|y|z>]
 
 ---
 
-### 5.7 Pore Network Model (PNM) Operations
+#### 5.8.8 CT_LABEL_ANALYSIS
 
-#### 5.7.1 PNM_FILTER_PORES
+Summarizes label connectivity and size statistics.
+
+**Syntax**:
+```geoscript
+CT_LABEL_ANALYSIS
+```
+
+**Returns**: Label analysis report
+
+---
+
+### 5.9 Pore Network Model (PNM) Operations
+
+#### 5.9.1 PNM_FILTER_PORES
 
 Filters pores based on geometric criteria.
 
@@ -1218,7 +1512,7 @@ PNM_FILTER_PORES min_radius=1.0 max_radius=100.0 min_coord=2
 
 ---
 
-#### 5.7.2 PNM_FILTER_THROATS
+#### 5.9.2 PNM_FILTER_THROATS
 
 Filters throats based on geometric criteria.
 
@@ -1236,7 +1530,7 @@ PNM_FILTER_THROATS min_radius=0.5 max_length=50.0
 
 ---
 
-#### 5.7.3 PNM_CALCULATE_PERMEABILITY
+#### 5.9.3 PNM_CALCULATE_PERMEABILITY
 
 Calculates absolute permeability using network simulation.
 
@@ -1255,7 +1549,7 @@ PNM_CALCULATE_PERMEABILITY direction=all
 
 ---
 
-#### 5.7.4 PNM_DRAINAGE_SIMULATION
+#### 5.9.4 PNM_DRAINAGE_SIMULATION
 
 Runs drainage capillary pressure simulation.
 
@@ -1273,7 +1567,7 @@ PNM_DRAINAGE_SIMULATION contact_angle=30 interfacial_tension=0.03
 
 ---
 
-#### 5.7.5 PNM_IMBIBITION_SIMULATION
+#### 5.9.5 PNM_IMBIBITION_SIMULATION
 
 Runs imbibition capillary pressure simulation.
 
@@ -1291,7 +1585,7 @@ PNM_IMBIBITION_SIMULATION contact_angle=60 interfacial_tension=0.03
 
 ---
 
-#### 5.7.6 PNM_EXTRACT_LARGEST_CLUSTER
+#### 5.9.6 PNM_EXTRACT_LARGEST_CLUSTER
 
 Extracts the largest connected cluster of pores.
 
@@ -1304,7 +1598,7 @@ PNM_EXTRACT_LARGEST_CLUSTER
 
 ---
 
-#### 5.7.7 PNM_STATISTICS
+#### 5.9.7 PNM_STATISTICS
 
 Calculates comprehensive network statistics.
 
@@ -1323,9 +1617,68 @@ PNM_STATISTICS
 
 ---
 
-### 5.8 Seismic Data Operations
+#### 5.9.8 SET_PNM_SPECIES
 
-#### 5.8.1 SEIS_FILTER
+Sets reactive species concentrations for a pore network.
+
+**Syntax**:
+```geoscript
+SET_PNM_SPECIES <species> <inlet_conc_mol_L> <initial_conc_mol_L>
+```
+
+**Examples**:
+```geoscript
+SET_PNM_SPECIES Ca2+ 0.01 0.005
+```
+
+---
+
+#### 5.9.9 SET_PNM_MINERALS
+
+Sets initial mineral volume fractions for reactive transport.
+
+**Syntax**:
+```geoscript
+SET_PNM_MINERALS <mineral> <volume_fraction>
+```
+
+**Examples**:
+```geoscript
+SET_PNM_MINERALS Calcite 0.02
+```
+
+---
+
+#### 5.9.10 RUN_PNM_REACTIVE_TRANSPORT
+
+Runs reactive transport simulation through the pore network.
+
+**Syntax**:
+```geoscript
+RUN_PNM_REACTIVE_TRANSPORT <total_time_s> <time_step_s> <inlet_temp_K> <inlet_pressure_Pa> <outlet_pressure_Pa>
+```
+
+**Examples**:
+```geoscript
+RUN_PNM_REACTIVE_TRANSPORT 1000 0.01 298 1.5e7 1.0e7
+```
+
+---
+
+#### 5.9.11 EXPORT_PNM_RESULTS
+
+Exports reactive transport results to CSV.
+
+**Syntax**:
+```geoscript
+EXPORT_PNM_RESULTS "results.csv"
+```
+
+---
+
+### 5.10 Seismic Data Operations
+
+#### 5.10.1 SEIS_FILTER
 
 Applies frequency filters to seismic data.
 
@@ -1350,7 +1703,7 @@ SEIS_FILTER type=highpass low=15
 
 ---
 
-#### 5.8.2 SEIS_AGC
+#### 5.10.2 SEIS_AGC
 
 Applies automatic gain control.
 
@@ -1368,7 +1721,7 @@ SEIS_AGC window=500
 
 ---
 
-#### 5.8.3 SEIS_VELOCITY_ANALYSIS
+#### 5.10.3 SEIS_VELOCITY_ANALYSIS
 
 Performs velocity analysis for NMO correction.
 
@@ -1386,7 +1739,7 @@ SEIS_VELOCITY_ANALYSIS method=semblance
 
 ---
 
-#### 5.8.4 SEIS_NMO_CORRECTION
+#### 5.10.4 SEIS_NMO_CORRECTION
 
 Applies normal moveout correction.
 
@@ -1404,7 +1757,7 @@ SEIS_NMO_CORRECTION velocity=2000
 
 ---
 
-#### 5.8.5 SEIS_STACK
+#### 5.10.5 SEIS_STACK
 
 Stacks seismic traces.
 
@@ -1422,7 +1775,7 @@ SEIS_STACK method=mean
 
 ---
 
-#### 5.8.6 SEIS_MIGRATION
+#### 5.10.6 SEIS_MIGRATION
 
 Performs seismic migration.
 
@@ -1440,7 +1793,7 @@ SEIS_MIGRATION method=kirchhoff aperture=1000
 
 ---
 
-#### 5.8.7 SEIS_PICK_HORIZON
+#### 5.10.7 SEIS_PICK_HORIZON
 
 Picks seismic horizons.
 
@@ -1458,9 +1811,9 @@ SEIS_PICK_HORIZON name=Top_Reservoir method=auto
 
 ---
 
-### 5.9 Utility Operations
+### 5.11 Utility Operations
 
-#### 5.9.1 LISTOPS
+#### 5.11.1 LISTOPS
 
 Lists all available operations for the current dataset type.
 
@@ -1475,7 +1828,7 @@ LISTOPS
 
 ---
 
-#### 5.9.2 DISPTYPE
+#### 5.11.2 DISPTYPE
 
 Displays detailed dataset type information.
 
@@ -1490,7 +1843,7 @@ DISPTYPE
 
 ---
 
-#### 5.9.3 LOAD
+#### 5.11.3 LOAD
 
 Loads a dataset from a file.
 
@@ -1516,7 +1869,7 @@ LOAD "image.tif" AS "ThinSection" PIXELSIZE=0.8 UNIT="mm"
 
 ---
 
-#### 5.9.4 INFO
+#### 5.11.4 INFO
 
 Shows dataset summary information.
 
@@ -1531,7 +1884,7 @@ INFO
 
 ---
 
-#### 5.9.5 UNLOAD
+#### 5.11.5 UNLOAD
 
 Unloads dataset from memory.
 
@@ -1546,7 +1899,7 @@ UNLOAD
 
 ---
 
-#### 5.9.6 SAVE
+#### 5.11.6 SAVE
 
 Saves a dataset to a file.
 
@@ -1570,7 +1923,7 @@ SAVE "borehole.las" FORMAT="las"
 
 ---
 
-#### 5.9.7 SET_PIXEL_SIZE
+#### 5.11.7 SET_PIXEL_SIZE
 
 Updates pixel size metadata on image or CT datasets.
 
@@ -1588,7 +1941,7 @@ SET_PIXEL_SIZE value=1.2 UNIT="um"
 
 ---
 
-#### 5.9.8 COPY
+#### 5.11.8 COPY
 
 Duplicates the current dataset.
 
@@ -1609,7 +1962,7 @@ COPY AS "BackupData"
 
 ---
 
-#### 5.9.9 DELETE
+#### 5.11.9 DELETE
 
 Removes the dataset from the project.
 
@@ -1621,6 +1974,361 @@ DELETE
 **Description**: Removes the dataset from the project manager. It remains in memory if referenced by variables but is removed from the UI project list.
 
 **Returns**: The removed dataset.
+
+---
+
+### 5.12 Borehole Operations
+
+#### 5.12.1 BH_ADD_LITHOLOGY
+
+Adds lithology intervals to a borehole dataset.
+
+**Syntax**:
+```geoscript
+BH_ADD_LITHOLOGY depth=<value> lith='<name>'
+```
+
+---
+
+#### 5.12.2 BH_REMOVE_LITHOLOGY
+
+Removes a lithology interval.
+
+**Syntax**:
+```geoscript
+BH_REMOVE_LITHOLOGY depth=<value>
+```
+
+---
+
+#### 5.12.3 BH_ADD_LOG
+
+Adds a log curve definition.
+
+**Syntax**:
+```geoscript
+BH_ADD_LOG name='<logName>' unit='<unit>'
+```
+
+---
+
+#### 5.12.4 BH_CALCULATE_POROSITY
+
+Calculates porosity from borehole logs.
+
+**Syntax**:
+```geoscript
+BH_CALCULATE_POROSITY method=<neutron|density>
+```
+
+---
+
+#### 5.12.5 BH_CALCULATE_SATURATION
+
+Calculates saturation using Archie-style methods.
+
+**Syntax**:
+```geoscript
+BH_CALCULATE_SATURATION method=archie
+```
+
+---
+
+#### 5.12.6 BH_DEPTH_SHIFT
+
+Applies a depth shift to borehole data.
+
+**Syntax**:
+```geoscript
+BH_DEPTH_SHIFT shift=<value>
+```
+
+---
+
+#### 5.12.7 BH_CORRELATION
+
+Runs borehole correlation tools.
+
+**Syntax**:
+```geoscript
+BH_CORRELATION method=<dtw|manual>
+```
+
+---
+
+### 5.13 Acoustic Volume Operations
+
+#### 5.13.1 ACOUSTIC_THRESHOLD
+
+Thresholds an acoustic volume.
+
+**Syntax**:
+```geoscript
+ACOUSTIC_THRESHOLD min=<value> max=<value>
+```
+
+---
+
+#### 5.13.2 ACOUSTIC_EXTRACT_TARGETS
+
+Extracts targets from acoustic data.
+
+**Syntax**:
+```geoscript
+ACOUSTIC_EXTRACT_TARGETS threshold=<value>
+```
+
+---
+
+### 5.14 Mesh Operations
+
+#### 5.14.1 MESH_SMOOTH
+
+Smooths mesh surfaces.
+
+**Syntax**:
+```geoscript
+MESH_SMOOTH iterations=<count>
+```
+
+---
+
+#### 5.14.2 MESH_DECIMATE
+
+Decimates mesh geometry.
+
+**Syntax**:
+```geoscript
+MESH_DECIMATE target=<ratio>
+```
+
+---
+
+#### 5.14.3 MESH_REPAIR
+
+Repairs mesh topology.
+
+**Syntax**:
+```geoscript
+MESH_REPAIR
+```
+
+---
+
+#### 5.14.4 MESH_CALCULATE_VOLUME
+
+Calculates mesh volume.
+
+**Syntax**:
+```geoscript
+MESH_CALCULATE_VOLUME
+```
+
+---
+
+### 5.15 Video Operations
+
+#### 5.15.1 VIDEO_EXTRACT_FRAME
+
+Extracts a frame from a video dataset.
+
+**Syntax**:
+```geoscript
+VIDEO_EXTRACT_FRAME index=<frameNumber>
+```
+
+---
+
+#### 5.15.2 VIDEO_STABILIZE
+
+Stabilizes a video dataset.
+
+**Syntax**:
+```geoscript
+VIDEO_STABILIZE smoothing=<value>
+```
+
+---
+
+### 5.16 Audio Operations
+
+#### 5.16.1 AUDIO_TRIM
+
+Trims audio to a time window.
+
+**Syntax**:
+```geoscript
+AUDIO_TRIM start=<seconds> end=<seconds>
+```
+
+---
+
+#### 5.16.2 AUDIO_NORMALIZE
+
+Normalizes audio volume.
+
+**Syntax**:
+```geoscript
+AUDIO_NORMALIZE target=<dB>
+```
+
+---
+
+### 5.17 Text Operations
+
+#### 5.17.1 TEXT_SEARCH
+
+Searches text datasets.
+
+**Syntax**:
+```geoscript
+TEXT_SEARCH pattern="<text>"
+```
+
+---
+
+#### 5.17.2 TEXT_REPLACE
+
+Replaces text in datasets.
+
+**Syntax**:
+```geoscript
+TEXT_REPLACE pattern="<text>" with="<replacement>"
+```
+
+---
+
+#### 5.17.3 TEXT_STATISTICS
+
+Computes text statistics.
+
+**Syntax**:
+```geoscript
+TEXT_STATISTICS
+```
+
+---
+
+### 5.18 Slope Stability Operations
+
+#### 5.18.1 SLOPE_GENERATE_BLOCKS
+
+Generates slope stability blocks.
+
+**Syntax**:
+```geoscript
+SLOPE_GENERATE_BLOCKS
+```
+
+---
+
+#### 5.18.2 SLOPE_ADD_JOINT_SET
+
+Adds a joint set to the slope model.
+
+**Syntax**:
+```geoscript
+SLOPE_ADD_JOINT_SET dip=<degrees> dip_dir=<degrees> spacing=<meters> friction=<degrees> cohesion=<MPa>
+```
+
+---
+
+#### 5.18.3 SLOPE_SET_MATERIAL
+
+Sets material properties for slope blocks.
+
+**Syntax**:
+```geoscript
+SLOPE_SET_MATERIAL preset=<name>
+```
+
+---
+
+#### 5.18.4 SLOPE_SET_ANGLE
+
+Sets slope angle parameters.
+
+**Syntax**:
+```geoscript
+SLOPE_SET_ANGLE degrees=<value>
+```
+
+---
+
+#### 5.18.5 SLOPE_ADD_EARTHQUAKE
+
+Adds earthquake loading to the model.
+
+**Syntax**:
+```geoscript
+SLOPE_ADD_EARTHQUAKE magnitude=<value> depth=<value>
+```
+
+---
+
+#### 5.18.6 SLOPE_SET_WATER
+
+Sets groundwater parameters.
+
+**Syntax**:
+```geoscript
+SLOPE_SET_WATER level=<value>
+```
+
+---
+
+#### 5.18.7 SLOPE_FILTER_BLOCKS
+
+Filters blocks based on criteria.
+
+**Syntax**:
+```geoscript
+SLOPE_FILTER_BLOCKS min_volume=<value>
+```
+
+---
+
+#### 5.18.8 SLOPE_TRACK_BLOCKS
+
+Tracks block motion through time.
+
+**Syntax**:
+```geoscript
+SLOPE_TRACK_BLOCKS
+```
+
+---
+
+#### 5.18.9 SLOPE_CALCULATE_FOS
+
+Calculates factor of safety.
+
+**Syntax**:
+```geoscript
+SLOPE_CALCULATE_FOS
+```
+
+---
+
+#### 5.18.10 SLOPE_SIMULATE
+
+Runs slope simulation.
+
+**Syntax**:
+```geoscript
+SLOPE_SIMULATE mode=<static|dynamic> time=<seconds>
+```
+
+---
+
+#### 5.18.11 SLOPE_EXPORT
+
+Exports slope stability results.
+
+**Syntax**:
+```geoscript
+SLOPE_EXPORT path="<outputPath>"
+```
 
 ---
 
@@ -2121,8 +2829,14 @@ RECLASSIFY, SLOPE, ASPECT, CONTOUR
 ### GIS Extended (8 commands)
 GIS_ADD_LAYER, GIS_REMOVE_LAYER, GIS_INTERSECT, GIS_UNION, GIS_CLIP, GIS_CALCULATE_AREA, GIS_CALCULATE_LENGTH, GIS_REPROJECT
 
-### Thermodynamics (6 commands)
-CREATE_DIAGRAM, EQUILIBRATE, SATURATION, BALANCE_REACTION, EVAPORATE, REACT
+### Thermodynamics (12 commands)
+CREATE_DIAGRAM, EQUILIBRATE, SATURATION, SATURATION_INDEX, BALANCE_REACTION, EVAPORATE, REACT, SPECIATE, DIAGNOSE_SPECIATE, DIAGNOSTIC_THERMODYNAMIC, CALCULATE_PHASES, CALCULATE_CARBONATE_ALKALINITY
+
+### Petrology (3 commands)
+FRACTIONATE_MAGMA, LIQUIDUS_SOLIDUS, METAMORPHIC_PT
+
+### PhysicoChem Reactor (4 commands)
+CREATE_REACTOR, RUN_SIMULATION, ADD_CELL, SET_CELL_MATERIAL
 
 ### Image Processing (7 commands)
 BRIGHTNESS_CONTRAST, FILTER, THRESHOLD, BINARIZE, GRAYSCALE, INVERT, NORMALIZE
@@ -2142,13 +2856,28 @@ SEIS_FILTER, SEIS_AGC, SEIS_VELOCITY_ANALYSIS, SEIS_NMO_CORRECTION, SEIS_STACK, 
 ### Borehole (7 commands)
 BH_ADD_LITHOLOGY, BH_REMOVE_LITHOLOGY, BH_ADD_LOG, BH_CALCULATE_POROSITY, BH_CALCULATE_SATURATION, BH_DEPTH_SHIFT, BH_CORRELATION
 
-### Miscellaneous (12 commands)
-ACOUSTIC_THRESHOLD, ACOUSTIC_EXTRACT_TARGETS, MESH_SMOOTH, MESH_DECIMATE, MESH_REPAIR, MESH_CALCULATE_VOLUME, VIDEO_EXTRACT_FRAME, VIDEO_STABILIZE, AUDIO_TRIM, AUDIO_NORMALIZE, TEXT_SEARCH, TEXT_REPLACE, TEXT_STATISTICS
+### Acoustic (2 commands)
+ACOUSTIC_THRESHOLD, ACOUSTIC_EXTRACT_TARGETS
 
-### Utility (7 commands)
-LOAD, SAVE, SET_PIXEL_SIZE, LISTOPS, DISPTYPE, INFO, UNLOAD
+### Mesh (4 commands)
+MESH_SMOOTH, MESH_DECIMATE, MESH_REPAIR, MESH_CALCULATE_VOLUME
 
-**Total: 88+ Commands**
+### Video (2 commands)
+VIDEO_EXTRACT_FRAME, VIDEO_STABILIZE
+
+### Audio (2 commands)
+AUDIO_TRIM, AUDIO_NORMALIZE
+
+### Text (3 commands)
+TEXT_SEARCH, TEXT_REPLACE, TEXT_STATISTICS
+
+### Slope Stability (11 commands)
+SLOPE_GENERATE_BLOCKS, SLOPE_ADD_JOINT_SET, SLOPE_SET_MATERIAL, SLOPE_SET_ANGLE, SLOPE_ADD_EARTHQUAKE, SLOPE_SET_WATER, SLOPE_FILTER_BLOCKS, SLOPE_TRACK_BLOCKS, SLOPE_CALCULATE_FOS, SLOPE_SIMULATE, SLOPE_EXPORT
+
+### Utility (9 commands)
+LOAD, SAVE, COPY, DELETE, SET_PIXEL_SIZE, LISTOPS, DISPTYPE, INFO, UNLOAD
+
+**Total: 117 Commands**
 
 ---
 

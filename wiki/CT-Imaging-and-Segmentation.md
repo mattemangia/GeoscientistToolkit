@@ -258,6 +258,14 @@ Define material properties.
 CT_ADD_MATERIAL name='Pore' density=1.0 color=#0000FF
 ```
 
+### CT_REMOVE_MATERIAL
+
+Remove material definitions.
+
+```geoscript
+CT_REMOVE_MATERIAL name='Pore'
+```
+
 ### CT_ANALYZE_POROSITY
 
 Calculate porosity.
@@ -280,6 +288,14 @@ Extract 2D slice.
 
 ```geoscript
 CT_EXTRACT_SLICE index=50 axis=z
+```
+
+### CT_LABEL_ANALYSIS
+
+Analyze labeled volumes.
+
+```geoscript
+CT_LABEL_ANALYSIS
 ```
 
 ---

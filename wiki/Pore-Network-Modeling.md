@@ -170,16 +170,13 @@ Define chemical system:
 
 ```geoscript
 # Configure species
-SET_PNM_SPECIES 'Ca2+', 'CO3-2', 'H+'
+SET_PNM_SPECIES Ca2+ 0.01 0.005
 
 # Configure minerals
-SET_PNM_MINERALS 'Calcite', 'Quartz'
+SET_PNM_MINERALS Calcite 0.02
 
 # Run simulation
-RUN_PNM_REACTIVE_TRANSPORT
-    TIME 1000
-    DT 0.01
-    TEMPERATURE 25
+RUN_PNM_REACTIVE_TRANSPORT 1000 0.01 298 1.5e7 1.0e7
 
 # Export results
 EXPORT_PNM_RESULTS 'results.csv'
