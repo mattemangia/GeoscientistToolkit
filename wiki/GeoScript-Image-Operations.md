@@ -379,7 +379,7 @@ LISTOPS
 
 ## Related Pages
 
-- [GeoScript Manual](GeoScript-Manual) - Complete scripting reference
-- [CT Imaging and Segmentation](CT-Imaging-and-Segmentation) - CT-specific operations
-- [User Guide](User-Guide) - Application documentation
-- [Home](Home) - Wiki home page
+- [GeoScript Manual](GeoScript-Manual.md) - Complete scripting reference
+- [CT Imaging and Segmentation](CT-Imaging-and-Segmentation.md) - CT-specific operations
+- [User Guide](User-Guide.md) - Application documentation
+- [Home](Home.md) - Wiki home page

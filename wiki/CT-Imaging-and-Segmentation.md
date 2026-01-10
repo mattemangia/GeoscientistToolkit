@@ -357,8 +357,8 @@ CT_EXTRACT_SLICE index=50 axis=z
 
 ## Related Pages
 
-- [GeoScript Image Operations](GeoScript-Image-Operations) - Image processing reference
-- [GeoScript Manual](GeoScript-Manual) - Complete scripting guide
-- [User Guide](User-Guide) - Application documentation
-- [Pore Network Modeling](Pore-Network-Modeling) - PNM from CT data
-- [Home](Home) - Wiki home page
+- [GeoScript Image Operations](GeoScript-Image-Operations.md) - Image processing reference
+- [GeoScript Manual](GeoScript-Manual.md) - Complete scripting guide
+- [User Guide](User-Guide.md) - Application documentation
+- [Pore Network Modeling](Pore-Network-Modeling.md) - PNM from CT data
+- [Home](Home.md) - Wiki home page

@@ -357,7 +357,7 @@ WITH "CorePNM_Clean" DO
 
 ## Related Pages
 
-- [CT Imaging and Segmentation](CT-Imaging-and-Segmentation) - Network input preparation
-- [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry) - Reactive transport chemistry
-- [User Guide](User-Guide) - Application documentation
-- [Home](Home) - Wiki home page
+- [CT Imaging and Segmentation](CT-Imaging-and-Segmentation.md) - Network input preparation
+- [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry.md) - Reactive transport chemistry
+- [User Guide](User-Guide.md) - Application documentation
+- [Home](Home.md) - Wiki home page

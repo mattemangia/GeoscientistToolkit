@@ -327,7 +327,7 @@ For each verification case, document:
 
 ## Related Pages
 
-- [User Guide](User-Guide) - Application documentation
-- [Developer Guide](Developer-Guide) - Adding tests
-- [API Reference](API-Reference) - Verification API
-- [Home](Home) - Wiki home page
+- [User Guide](User-Guide.md) - Application documentation
+- [Developer Guide](Developer-Guide.md) - Adding tests
+- [API Reference](API-Reference.md) - Verification API
+- [Home](Home.md) - Wiki home page

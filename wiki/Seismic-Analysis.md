@@ -368,7 +368,7 @@ SEIS_FILTER type=bandpass low=10 high=80 |>
 
 ## Related Pages
 
-- [User Guide](User-Guide) - Application documentation
-- [Geothermal Simulation](Geothermal-Simulation) - Related subsurface analysis
-- [GeoScript Manual](GeoScript-Manual) - Scripting reference
-- [Home](Home) - Wiki home page
+- [User Guide](User-Guide.md) - Application documentation
+- [Geothermal Simulation](Geothermal-Simulation.md) - Related subsurface analysis
+- [GeoScript Manual](GeoScript-Manual.md) - Scripting reference
+- [Home](Home.md) - Wiki home page

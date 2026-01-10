@@ -516,7 +516,7 @@ public class IntegrationTests
 
 ## Related Pages
 
-- [API Reference](API-Reference) - API documentation
-- [Verification and Testing](Verification-and-Testing) - Test cases
-- [GeoScript Manual](GeoScript-Manual) - Scripting reference
-- [Home](Home) - Wiki home page
+- [API Reference](API-Reference.md) - API documentation
+- [Verification and Testing](Verification-and-Testing.md) - Test cases
+- [GeoScript Manual](GeoScript-Manual.md) - Scripting reference
+- [Home](Home.md) - Wiki home page

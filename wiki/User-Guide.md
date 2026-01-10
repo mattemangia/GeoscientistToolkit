@@ -309,13 +309,13 @@ Geoscientist's Toolkit includes 22 specialized analysis modules. Key modules are
 
 | Module | Documentation |
 |--------|---------------|
-| Pore Network Modeling | [Pore Network Modeling](Pore-Network-Modeling) |
-| Geothermal Analysis | [Geothermal Simulation](Geothermal-Simulation) |
-| CT Imaging & Segmentation | [CT Imaging and Segmentation](CT-Imaging-and-Segmentation) |
-| Seismic Analysis | [Seismic Analysis](Seismic-Analysis) |
-| Thermodynamics | [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry) |
-| Slope Stability | [Slope Stability](Slope-Stability) |
-| Photogrammetry | [Photogrammetry](Photogrammetry) |
+| Pore Network Modeling | [Pore Network Modeling](Pore-Network-Modeling.md) |
+| Geothermal Analysis | [Geothermal Simulation](Geothermal-Simulation.md) |
+| CT Imaging & Segmentation | [CT Imaging and Segmentation](CT-Imaging-and-Segmentation.md) |
+| Seismic Analysis | [Seismic Analysis](Seismic-Analysis.md) |
+| Thermodynamics | [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry.md) |
+| Slope Stability | [Slope Stability](Slope-Stability.md) |
+| Photogrammetry | [Photogrammetry](Photogrammetry.md) |
 
 ### Overview of Analysis Capabilities
 
@@ -376,7 +376,7 @@ Some simulations support distributed execution across multiple machines.
 3. Configure node properties (CPU cores, memory)
 4. Enable distribution in simulation settings
 
-**Learn more:** [NodeEndpoint](NodeEndpoint)
+**Learn more:** [NodeEndpoint](NodeEndpoint.md)
 
 ### Material Library Management
 
@@ -503,10 +503,10 @@ project.gtp (ZIP)
 
 ## Related Pages
 
-- [Getting Started](Getting-Started) - Quick start guide
-- [GeoScript Manual](GeoScript-Manual) - Scripting language reference
-- [Installation](Installation) - Setup instructions
-- [Home](Home) - Wiki home page
+- [Getting Started](Getting-Started.md) - Quick start guide
+- [GeoScript Manual](GeoScript-Manual.md) - Scripting language reference
+- [Installation](Installation.md) - Setup instructions
+- [Home](Home.md) - Wiki home page
 
 ---
 
