@@ -316,7 +316,7 @@ The geothermal solver has been validated against:
 | T2Well | Enhanced TOUGH | < 5% |
 | COMSOL | FEM reference | < 3% |
 
-See [Verification and Testing](Verification-and-Testing) for detailed results.
+See [Verification and Testing](Verification-and-Testing.md) for detailed results.
 
 ---
 
@@ -361,7 +361,7 @@ See [Verification and Testing](Verification-and-Testing) for detailed results.
 
 ## Related Pages
 
-- [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry) - Chemical systems
-- [User Guide](User-Guide) - Application documentation
-- [Verification and Testing](Verification-and-Testing) - Benchmark results
-- [Home](Home) - Wiki home page
+- [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry.md) - Chemical systems
+- [User Guide](User-Guide.md) - Application documentation
+- [Verification and Testing](Verification-and-Testing.md) - Benchmark results
+- [Home](Home.md) - Wiki home page

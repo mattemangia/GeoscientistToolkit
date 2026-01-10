@@ -347,7 +347,7 @@ Properties vary with temperature using:
 
 ## Related Pages
 
-- [PhysicoChem Reactors](PhysicoChem-Reactors) - Reactor simulation
-- [Pore Network Modeling](Pore-Network-Modeling) - Reactive transport
-- [GeoScript Manual](GeoScript-Manual) - Scripting reference
-- [Home](Home) - Wiki home page
+- [PhysicoChem Reactors](PhysicoChem-Reactors.md) - Reactor simulation
+- [Pore Network Modeling](Pore-Network-Modeling.md) - Reactive transport
+- [GeoScript Manual](GeoScript-Manual.md) - Scripting reference
+- [Home](Home.md) - Wiki home page

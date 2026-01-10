@@ -387,7 +387,7 @@ Use with IntelliSense in Visual Studio for auto-completion and inline documentat
 
 ## Related Pages
 
-- [NodeEndpoint](NodeEndpoint) - REST API for distributed computing
-- [GeoScript Manual](GeoScript-Manual) - Scripting language reference
-- [Developer Guide](Developer-Guide) - Extension development
-- [Home](Home) - Wiki home page
+- [NodeEndpoint](NodeEndpoint.md) - REST API for distributed computing
+- [GeoScript Manual](GeoScript-Manual.md) - Scripting language reference
+- [Developer Guide](Developer-Guide.md) - Extension development
+- [Home](Home.md) - Wiki home page

@@ -491,9 +491,9 @@ Solution: Ensure dataset exists before using @'DatasetName'
 
 ## Related Pages
 
-- [GeoScript Image Operations](GeoScript-Image-Operations) - Detailed image processing reference
-- [User Guide](User-Guide) - Complete application documentation
-- [Home](Home) - Wiki home page
+- [GeoScript Image Operations](GeoScript-Image-Operations.md) - Detailed image processing reference
+- [User Guide](User-Guide.md) - Complete application documentation
+- [Home](Home.md) - Wiki home page
 
 ---
 

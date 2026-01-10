@@ -16,7 +16,7 @@ The TUI wizard downloads and updates the toolkit automatically.
 - **Linux**: Run `./InstallerWizard`
 - **macOS**: Run `./InstallerWizard` (Intel/Apple Silicon)
 
-See [Installation](Installation) for detailed instructions.
+See [Installation](Installation.md) for detailed instructions.
 
 ### Build from Source
 
@@ -91,7 +91,7 @@ From `File → Import`, choose your data type:
    - AI Models - Automatic segmentation
 4. **Export mesh** in `Tools → Export → Mesh Extraction`
 
-**More details:** [CT Imaging and Segmentation](CT-Imaging-and-Segmentation)
+**More details:** [CT Imaging and Segmentation](CT-Imaging-and-Segmentation.md)
 
 ### Example: Seismic + Borehole Integration
 
@@ -100,7 +100,7 @@ From `File → Import`, choose your data type:
 3. **Generate synthetic seismic** in `Borehole Tools → Seismic`
 4. **Tie wells** in `Seismic Tools → Borehole Integration`
 
-**More details:** [Seismic Analysis](Seismic-Analysis)
+**More details:** [Seismic Analysis](Seismic-Analysis.md)
 
 ### Example: Geothermal Simulation
 
@@ -112,7 +112,7 @@ From `File → Import`, choose your data type:
 3. **Run simulation**
 4. **Visualize** temperature distribution and flow paths
 
-**More details:** [Geothermal Simulation](Geothermal-Simulation)
+**More details:** [Geothermal Simulation](Geothermal-Simulation.md)
 
 ---
 
@@ -141,27 +141,27 @@ From `File → Import`, choose your data type:
 
 | Topic | Guide |
 |-------|-------|
-| Complete user guide | [User Guide](User-Guide) |
-| GeoScript scripting | [GeoScript Manual](GeoScript-Manual) |
-| Image processing pipelines | [GeoScript Image Operations](GeoScript-Image-Operations) |
-| AI segmentation | [CT Imaging and Segmentation](CT-Imaging-and-Segmentation) |
-| Thermodynamics & geochemistry | [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry) |
-| Pore network modeling | [Pore Network Modeling](Pore-Network-Modeling) |
-| API automation | [API Reference](API-Reference) |
-| All documentation | [Home](Home) |
+| Complete user guide | [User Guide](User-Guide.md) |
+| GeoScript scripting | [GeoScript Manual](GeoScript-Manual.md) |
+| Image processing pipelines | [GeoScript Image Operations](GeoScript-Image-Operations.md) |
+| AI segmentation | [CT Imaging and Segmentation](CT-Imaging-and-Segmentation.md) |
+| Thermodynamics & geochemistry | [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry.md) |
+| Pore network modeling | [Pore Network Modeling](Pore-Network-Modeling.md) |
+| API automation | [API Reference](API-Reference.md) |
+| All documentation | [Home](Home.md) |
 
 ### By Workflow
 
 | Workflow | Relevant Pages |
 |----------|----------------|
-| CT analysis & segmentation | [CT Imaging and Segmentation](CT-Imaging-and-Segmentation), [User Guide](User-Guide) |
-| Seismic interpretation | [Seismic Analysis](Seismic-Analysis) |
-| Geothermal modeling | [Geothermal Simulation](Geothermal-Simulation) |
-| Reactive transport | [PhysicoChem Reactors](PhysicoChem-Reactors), [Pore Network Modeling](Pore-Network-Modeling) |
-| Slope stability | [Slope Stability](Slope-Stability) |
-| 3D reconstruction | [Photogrammetry](Photogrammetry) |
-| Batch processing | [GeoScript Manual](GeoScript-Manual), [API Reference](API-Reference) |
-| Distributed computing | [NodeEndpoint](NodeEndpoint) |
+| CT analysis & segmentation | [CT Imaging and Segmentation](CT-Imaging-and-Segmentation.md), [User Guide](User-Guide.md) |
+| Seismic interpretation | [Seismic Analysis](Seismic-Analysis.md) |
+| Geothermal modeling | [Geothermal Simulation](Geothermal-Simulation.md) |
+| Reactive transport | [PhysicoChem Reactors](PhysicoChem-Reactors.md), [Pore Network Modeling](Pore-Network-Modeling.md) |
+| Slope stability | [Slope Stability](Slope-Stability.md) |
+| 3D reconstruction | [Photogrammetry](Photogrammetry.md) |
+| Batch processing | [GeoScript Manual](GeoScript-Manual.md), [API Reference](API-Reference.md) |
+| Distributed computing | [NodeEndpoint](NodeEndpoint.md) |
 
 ---
 
@@ -231,9 +231,9 @@ Visualize temperature distribution and flow paths
 
 ## Next Steps
 
-- [User Guide](User-Guide) - Complete application documentation
-- [GeoScript Manual](GeoScript-Manual) - Learn to automate workflows
-- [Installation](Installation) - Detailed setup instructions
+- [User Guide](User-Guide.md) - Complete application documentation
+- [GeoScript Manual](GeoScript-Manual.md) - Learn to automate workflows
+- [Installation](Installation.md) - Detailed setup instructions
 
 ---
 
