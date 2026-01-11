@@ -24,6 +24,15 @@ The Geomechanics module solves voxel-scale stress/strain and failure using elast
 2. Open **CT Tools → Analysis → Geomechanical Simulation**.
 3. Choose materials, configure loading, and run.
 
+### Triaxial Simulation Tool
+
+A dedicated triaxial testing UI is available from the main menu:
+
+1. Open **Tools → Triaxial Simulation**.
+2. Select a material (and optional PNM dataset).
+3. Configure confining pressure, axial loading, and failure criteria.
+4. Run the test and review stress-strain curves, Mohr circles, and 3D visualization.
+
 ---
 
 ## Core Inputs

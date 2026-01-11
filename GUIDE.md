@@ -869,16 +869,30 @@ Compute effective thermal conductivity.
 
 ### Stratigraphic Analysis
 
-#### Borehole Correlation
-Align lithology intervals across wells.
+#### Stratigraphy Correlation
+Compare regional stratigraphic charts and visualize correlation lines.
 
 **Features:**
-- Interactive correlation viewer
-- Tie-point definition
-- Age/depth model generation
-- Sequence identification
+- Toggle stratigraphies and correlation lines
+- Adjustable display level (eon → age)
+- PNG and CSV export
 
 **File reference:** `/UI/StratigraphyCorrelationViewer.cs`
+
+### Structural Geology
+
+#### 2D Geology & Restoration
+Draft and restore 2D cross-sections.
+
+**Features:**
+- Formation/fault drafting and editing
+- Topography edits with snapping
+- Interactive restoration overlays with apply/clear controls
+
+**File references:**
+- `/Data/TwoDGeology/TwoDGeologyViewer.cs`
+- `/Data/TwoDGeology/TwoDGeologyTools.cs`
+- `/Data/TwoDGeology/StructuralRestoration.cs`
 
 ### Subsurface GIS
 
