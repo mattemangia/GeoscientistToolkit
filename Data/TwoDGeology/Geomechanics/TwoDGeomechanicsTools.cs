@@ -51,6 +51,14 @@ public class TwoDGeomechanicsTools
     private readonly JointSetManager _jointSets;
     private readonly GeomechanicalMaterialLibrary2D _materials;
 
+    // Editing helpers
+    private readonly SnappingSystem _snapping;
+    private readonly TransformHandleSystem _transformHandles;
+    private readonly UndoRedoManager _undoRedo;
+    private readonly DeformationPreview _deformationPreview;
+    private readonly MeasurementSystem _measurement;
+    private readonly EditContext _editContext;
+
     private GeomechanicsToolMode _currentMode = GeomechanicsToolMode.None;
     private GeometricPrimitive2D _selectedPrimitive;
     private JointSet2D _selectedJointSet;
@@ -62,6 +70,7 @@ public class TwoDGeomechanicsTools
     private readonly List<Vector2> _tempPoints = new();
     private bool _isDrawing;
     private Vector2 _drawStart;
+    private PrimitiveState _dragStartState;
 
     // Simulation state
     private CancellationTokenSource _simCts;
@@ -75,6 +84,8 @@ public class TwoDGeomechanicsTools
     private bool _showSimulationSetup;
     private bool _showResultsPanel = true;
     private bool _showMohrCircle;
+    private bool _showSnappingOptions;
+    private bool _showCoordinates = true;
 
     // New primitive parameters
     private float _newRectWidth = 5f;
@@ -91,6 +102,11 @@ public class TwoDGeomechanicsTools
 
     // Last mouse position
     private Vector2 _lastMouseWorldPos;
+    private Vector2 _lastSnappedPos;
+    private SnapResult _lastSnapResult;
+
+    // Zoom level for handle sizing
+    private float _currentZoom = 1f;
 
     #endregion
 
@@ -103,6 +119,29 @@ public class TwoDGeomechanicsTools
         _primitives = new PrimitiveManager2D();
         _jointSets = new JointSetManager();
         _materials = simulator.Mesh.Materials;
+
+        // Initialize editing helpers
+        _snapping = new SnappingSystem
+        {
+            GridSpacing = 0.5f,
+            SnapTolerance = 0.3f,
+            AngleSnapIncrement = 15f,
+            EnabledModes = SnapMode.Grid | SnapMode.Node | SnapMode.Vertex | SnapMode.Angle
+        };
+
+        _transformHandles = new TransformHandleSystem();
+        _deformationPreview = new DeformationPreview();
+        _measurement = new MeasurementSystem();
+
+        // Create edit context for undo/redo
+        _editContext = new EditContext
+        {
+            Primitives = _primitives,
+            JointSets = _jointSets,
+            Mesh = simulator.Mesh,
+            Simulator = simulator
+        };
+        _undoRedo = new UndoRedoManager(_editContext);
 
         _simulator.OnStepCompleted += OnSimulationStepCompleted;
         _simulator.OnSimulationCompleted += OnSimulationCompleted;
@@ -124,7 +163,13 @@ public class TwoDGeomechanicsTools
         ImGui.Text("2D Geomechanical Simulation");
         ImGui.Separator();
 
+        RenderUndoRedoSection();
+        ImGui.Separator();
+
         RenderToolModeSection();
+        ImGui.Separator();
+
+        RenderSnappingSection();
         ImGui.Separator();
 
         RenderPrimitivesSection();
@@ -143,6 +188,229 @@ public class TwoDGeomechanicsTools
         ImGui.Separator();
 
         RenderVisualizationSection();
+        ImGui.Separator();
+
+        RenderCoordinatesSection();
+    }
+
+    private void RenderUndoRedoSection()
+    {
+        var buttonSize = new Vector2(80, 0);
+
+        // Undo button
+        bool canUndo = _undoRedo.CanUndo;
+        if (!canUndo) ImGui.BeginDisabled();
+        if (ImGui.Button("Undo", buttonSize))
+        {
+            _undoRedo.Undo();
+        }
+        if (ImGui.IsItemHovered() && canUndo)
+        {
+            ImGui.SetTooltip($"Undo: {_undoRedo.UndoDescription}");
+        }
+        if (!canUndo) ImGui.EndDisabled();
+
+        ImGui.SameLine();
+
+        // Redo button
+        bool canRedo = _undoRedo.CanRedo;
+        if (!canRedo) ImGui.BeginDisabled();
+        if (ImGui.Button("Redo", buttonSize))
+        {
+            _undoRedo.Redo();
+        }
+        if (ImGui.IsItemHovered() && canRedo)
+        {
+            ImGui.SetTooltip($"Redo: {_undoRedo.RedoDescription}");
+        }
+        if (!canRedo) ImGui.EndDisabled();
+
+        // Keyboard shortcuts hint
+        ImGui.TextDisabled("Ctrl+Z / Ctrl+Y");
+    }
+
+    private void RenderSnappingSection()
+    {
+        if (ImGui.CollapsingHeader("Snapping"))
+        {
+            bool snapEnabled = _snapping.IsEnabled;
+            if (ImGui.Checkbox("Enable Snapping", ref snapEnabled))
+            {
+                _snapping.IsEnabled = snapEnabled;
+            }
+
+            if (_snapping.IsEnabled)
+            {
+                // Grid snapping
+                bool gridSnap = _snapping.EnabledModes.HasFlag(SnapMode.Grid);
+                if (ImGui.Checkbox("Grid", ref gridSnap))
+                {
+                    _snapping.EnabledModes = gridSnap
+                        ? _snapping.EnabledModes | SnapMode.Grid
+                        : _snapping.EnabledModes & ~SnapMode.Grid;
+                }
+
+                if (gridSnap)
+                {
+                    ImGui.SameLine();
+                    float gridSize = _snapping.GridSpacing;
+                    ImGui.SetNextItemWidth(80);
+                    if (ImGui.DragFloat("##gridsize", ref gridSize, 0.1f, 0.1f, 10f))
+                    {
+                        _snapping.GridSpacing = gridSize;
+                    }
+                }
+
+                // Node snapping
+                bool nodeSnap = _snapping.EnabledModes.HasFlag(SnapMode.Node);
+                if (ImGui.Checkbox("Nodes", ref nodeSnap))
+                {
+                    _snapping.EnabledModes = nodeSnap
+                        ? _snapping.EnabledModes | SnapMode.Node
+                        : _snapping.EnabledModes & ~SnapMode.Node;
+                }
+
+                ImGui.SameLine();
+
+                // Vertex snapping
+                bool vertexSnap = _snapping.EnabledModes.HasFlag(SnapMode.Vertex);
+                if (ImGui.Checkbox("Vertices", ref vertexSnap))
+                {
+                    _snapping.EnabledModes = vertexSnap
+                        ? _snapping.EnabledModes | SnapMode.Vertex
+                        : _snapping.EnabledModes & ~SnapMode.Vertex;
+                }
+
+                // Edge snapping
+                bool edgeSnap = _snapping.EnabledModes.HasFlag(SnapMode.Edge);
+                if (ImGui.Checkbox("Edges", ref edgeSnap))
+                {
+                    _snapping.EnabledModes = edgeSnap
+                        ? _snapping.EnabledModes | SnapMode.Edge
+                        : _snapping.EnabledModes & ~SnapMode.Edge;
+                }
+
+                ImGui.SameLine();
+
+                // Center snapping
+                bool centerSnap = _snapping.EnabledModes.HasFlag(SnapMode.Center);
+                if (ImGui.Checkbox("Centers", ref centerSnap))
+                {
+                    _snapping.EnabledModes = centerSnap
+                        ? _snapping.EnabledModes | SnapMode.Center
+                        : _snapping.EnabledModes & ~SnapMode.Center;
+                }
+
+                // Midpoint snapping
+                bool midpointSnap = _snapping.EnabledModes.HasFlag(SnapMode.Midpoint);
+                if (ImGui.Checkbox("Midpoints", ref midpointSnap))
+                {
+                    _snapping.EnabledModes = midpointSnap
+                        ? _snapping.EnabledModes | SnapMode.Midpoint
+                        : _snapping.EnabledModes & ~SnapMode.Midpoint;
+                }
+
+                ImGui.SameLine();
+
+                // Angle snapping
+                bool angleSnap = _snapping.EnabledModes.HasFlag(SnapMode.Angle);
+                if (ImGui.Checkbox("Angles", ref angleSnap))
+                {
+                    _snapping.EnabledModes = angleSnap
+                        ? _snapping.EnabledModes | SnapMode.Angle
+                        : _snapping.EnabledModes & ~SnapMode.Angle;
+                }
+
+                if (angleSnap)
+                {
+                    float angleInc = _snapping.AngleSnapIncrement;
+                    ImGui.SetNextItemWidth(100);
+                    if (ImGui.DragFloat("Angle Increment", ref angleInc, 1f, 1f, 45f))
+                    {
+                        _snapping.AngleSnapIncrement = angleInc;
+                    }
+                }
+
+                // Snap tolerance
+                float tolerance = _snapping.SnapTolerance;
+                if (ImGui.DragFloat("Tolerance", ref tolerance, 0.05f, 0.1f, 2f))
+                {
+                    _snapping.SnapTolerance = tolerance;
+                }
+
+                // Show current snap status
+                if (_lastSnapResult.Snapped)
+                {
+                    ImGui.TextColored(new Vector4(0, 1, 0, 1), $"Snap: {_lastSnapResult.Description}");
+                }
+            }
+        }
+    }
+
+    private void RenderCoordinatesSection()
+    {
+        if (ImGui.CollapsingHeader("Coordinates & Measurement", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.Checkbox("Show Coordinates", ref _showCoordinates);
+
+            if (_showCoordinates)
+            {
+                ImGui.Text($"Mouse: {MeasurementSystem.FormatCoordinate(_lastMouseWorldPos)}");
+
+                if (_lastSnapResult.Snapped)
+                {
+                    ImGui.Text($"Snapped: {MeasurementSystem.FormatCoordinate(_lastSnappedPos)}");
+                }
+            }
+
+            // Measurement tools
+            ImGui.Separator();
+            ImGui.Text("Measurement:");
+
+            var buttonSize = new Vector2(70, 0);
+
+            int measureType = (int)_measurement.MeasureType;
+            if (ImGui.Combo("Type", ref measureType, new[] { "Distance", "Polyline", "Angle", "Area", "Point" }, 5))
+            {
+                _measurement.MeasureType = (MeasurementType)measureType;
+            }
+
+            if (_measurement.IsMeasuring)
+            {
+                switch (_measurement.MeasureType)
+                {
+                    case MeasurementType.Distance:
+                        ImGui.Text($"Distance: {MeasurementSystem.FormatDistance(_measurement.GetDistance())}");
+                        break;
+                    case MeasurementType.Polyline:
+                        ImGui.Text($"Length: {MeasurementSystem.FormatDistance(_measurement.GetPolylineLength())}");
+                        ImGui.Text($"Points: {_measurement.MeasurePoints.Count}");
+                        break;
+                    case MeasurementType.Angle:
+                        if (_measurement.MeasurePoints.Count >= 3)
+                        {
+                            ImGui.Text($"Angle: {MeasurementSystem.FormatAngle(_measurement.GetAngle())}");
+                        }
+                        else
+                        {
+                            ImGui.Text($"Points: {_measurement.MeasurePoints.Count}/3");
+                        }
+                        break;
+                    case MeasurementType.Area:
+                        if (_measurement.MeasurePoints.Count >= 3)
+                        {
+                            ImGui.Text($"Area: {MeasurementSystem.FormatArea(_measurement.GetArea())}");
+                        }
+                        ImGui.Text($"Points: {_measurement.MeasurePoints.Count}");
+                        break;
+                }
+
+                if (ImGui.Button("Clear", buttonSize))
+                {
+                    _measurement.ClearMeasurement();
+                }
+            }
+        }
     }
 
     private void RenderToolModeSection()
@@ -930,9 +1198,75 @@ public class TwoDGeomechanicsTools
 
     #region Mouse and Keyboard Input
 
-    public void HandleMouseInput(Vector2 worldPos, bool leftClick, bool rightClick, bool isDragging)
+    public void HandleMouseInput(Vector2 worldPos, bool leftClick, bool rightClick, bool isDragging, float zoom = 1f)
     {
         _lastMouseWorldPos = worldPos;
+        _currentZoom = zoom;
+        _measurement.CurrentPosition = worldPos;
+
+        // Apply snapping
+        _lastSnapResult = _snapping.Snap(worldPos, _simulator.Mesh, _primitives);
+        _lastSnappedPos = _lastSnapResult.Snapped ? _lastSnapResult.Position : worldPos;
+        Vector2 snappedPos = _lastSnappedPos;
+
+        // Handle transform handles for selected primitive
+        if (_currentMode == GeomechanicsToolMode.Select && _selectedPrimitive != null)
+        {
+            // Update hover state
+            _transformHandles.UpdateHover(worldPos, _selectedPrimitive, zoom);
+
+            if (leftClick && !_transformHandles.IsDragging)
+            {
+                // Start dragging if clicking on a handle
+                _transformHandles.BeginDrag(worldPos, _selectedPrimitive, zoom);
+                if (_transformHandles.IsDragging)
+                {
+                    _dragStartState = new PrimitiveState(_selectedPrimitive);
+                    return;
+                }
+            }
+
+            if (_transformHandles.IsDragging)
+            {
+                if (isDragging)
+                {
+                    _transformHandles.UpdateDrag(worldPos, _selectedPrimitive, _snapping);
+                }
+                else
+                {
+                    // End drag - record for undo
+                    if (_dragStartState != null)
+                    {
+                        var op = new ModifyPrimitiveOperation(_selectedPrimitive, _dragStartState);
+                        _undoRedo.RecordOperation(op);
+                        _dragStartState = null;
+                    }
+                    _transformHandles.EndDrag();
+                }
+                return;
+            }
+        }
+
+        // Handle measurement mode
+        if (_currentMode == GeomechanicsToolMode.MeasureDistance || _currentMode == GeomechanicsToolMode.MeasureAngle)
+        {
+            if (leftClick)
+            {
+                if (!_measurement.IsMeasuring)
+                {
+                    _measurement.StartMeasurement(snappedPos);
+                }
+                else
+                {
+                    _measurement.AddPoint(snappedPos);
+                }
+            }
+            if (rightClick)
+            {
+                _measurement.EndMeasurement();
+            }
+            return;
+        }
 
         switch (_currentMode)
         {
@@ -941,58 +1275,58 @@ public class TwoDGeomechanicsTools
                 break;
 
             case GeomechanicsToolMode.DrawRectangle:
-                if (leftClick) PlaceRectangle(worldPos);
+                if (leftClick) PlaceRectangle(snappedPos);
                 break;
 
             case GeomechanicsToolMode.DrawCircle:
-                if (leftClick) PlaceCircle(worldPos);
+                if (leftClick) PlaceCircle(snappedPos);
                 break;
 
             case GeomechanicsToolMode.DrawPolygon:
-                if (leftClick) AddPolygonPoint(worldPos);
+                if (leftClick) AddPolygonPoint(snappedPos);
                 if (rightClick) FinishPolygon();
                 break;
 
             case GeomechanicsToolMode.DrawJoint:
-                if (leftClick) AddJointPoint(worldPos);
+                if (leftClick) AddJointPoint(snappedPos);
                 if (rightClick) FinishJoint();
                 break;
 
             case GeomechanicsToolMode.DrawJointSet:
-                if (leftClick && !_isDrawing) { _drawStart = worldPos; _isDrawing = true; }
-                if (rightClick && _isDrawing) FinishJointSetRegion(worldPos);
+                if (leftClick && !_isDrawing) { _drawStart = snappedPos; _isDrawing = true; }
+                if (rightClick && _isDrawing) FinishJointSetRegion(snappedPos);
                 break;
 
             case GeomechanicsToolMode.DrawFoundation:
-                if (leftClick) PlaceFoundation(worldPos);
+                if (leftClick) PlaceFoundation(snappedPos);
                 break;
 
             case GeomechanicsToolMode.DrawRetainingWall:
-                if (leftClick) PlaceRetainingWall(worldPos);
+                if (leftClick) PlaceRetainingWall(snappedPos);
                 break;
 
             case GeomechanicsToolMode.DrawTunnel:
-                if (leftClick) PlaceTunnel(worldPos);
+                if (leftClick) PlaceTunnel(snappedPos);
                 break;
 
             case GeomechanicsToolMode.DrawDam:
-                if (leftClick) PlaceDam(worldPos);
+                if (leftClick) PlaceDam(snappedPos);
                 break;
 
             case GeomechanicsToolMode.DrawIndenter:
-                if (leftClick) PlaceIndenter(worldPos);
+                if (leftClick) PlaceIndenter(snappedPos);
                 break;
 
             case GeomechanicsToolMode.ApplyForce:
-                if (leftClick) ApplyForceAtPosition(worldPos);
+                if (leftClick) ApplyForceAtPosition(snappedPos);
                 break;
 
             case GeomechanicsToolMode.ApplyDisplacement:
-                if (leftClick) ApplyDisplacementAtPosition(worldPos);
+                if (leftClick) ApplyDisplacementAtPosition(snappedPos);
                 break;
 
             case GeomechanicsToolMode.FixBoundary:
-                if (leftClick) FixBoundaryAtPosition(worldPos);
+                if (leftClick) FixBoundaryAtPosition(snappedPos);
                 break;
 
             case GeomechanicsToolMode.ProbeResults:
@@ -1003,15 +1337,73 @@ public class TwoDGeomechanicsTools
 
     public void HandleKeyboardInput()
     {
+        bool ctrlPressed = ImGui.GetIO().KeyCtrl;
+        bool shiftPressed = ImGui.GetIO().KeyShift;
+
+        // Escape - cancel current operation
         if (ImGui.IsKeyPressed(ImGuiKey.Escape))
         {
-            CancelCurrentOperation();
+            if (_transformHandles.IsDragging)
+            {
+                _transformHandles.CancelDrag(_selectedPrimitive);
+                _dragStartState = null;
+            }
+            else
+            {
+                CancelCurrentOperation();
+            }
         }
 
+        // Delete - delete selected primitive
         if (ImGui.IsKeyPressed(ImGuiKey.Delete) && _selectedPrimitive != null)
         {
+            var op = new RemovePrimitiveOperation(_selectedPrimitive);
+            _undoRedo.RecordOperation(op);
             _primitives.RemovePrimitive(_selectedPrimitive.Id);
             _selectedPrimitive = null;
+        }
+
+        // Ctrl+Z - Undo
+        if (ctrlPressed && ImGui.IsKeyPressed(ImGuiKey.Z) && !shiftPressed)
+        {
+            _undoRedo.Undo();
+        }
+
+        // Ctrl+Y or Ctrl+Shift+Z - Redo
+        if ((ctrlPressed && ImGui.IsKeyPressed(ImGuiKey.Y)) ||
+            (ctrlPressed && shiftPressed && ImGui.IsKeyPressed(ImGuiKey.Z)))
+        {
+            _undoRedo.Redo();
+        }
+
+        // G - Toggle grid snap
+        if (ImGui.IsKeyPressed(ImGuiKey.G) && !ctrlPressed)
+        {
+            _snapping.EnabledModes ^= SnapMode.Grid;
+        }
+
+        // N - Toggle node snap
+        if (ImGui.IsKeyPressed(ImGuiKey.N) && !ctrlPressed)
+        {
+            _snapping.EnabledModes ^= SnapMode.Node;
+        }
+
+        // V - Toggle vertex snap
+        if (ImGui.IsKeyPressed(ImGuiKey.V) && !ctrlPressed)
+        {
+            _snapping.EnabledModes ^= SnapMode.Vertex;
+        }
+
+        // A - Toggle angle snap
+        if (ImGui.IsKeyPressed(ImGuiKey.A) && !ctrlPressed)
+        {
+            _snapping.EnabledModes ^= SnapMode.Angle;
+        }
+
+        // S - Toggle snapping on/off
+        if (ImGui.IsKeyPressed(ImGuiKey.S) && !ctrlPressed)
+        {
+            _snapping.IsEnabled = !_snapping.IsEnabled;
         }
     }
 
@@ -1410,11 +1802,17 @@ public class TwoDGeomechanicsTools
 
     public void RenderOverlay(ImDrawListPtr drawList, Func<Vector2, Vector2> worldToScreen)
     {
+        // Render grid if enabled
+        if (_snapping.IsEnabled && _snapping.EnabledModes.HasFlag(SnapMode.Grid))
+        {
+            RenderGrid(drawList, worldToScreen);
+        }
+
         // Render mesh and results
         _renderer.Mesh = _simulator.Mesh;
         _renderer.Render(drawList, worldToScreen);
 
-        // Render primitives
+        // Render primitives (with deformation preview if active)
         RenderPrimitives(drawList, worldToScreen);
 
         // Render joint sets
@@ -1423,8 +1821,182 @@ public class TwoDGeomechanicsTools
         // Render drawing preview
         RenderDrawingPreview(drawList, worldToScreen);
 
-        // Render selection highlight
+        // Render selection highlight and transform handles
         RenderSelection(drawList, worldToScreen);
+
+        // Render snap indicator
+        RenderSnapIndicator(drawList, worldToScreen);
+
+        // Render measurement overlay
+        RenderMeasurement(drawList, worldToScreen);
+
+        // Render coordinate display
+        if (_showCoordinates)
+        {
+            RenderCoordinateDisplay(drawList, worldToScreen);
+        }
+    }
+
+    private void RenderGrid(ImDrawListPtr drawList, Func<Vector2, Vector2> worldToScreen)
+    {
+        var (min, max) = _simulator.Mesh.GetBoundingBox();
+
+        // Extend grid beyond mesh bounds
+        float padding = _snapping.GridSpacing * 5;
+        min -= new Vector2(padding, padding);
+        max += new Vector2(padding, padding);
+
+        // Snap bounds to grid
+        min = new Vector2(
+            MathF.Floor(min.X / _snapping.GridSpacing) * _snapping.GridSpacing,
+            MathF.Floor(min.Y / _snapping.GridSpacing) * _snapping.GridSpacing);
+        max = new Vector2(
+            MathF.Ceiling(max.X / _snapping.GridSpacing) * _snapping.GridSpacing,
+            MathF.Ceiling(max.Y / _snapping.GridSpacing) * _snapping.GridSpacing);
+
+        uint gridColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.3f, 0.3f, 0.3f, 0.3f));
+        uint majorColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.5f, 0.4f));
+
+        int majorInterval = 5;
+
+        // Vertical lines
+        int i = 0;
+        for (float x = min.X; x <= max.X; x += _snapping.GridSpacing)
+        {
+            var p1 = worldToScreen(new Vector2(x, min.Y));
+            var p2 = worldToScreen(new Vector2(x, max.Y));
+            uint color = (i % majorInterval == 0) ? majorColor : gridColor;
+            drawList.AddLine(p1, p2, color, 1);
+            i++;
+        }
+
+        // Horizontal lines
+        i = 0;
+        for (float y = min.Y; y <= max.Y; y += _snapping.GridSpacing)
+        {
+            var p1 = worldToScreen(new Vector2(min.X, y));
+            var p2 = worldToScreen(new Vector2(max.X, y));
+            uint color = (i % majorInterval == 0) ? majorColor : gridColor;
+            drawList.AddLine(p1, p2, color, 1);
+            i++;
+        }
+    }
+
+    private void RenderSnapIndicator(ImDrawListPtr drawList, Func<Vector2, Vector2> worldToScreen)
+    {
+        if (!_snapping.IsEnabled || !_lastSnapResult.Snapped) return;
+
+        var screenPos = worldToScreen(_lastSnappedPos);
+
+        uint snapColor = _lastSnapResult.SnapType switch
+        {
+            SnapMode.Grid => ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 1f, 0.8f)),
+            SnapMode.Node => ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0.5f, 0f, 0.9f)),
+            SnapMode.Vertex => ImGui.ColorConvertFloat4ToU32(new Vector4(0f, 1f, 0f, 0.9f)),
+            SnapMode.Edge => ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 0f, 0.8f)),
+            SnapMode.Center => ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0f, 1f, 0.9f)),
+            SnapMode.Midpoint => ImGui.ColorConvertFloat4ToU32(new Vector4(0f, 1f, 1f, 0.9f)),
+            SnapMode.Intersection => ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0f, 0f, 0.9f)),
+            _ => ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 0.8f))
+        };
+
+        // Draw snap marker
+        float markerSize = 8;
+        switch (_lastSnapResult.SnapType)
+        {
+            case SnapMode.Grid:
+                // Small cross
+                drawList.AddLine(screenPos - new Vector2(markerSize, 0), screenPos + new Vector2(markerSize, 0), snapColor, 2);
+                drawList.AddLine(screenPos - new Vector2(0, markerSize), screenPos + new Vector2(0, markerSize), snapColor, 2);
+                break;
+            case SnapMode.Node:
+            case SnapMode.Vertex:
+                // Square
+                drawList.AddRect(screenPos - new Vector2(markerSize, markerSize), screenPos + new Vector2(markerSize, markerSize), snapColor, 0, ImDrawFlags.None, 2);
+                break;
+            case SnapMode.Center:
+                // Circle with cross
+                drawList.AddCircle(screenPos, markerSize, snapColor, 16, 2);
+                drawList.AddLine(screenPos - new Vector2(markerSize * 0.7f, 0), screenPos + new Vector2(markerSize * 0.7f, 0), snapColor, 1);
+                drawList.AddLine(screenPos - new Vector2(0, markerSize * 0.7f), screenPos + new Vector2(0, markerSize * 0.7f), snapColor, 1);
+                break;
+            case SnapMode.Midpoint:
+                // Triangle
+                drawList.AddTriangle(screenPos + new Vector2(0, -markerSize),
+                                     screenPos + new Vector2(-markerSize, markerSize),
+                                     screenPos + new Vector2(markerSize, markerSize),
+                                     snapColor, 2);
+                break;
+            case SnapMode.Edge:
+                // Perpendicular mark
+                drawList.AddLine(screenPos - new Vector2(markerSize, markerSize), screenPos + new Vector2(markerSize, -markerSize), snapColor, 2);
+                break;
+            case SnapMode.Intersection:
+                // X mark
+                drawList.AddLine(screenPos - new Vector2(markerSize, markerSize), screenPos + new Vector2(markerSize, markerSize), snapColor, 2);
+                drawList.AddLine(screenPos - new Vector2(-markerSize, markerSize), screenPos + new Vector2(-markerSize, -markerSize), snapColor, 2);
+                break;
+            default:
+                drawList.AddCircleFilled(screenPos, 4, snapColor);
+                break;
+        }
+    }
+
+    private void RenderMeasurement(ImDrawListPtr drawList, Func<Vector2, Vector2> worldToScreen)
+    {
+        if (_measurement.MeasurePoints.Count == 0) return;
+
+        uint lineColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0.8f, 0f, 1f));
+        uint pointColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0.5f, 0f, 1f));
+        uint textColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 1f));
+
+        // Draw points
+        foreach (var p in _measurement.MeasurePoints)
+        {
+            var screenPos = worldToScreen(p);
+            drawList.AddCircleFilled(screenPos, 5, pointColor);
+        }
+
+        // Draw lines
+        for (int i = 1; i < _measurement.MeasurePoints.Count; i++)
+        {
+            var p1 = worldToScreen(_measurement.MeasurePoints[i - 1]);
+            var p2 = worldToScreen(_measurement.MeasurePoints[i]);
+            drawList.AddLine(p1, p2, lineColor, 2);
+
+            // Draw distance label
+            var mid = (p1 + p2) / 2;
+            float dist = Vector2.Distance(_measurement.MeasurePoints[i - 1], _measurement.MeasurePoints[i]);
+            drawList.AddText(mid + new Vector2(5, -15), textColor, MeasurementSystem.FormatDistance(dist, 2));
+        }
+
+        // Draw line to cursor if measuring
+        if (_measurement.IsMeasuring && _measurement.MeasurePoints.Count > 0)
+        {
+            var lastPoint = worldToScreen(_measurement.MeasurePoints[^1]);
+            var cursorPos = worldToScreen(_lastSnappedPos);
+            uint previewColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0.8f, 0f, 0.5f));
+            drawList.AddLine(lastPoint, cursorPos, previewColor, 1);
+        }
+    }
+
+    private void RenderCoordinateDisplay(ImDrawListPtr drawList, Func<Vector2, Vector2> worldToScreen)
+    {
+        var screenPos = worldToScreen(_lastMouseWorldPos);
+
+        // Display coordinates near cursor
+        string coordText = MeasurementSystem.FormatCoordinate(_lastSnappedPos);
+        uint textColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.9f, 0.9f, 0.9f, 0.8f));
+        uint bgColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0f, 0f, 0f, 0.5f));
+
+        var textPos = screenPos + new Vector2(15, 10);
+        var textSize = ImGui.CalcTextSize(coordText);
+
+        // Background
+        drawList.AddRectFilled(textPos - new Vector2(2, 2), textPos + textSize + new Vector2(4, 2), bgColor, 3);
+
+        // Text
+        drawList.AddText(textPos, textColor, coordText);
     }
 
     private void RenderPrimitives(ImDrawListPtr drawList, Func<Vector2, Vector2> worldToScreen)
@@ -1551,6 +2123,9 @@ public class TwoDGeomechanicsTools
                 int j = (i + 1) % vertices.Count;
                 drawList.AddLine(screenVerts[i], screenVerts[j], selectColor, 3);
             }
+
+            // Draw transform handles
+            RenderTransformHandles(drawList, worldToScreen);
         }
 
         // Highlight selected element
@@ -1573,6 +2148,95 @@ public class TwoDGeomechanicsTools
         {
             var node = _simulator.Mesh.Nodes[_selectedNodeId];
             drawList.AddCircle(worldToScreen(node.InitialPosition), 8, selectColor, 16, 3);
+        }
+    }
+
+    private void RenderTransformHandles(ImDrawListPtr drawList, Func<Vector2, Vector2> worldToScreen)
+    {
+        if (_selectedPrimitive == null || _currentMode != GeomechanicsToolMode.Select) return;
+
+        var handles = _transformHandles.GetHandles(_selectedPrimitive, _currentZoom);
+
+        foreach (var handle in handles)
+        {
+            var screenPos = worldToScreen(handle.Position);
+            bool isHovered = _transformHandles.HoveredHandle == handle.Type;
+            bool isActive = _transformHandles.ActiveHandle == handle.Type;
+
+            uint handleColor = isActive
+                ? ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0.8f, 0f, 1f))
+                : isHovered
+                    ? ImGui.ColorConvertFloat4ToU32(new Vector4(0f, 1f, 1f, 1f))
+                    : ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 0.8f));
+
+            uint fillColor = isActive
+                ? ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0.8f, 0f, 0.5f))
+                : isHovered
+                    ? ImGui.ColorConvertFloat4ToU32(new Vector4(0f, 1f, 1f, 0.3f))
+                    : ImGui.ColorConvertFloat4ToU32(new Vector4(0.2f, 0.2f, 0.2f, 0.5f));
+
+            float size = handle.Size * _currentZoom;
+
+            switch (handle.Type)
+            {
+                case HandleType.Move:
+                    // Cross arrows for move handle
+                    drawList.AddCircleFilled(screenPos, size, fillColor);
+                    drawList.AddCircle(screenPos, size, handleColor, 16, 2);
+                    // Arrow indicators
+                    drawList.AddLine(screenPos - new Vector2(size * 0.6f, 0), screenPos + new Vector2(size * 0.6f, 0), handleColor, 2);
+                    drawList.AddLine(screenPos - new Vector2(0, size * 0.6f), screenPos + new Vector2(0, size * 0.6f), handleColor, 2);
+                    break;
+
+                case HandleType.ScaleTopLeft:
+                case HandleType.ScaleTopRight:
+                case HandleType.ScaleBottomLeft:
+                case HandleType.ScaleBottomRight:
+                    // Square handles for corner scale
+                    drawList.AddRectFilled(screenPos - new Vector2(size, size), screenPos + new Vector2(size, size), fillColor);
+                    drawList.AddRect(screenPos - new Vector2(size, size), screenPos + new Vector2(size, size), handleColor, 0, ImDrawFlags.None, 2);
+                    break;
+
+                case HandleType.ScaleTop:
+                case HandleType.ScaleBottom:
+                    // Horizontal bar for vertical scale
+                    drawList.AddRectFilled(screenPos - new Vector2(size * 1.5f, size * 0.6f), screenPos + new Vector2(size * 1.5f, size * 0.6f), fillColor);
+                    drawList.AddRect(screenPos - new Vector2(size * 1.5f, size * 0.6f), screenPos + new Vector2(size * 1.5f, size * 0.6f), handleColor, 0, ImDrawFlags.None, 2);
+                    break;
+
+                case HandleType.ScaleLeft:
+                case HandleType.ScaleRight:
+                    // Vertical bar for horizontal scale
+                    drawList.AddRectFilled(screenPos - new Vector2(size * 0.6f, size * 1.5f), screenPos + new Vector2(size * 0.6f, size * 1.5f), fillColor);
+                    drawList.AddRect(screenPos - new Vector2(size * 0.6f, size * 1.5f), screenPos + new Vector2(size * 0.6f, size * 1.5f), handleColor, 0, ImDrawFlags.None, 2);
+                    break;
+
+                case HandleType.RotateTopLeft:
+                case HandleType.RotateTopRight:
+                case HandleType.RotateBottomLeft:
+                case HandleType.RotateBottomRight:
+                    // Circular handles for rotation
+                    drawList.AddCircleFilled(screenPos, size * 0.8f, fillColor);
+                    drawList.AddCircle(screenPos, size * 0.8f, handleColor, 16, 2);
+                    // Rotation arc indicator
+                    float startAngle = handle.Type switch
+                    {
+                        HandleType.RotateTopLeft => MathF.PI * 0.75f,
+                        HandleType.RotateTopRight => MathF.PI * 0.25f,
+                        HandleType.RotateBottomRight => -MathF.PI * 0.25f,
+                        HandleType.RotateBottomLeft => -MathF.PI * 0.75f,
+                        _ => 0
+                    };
+                    for (int i = 0; i < 8; i++)
+                    {
+                        float a1 = startAngle - MathF.PI * 0.25f * i / 8;
+                        float a2 = startAngle - MathF.PI * 0.25f * (i + 1) / 8;
+                        var p1 = screenPos + new Vector2(MathF.Cos(a1), MathF.Sin(a1)) * size * 1.5f;
+                        var p2 = screenPos + new Vector2(MathF.Cos(a2), MathF.Sin(a2)) * size * 1.5f;
+                        drawList.AddLine(p1, p2, handleColor, 1);
+                    }
+                    break;
+            }
         }
     }
 
