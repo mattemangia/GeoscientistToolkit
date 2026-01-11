@@ -102,6 +102,7 @@ All datasets support comprehensive metadata:
 | **Table** | Tabular data | CSV, Excel | Statistics, filtering |
 | **GIS** | Geographic data | Shapefile, GeoJSON | Spatial operations |
 | **Borehole** | Well log data | LAS, .bhb | Lithology, correlation |
+| **2D Geology Profile** | Cross-section datasets | .2dgeo | Formation/fault editing, restoration |
 | **PNM** | Pore networks | Custom | Flow simulation |
 | **Dual PNM** | Dual-porosity networks | Custom | Macro/micro coupling |
 | **Seismic** | Seismic survey | SEG-Y | Trace visualization |
@@ -148,6 +149,24 @@ Well log data with depth-indexed properties.
 - Stratigraphic correlation
 - Multi-borehole visualization
 - Formation tops
+
+### 2D Geology Profile
+
+Cross-section datasets for structural interpretation and restoration.
+
+**Use cases:**
+- Drafting formations and faults along a profile
+- Restoring deformed sections to pre-deformation states
+- Preparing 2D slope stability inputs
+
+**Key features:**
+- Formation/fault drawing and editing tools
+- Topography editing with snapping
+- Interactive structural restoration overlay
+- Geologic presets for rapid section setup
+
+**GeoScript integration:**
+- `SLOPE2D_FROM_GEOLOGY` converts a profile into a 2D slope stability dataset.
 
 ### Pore Network Model (PNM)
 
@@ -325,7 +344,9 @@ Context-sensitive tools appear based on the selected dataset type:
 - Fullscreen
 
 **Tools Menu:**
-- GeoScript Editor
+- GeoScript Terminal
+- Stratigraphy Correlation Viewer
+- Triaxial Simulation
 - Material Library
 - Compound Library
 - System Info, Settings
@@ -350,6 +371,8 @@ Geoscientist's Toolkit includes 22 specialized analysis modules. Key modules are
 | Thermodynamics | [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry.md) |
 | Slope Stability | [Slope Stability](Slope-Stability.md) |
 | Photogrammetry | [Photogrammetry](Photogrammetry.md) |
+| 2D Geology & Restoration | [2D Geology & Restoration](2D-Geology-and-Restoration.md) |
+| Stratigraphy Correlation | [Stratigraphy Correlation](Stratigraphy-Correlation.md) |
 
 ### Overview of Analysis Capabilities
 
@@ -369,6 +392,15 @@ Geoscientist's Toolkit includes 22 specialized analysis modules. Key modules are
 - Elastic-plastic constitutive models
 - Mohr-Coulomb failure criterion
 - Property calibration
+
+#### Structural Geology & Restoration
+- 2D cross-section drafting and editing
+- Interactive restoration overlays
+- Geological presets for common structures
+
+#### Stratigraphy Correlation
+- Correlate international/regional stratigraphic charts
+- Export correlation tables and PNGs
 
 #### Thermodynamic Analysis
 - Chemical equilibrium solver

@@ -14,12 +14,15 @@ This page is an index of the simulation-oriented modules in Geoscientist's Toolk
 | **Geomechanical Simulation** | CT Image Stack | CT Tools → Analysis → Geomechanical Simulation | Stress/strain, damage, failure indices | [Geomechanical Simulation](Geomechanical-Simulation.md) |
 | **Pore Network Modeling** | PNM Dataset | Tools → PNM | Permeability, capillary curves, reactive transport | [Pore Network Modeling](Pore-Network-Modeling.md) |
 | **Slope Stability** | DEM / GIS Surface | Tools → Analysis → Slope Stability | Factor of safety, block kinematics | [Slope Stability](Slope-Stability.md) |
+| **2D Geology & Restoration** | 2D Geology Profile (.2dgeo) | 2D Geology Tools → Restore Section | Restored overlays, updated cross-sections | [2D Geology & Restoration](2D-Geology-and-Restoration.md) |
+| **Stratigraphy Correlation** | Built-in stratigraphic charts | Tools → Stratigraphy Correlation Viewer | Correlation lines, PNG/CSV exports | [Stratigraphy Correlation](Stratigraphy-Correlation.md) |
 | **Seismic & Earthquake** | Seismic Dataset | Tools → Analysis → Seismic | Seismic volumes, synthetic ties | [Seismic Analysis](Seismic-Analysis.md) |
 | **Geothermal Simulation** | Borehole, Mesh, GIS | Tools → Analysis → Geothermal | Temperature, flow, heat extraction | [Geothermal Simulation](Geothermal-Simulation.md) |
 | **Hydrological Analysis** | GIS Raster | GIS Tools → Hydrological Analysis | Flow paths, watersheds, rainfall response | [Hydrological Analysis](Hydrological-Analysis.md) |
 | **Thermodynamics & Geochemistry** | Table Dataset | GeoScript / Tools → Compound Library | Equilibrium speciation, phase diagrams | [Thermodynamics and Geochemistry](Thermodynamics-and-Geochemistry.md) |
 | **PhysicoChem Reactors** | PhysicoChem Dataset (Group) | Tools → Analysis → PhysicoChem | Multiphysics reactor states, param sweeps | [PhysicoChem Reactors](PhysicoChem-Reactors.md) |
 | **Multiphase Flow (PhysicoChem)** | PhysicoChem Dataset | GeoScript (ENABLE_MULTIPHASE...) | Phase saturations, EOS outputs | [Multiphase Flow](Multiphase-Flow.md) |
+| **Triaxial Simulation** | Material Library (+ optional PNM) | Tools → Triaxial Simulation | Stress-strain curves, Mohr circles, CSV output | [Geomechanical Simulation](Geomechanical-Simulation.md) |
 
 ---
 
@@ -48,6 +51,15 @@ The CT tool suite groups physics simulations in the **Analysis** category:
 
 These modules operate directly on segmented CT volumes and pull physical properties from the material library.
 
+### Structural Geology & Correlation
+
+- **2D Geology & Restoration** focuses on drafting cross-sections and restoring deformation in `.2dgeo` profiles.
+- **Stratigraphy Correlation** compares regional stratigraphic charts with correlation lines and exportable tables.
+
+### Rock Mechanics Testing
+
+- **Triaxial Simulation** provides a dedicated tool for virtual triaxial testing with customizable loading paths.
+
 ### Reservoir & Field-Scale Simulations
 
 - **Geothermal Simulation** runs coupled heat and flow, with optional geomechanical coupling.
@@ -75,11 +87,15 @@ These modules operate directly on segmented CT volumes and pull physical propert
 | `Analysis/Thermodynamic/` | Equilibrium, kinetics, phase diagrams |
 | `Analysis/PhysicoChem/` | Reactor solver, coupling, nuclear/ORC examples |
 | `Business/GeoScript*Extensions.cs` | Scripted simulation commands |
+| `Data/TwoDGeology/` | 2D geology datasets, restoration tools, cross-section utilities |
+| `Analysis/Geomechanics/TriaxialSimulationTool.cs` | Dedicated triaxial testing UI |
 
 ---
 
 ## Related Pages
 
 - [CT Imaging and Segmentation](CT-Imaging-and-Segmentation.md)
+- [2D Geology & Restoration](2D-Geology-and-Restoration.md)
+- [Stratigraphy Correlation](Stratigraphy-Correlation.md)
 - [GeoScript Manual](GeoScript-Manual.md)
 - [API Reference](API-Reference.md)

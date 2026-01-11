@@ -29,6 +29,8 @@ This wiki contains comprehensive documentation for the Geoscientist's Toolkit ap
 | | [Seismic Analysis](Seismic-Analysis.md) | [NodeEndpoint](NodeEndpoint.md) |
 | | [Geothermal Simulation](Geothermal-Simulation.md) | [Developer Guide](Developer-Guide.md) |
 | | [Simulation Modules](Simulation-Modules.md) | |
+| | [2D Geology & Restoration](2D-Geology-and-Restoration.md) | |
+| | [Stratigraphy Correlation](Stratigraphy-Correlation.md) | |
 
 ---
 
@@ -54,6 +56,7 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 | **CT Scans** | DICOM, TIFF, .ctstack | AI-powered segmentation (SAM2, MicroSAM), 3D reconstruction |
 | **Seismic Data** | SEG-Y | Trace analysis, wiggle/variable area displays, well correlation |
 | **Well Logs** | LAS, .bhb | Lithology editing, synthetic seismic, geothermal simulation |
+| **2D Geology Profiles** | .2dgeo | Cross-section editing, structural restoration, slope stability prep |
 | **3D Meshes** | OBJ, STL | Import/export, surface extraction from CT |
 | **GIS Data** | Shapefile, GeoJSON | Subsurface mapping, geographic integration |
 | **Images** | PNG, JPG, BMP, TIFF | Standard image processing and analysis |
@@ -89,6 +92,10 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 - **Geothermal Simulation** - Heat transfer and fluid flow in boreholes
 
 **Learn more:** [Simulation Modules](Simulation-Modules.md) | [Geothermal Simulation](Geothermal-Simulation.md) | [Slope Stability](Slope-Stability.md) | [Pore Network Modeling](Pore-Network-Modeling.md)
+
+#### Structural Geology & Correlation
+- **2D Geology & Restoration** - Cross-section drafting, fault/formation editing, interactive restoration ([2D Geology & Restoration](2D-Geology-and-Restoration.md))
+- **Stratigraphy Correlation** - Compare regional/chronostratigraphic charts and export correlation tables ([Stratigraphy Correlation](Stratigraphy-Correlation.md))
 
 #### Thermodynamics & Geochemistry
 - Extended compound library (60+ species)
@@ -185,6 +192,8 @@ mesh.Export("output.obj")
 - [Geothermal Simulation](Geothermal-Simulation.md) - Heat transfer and BHE modeling
 - [Pore Network Modeling](Pore-Network-Modeling.md) - PNM generation and flow simulation
 - [Slope Stability](Slope-Stability.md) - DEM-based stability analysis
+- [2D Geology & Restoration](2D-Geology-and-Restoration.md) - Cross-section workflows and restoration
+- [Stratigraphy Correlation](Stratigraphy-Correlation.md) - Stratigraphic chart correlation viewer
 - [Photogrammetry](Photogrammetry.md) - 3D reconstruction from images
 - [Hydrological Analysis](Hydrological-Analysis.md) - Flow routing and rainfall simulation
 - [Acoustic Simulation](Acoustic-Simulation.md) - CT-scale wave propagation

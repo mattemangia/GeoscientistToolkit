@@ -27,6 +27,8 @@
 * [Hydrological Analysis](Hydrological-Analysis.md)
 * [Pore Network Modeling](Pore-Network-Modeling.md)
 * [Slope Stability](Slope-Stability.md)
+* [2D Geology & Restoration](2D-Geology-and-Restoration.md)
+* [Stratigraphy Correlation](Stratigraphy-Correlation.md)
 * [Photogrammetry](Photogrammetry.md)
 * [Acoustic Simulation](Acoustic-Simulation.md)
 * [NMR Simulation](NMR-Simulation.md)
