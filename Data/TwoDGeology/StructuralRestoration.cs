@@ -23,14 +23,14 @@ namespace GeoscientistToolkit.Business.GIS;
 /// </summary>
 public class StructuralRestoration
 {
-    // Store transformation parameters by INDEX for reliable matching
-    private readonly List<FaultRestorationData> _faultDataByIndex = new();
-    private readonly List<FoldingData> _foldingDataByIndex = new();
+    // Store transformation parameters for reversibility
+    private readonly Dictionary<CrossSectionGenerator.ProjectedFault, FaultRestorationData> _faultData = new();
+    private readonly Dictionary<CrossSectionGenerator.ProjectedFormation, FoldingData> _foldingData = new();
     private readonly CrossSectionGenerator.CrossSection _originalSection;
 
     public StructuralRestoration(CrossSectionGenerator.CrossSection section)
     {
-        _originalSection = section ?? throw new ArgumentNullException(nameof(section));
+        _originalSection = section;
         RestoredSection = DeepCopySection(section);
         AnalyzeStructures();
     }
@@ -42,29 +42,25 @@ public class StructuralRestoration
     /// </summary>
     private void AnalyzeStructures()
     {
-        _faultDataByIndex.Clear();
-        _foldingDataByIndex.Clear();
+        _faultData.Clear();
+        _foldingData.Clear();
 
-        // Analyze each fault BY INDEX
-        for (int i = 0; i < _originalSection.Faults.Count; i++)
+        // Analyze each fault
+        foreach (var fault in _originalSection.Faults)
         {
-            var fault = _originalSection.Faults[i];
             var data = new FaultRestorationData
             {
                 OriginalTrace = new List<Vector2>(fault.FaultTrace),
                 Displacement = CalculateFaultDisplacement(fault),
-                HangingWallCutoff = fault.FaultTrace.Count > 0 ? fault.FaultTrace[0] : Vector2.Zero,
-                FootwallCutoff = fault.FaultTrace.Count > 0 ? fault.FaultTrace[^1] : Vector2.Zero,
-                FaultType = fault.Type,
-                Dip = fault.Dip
+                HangingWallCutoff = fault.FaultTrace.FirstOrDefault(),
+                FootwallCutoff = fault.FaultTrace.LastOrDefault()
             };
-            _faultDataByIndex.Add(data);
+            _faultData[fault] = data;
         }
 
-        // Analyze each formation for fold geometry BY INDEX
-        for (int i = 0; i < _originalSection.Formations.Count; i++)
+        // Analyze each formation for fold geometry
+        foreach (var formation in _originalSection.Formations)
         {
-            var formation = _originalSection.Formations[i];
             var data = new FoldingData
             {
                 OriginalTop = new List<Vector2>(formation.TopBoundary),
@@ -72,12 +68,39 @@ public class StructuralRestoration
                 FoldStyle = DetermineFoldStyle(formation),
                 Wavelength = CalculateFoldWavelength(formation.TopBoundary),
                 Amplitude = CalculateFoldAmplitude(formation.TopBoundary),
-                AxialSurfacePosition = FindAxialSurface(formation.TopBoundary),
-                OriginalThickness = CalculateFormationThickness(formation)
+                AxialSurfacePosition = FindAxialSurface(formation.TopBoundary)
             };
-            _foldingDataByIndex.Add(data);
+            _foldingData[formation] = data;
         }
     }
+
+    #region Faulting (Forward Modeling)
+
+    private void FaultAllFaults(float percentage)
+    {
+        // Process faults from oldest to youngest (bottom to top)
+        var sortedFaults = RestoredSection.Faults
+            .OrderBy(f => f.FaultTrace.FirstOrDefault().Y)
+            .ToList();
+
+        foreach (var fault in sortedFaults)
+        {
+            if (!_faultData.ContainsKey(fault)) continue;
+            var data = _faultData[fault];
+
+            // Calculate displacement vector
+            var displacementVector = data.Displacement * (percentage / 100f);
+
+            // Apply to all formations
+            foreach (var formation in RestoredSection.Formations)
+            {
+                ApplyVectorToPoints(formation.TopBoundary, fault, displacementVector);
+                ApplyVectorToPoints(formation.BottomBoundary, fault, displacementVector);
+            }
+        }
+    }
+
+    #endregion
 
     #region Public Interface
 
@@ -88,20 +111,12 @@ public class StructuralRestoration
     public void Restore(float percentage)
     {
         percentage = Math.Clamp(percentage, 0f, 100f);
-
-        // Always start fresh from the original section
         RestoredSection = DeepCopySection(_originalSection);
-
-        if (percentage < 0.01f)
-        {
-            // At 0%, just show the original - no transformation needed
-            return;
-        }
 
         // Step 1: Remove fault displacements (unfaulting)
         UnfaultAllFaults(percentage);
 
-        // Step 2: Remove folds (unfolding) - this is the main restoration step
+        // Step 2: Remove folds (unfolding)
         UnfoldAllFormations(percentage);
     }
 
@@ -114,14 +129,9 @@ public class StructuralRestoration
     {
         percentage = Math.Clamp(percentage, 0f, 100f);
 
-        // Start from a flat reference state
-        CreateFlatReference();
-
-        if (percentage < 0.01f)
-        {
-            // At 0%, show the flat reference
-            return;
-        }
+        // Start from the original (which might already be deformed) 
+        // or from a flat state if we want pure forward modeling
+        RestoredSection = DeepCopySection(_originalSection);
 
         // Apply folding first (chronologically correct for many settings)
         FoldAllFormations(percentage);
@@ -137,41 +147,31 @@ public class StructuralRestoration
     {
         RestoredSection = DeepCopySection(_originalSection);
 
-        // Flatten all formations to horizontal layers stacked from top to bottom
-        var sortedFormations = RestoredSection.Formations
-            .Select((f, idx) => (formation: f, data: idx < _foldingDataByIndex.Count ? _foldingDataByIndex[idx] : null))
-            .Where(x => x.data != null)
-            .OrderByDescending(x => x.data.OriginalTop.Count > 0 ? x.data.OriginalTop.Average(p => p.Y) : float.MinValue)
-            .ToList();
+        // Flatten all formations to a horizontal datum
+        var datumElevation = 0f;
+        var cumulativeThickness = 0f;
 
-        float datumElevation = 0f;
-        float cumulativeDepth = 0f;
-
-        foreach (var (formation, data) in sortedFormations)
+        foreach (var formation in RestoredSection.Formations.OrderBy(f => f.TopBoundary.Select(p => p.Y).Max()))
         {
-            var thickness = data.OriginalThickness;
-            var topElev = datumElevation - cumulativeDepth;
+            var thickness = CalculateFormationThickness(formation);
+            var topElev = datumElevation - cumulativeThickness;
             var bottomElev = topElev - thickness;
 
             FlattenBoundary(formation.TopBoundary, topElev);
             FlattenBoundary(formation.BottomBoundary, bottomElev);
 
-            cumulativeDepth += thickness;
+            cumulativeThickness += thickness;
         }
 
-        // Flatten faults to vertical lines
+        // Remove faults (set to vertical lines)
         foreach (var fault in RestoredSection.Faults)
-        {
             if (fault.FaultTrace.Count >= 2)
             {
                 var x = fault.FaultTrace[0].X;
-                var minY = fault.FaultTrace.Min(p => p.Y);
-                var maxY = fault.FaultTrace.Max(p => p.Y);
                 fault.FaultTrace.Clear();
-                fault.FaultTrace.Add(new Vector2(x, maxY));
-                fault.FaultTrace.Add(new Vector2(x, minY));
+                fault.FaultTrace.Add(new Vector2(x, 0));
+                fault.FaultTrace.Add(new Vector2(x, -1000));
             }
-        }
     }
 
     #endregion
@@ -180,27 +180,24 @@ public class StructuralRestoration
 
     private void UnfaultAllFaults(float percentage)
     {
-        // Process faults from youngest to oldest (typically top to bottom in section)
-        // Use indices to properly match faults to their restoration data
-        var faultIndices = Enumerable.Range(0, Math.Min(RestoredSection.Faults.Count, _faultDataByIndex.Count))
-            .OrderByDescending(i => RestoredSection.Faults[i].FaultTrace.Count > 0
-                ? RestoredSection.Faults[i].FaultTrace[0].Y
-                : float.MinValue)
+        // Process faults from youngest to oldest (top to bottom in section)
+        var sortedFaults = RestoredSection.Faults
+            .OrderByDescending(f => f.FaultTrace.FirstOrDefault().Y)
             .ToList();
 
-        foreach (var faultIndex in faultIndices)
+        foreach (var fault in sortedFaults)
         {
-            var fault = RestoredSection.Faults[faultIndex];
-            var data = _faultDataByIndex[faultIndex];
+            if (!_faultData.ContainsKey(fault)) continue;
+            var data = _faultData[fault];
 
-            // Calculate restoration vector (opposite of displacement, scaled by percentage)
+            // Calculate restoration vector (opposite of displacement)
             var restorationVector = -data.Displacement * (percentage / 100f);
 
-            // Apply to all formations in the hanging wall
+            // Apply to all formations
             foreach (var formation in RestoredSection.Formations)
             {
-                ApplyVectorToHangingWall(formation.TopBoundary, fault, data, restorationVector);
-                ApplyVectorToHangingWall(formation.BottomBoundary, fault, data, restorationVector);
+                ApplyVectorToPoints(formation.TopBoundary, fault, restorationVector);
+                ApplyVectorToPoints(formation.BottomBoundary, fault, restorationVector);
             }
         }
     }
@@ -215,60 +212,13 @@ public class StructuralRestoration
             var dipRad = fault.Dip * MathF.PI / 180f;
             var heave = fault.Displacement.Value * MathF.Cos(dipRad);
             var throw_ = fault.Displacement.Value * MathF.Sin(dipRad);
-
-            // Direction depends on fault type
-            if (fault.Type == GeologicalFeatureType.Fault_Normal)
-            {
-                return new Vector2(heave, -throw_); // Normal faults: hanging wall moves down
-            }
-            else if (fault.Type == GeologicalFeatureType.Fault_Reverse ||
-                     fault.Type == GeologicalFeatureType.Fault_Thrust)
-            {
-                return new Vector2(-heave, throw_); // Reverse/thrust: hanging wall moves up
-            }
             return new Vector2(heave, throw_);
         }
 
-        // Estimate from geometry if no displacement specified
+        // Estimate from geometry
         var p1 = fault.FaultTrace[0];
         var p2 = fault.FaultTrace[^1];
-        var estimatedDisplacement = Vector2.Distance(p1, p2) * 0.1f; // Estimate 10% of trace length
-
-        var dipRad2 = fault.Dip * MathF.PI / 180f;
-        return new Vector2(
-            estimatedDisplacement * MathF.Cos(dipRad2),
-            estimatedDisplacement * MathF.Sin(dipRad2)
-        );
-    }
-
-    #endregion
-
-    #region Faulting (Forward Modeling)
-
-    private void FaultAllFaults(float percentage)
-    {
-        // Process faults from oldest to youngest (bottom to top)
-        var faultIndices = Enumerable.Range(0, Math.Min(RestoredSection.Faults.Count, _faultDataByIndex.Count))
-            .OrderBy(i => RestoredSection.Faults[i].FaultTrace.Count > 0
-                ? RestoredSection.Faults[i].FaultTrace[0].Y
-                : float.MaxValue)
-            .ToList();
-
-        foreach (var faultIndex in faultIndices)
-        {
-            var fault = RestoredSection.Faults[faultIndex];
-            var data = _faultDataByIndex[faultIndex];
-
-            // Calculate displacement vector (scaled by percentage)
-            var displacementVector = data.Displacement * (percentage / 100f);
-
-            // Apply to all formations
-            foreach (var formation in RestoredSection.Formations)
-            {
-                ApplyVectorToHangingWall(formation.TopBoundary, fault, data, displacementVector);
-                ApplyVectorToHangingWall(formation.BottomBoundary, fault, data, displacementVector);
-            }
-        }
+        return new Vector2(p1.X - p2.X, p1.Y - p2.Y);
     }
 
     #endregion
@@ -277,57 +227,35 @@ public class StructuralRestoration
 
     private void UnfoldAllFormations(float percentage)
     {
-        if (RestoredSection.Formations.Count == 0 || _foldingDataByIndex.Count == 0)
-            return;
+        // Find the stratigraphically highest (youngest) formation as datum
+        var datumFormation = RestoredSection.Formations
+            .OrderByDescending(f => f.TopBoundary.Select(p => p.Y).Max())
+            .FirstOrDefault();
 
-        // Find a datum - use the stratigraphically highest formation's average top elevation
-        var formationsWithData = RestoredSection.Formations
-            .Select((f, idx) => (formation: f, data: idx < _foldingDataByIndex.Count ? _foldingDataByIndex[idx] : null, index: idx))
-            .Where(x => x.data != null)
-            .ToList();
+        if (datumFormation == null) return;
 
-        if (formationsWithData.Count == 0) return;
+        // Use the mean elevation of the datum formation's top
+        var datumElevation = datumFormation.TopBoundary.Select(p => p.Y).Average();
 
-        // Sort by average Y to establish stratigraphic order (highest = youngest)
-        var sortedByElevation = formationsWithData
-            .OrderByDescending(x => x.data.OriginalTop.Count > 0 ? x.data.OriginalTop.Average(p => p.Y) : float.MinValue)
-            .ToList();
-
-        // The datum is the average elevation of the top formation (this becomes horizontal at 100%)
-        var datumFormationData = sortedByElevation[0].data;
-        var datumElevation = datumFormationData.OriginalTop.Count > 0
-            ? datumFormationData.OriginalTop.Average(p => p.Y)
-            : 0f;
-
-        // Calculate cumulative depth from datum for each formation
-        float cumulativeDepth = 0f;
-
-        foreach (var (formation, data, originalIndex) in sortedByElevation)
+        // Process each formation
+        foreach (var formation in RestoredSection.Formations)
         {
-            var thickness = data.OriginalThickness;
+            if (!_foldingData.ContainsKey(formation)) continue;
+            var data = _foldingData[formation];
 
-            // Target elevations for this formation when fully restored
-            var targetTopElevation = datumElevation - cumulativeDepth;
-            var targetBottomElevation = targetTopElevation - thickness;
+            // Calculate target elevations based on stratigraphic position
+            var formationThickness = CalculateFormationThickness(formation);
+            var topTarget = datumElevation;
+            var bottomTarget = topTarget - formationThickness;
 
-            // Unfold using flexural slip method
-            UnfoldBoundaryFlexuralSlip(
-                formation.TopBoundary,
-                data.OriginalTop,
-                targetTopElevation,
-                percentage,
-                data
-            );
+            // Unfold boundaries using flexural slip method
+            UnfoldBoundaryFlexuralSlip(formation.TopBoundary, data.OriginalTop,
+                topTarget, percentage, data.FoldStyle);
+            UnfoldBoundaryFlexuralSlip(formation.BottomBoundary, data.OriginalBottom,
+                bottomTarget, percentage, data.FoldStyle);
 
-            UnfoldBoundaryFlexuralSlip(
-                formation.BottomBoundary,
-                data.OriginalBottom,
-                targetBottomElevation,
-                percentage,
-                data
-            );
-
-            cumulativeDepth += thickness;
+            // Update datum for next formation
+            datumElevation = bottomTarget;
         }
     }
 
@@ -336,76 +264,61 @@ public class StructuralRestoration
     ///     This method preserves bed length, which is the fundamental constraint
     ///     for flexural slip folding (Ramsay, 1967; Ramsay & Huber, 1987).
     /// </summary>
-    private void UnfoldBoundaryFlexuralSlip(
-        List<Vector2> boundary,
-        List<Vector2> originalBoundary,
-        float targetElevation,
-        float percentage,
-        FoldingData foldData)
+    private void UnfoldBoundaryFlexuralSlip(List<Vector2> boundary, List<Vector2> originalBoundary,
+        float targetElevation, float percentage, FoldStyle style)
     {
-        if (boundary.Count < 2 || originalBoundary.Count < 2) return;
+        if (boundary.Count < 2) return;
 
-        // Calculate the total arc length of the original (deformed) boundary
-        var totalArcLength = CalculateLineLength(originalBoundary);
+        // Calculate the deformed bed length
+        var deformedLength = CalculateLineLength(originalBoundary);
 
-        // Find a stable pin point (minimum curvature point)
+        // Define pin line - use the point with minimum curvature (most stable)
         var pinIndex = FindPinPoint(originalBoundary);
-        var pinX = originalBoundary[pinIndex].X;
+        var pinPoint = originalBoundary[pinIndex];
+        var pinX = pinPoint.X;
 
-        // Calculate arc lengths from pin point for the original deformed shape
-        var arcLengths = CalculateArcLengths(originalBoundary, pinIndex);
-
-        // Create the target flattened positions (preserving arc length = bed length)
+        // Create flattened boundary preserving bed length
         var flattenedBoundary = new List<Vector2>(boundary.Count);
 
-        for (var i = 0; i < originalBoundary.Count; i++)
+        // Calculate cumulative arc lengths from pin point
+        var arcLengths = CalculateArcLengths(originalBoundary, pinIndex);
+
+        // Generate flattened positions
+        for (var i = 0; i < boundary.Count; i++)
         {
-            float x;
+            float x, y;
+
             if (i < pinIndex)
-            {
-                // Points before pin - extend to the left based on arc length
+                // Points before pin - extend to the left
                 x = pinX - arcLengths[i];
-            }
             else if (i > pinIndex)
-            {
-                // Points after pin - extend to the right based on arc length
+                // Points after pin - extend to the right
                 x = pinX + arcLengths[i];
-            }
             else
-            {
-                // Pin point stays at same X
+                // Pin point
                 x = pinX;
-            }
 
-            flattenedBoundary.Add(new Vector2(x, targetElevation));
+            y = targetElevation;
+            flattenedBoundary.Add(new Vector2(x, y));
         }
 
-        // Ensure we have the same number of points
-        while (flattenedBoundary.Count < boundary.Count)
-        {
-            flattenedBoundary.Add(flattenedBoundary[^1]);
-        }
-        while (flattenedBoundary.Count > boundary.Count)
-        {
-            flattenedBoundary.RemoveAt(flattenedBoundary.Count - 1);
-        }
-
-        // Interpolate between current (deformed) state and flattened state based on percentage
-        var t = percentage / 100f;
+        // Interpolate between current deformed state and flattened state
         for (var i = 0; i < boundary.Count; i++)
         {
             var current = boundary[i];
             var target = flattenedBoundary[i];
+
+            var t = percentage / 100f;
             boundary[i] = Vector2.Lerp(current, target, t);
         }
     }
 
     /// <summary>
-    ///     Finds the best pin point - the point with minimum curvature (most stable for restoration)
+    ///     Finds the best pin point - the point with minimum curvature
     /// </summary>
     private int FindPinPoint(List<Vector2> boundary)
     {
-        if (boundary.Count < 3) return boundary.Count / 2;
+        if (boundary.Count < 3) return 0;
 
         var minCurvatureIndex = 1;
         var minCurvature = float.MaxValue;
@@ -425,19 +338,9 @@ public class StructuralRestoration
 
     private float CalculateCurvature(Vector2 p1, Vector2 p2, Vector2 p3)
     {
-        var v1 = p2 - p1;
-        var v2 = p3 - p2;
-
-        var len1 = v1.Length();
-        var len2 = v2.Length();
-
-        if (len1 < 1e-6f || len2 < 1e-6f) return 0f;
-
-        v1 /= len1;
-        v2 /= len2;
-
-        var dotProduct = Math.Clamp(Vector2.Dot(v1, v2), -1f, 1f);
-        var angle = MathF.Acos(dotProduct);
+        var v1 = Vector2.Normalize(p2 - p1);
+        var v2 = Vector2.Normalize(p3 - p2);
+        var angle = MathF.Acos(Math.Clamp(Vector2.Dot(v1, v2), -1f, 1f));
         return angle;
     }
 
@@ -447,8 +350,8 @@ public class StructuralRestoration
     private List<float> CalculateArcLengths(List<Vector2> boundary, int referenceIndex)
     {
         var arcLengths = new List<float>(boundary.Count);
-        for (var i = 0; i < boundary.Count; i++)
-            arcLengths.Add(0f);
+
+        for (var i = 0; i < boundary.Count; i++) arcLengths.Add(0f);
 
         // Calculate lengths moving backward from reference
         var cumulative = 0f;
@@ -475,11 +378,12 @@ public class StructuralRestoration
 
     private void FoldAllFormations(float percentage)
     {
-        for (int i = 0; i < RestoredSection.Formations.Count && i < _foldingDataByIndex.Count; i++)
+        foreach (var formation in RestoredSection.Formations)
         {
-            var formation = RestoredSection.Formations[i];
-            var data = _foldingDataByIndex[i];
+            if (!_foldingData.ContainsKey(formation)) continue;
+            var data = _foldingData[formation];
 
+            // Apply folding based on the analyzed fold style
             FoldBoundary(formation.TopBoundary, data, percentage);
             FoldBoundary(formation.BottomBoundary, data, percentage);
         }
@@ -493,27 +397,35 @@ public class StructuralRestoration
     {
         if (boundary.Count < 2 || data.Wavelength <= 0) return;
 
-        var t = percentage / 100f;
+        var foldedBoundary = new List<Vector2>(boundary.Count);
 
         for (var i = 0; i < boundary.Count; i++)
         {
             var point = boundary[i];
 
-            // Calculate fold displacement using cosine wave for anticline
-            // z(x) = A * cos(2*pi * (x - center) / wavelength)
-            var normalizedX = (point.X - data.AxialSurfacePosition) / data.Wavelength;
-            var verticalDisplacement = data.Amplitude * MathF.Cos(2f * MathF.PI * normalizedX);
+            // Calculate fold displacement using sine wave
+            // z(x) = A * sin(2π * x / λ + φ)
+            var phase = 2f * MathF.PI * (point.X - data.AxialSurfacePosition) / data.Wavelength;
+            var verticalDisplacement = data.Amplitude * MathF.Sin(phase);
 
             // Apply fold style modification
             if (data.FoldStyle == FoldStyle.Similar)
             {
                 // Similar folds maintain constant thickness parallel to axial surface
+                // Amplitude increases with distance from axial surface
                 var distance = MathF.Abs(point.Y);
-                verticalDisplacement *= 1f + distance / 2000f;
+                verticalDisplacement *= 1f + distance / 1000f;
             }
 
-            // Interpolate from flat to folded
-            boundary[i] = new Vector2(point.X, point.Y + verticalDisplacement * t);
+            var foldedPoint = new Vector2(point.X, point.Y + verticalDisplacement);
+            foldedBoundary.Add(foldedPoint);
+        }
+
+        // Interpolate between current flat state and folded state
+        for (var i = 0; i < boundary.Count; i++)
+        {
+            var t = percentage / 100f;
+            boundary[i] = Vector2.Lerp(boundary[i], foldedBoundary[i], t);
         }
     }
 
@@ -523,11 +435,7 @@ public class StructuralRestoration
 
     private FoldStyle DetermineFoldStyle(CrossSectionGenerator.ProjectedFormation formation)
     {
-        // Return the formation's stored fold style if available
-        if (formation.FoldStyle != FoldStyle.Parallel)
-            return formation.FoldStyle;
-
-        // Otherwise analyze thickness variation
+        // Analyze thickness variation across the fold
         if (formation.TopBoundary.Count < 3 || formation.BottomBoundary.Count < 3)
             return FoldStyle.Parallel;
 
@@ -543,20 +451,21 @@ public class StructuralRestoration
         if (thicknesses.Count == 0) return FoldStyle.Parallel;
 
         var meanThickness = thicknesses.Average();
-        if (meanThickness < 1e-6f) return FoldStyle.Parallel;
-
         var variance = thicknesses.Select(t => (t - meanThickness) * (t - meanThickness)).Average();
         var coefficientOfVariation = MathF.Sqrt(variance) / meanThickness;
 
         // If thickness varies significantly, it's similar fold
-        return coefficientOfVariation > 0.2f ? FoldStyle.Similar : FoldStyle.Parallel;
+        if (coefficientOfVariation > 0.2f)
+            return FoldStyle.Similar;
+
+        return FoldStyle.Parallel;
     }
 
     private float CalculateFoldWavelength(List<Vector2> boundary)
     {
-        if (boundary.Count < 3) return 1000f;
+        if (boundary.Count < 3) return 1000f; // Default
 
-        // Find peaks and troughs (local extrema in Y)
+        // Find peaks and troughs
         var extrema = new List<int>();
         for (var i = 1; i < boundary.Count - 1; i++)
         {
@@ -568,18 +477,15 @@ public class StructuralRestoration
         }
 
         if (extrema.Count < 2)
-        {
-            // No clear fold - use total X range
+            // No clear fold - use total length
             return boundary[^1].X - boundary[0].X;
-        }
 
-        // Calculate average distance between consecutive extrema (half-wavelength)
+        // Calculate average distance between extrema as wavelength
         var totalDistance = 0f;
         for (var i = 0; i < extrema.Count - 1; i++)
             totalDistance += boundary[extrema[i + 1]].X - boundary[extrema[i]].X;
 
-        var halfWavelength = totalDistance / (extrema.Count - 1);
-        return halfWavelength * 2f; // Full wavelength
+        return totalDistance / (extrema.Count - 1) * 2f; // *2 for full wavelength
     }
 
     private float CalculateFoldAmplitude(List<Vector2> boundary)
@@ -594,11 +500,11 @@ public class StructuralRestoration
 
     private float FindAxialSurface(List<Vector2> boundary)
     {
-        if (boundary.Count < 3) return boundary.Count > 0 ? boundary[boundary.Count / 2].X : 0f;
+        if (boundary.Count < 3) return boundary[0].X;
 
-        // Find point of maximum curvature as approximate axial surface position
+        // Find point of maximum curvature as approximate axial surface
         var maxCurvature = 0f;
-        var maxIndex = boundary.Count / 2;
+        var maxIndex = 0;
 
         for (var i = 1; i < boundary.Count - 1; i++)
         {
@@ -616,9 +522,9 @@ public class StructuralRestoration
     private float CalculateFormationThickness(CrossSectionGenerator.ProjectedFormation formation)
     {
         if (formation.TopBoundary.Count == 0 || formation.BottomBoundary.Count == 0)
-            return 100f;
+            return 100f; // Default
 
-        // Calculate average vertical distance between top and bottom
+        // Calculate average vertical distance
         var samples = Math.Min(formation.TopBoundary.Count, formation.BottomBoundary.Count);
         var totalThickness = 0f;
         var count = 0;
@@ -642,17 +548,13 @@ public class StructuralRestoration
 
     private void FlattenBoundary(List<Vector2> boundary, float elevation)
     {
-        for (var i = 0; i < boundary.Count; i++)
-        {
-            boundary[i] = new Vector2(boundary[i].X, elevation);
-        }
+        for (var i = 0; i < boundary.Count; i++) boundary[i] = new Vector2(boundary[i].X, elevation);
     }
 
     private static float CalculateLineLength(List<Vector2> points)
     {
         float length = 0;
-        for (var i = 0; i < points.Count - 1; i++)
-            length += Vector2.Distance(points[i], points[i + 1]);
+        for (var i = 0; i < points.Count - 1; i++) length += Vector2.Distance(points[i], points[i + 1]);
         return length;
     }
 
@@ -660,37 +562,24 @@ public class StructuralRestoration
     ///     Applies a vector transformation to points in the hanging wall of a fault.
     ///     Uses SIMD when available for performance.
     /// </summary>
-    private void ApplyVectorToHangingWall(
-        List<Vector2> points,
-        CrossSectionGenerator.ProjectedFault fault,
-        FaultRestorationData data,
-        Vector2 vector)
+    private void ApplyVectorToPoints(List<Vector2> points, CrossSectionGenerator.ProjectedFault fault, Vector2 vector)
     {
         if (Avx2.IsSupported)
-            ApplyVectorAvx2(points, fault, data, vector);
+            ApplyVectorAvx2(points, fault, vector);
         else if (AdvSimd.IsSupported)
-            ApplyVectorNeon(points, fault, data, vector);
+            ApplyVectorNeon(points, fault, vector);
         else
-            ApplyVectorScalar(points, fault, data, vector);
+            ApplyVectorScalar(points, fault, vector);
     }
 
-    private void ApplyVectorScalar(
-        List<Vector2> points,
-        CrossSectionGenerator.ProjectedFault fault,
-        FaultRestorationData data,
-        Vector2 vector)
+    private void ApplyVectorScalar(List<Vector2> points, CrossSectionGenerator.ProjectedFault fault, Vector2 vector)
     {
         for (var i = 0; i < points.Count; i++)
-        {
-            if (IsHangingWall(points[i], fault, data))
+            if (IsHangingWall(points[i], fault))
                 points[i] += vector;
-        }
     }
 
-    private unsafe void ApplyVectorAvx2(
-        List<Vector2> points,
-        CrossSectionGenerator.ProjectedFault fault,
-        FaultRestorationData data,
+    private unsafe void ApplyVectorAvx2(List<Vector2> points, CrossSectionGenerator.ProjectedFault fault,
         Vector2 vector)
     {
         var count = points.Count;
@@ -699,16 +588,13 @@ public class StructuralRestoration
 
         for (var i = 0; i <= count - 4; i += 4)
         {
-            var pointsVec = Vector256.Create(
-                points[i].X, points[i].Y,
-                points[i + 1].X, points[i + 1].Y,
-                points[i + 2].X, points[i + 2].Y,
-                points[i + 3].X, points[i + 3].Y);
+            var pointsVec = Vector256.Create(points[i].X, points[i].Y, points[i + 1].X, points[i + 1].Y,
+                points[i + 2].X, points[i + 2].Y, points[i + 3].X, points[i + 3].Y);
 
-            var m1 = IsHangingWall(points[i], fault, data) ? BitConverter.Int32BitsToSingle(-1) : 0f;
-            var m2 = IsHangingWall(points[i + 1], fault, data) ? BitConverter.Int32BitsToSingle(-1) : 0f;
-            var m3 = IsHangingWall(points[i + 2], fault, data) ? BitConverter.Int32BitsToSingle(-1) : 0f;
-            var m4 = IsHangingWall(points[i + 3], fault, data) ? BitConverter.Int32BitsToSingle(-1) : 0f;
+            var m1 = IsHangingWall(points[i], fault) ? BitConverter.Int32BitsToSingle(-1) : 0f;
+            var m2 = IsHangingWall(points[i + 1], fault) ? BitConverter.Int32BitsToSingle(-1) : 0f;
+            var m3 = IsHangingWall(points[i + 2], fault) ? BitConverter.Int32BitsToSingle(-1) : 0f;
+            var m4 = IsHangingWall(points[i + 3], fault) ? BitConverter.Int32BitsToSingle(-1) : 0f;
             var maskVec = Vector256.Create(m1, m1, m2, m2, m3, m3, m4, m4);
 
             var maskedAdd = Avx.BlendVariable(Vector256<float>.Zero, restorationVec, maskVec);
@@ -721,31 +607,22 @@ public class StructuralRestoration
             points[i + 3] = new Vector2(resPtr[6], resPtr[7]);
         }
 
-        // Handle remaining elements
         for (var i = count - count % 4; i < count; i++)
-        {
-            if (IsHangingWall(points[i], fault, data))
+            if (IsHangingWall(points[i], fault))
                 points[i] += vector;
-        }
     }
 
-    private void ApplyVectorNeon(
-        List<Vector2> points,
-        CrossSectionGenerator.ProjectedFault fault,
-        FaultRestorationData data,
-        Vector2 vector)
+    private void ApplyVectorNeon(List<Vector2> points, CrossSectionGenerator.ProjectedFault fault, Vector2 vector)
     {
         var count = points.Count;
         var restorationVec = Vector128.Create(vector.X, vector.Y, vector.X, vector.Y);
 
         for (var i = 0; i <= count - 2; i += 2)
         {
-            var pointsVec = Vector128.Create(
-                points[i].X, points[i].Y,
-                points[i + 1].X, points[i + 1].Y);
+            var pointsVec = Vector128.Create(points[i].X, points[i].Y, points[i + 1].X, points[i + 1].Y);
 
-            var m1 = IsHangingWall(points[i], fault, data) ? 0xFFFFFFFF : 0u;
-            var m2 = IsHangingWall(points[i + 1], fault, data) ? 0xFFFFFFFF : 0u;
+            var m1 = IsHangingWall(points[i], fault) ? 0xFFFFFFFF : 0;
+            var m2 = IsHangingWall(points[i + 1], fault) ? 0xFFFFFFFF : 0;
             var mask = Vector128.Create(m1, m1, m2, m2);
 
             var maskedAddVec = AdvSimd.And(restorationVec, mask.AsSingle());
@@ -755,29 +632,22 @@ public class StructuralRestoration
             points[i + 1] = new Vector2(result.GetElement(2), result.GetElement(3));
         }
 
-        // Handle remaining element
         if (count % 2 != 0)
-        {
-            if (IsHangingWall(points[count - 1], fault, data))
+            if (IsHangingWall(points[count - 1], fault))
                 points[count - 1] += vector;
-        }
     }
 
-    private bool IsHangingWall(
-        Vector2 point,
-        CrossSectionGenerator.ProjectedFault fault,
-        FaultRestorationData data)
+    private bool IsHangingWall(Vector2 point, CrossSectionGenerator.ProjectedFault fault)
     {
         if (fault.FaultTrace.Count < 2) return false;
 
-        // Find the closest segment on the fault trace
         var minDistanceSq = float.MaxValue;
         var closestSegmentIndex = 0;
 
         for (var i = 0; i < fault.FaultTrace.Count - 1; i++)
         {
-            var dist = ProfileGenerator.DistanceToLineSegment(point, fault.FaultTrace[i], fault.FaultTrace[i + 1]);
-            var distSq = dist * dist;
+            var distSq = ProfileGenerator.DistanceToLineSegment(point, fault.FaultTrace[i], fault.FaultTrace[i + 1]);
+            distSq *= distSq;
             if (distSq < minDistanceSq)
             {
                 minDistanceSq = distSq;
@@ -788,13 +658,9 @@ public class StructuralRestoration
         var p1 = fault.FaultTrace[closestSegmentIndex];
         var p2 = fault.FaultTrace[closestSegmentIndex + 1];
 
-        // Cross product to determine which side of the fault line the point is on
         var crossProduct = (p2.X - p1.X) * (point.Y - p1.Y) - (p2.Y - p1.Y) * (point.X - p1.X);
+        var isDippingRight = p2.X > p1.X;
 
-        // Determine which side is hanging wall based on dip direction
-        var isDippingRight = data.OriginalTrace.Count >= 2 && data.OriginalTrace[^1].X > data.OriginalTrace[0].X;
-
-        // For normal and reverse faults, hanging wall is on the dip side
         return isDippingRight ? crossProduct < 0 : crossProduct > 0;
     }
 
@@ -802,15 +668,14 @@ public class StructuralRestoration
     {
         var copy = new CrossSectionGenerator.CrossSection
         {
-            Profile = source.Profile, // Profile is shared (not modified during restoration)
+            Profile = source.Profile,
             VerticalExaggeration = source.VerticalExaggeration,
             Formations = source.Formations.Select(f => new CrossSectionGenerator.ProjectedFormation
             {
                 Name = f.Name,
                 Color = f.Color,
                 TopBoundary = new List<Vector2>(f.TopBoundary),
-                BottomBoundary = new List<Vector2>(f.BottomBoundary),
-                FoldStyle = f.FoldStyle
+                BottomBoundary = new List<Vector2>(f.BottomBoundary)
             }).ToList(),
             Faults = source.Faults.Select(f => new CrossSectionGenerator.ProjectedFault
             {
@@ -830,23 +695,20 @@ public class StructuralRestoration
 
     private class FaultRestorationData
     {
-        public List<Vector2> OriginalTrace { get; set; } = new();
+        public List<Vector2> OriginalTrace { get; set; }
         public Vector2 Displacement { get; set; }
         public Vector2 HangingWallCutoff { get; set; }
         public Vector2 FootwallCutoff { get; set; }
-        public GeologicalFeatureType FaultType { get; set; }
-        public float Dip { get; set; }
     }
 
     private class FoldingData
     {
-        public List<Vector2> OriginalTop { get; set; } = new();
-        public List<Vector2> OriginalBottom { get; set; } = new();
+        public List<Vector2> OriginalTop { get; set; }
+        public List<Vector2> OriginalBottom { get; set; }
         public FoldStyle FoldStyle { get; set; }
         public float Wavelength { get; set; }
         public float Amplitude { get; set; }
         public float AxialSurfacePosition { get; set; }
-        public float OriginalThickness { get; set; }
     }
 
     #endregion
