@@ -489,18 +489,16 @@ public static class SeismicCubeSerializer
             });
         }
 
+        var header = new SegyHeader
+        {
+            NumSamples = sampleCount,
+            SampleInterval = (int)(sampleInterval * 1000) // Convert ms to microseconds
+        };
+
         // Create minimal dataset
         var dataset = new SeismicDataset("Embedded", "")
         {
-            SegyData = new SegyParser
-            {
-                Traces = traces,
-                Header = new SegyHeader
-                {
-                    NumSamples = sampleCount,
-                    SampleInterval = (int)(sampleInterval * 1000) // Convert ms to microseconds
-                }
-            }
+            SegyData = new SegyParser(header, traces)
         };
 
         return dataset;

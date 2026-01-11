@@ -18,6 +18,16 @@ public class SegyParser
     public SegyHeader Header { get; private set; }
     public List<SegyTrace> Traces { get; private set; } = new();
 
+    public SegyParser()
+    {
+    }
+
+    public SegyParser(SegyHeader header, List<SegyTrace> traces)
+    {
+        Header = header ?? throw new ArgumentNullException(nameof(header));
+        Traces = traces ?? new List<SegyTrace>();
+    }
+
     /// <summary>
     /// Parse a SEG-Y file from disk.
     /// </summary>

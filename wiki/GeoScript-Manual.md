@@ -211,6 +211,7 @@ CT.Materials.Basalt.VoxelCount
 | **SubsurfaceGIS** | Subsurface GIS layers | GIS_ADD_LAYER, GIS_REPROJECT |
 | **Earthquake** | Earthquake datasets | INFO, SAVE |
 | **Seismic** | Seismic survey data | SEIS_FILTER, SEIS_STACK |
+| **SeismicCube** | 3D seismic cubes | CUBE_CREATE, CUBE_BUILD_VOLUME |
 | **Video** | Video datasets | VIDEO_EXTRACT_FRAME, VIDEO_STABILIZE |
 | **Audio** | Audio datasets | AUDIO_TRIM, AUDIO_NORMALIZE |
 | **Text** | Text datasets | TEXT_SEARCH, TEXT_STATISTICS |
@@ -382,6 +383,21 @@ SIMULATE_GEOMECH porosity=examplepnmdataset.porosity sigma1=100 sigma2=50 sigma3
 | `SEIS_STACK` | Stack traces | `SEIS_STACK method=mean` |
 | `SEIS_MIGRATION` | Seismic migration | `SEIS_MIGRATION method=kirchhoff aperture=1000` |
 | `SEIS_PICK_HORIZON` | Pick seismic horizons | `SEIS_PICK_HORIZON method=auto` |
+
+### Seismic Cube Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `CUBE_CREATE` | Create a seismic cube | `CUBE_CREATE name="Survey_Cube" survey="Field_2024"` |
+| `CUBE_ADD_LINE` | Add a seismic line | `CUBE_ADD_LINE cube="Survey_Cube" line="Line_001" start_x=0 start_y=0 end_x=5000 end_y=0` |
+| `CUBE_ADD_PERPENDICULAR` | Add a perpendicular line | `CUBE_ADD_PERPENDICULAR cube="Survey_Cube" base="Line_001" trace=100 line="Crossline_001"` |
+| `CUBE_DETECT_INTERSECTIONS` | Detect intersections | `CUBE_DETECT_INTERSECTIONS cube="Survey_Cube"` |
+| `CUBE_SET_NORMALIZATION` | Configure normalization | `CUBE_SET_NORMALIZATION cube="Survey_Cube" amplitude_method=balanced` |
+| `CUBE_NORMALIZE` | Apply normalization | `CUBE_NORMALIZE cube="Survey_Cube"` |
+| `CUBE_BUILD_VOLUME` | Build regularized volume | `CUBE_BUILD_VOLUME cube="Survey_Cube" inline_count=200 crossline_count=200 sample_count=1500` |
+| `CUBE_EXPORT_GIS` | Export to Subsurface GIS | `CUBE_EXPORT_GIS cube="Survey_Cube" output="Subsurface_Model"` |
+| `CUBE_EXPORT_SLICE` | Export time slice | `CUBE_EXPORT_SLICE cube="Survey_Cube" time=1500 output="Slice_1500ms"` |
+| `CUBE_STATISTICS` | Generate summary table | `CUBE_STATISTICS cube="Survey_Cube" output="Cube_Stats"` |
 
 ### Acoustic Volume Operations
 
@@ -557,6 +573,20 @@ SEIS_FILTER type=bandpass low=10 high=80 |>
   SEIS_NMO_CORRECTION velocity=2000 |>
   SEIS_STACK method=mean |>
   SEIS_MIGRATION method=kirchhoff aperture=1000
+```
+
+### Seismic Cube Workflow
+
+```geoscript
+# Build a seismic cube from intersecting lines
+CUBE_CREATE name="Survey_Cube" survey="Field_2024"
+CUBE_ADD_LINE cube="Survey_Cube" line="Line_001" start_x=0 start_y=0 end_x=5000 end_y=0
+CUBE_ADD_LINE cube="Survey_Cube" line="Line_002" start_x=2500 start_y=-2500 end_x=2500 end_y=2500
+CUBE_ADD_PERPENDICULAR cube="Survey_Cube" base="Line_001" trace=100 line="Crossline_001"
+CUBE_DETECT_INTERSECTIONS cube="Survey_Cube"
+CUBE_SET_NORMALIZATION cube="Survey_Cube" amplitude_method=balanced match_phase=true
+CUBE_NORMALIZE cube="Survey_Cube"
+CUBE_BUILD_VOLUME cube="Survey_Cube" inline_count=200 crossline_count=200 sample_count=1500
 ```
 
 ### Pore Network Analysis

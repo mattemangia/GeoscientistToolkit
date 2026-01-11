@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Business.GeoScript;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.Seismic;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Business.GeoScriptUtilityCommands;
@@ -26,10 +27,9 @@ public class ListOpsCommand : IGeoScriptCommand
         if (context.InputDataset == null)
             throw new InvalidOperationException("No input dataset provided");
 
-        var datasetType = context.InputDataset.Type;
-        var availableCommands = GetAvailableCommandsForType(datasetType);
+        var availableCommands = GetAvailableCommandsForDataset(context.InputDataset);
 
-        Logger.Log($"Available operations for {datasetType}:");
+        Logger.Log($"Available operations for {context.InputDataset.Type}:");
         Logger.Log("─────────────────────────────────────────");
 
         foreach (var command in availableCommands.OrderBy(c => c.Name))
@@ -45,7 +45,7 @@ public class ListOpsCommand : IGeoScriptCommand
         return Task.FromResult(context.InputDataset);
     }
 
-    private List<IGeoScriptCommand> GetAvailableCommandsForType(DatasetType type)
+    private List<IGeoScriptCommand> GetAvailableCommandsForDataset(Dataset dataset)
     {
         var allCommands = CommandRegistry.GetAllCommands().ToList();
         var availableCommands = new List<IGeoScriptCommand>();
@@ -54,21 +54,46 @@ public class ListOpsCommand : IGeoScriptCommand
         {
             // Try to determine if command works with this dataset type
             // This is a simplified check - in practice you'd want more sophisticated logic
-            if (IsCommandApplicable(command, type))
+            if (IsCommandApplicable(command, dataset))
                 availableCommands.Add(command);
         }
 
         return availableCommands;
     }
 
-    private bool IsCommandApplicable(IGeoScriptCommand command, DatasetType type)
+    private bool IsCommandApplicable(IGeoScriptCommand command, Dataset dataset)
     {
+        var type = dataset.Type;
+
         // Image operations
         if (type == DatasetType.SingleImage || type == DatasetType.CtImageStack)
         {
             var imageCommands = new[] { "BRIGHTNESS_CONTRAST", "FILTER", "THRESHOLD", "BINARIZE",
                 "GRAYSCALE", "INVERT", "NORMALIZE", "SET_PIXEL_SIZE", "LISTOPS", "DISPTYPE", "UNLOAD", "INFO" };
             if (imageCommands.Contains(command.Name))
+                return true;
+        }
+
+        if (dataset is SeismicCubeDataset)
+        {
+            var cubeCommands = new[]
+            {
+                "CUBE_CREATE", "CUBE_ADD_LINE", "CUBE_ADD_PERPENDICULAR", "CUBE_DETECT_INTERSECTIONS",
+                "CUBE_SET_NORMALIZATION", "CUBE_NORMALIZE", "CUBE_BUILD_VOLUME", "CUBE_EXPORT_GIS",
+                "CUBE_EXPORT_SLICE", "CUBE_STATISTICS", "LISTOPS", "DISPTYPE", "UNLOAD", "INFO"
+            };
+            if (cubeCommands.Contains(command.Name))
+                return true;
+        }
+
+        if (type == DatasetType.Seismic && dataset is not SeismicCubeDataset)
+        {
+            var seismicCommands = new[]
+            {
+                "SEIS_FILTER", "SEIS_AGC", "SEIS_VELOCITY_ANALYSIS", "SEIS_NMO_CORRECTION",
+                "SEIS_STACK", "SEIS_MIGRATION", "SEIS_PICK_HORIZON", "LISTOPS", "DISPTYPE", "UNLOAD", "INFO"
+            };
+            if (seismicCommands.Contains(command.Name))
                 return true;
         }
 

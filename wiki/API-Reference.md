@@ -11,6 +11,7 @@ The API provides:
 - Dataset loaders
 - GeoScript execution
 - Acoustic 3D velocity simulation
+- Seismic cube construction and export
 - External tool integration
 
 ---
@@ -75,6 +76,42 @@ public class GtkApi
 
     // Export
     public void ExportResults(object results, string path, string format = "csv");
+}
+```
+
+### SeismicCubeApi
+
+Utilities for creating and exporting seismic cubes.
+
+```csharp
+public class SeismicCubeApi
+{
+    public SeismicCubeDataset CreateCube(string name, string surveyName = "", string projectName = "");
+    public void AddLine(SeismicCubeDataset cube, SeismicDataset line, LineGeometry geometry);
+    public void AddLineFromHeaders(SeismicCubeDataset cube, SeismicDataset line);
+    public void AddPerpendicularLine(SeismicCubeDataset cube, SeismicDataset line, string baseLineId, int traceIndex);
+    public void DetectIntersections(SeismicCubeDataset cube);
+    public void ApplyNormalization(SeismicCubeDataset cube);
+    public void BuildVolume(SeismicCubeDataset cube, int inlineCount, int crosslineCount, int sampleCount, float inlineSpacing, float crosslineSpacing, float sampleInterval);
+    public Task ExportAsync(SeismicCubeDataset cube, string outputPath, SeismicCubeExportOptions options = null, IProgress<(float progress, string message)> progress = null);
+    public Task<SeismicCubeDataset> ImportAsync(string inputPath, IProgress<(float progress, string message)> progress = null);
+    public SubsurfaceGISDataset ExportToSubsurfaceGis(SeismicCubeDataset cube, string name);
+    public GISRasterLayer ExportTimeSlice(SeismicCubeDataset cube, float timeMs, string name);
+}
+```
+
+### LoaderApi
+
+Dataset loaders for common file formats.
+
+```csharp
+public class LoaderApi
+{
+    public Task<Dataset> LoadSeismicAsync(string filePath, IProgress<(float progress, string message)> progress = null);
+    public Task<Dataset> LoadSeismicCubeAsync(string filePath, IProgress<(float progress, string message)> progress = null);
+    public Task<Dataset> LoadSubsurfaceGisAsync(string filePath, IProgress<(float progress, string message)> progress = null);
+    public Task<Dataset> LoadTableAsync(string filePath, IProgress<(float progress, string message)> progress = null);
+    // Additional loaders available for CT, PNM, acoustic volumes, and more.
 }
 ```
 

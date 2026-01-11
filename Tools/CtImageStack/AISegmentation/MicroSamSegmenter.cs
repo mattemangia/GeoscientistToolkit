@@ -103,8 +103,8 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
                 EncodeImage(image);
             }
 
-            // Use placeholder point at center with label -1 for zero-shot mode
-            var points = new List<(float x, float y)> { (512f, 512f) };
+            // Use image center point with label -1 for zero-shot mode
+            var points = new List<(float x, float y)> { (originalWidth / 2f, originalHeight / 2f) };
             var labels = new List<float> { -1.0f }; // -1 indicates zero-shot mode
 
             var masks = RunDecoderMultipleMasks(points, labels, originalWidth, originalHeight);

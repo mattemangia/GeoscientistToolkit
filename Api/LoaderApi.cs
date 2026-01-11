@@ -20,6 +20,7 @@ public class LoaderApi
             ["mesh_3d"] = () => new Mesh3DLoader(),
             ["pnm"] = () => new PNMLoader(),
             ["seismic"] = () => new SeismicLoader(),
+            ["seismic_cube"] = () => new SeismicCubeLoader(),
             ["subsurface_gis"] = () => new SubsurfaceGISLoader(),
             ["table"] = () => new TableLoader(),
             ["text"] = () => new TextLoader(),
@@ -95,6 +96,17 @@ public class LoaderApi
         IProgress<(float progress, string message)> progress = null)
     {
         var loader = new SeismicLoader { FilePath = filePath };
+        return loader.LoadAsync(progress);
+    }
+
+    /// <summary>
+    ///     Loads a seismic cube dataset from a .seiscube file.
+    /// </summary>
+    public Task<Dataset> LoadSeismicCubeAsync(
+        string filePath,
+        IProgress<(float progress, string message)> progress = null)
+    {
+        var loader = new SeismicCubeLoader { FilePath = filePath };
         return loader.LoadAsync(progress);
     }
 

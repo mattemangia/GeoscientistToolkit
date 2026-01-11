@@ -868,6 +868,71 @@ SEIS_PICK_HORIZON method=auto
 
 ---
 
+## GeoScript Seismic Cube Commands
+
+### CUBE_CREATE
+
+```geoscript
+CUBE_CREATE name="Survey_Cube" survey="Field_2024"
+```
+
+### CUBE_ADD_LINE
+
+```geoscript
+CUBE_ADD_LINE cube="Survey_Cube" line="Line_001" start_x=0 start_y=0 end_x=5000 end_y=0
+CUBE_ADD_LINE cube="Survey_Cube" line="Line_002" use_headers=true
+```
+
+### CUBE_ADD_PERPENDICULAR
+
+```geoscript
+CUBE_ADD_PERPENDICULAR cube="Survey_Cube" base="Line_001" trace=100 line="Crossline_001"
+```
+
+### CUBE_DETECT_INTERSECTIONS
+
+```geoscript
+CUBE_DETECT_INTERSECTIONS cube="Survey_Cube"
+```
+
+### CUBE_SET_NORMALIZATION
+
+```geoscript
+CUBE_SET_NORMALIZATION cube="Survey_Cube" amplitude_method=balanced match_phase=true
+```
+
+### CUBE_NORMALIZE
+
+```geoscript
+CUBE_NORMALIZE cube="Survey_Cube"
+```
+
+### CUBE_BUILD_VOLUME
+
+```geoscript
+CUBE_BUILD_VOLUME cube="Survey_Cube" inline_count=200 crossline_count=200 sample_count=1500
+```
+
+### CUBE_EXPORT_GIS
+
+```geoscript
+CUBE_EXPORT_GIS cube="Survey_Cube" output="Subsurface_Model"
+```
+
+### CUBE_EXPORT_SLICE
+
+```geoscript
+CUBE_EXPORT_SLICE cube="Survey_Cube" time=1500 output="Slice_1500ms"
+```
+
+### CUBE_STATISTICS
+
+```geoscript
+CUBE_STATISTICS cube="Survey_Cube" output="Cube_Stats"
+```
+
+---
+
 ## Processing Workflow Example
 
 ### Standard Seismic Processing Pipeline

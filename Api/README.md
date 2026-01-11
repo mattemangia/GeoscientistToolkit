@@ -11,6 +11,7 @@ Geoscientist Toolkit without hosting the full UI.
 - **Dataset loader access** for the same loader classes used by the UI.
 - **GeoScript command execution** (pipeline-ready).
 - **Acoustic 3D velocity simulation** via `ChunkedAcousticSimulator`.
+- **Seismic cube construction/export** via `SeismicCubeApi`.
 
 ## Usage
 
@@ -25,6 +26,13 @@ var output = await geoScriptApi.ExecuteAsync("INFO", inputDataset);
 
 var loaderApi = new LoaderApi();
 var dataset = await loaderApi.LoadAcousticVolumeAsync("/path/to/volume");
+
+var cubeApi = new SeismicCubeApi();
+var cube = cubeApi.CreateCube("Survey_Cube", "Field_2024");
+cubeApi.AddLineFromHeaders(cube, seismicLine);
+cubeApi.DetectIntersections(cube);
+cubeApi.BuildVolume(cube, 200, 200, 1500, 25f, 25f, 4f);
+await cubeApi.ExportAsync(cube, "/path/to/cube.seiscube");
 ```
 
 ## Referencing the API DLL

@@ -461,6 +461,16 @@ public static class CommandRegistry
             new SeisStackCommand(),
             new SeisMigrationCommand(),
             new SeisPickHorizonCommand(),
+            new CubeCreateCommand(),
+            new CubeAddLineCommand(),
+            new CubeAddPerpendicularCommand(),
+            new CubeDetectIntersectionsCommand(),
+            new CubeSetNormalizationCommand(),
+            new CubeNormalizeCommand(),
+            new CubeBuildVolumeCommand(),
+            new CubeExportGisCommand(),
+            new CubeExportSliceCommand(),
+            new CubeStatisticsCommand(),
 
             // AcousticVolume Commands
             new AcousticThresholdCommand(),
