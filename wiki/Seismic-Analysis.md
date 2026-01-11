@@ -316,18 +316,63 @@ The Advanced Processing tools prepare seismic data for geological interpretation
 ### Accessing Advanced Processing
 
 1. Select a Seismic dataset in the Project Tree
-2. Go to **Tools panel → Advanced** category
-3. Choose the processing step (Noise Removal, Data Correction, etc.)
+2. Go to **Tools panel** (right side panel)
+3. Click the **Category** dropdown
+4. Select **"Advanced"**
+5. Use the **tabs** at the top to switch between processing steps:
+   - Noise Removal
+   - Data Correction
+   - Velocity Analysis
+   - Stacking
+   - Migration
+
+![Advanced Processing Location](images/seismic-advanced-processing.png)
 
 ### Processing Workflow
+
+The recommended processing order is:
 
 ```
 Raw SEG-Y → Noise Removal → Data Correction → Velocity Analysis → NMO + Stacking → Migration
 ```
 
-### Noise Removal
+---
 
-Remove unwanted noise to enhance signal quality.
+### Step-by-Step: Noise Removal
+
+**Goal:** Remove unwanted noise to enhance signal quality before further processing.
+
+#### Tutorial: Remove Spike Noise with Median Filter
+
+1. **Load your seismic dataset** (File → Import → .sgy file)
+2. **Select the dataset** in Project Tree
+3. Open **Tools panel → Advanced → Noise Removal** tab
+4. In "Noise Removal Method" section:
+   - Select **"MedianFilter"** from the dropdown
+5. In "Method Parameters" section:
+   - Set **Window Size** to **5** (for typical spike noise)
+   - Increase to **9-15** for more aggressive filtering
+6. Click **"Apply Noise Removal"** button
+7. **Watch the progress bar** - processing runs in background
+8. View results in the **Seismic Viewer** - noise should be reduced
+
+#### Tutorial: Remove Ground Roll with F-K Filter
+
+Ground roll is linear coherent noise that appears as steep dipping events.
+
+1. Select **"FKFilter"** from the Method dropdown
+2. Set **Low Cut Velocity** to **1000** m/s (rejects slow events)
+3. Set **High Cut Velocity** to **5000** m/s (keeps signal velocities)
+4. Click **"Apply Noise Removal"**
+5. Ground roll events should be attenuated
+
+#### Tutorial: Attenuate Random Noise with SVD
+
+1. Select **"SingularValueDecomposition"** method
+2. Set **Components to Keep** to **10-20**
+   - Lower values = more aggressive noise removal
+   - Higher values = preserve more signal detail
+3. Click **"Apply Noise Removal"**
 
 #### Available Methods
 
@@ -340,47 +385,103 @@ Remove unwanted noise to enhance signal quality.
 | **Adaptive Subtraction** | Model-based noise subtraction | Predictable noise patterns |
 | **Spike Deconvolution** | High-amplitude spike removal | Instrument artifacts |
 
-#### Parameters
+---
 
-- **Window Size**: Median filter window (3-21 samples)
-- **SVD Components**: Number of components to keep (1-50)
-- **Wavelet Threshold**: Soft threshold level (0.01-1.0)
-- **Spike Threshold**: RMS multiplier for spike detection (2-10)
+### Step-by-Step: Data Correction
 
-### Data Correction
+**Goal:** Correct for acquisition geometry, propagation effects, and instrument response.
 
-Apply corrections for acquisition and propagation effects.
+#### Tutorial: Apply Amplitude Corrections
 
-#### Static Corrections
+Amplitude corrections compensate for energy loss with depth.
 
-Correct for near-surface effects and datum alignment.
+1. Go to **Tools panel → Advanced → Data Correction** tab
+2. **Static Corrections section:**
+   - Check **"Apply Static Correction"** if needed
+   - Enter **Datum Shift** in ms (positive = shift down)
+3. **Amplitude Corrections section:**
+   - Check **"Spherical Divergence"** for geometric spreading correction
+     - Set **Average Velocity** (typically 2000-3000 m/s)
+     - Set **Gain** (start with 0.001, adjust as needed)
+   - Check **"Geometric Spreading"** for t^n correction
+     - Set **Exponent** (1.0 = linear, 2.0 = quadratic, typically 1.5)
+4. Click **"Apply Data Corrections"**
+5. View results - deep reflectors should now be visible
 
-| Parameter | Description |
-|-----------|-------------|
-| Datum Shift | Bulk time shift (ms) |
-| Per-trace Statics | Individual trace adjustments |
+#### Tutorial: Apply Q Compensation (Inverse Q Filtering)
 
-#### Amplitude Corrections
+Q compensation recovers high frequencies lost to earth absorption.
+
+1. In **Attenuation (Q) Compensation** section:
+   - Check **"Apply Q Compensation"**
+   - Set **Q Factor** (typically 50-200, lower = more attenuation)
+   - Set **Dominant Frequency** (typically 25-40 Hz)
+   - Set **Max Gain** (limit to prevent noise amplification, try 10)
+2. Click **"Apply Data Corrections"**
+3. Check frequency content - higher frequencies should be restored
+
+#### Tutorial: Apply Deconvolution
+
+Deconvolution sharpens the source wavelet for better resolution.
+
+1. In **Deconvolution** section:
+   - Check **"Source Wavelet Deconvolution"**
+   - Set **Filter Length** to **100** samples (adjust based on wavelet length)
+   - Set **Prewhitening** to **0.01** (stabilizes computation)
+2. Click **"Apply Data Corrections"**
+3. Reflectors should appear sharper
+
+#### Tutorial: Fix Polarity Reversals
+
+Some traces may have flipped polarity due to instrument issues.
+
+1. In **Polarity Correction** section:
+   - Check **"Apply Polarity Correction"**
+   - Set **Reference Trace** to a trace number with known good polarity (e.g., 0)
+2. Click **"Apply Data Corrections"**
+3. Inverted traces will be flipped to match the reference
+
+#### Available Corrections
 
 | Correction | Purpose | Parameters |
 |------------|---------|------------|
+| **Static Correction** | Align traces to datum | Datum shift (ms) |
 | **Spherical Divergence** | Compensate wavefront spreading | Velocity, Gain |
 | **Geometric Spreading** | Time-power correction (t^n) | Exponent (1.0-2.5) |
-| **Q Compensation** | Frequency-dependent attenuation | Q factor, Dominant frequency |
+| **Q Compensation** | Frequency-dependent attenuation | Q factor, Dominant freq |
+| **Deconvolution** | Sharpen source wavelet | Filter length, Prewhitening |
+| **Polarity** | Correct flipped traces | Reference trace |
 
-#### Deconvolution
+---
 
-- **Source Wavelet Deconvolution**: Compress source wavelet using Wiener filter
-- **Filter Length**: 10-200 samples
-- **Prewhitening**: Stabilization factor (0.001-0.1)
+### Step-by-Step: Velocity Analysis
 
-#### Polarity Correction
+**Goal:** Determine the velocity function needed for NMO correction and stacking.
 
-Detect and correct polarity reversals using cross-correlation with a reference trace.
+#### Tutorial: Run Velocity Analysis
 
-### Velocity Analysis
+1. Go to **Tools panel → Advanced → Velocity Analysis** tab
+2. **Configure Velocity Scan Parameters:**
+   - Set **Min Velocity** to **1500** m/s (water/shallow sediments)
+   - Set **Max Velocity** to **5000** m/s (deep carbonates/basement)
+   - Set **Velocity Steps** to **100** (higher = finer resolution)
+   - Set **Time Steps** to **200** (vertical resolution of picks)
+3. **Configure Semblance Parameters:**
+   - Set **Window (ms)** to **50** ms (analysis window size)
+   - Set **Trace Spacing (m)** to match your acquisition (typically 25 m)
+   - Set **Pick Threshold** to **0.3** (lower = more picks, higher = only strong events)
+4. Click **"Run Velocity Analysis"**
+5. **Watch the progress bar** as semblance is computed
+6. **View results** in the output sections:
+   - **Velocity Function table**: Time vs. Velocity picks
+   - **Interval Velocities**: Derived from Dix equation
 
-Determine interval and RMS velocities for NMO correction.
+#### Interpreting Results
+
+- **High semblance** (>0.5) indicates strong, coherent reflectors
+- **Velocity increasing with depth** is typical (compaction)
+- **Velocity inversions** may indicate gas or overpressure
+- Check interval velocities for geological reasonableness
 
 #### Semblance Analysis
 
@@ -401,15 +502,46 @@ Semblance = Σ(stacked amplitude)² / (N × Σ(individual amplitudes²))
 | Semblance Window | Analysis window size | 30-100 ms |
 | Pick Threshold | Minimum semblance for picks | 0.2-0.5 |
 
-#### Output
+---
 
-- **Velocity Picks**: Time-velocity pairs for NMO
-- **Interval Velocities**: Computed via Dix equation
-- **Semblance Panel**: 2D velocity scan display
+### Step-by-Step: NMO Correction and Stacking
 
-### NMO Correction and Stacking
+**Goal:** Flatten hyperbolic reflections and stack traces to improve signal-to-noise ratio.
 
-Normal Moveout correction flattens hyperbolic reflections; stacking improves signal-to-noise.
+> **IMPORTANT:** You must run **Velocity Analysis** first! The NMO+Stack tool uses the velocity picks from velocity analysis.
+
+#### Tutorial: Apply NMO and Stack Traces
+
+1. **First, run Velocity Analysis** (see previous section)
+   - Ensure you have velocity picks in the "Velocity Function" table
+2. Go to **Tools panel → Advanced → Stacking** tab
+3. **Configure NMO and Stacking Parameters:**
+   - Set **CDP Fold** (number of traces per stack point)
+     - Typical values: 6, 12, 24, 48
+     - Higher fold = better S/N but fewer output traces
+   - Set **Trace Spacing (m)** to match your acquisition
+4. **Configure Stretch Mute:**
+   - Check **"Apply Stretch Mute"**
+   - Set **Mute Percentage** to **30%** (removes stretched samples near far offsets)
+5. Click **"Apply NMO and Stack"**
+6. **Monitor progress bar** - NMO correction is applied trace-by-trace
+7. **Result**: A new stacked dataset with improved signal-to-noise
+
+#### Understanding the Output
+
+- Stacked data has **fewer traces** (grouped by CDP fold)
+- **Signal-to-noise ratio** improves by √N where N is the fold
+- Horizontal reflectors should appear **flatter** after NMO
+- **Residual moveout** indicates velocity errors
+
+#### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| Reflectors still curved after NMO | Velocity too low - rerun velocity analysis |
+| Reflectors over-corrected (smile) | Velocity too high |
+| Shallow data stretched/muted | Reduce stretch mute percentage |
+| Poor stack quality | Check for consistent polarity, apply corrections first |
 
 #### NMO Equation
 
@@ -423,24 +555,71 @@ Where:
 - v = RMS velocity
 ```
 
-#### Stacking Parameters
+---
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| CDP Fold | Traces per stack point | 12 |
-| Trace Spacing | Offset increment | 25 m |
-| Stretch Mute | Remove stretched samples | 30% |
+### Step-by-Step: Migration
 
-#### Workflow
+**Goal:** Move dipping reflectors to their true subsurface positions and collapse diffractions.
 
-1. Run Velocity Analysis first
-2. Set stacking parameters
-3. Apply NMO + Stack
-4. Result is a stacked section with improved S/N
+Migration is typically the **final processing step** and transforms seismic data from time domain to depth or migrated time domain.
 
-### Migration
+#### Tutorial: Apply Kirchhoff Migration (Most Common)
 
-Move dipping reflectors to their true subsurface positions.
+Kirchhoff migration is versatile and handles most geological scenarios.
+
+1. Go to **Tools panel → Advanced → Migration** tab
+2. **Select Migration Method:**
+   - Choose **"Kirchhoff"** from the dropdown
+   - Description: "Diffraction summation - handles lateral velocity variations"
+3. **Configure Migration Parameters:**
+   - Set **Migration Velocity** to your average velocity (e.g., 2500 m/s)
+     - Use velocity from velocity analysis or well data
+   - Set **Trace Spacing (m)** to match your data (e.g., 25 m)
+   - Set **Aperture (traces)** to **100**
+     - Larger = more accurate but slower
+     - Too small = migration artifacts
+4. Click **"Apply Migration"**
+5. **Watch progress bar** - Kirchhoff migrates trace-by-trace
+6. **View results:**
+   - Dipping reflectors should now be in correct positions
+   - Diffractions (point scatterers) should be collapsed
+   - Data shows **"Data is migrated"** indicator
+
+#### Tutorial: Apply Phase Shift Migration (Fast)
+
+Use for quick processing with constant velocity.
+
+1. Select **"PhaseShift"** from the Method dropdown
+2. Set **Migration Velocity** (use average velocity)
+3. Click **"Apply Migration"**
+4. **Much faster** than Kirchhoff but assumes constant velocity
+
+#### Tutorial: Apply Finite Difference Migration
+
+Best for moderate dips and lateral velocity variations.
+
+1. Select **"FiniteDifference"** from the Method dropdown
+2. Set **Migration Velocity**
+3. Set **Depth Steps** to **100-200** (more = more accurate, slower)
+4. Click **"Apply Migration"**
+
+#### Tutorial: Apply Stolt F-K Migration (Fastest)
+
+Quick-look migration for exploration.
+
+1. Select **"StoltFK"** from the Method dropdown
+2. Set **Migration Velocity**
+3. Click **"Apply Migration"**
+4. **Very fast** - good for initial assessment
+
+#### Choosing the Right Migration Method
+
+| Geology | Recommended Method | Why |
+|---------|-------------------|-----|
+| Simple, flat layers | Stolt F-K or Phase Shift | Fast, velocity is constant |
+| Moderate dips | Finite Difference | Handles 15-degree dips accurately |
+| Complex structure, faults | Kirchhoff | Handles all dips, point diffractors |
+| Strong lateral velocity changes | Kirchhoff | Adapts to velocity variations |
 
 #### Available Methods
 
@@ -451,20 +630,13 @@ Move dipping reflectors to their true subsurface positions.
 | **Finite Difference** | Wave equation | 15-degree wave propagation | Moderate dips, lateral variation |
 | **Stolt F-K** | F-K domain | Wavenumber mapping | Constant velocity, very fast |
 
-#### Parameters
+#### Migration Tips
 
-| Parameter | Description | Typical Value |
-|-----------|-------------|---------------|
-| Migration Velocity | Constant or variable | 2000-4000 m/s |
-| Aperture | Horizontal extent (Kirchhoff) | 50-200 traces |
-| Depth Steps | Continuation steps (FD) | 50-500 |
-
-#### When to Use Each Method
-
-- **Kirchhoff**: Complex geology, lateral velocity changes
-- **Phase Shift**: Simple geology, quick processing
-- **Finite Difference**: Moderate complexity, accurate for dipping beds
-- **Stolt**: Exploration-stage quick look
+- **Migrated data** shows reflectors at true positions - use for interpretation
+- **Unmigrated (stacked) data** preserves hyperbolic moveout - use for velocity analysis
+- Migration can **amplify noise** - apply noise removal first
+- **Over-migration** (velocity too high) creates "smiles"
+- **Under-migration** (velocity too low) leaves residual diffractions
 
 ### Complete Processing Example
 
