@@ -77,6 +77,20 @@ public class GeomechCreateMeshCommand : IGeoScriptCommand
         var match = Regex.Match(fullText, paramName + @"\s*=\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
         return match.Success ? match.Groups[1].Value : defaultValue;
     }
+
+    private FailureCriterion2D ParseFailureCriterion(string criterion)
+    {
+        if (string.Equals(criterion, "MohrCoulomb", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(criterion, "Mohr-Coulomb", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(criterion, "LinearMohrCoulomb", StringComparison.OrdinalIgnoreCase))
+        {
+            return FailureCriterion2D.LinearMohrCoulomb;
+        }
+
+        return Enum.TryParse<FailureCriterion2D>(criterion, true, out var parsed)
+            ? parsed
+            : FailureCriterion2D.LinearMohrCoulomb;
+    }
 }
 
 /// <summary>
@@ -113,7 +127,7 @@ public class GeomechSetMaterialCommand : IGeoScriptCommand
             Cohesion = cohesion,
             FrictionAngle = friction,
             TensileStrength = tensile,
-            FailureCriterion = Enum.TryParse<FailureCriterion2D>(criterion, true, out var fc) ? fc : FailureCriterion2D.MohrCoulomb
+            FailureCriterion = ParseFailureCriterion(criterion)
         };
 
         // For curved Mohr-Coulomb
@@ -149,6 +163,20 @@ public class GeomechSetMaterialCommand : IGeoScriptCommand
     {
         var match = Regex.Match(fullText, paramName + @"\s*=\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
         return match.Success ? match.Groups[1].Value : defaultValue;
+    }
+
+    private FailureCriterion2D ParseFailureCriterion(string criterion)
+    {
+        if (string.Equals(criterion, "MohrCoulomb", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(criterion, "Mohr-Coulomb", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(criterion, "LinearMohrCoulomb", StringComparison.OrdinalIgnoreCase))
+        {
+            return FailureCriterion2D.LinearMohrCoulomb;
+        }
+
+        return Enum.TryParse<FailureCriterion2D>(criterion, true, out var parsed)
+            ? parsed
+            : FailureCriterion2D.LinearMohrCoulomb;
     }
 }
 
@@ -455,11 +483,11 @@ public class GeomechRunCommand : IGeoScriptCommand
         sim.AnalysisType = Enum.TryParse<AnalysisType2D>(analysis, true, out var at) ? at : AnalysisType2D.Static;
         sim.SolverType = Enum.TryParse<SolverType2D>(solver, true, out var st) ? st : SolverType2D.ConjugateGradient;
         sim.NumLoadSteps = steps;
-        sim.Tolerance = tolerance;
+        sim.ConvergenceTolerance = tolerance;
 
         Logger.Log($"Starting {analysis} simulation with {steps} steps...");
 
-        await sim.RunAsync(context.CancellationToken);
+        await sim.RunAsync();
 
         var state = sim.State;
         Logger.Log($"Simulation completed:");
@@ -602,4 +630,5 @@ public class GeomechSetDisplayCommand : IGeoScriptCommand
         var match = Regex.Match(fullText, paramName + @"\s*=\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
         return match.Success ? match.Groups[1].Value : defaultValue;
     }
+
 }

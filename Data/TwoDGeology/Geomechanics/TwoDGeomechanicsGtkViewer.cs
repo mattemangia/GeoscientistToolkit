@@ -26,22 +26,22 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
 
     // UI Components
     private readonly DrawingArea _canvas;
-    private readonly Notebook _notebook;
-    private readonly TreeView _primitiveList;
-    private readonly TreeView _materialList;
-    private readonly TreeView _jointSetList;
+    private Notebook _notebook;
+    private TreeView _primitiveList;
+    private TreeView _materialList;
+    private TreeView _jointSetList;
     private readonly ListStore _primitiveStore;
     private readonly ListStore _materialStore;
     private readonly ListStore _jointSetStore;
 
     // Panels
-    private readonly Box _toolsPanel;
-    private readonly Box _propertiesPanel;
-    private readonly ComboBoxText _resultFieldCombo;
-    private readonly ComboBoxText _colorMapCombo;
-    private readonly Scale _deformationScale;
-    private readonly ProgressBar _progressBar;
-    private readonly Label _statusLabel;
+    private Box _toolsPanel;
+    private Box _propertiesPanel;
+    private ComboBoxText _resultFieldCombo;
+    private ComboBoxText _colorMapCombo;
+    private Scale _deformationScale;
+    private ProgressBar _progressBar;
+    private Label _statusLabel;
 
     // Visualization state
     private ResultField2D _displayField = ResultField2D.DisplacementMagnitude;
@@ -583,10 +583,29 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
             ResultField2D.Sigma2 => _simulator.Results.Sigma2,
             ResultField2D.VonMisesStress => _simulator.Results.VonMisesStress,
             ResultField2D.MaxShearStress => _simulator.Results.MaxShearStress,
+            ResultField2D.StrainMagnitude => GetStrainMagnitude(),
             ResultField2D.PlasticStrain => _simulator.Results.PlasticStrain,
             ResultField2D.YieldIndex => _simulator.Results.YieldIndex,
             _ => null
         };
+    }
+
+    private double[] GetStrainMagnitude()
+    {
+        if (_simulator.Results?.StrainXX == null || _simulator.Results.StrainYY == null || _simulator.Results.StrainXY == null)
+            return null;
+
+        int count = _simulator.Results.StrainXX.Length;
+        var magnitude = new double[count];
+        for (int i = 0; i < count; i++)
+        {
+            double exx = _simulator.Results.StrainXX[i];
+            double eyy = _simulator.Results.StrainYY[i];
+            double exy = _simulator.Results.StrainXY[i];
+            magnitude[i] = Math.Sqrt(exx * exx + eyy * eyy + 2.0 * exy * exy);
+        }
+
+        return magnitude;
     }
 
     private void DrawJointSets(Context cr)
@@ -957,30 +976,33 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
 
     private void OnSimulationStep(SimulationState2D state)
     {
-        Application.Invoke((s, e) =>
+        GLib.Idle.Add(() =>
         {
             _progressBar.Fraction = state.TotalSteps > 0 ? (double)state.CurrentStep / state.TotalSteps : 0;
             _statusLabel.Text = $"Step {state.CurrentStep}/{state.TotalSteps} - Residual: {state.ResidualNorm:E3}";
             _canvas.QueueDraw();
+            return false;
         });
     }
 
     private void OnSimulationCompleted(SimulationResults2D results)
     {
-        Application.Invoke((s, e) =>
+        GLib.Idle.Add(() =>
         {
             _isSimulating = false;
             _progressBar.Fraction = 1;
             _statusLabel.Text = "Simulation completed";
             _canvas.QueueDraw();
+            return false;
         });
     }
 
     private void OnSimulationMessage(string message)
     {
-        Application.Invoke((s, e) =>
+        GLib.Idle.Add(() =>
         {
             _statusLabel.Text = message;
+            return false;
         });
     }
 

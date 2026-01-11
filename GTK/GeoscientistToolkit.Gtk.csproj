@@ -26,6 +26,7 @@
     <Compile Include="BoreholeLasTools.cs" />
     <Compile Include="Dialogs\*.cs" />
     <Compile Include="Views\*.cs" />
+    <Compile Include="..\Data\TwoDGeology\Geomechanics\TwoDGeomechanicsGtkViewer.cs" Link="Data\TwoDGeology\Geomechanics\TwoDGeomechanicsGtkViewer.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\GeoscientistToolkit.csproj" />
