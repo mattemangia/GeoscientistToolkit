@@ -46,6 +46,7 @@ public enum ResultField2D
     StrainXX,
     StrainYY,
     StrainXY,
+    StrainMagnitude,
     VolumetricStrain,
     ShearStrain,
 
@@ -370,6 +371,7 @@ public class GeomechanicalRenderer2D
             ResultField2D.StrainXX => Results.StrainXX,
             ResultField2D.StrainYY => Results.StrainYY,
             ResultField2D.StrainXY => Results.StrainXY,
+            ResultField2D.StrainMagnitude => GetStrainMagnitude(),
             ResultField2D.VolumetricStrain => Results.VolumetricStrain,
             ResultField2D.PlasticStrain => Results.PlasticStrain,
             ResultField2D.YieldIndex => Results.YieldIndex,
@@ -404,6 +406,24 @@ public class GeomechanicalRenderer2D
             ColorMap.MinValue = min;
             ColorMap.MaxValue = max;
         }
+    }
+
+    private double[] GetStrainMagnitude()
+    {
+        if (Results?.StrainXX == null || Results.StrainYY == null || Results.StrainXY == null)
+            return null;
+
+        int count = Results.StrainXX.Length;
+        var magnitude = new double[count];
+        for (int i = 0; i < count; i++)
+        {
+            double exx = Results.StrainXX[i];
+            double eyy = Results.StrainYY[i];
+            double exy = Results.StrainXY[i];
+            magnitude[i] = Math.Sqrt(exx * exx + eyy * eyy + 2.0 * exy * exy);
+        }
+
+        return magnitude;
     }
 
     /// <summary>
@@ -782,6 +802,7 @@ public static class ResultFieldInfo
             ResultField2D.VonMisesStress => "Von Mises Stress",
             ResultField2D.MaxShearStress => "Max Shear Stress",
             ResultField2D.MeanStress => "Mean Stress",
+            ResultField2D.StrainMagnitude => "Strain Magnitude",
             ResultField2D.PlasticStrain => "Plastic Strain",
             ResultField2D.YieldIndex => "Yield Index",
             ResultField2D.SafetyFactor => "Safety Factor",
@@ -797,6 +818,9 @@ public static class ResultFieldInfo
             ResultField2D.StressXX or ResultField2D.StressYY or ResultField2D.StressXY or
             ResultField2D.Sigma1 or ResultField2D.Sigma2 or ResultField2D.VonMisesStress or
             ResultField2D.MaxShearStress or ResultField2D.MeanStress or ResultField2D.PorePressure => "Pa",
+            ResultField2D.StrainXX or ResultField2D.StrainYY or ResultField2D.StrainXY or
+            ResultField2D.StrainMagnitude or ResultField2D.VolumetricStrain or ResultField2D.ShearStrain or
+            ResultField2D.PlasticStrain => "strain",
             ResultField2D.Temperature => "°C",
             ResultField2D.PrincipalAngle => "°",
             _ => ""
@@ -823,7 +847,7 @@ public static class ResultFieldInfo
     public static ResultField2D[] GetStrainFields()
     {
         return new[] { ResultField2D.StrainXX, ResultField2D.StrainYY, ResultField2D.StrainXY,
-                       ResultField2D.VolumetricStrain, ResultField2D.ShearStrain };
+                       ResultField2D.StrainMagnitude, ResultField2D.VolumetricStrain, ResultField2D.ShearStrain };
     }
 
     public static ResultField2D[] GetPlasticityFields()

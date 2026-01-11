@@ -807,8 +807,8 @@ public class InterfaceElement4 : FEMElement2D
 
     protected override (double xi, double eta, double weight)[] GaussPoints => new[]
     {
-        (-1.0 / Math.Sqrt(3), 0, 1.0),
-        ( 1.0 / Math.Sqrt(3), 0, 1.0)
+        (-1.0 / Math.Sqrt(3), 0.0, 1.0),
+        ( 1.0 / Math.Sqrt(3), 0.0, 1.0)
     };
 
     protected override double[] GetShapeFunctions(double xi, double eta)

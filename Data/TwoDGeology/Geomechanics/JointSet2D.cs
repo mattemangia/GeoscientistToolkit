@@ -193,7 +193,7 @@ public class JointSet2D
     public Vector4 Color { get; set; } = new(0.3f, 0.3f, 0.9f, 1f);
     public bool IsVisible { get; set; } = true;
 
-    private readonly Random _random = new();
+    private Random _random = new();
 
     /// <summary>
     /// Generate joints within a rectangular region
