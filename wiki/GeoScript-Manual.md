@@ -453,6 +453,84 @@ SIMULATE_GEOMECH porosity=examplepnmdataset.porosity sigma1=100 sigma2=50 sigma3
 | `SLOPE_SIMULATE` | Run slope simulation | `SLOPE_SIMULATE mode=dynamic time=10` |
 | `SLOPE_EXPORT` | Export slope results | `SLOPE_EXPORT path=\"results.json\"` |
 
+### 2D Geomechanical Simulation Operations
+
+These commands work with TwoDGeologyDataset for 2D finite element geomechanical analysis.
+
+#### Mesh and Model Setup
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `GEOMECH_CREATE_MESH` | Create 2D FEM mesh | `GEOMECH_CREATE_MESH type=rectangular width=100 height=50 nx=20 ny=10` |
+| `GEOMECH_SET_MATERIAL` | Define material properties | `GEOMECH_SET_MATERIAL name=Sandstone E=25e9 nu=0.25 cohesion=5e6 friction=35` |
+| `GEOMECH_ADD_PRIMITIVE` | Add geometric primitive | `GEOMECH_ADD_PRIMITIVE type=foundation x=50 y=50 width=10 height=2` |
+| `GEOMECH_ADD_JOINTSET` | Add discontinuity joint set | `GEOMECH_ADD_JOINTSET dip=45 spacing=2 friction=30 cohesion=0` |
+
+#### Boundary Conditions and Loads
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `GEOMECH_FIX_BOUNDARY` | Apply fixed boundary conditions | `GEOMECH_FIX_BOUNDARY side=bottom` |
+| `GEOMECH_APPLY_LOAD` | Apply loads (force, pressure, displacement) | `GEOMECH_APPLY_LOAD type=pressure pressure=100000` |
+
+#### Simulation and Results
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `GEOMECH_RUN` | Run geomechanical simulation | `GEOMECH_RUN analysis=static steps=10 solver=PCG` |
+| `GEOMECH_SET_DISPLAY` | Set visualization options | `GEOMECH_SET_DISPLAY field=vonmises colormap=jet deformation_scale=100` |
+| `GEOMECH_EXPORT_RESULTS` | Export simulation results | `GEOMECH_EXPORT_RESULTS field=stress_xx format=csv path=results.csv` |
+
+#### Material Properties
+
+The `GEOMECH_SET_MATERIAL` command supports these parameters:
+
+| Parameter | Description | Units |
+|-----------|-------------|-------|
+| `E` | Young's modulus | Pa |
+| `nu` | Poisson's ratio | - |
+| `density` | Material density | kg/m³ |
+| `cohesion` | Cohesion (Mohr-Coulomb) | Pa |
+| `friction` | Friction angle | degrees |
+| `tensile` | Tensile strength | Pa |
+| `criterion` | Failure criterion | MohrCoulomb, HoekBrown, CurvedMC |
+
+For **Curved Mohr-Coulomb** (τ = A(σₙ + T)^B):
+| Parameter | Description |
+|-----------|-------------|
+| `A` | A coefficient (typically 0.5-2.0) |
+| `B` | B exponent (typically 0.5-0.9) |
+
+For **Hoek-Brown**:
+| Parameter | Description |
+|-----------|-------------|
+| `mi` | Intact rock parameter (1-35) |
+| `GSI` | Geological Strength Index (10-100) |
+| `D` | Disturbance factor (0-1) |
+
+#### Primitive Types
+
+| Type | Description |
+|------|-------------|
+| `rectangle` | Simple rectangle |
+| `circle` | Circular region |
+| `foundation` | Strip foundation |
+| `tunnel` | Excavation tunnel |
+| `dam` | Dam structure |
+| `indenter` | Indenter for bearing capacity |
+| `retainingwall` | Retaining wall structure |
+
+#### Display Fields
+
+| Field | Description |
+|-------|-------------|
+| `stress_xx`, `stress_yy`, `stress_xy` | Stress components |
+| `sigma1`, `sigma2` | Principal stresses |
+| `vonmises` | Von Mises equivalent stress |
+| `displacement`, `displacement_x`, `displacement_y` | Displacements |
+| `strain` | Strain magnitude |
+| `yield` | Yield index (0-1) |
+
 ### Utility Operations
 
 | Command | Description | Example |
