@@ -361,7 +361,11 @@ public class SeismicCubeTools : IDatasetTools
 
         if (ImGui.CollapsingHeader("Amplitude Normalization", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.Checkbox("Enable Amplitude Normalization", ref settings.NormalizeAmplitude);
+            var normalizeAmplitude = settings.NormalizeAmplitude;
+            if (ImGui.Checkbox("Enable Amplitude Normalization", ref normalizeAmplitude))
+            {
+                settings.NormalizeAmplitude = normalizeAmplitude;
+            }
 
             if (settings.NormalizeAmplitude)
             {
@@ -377,39 +381,71 @@ public class SeismicCubeTools : IDatasetTools
 
         if (ImGui.CollapsingHeader("Frequency Matching", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.Checkbox("Enable Frequency Matching", ref settings.MatchFrequency);
+            var matchFrequency = settings.MatchFrequency;
+            if (ImGui.Checkbox("Enable Frequency Matching", ref matchFrequency))
+            {
+                settings.MatchFrequency = matchFrequency;
+            }
 
             if (settings.MatchFrequency)
             {
                 ImGui.SetNextItemWidth(100);
-                ImGui.InputFloat("Low Frequency (Hz)", ref settings.TargetFrequencyLow);
+                var targetFrequencyLow = settings.TargetFrequencyLow;
+                if (ImGui.InputFloat("Low Frequency (Hz)", ref targetFrequencyLow))
+                {
+                    settings.TargetFrequencyLow = targetFrequencyLow;
+                }
                 ImGui.SetNextItemWidth(100);
-                ImGui.InputFloat("High Frequency (Hz)", ref settings.TargetFrequencyHigh);
+                var targetFrequencyHigh = settings.TargetFrequencyHigh;
+                if (ImGui.InputFloat("High Frequency (Hz)", ref targetFrequencyHigh))
+                {
+                    settings.TargetFrequencyHigh = targetFrequencyHigh;
+                }
             }
         }
 
         if (ImGui.CollapsingHeader("Phase Matching"))
         {
-            ImGui.Checkbox("Enable Phase Matching", ref settings.MatchPhase);
+            var matchPhase = settings.MatchPhase;
+            if (ImGui.Checkbox("Enable Phase Matching", ref matchPhase))
+            {
+                settings.MatchPhase = matchPhase;
+            }
         }
 
         if (ImGui.CollapsingHeader("Transition Smoothing"))
         {
-            ImGui.Checkbox("Enable Transition Smoothing", ref settings.SmoothTransitions);
+            var smoothTransitions = settings.SmoothTransitions;
+            if (ImGui.Checkbox("Enable Transition Smoothing", ref smoothTransitions))
+            {
+                settings.SmoothTransitions = smoothTransitions;
+            }
 
             if (settings.SmoothTransitions)
             {
                 ImGui.SetNextItemWidth(100);
-                ImGui.InputInt("Transition Zone (traces)", ref settings.TransitionZoneTraces);
+                var transitionZoneTraces = settings.TransitionZoneTraces;
+                if (ImGui.InputInt("Transition Zone (traces)", ref transitionZoneTraces))
+                {
+                    settings.TransitionZoneTraces = transitionZoneTraces;
+                }
             }
         }
 
         if (ImGui.CollapsingHeader("Matching Window"))
         {
             ImGui.SetNextItemWidth(100);
-            ImGui.InputInt("Window Size (traces)", ref settings.MatchingWindowTraces);
+            var matchingWindowTraces = settings.MatchingWindowTraces;
+            if (ImGui.InputInt("Window Size (traces)", ref matchingWindowTraces))
+            {
+                settings.MatchingWindowTraces = matchingWindowTraces;
+            }
             ImGui.SetNextItemWidth(100);
-            ImGui.InputFloat("Window Time (ms)", ref settings.MatchingWindowMs);
+            var matchingWindowMs = settings.MatchingWindowMs;
+            if (ImGui.InputFloat("Window Time (ms)", ref matchingWindowMs))
+            {
+                settings.MatchingWindowMs = matchingWindowMs;
+            }
         }
 
         ImGui.Separator();
@@ -667,7 +703,8 @@ public class SeismicCubeTools : IDatasetTools
                 {
                     try
                     {
-                        var gisDataset = SeismicCubeGISExporter.ExportToSubsurfaceGIS(dataset);
+                        var exporter = new SeismicCubeGISExporter(dataset);
+                        var gisDataset = exporter.ExportToSubsurfaceGIS($"{dataset.Name}_SubsurfaceGIS");
                         Logger.Log($"[SeismicCubeTools] Generated subsurface GIS map with {gisDataset.LayerBoundaries.Count} layers");
                     }
                     catch (Exception ex)

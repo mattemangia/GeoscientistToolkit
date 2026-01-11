@@ -368,6 +368,7 @@ Available geometric properties:
 | **SubsurfaceGIS** | Subsurface GIS layers | Custom format | GIS_REPROJECT |
 | **Earthquake** | Earthquake datasets | Custom format | INFO, SAVE |
 | **Seismic** | Seismic survey data | SEG-Y | SEIS_FILTER, SEIS_STACK |
+| **SeismicCube** | Seismic cube datasets | .seiscube | CUBE_CREATE, CUBE_BUILD_VOLUME |
 | **Video** | Video files | MP4, AVI | VIDEO_EXTRACT_FRAME |
 | **Audio** | Audio files | WAV, MP3 | AUDIO_NORMALIZE |
 | **Text** | Text documents | TXT | TEXT_SEARCH, TEXT_REPLACE |
@@ -1844,9 +1845,128 @@ SEIS_PICK_HORIZON name=Top_Reservoir method=auto
 
 ---
 
-### 5.11 Utility Operations
+### 5.11 Seismic Cube Operations
 
-#### 5.11.1 LISTOPS
+#### 5.11.1 CUBE_CREATE
+
+Creates a seismic cube dataset.
+
+**Syntax**:
+```geoscript
+CUBE_CREATE name="Survey_Cube" [survey="Field_2024"] [project="Project_X"]
+```
+
+**Returns**: Seismic cube dataset
+
+---
+
+#### 5.11.2 CUBE_ADD_LINE
+
+Adds a seismic line to a cube using geometry or header-derived coordinates.
+
+**Syntax**:
+```geoscript
+CUBE_ADD_LINE cube="Survey_Cube" line="Line_001" start_x=0 start_y=0 end_x=5000 end_y=0 trace_spacing=25
+CUBE_ADD_LINE cube="Survey_Cube" line="Line_002" use_headers=true
+```
+
+**Returns**: Updated cube dataset
+
+---
+
+#### 5.11.3 CUBE_ADD_PERPENDICULAR
+
+Adds a perpendicular line at a trace index of an existing line.
+
+**Syntax**:
+```geoscript
+CUBE_ADD_PERPENDICULAR cube="Survey_Cube" base="Line_001" trace=100 line="Crossline_001"
+```
+
+**Returns**: Updated cube dataset
+
+---
+
+#### 5.11.4 CUBE_DETECT_INTERSECTIONS
+
+Detects intersections between cube lines.
+
+**Syntax**:
+```geoscript
+CUBE_DETECT_INTERSECTIONS cube="Survey_Cube"
+```
+
+---
+
+#### 5.11.5 CUBE_SET_NORMALIZATION
+
+Configures normalization settings.
+
+**Syntax**:
+```geoscript
+CUBE_SET_NORMALIZATION cube="Survey_Cube" amplitude_method=balanced match_phase=true
+```
+
+---
+
+#### 5.11.6 CUBE_NORMALIZE
+
+Applies normalization at intersections.
+
+**Syntax**:
+```geoscript
+CUBE_NORMALIZE cube="Survey_Cube"
+```
+
+---
+
+#### 5.11.7 CUBE_BUILD_VOLUME
+
+Builds the regularized cube volume.
+
+**Syntax**:
+```geoscript
+CUBE_BUILD_VOLUME cube="Survey_Cube" inline_count=200 crossline_count=200 sample_count=1500 inline_spacing=25 crossline_spacing=25 sample_interval=4
+```
+
+---
+
+#### 5.11.8 CUBE_EXPORT_GIS
+
+Exports the cube to a Subsurface GIS dataset.
+
+**Syntax**:
+```geoscript
+CUBE_EXPORT_GIS cube="Survey_Cube" output="Subsurface_Model"
+```
+
+---
+
+#### 5.11.9 CUBE_EXPORT_SLICE
+
+Exports a time slice as a GIS raster dataset.
+
+**Syntax**:
+```geoscript
+CUBE_EXPORT_SLICE cube="Survey_Cube" time=1500 output="Slice_1500ms"
+```
+
+---
+
+#### 5.11.10 CUBE_STATISTICS
+
+Generates a summary table of cube statistics.
+
+**Syntax**:
+```geoscript
+CUBE_STATISTICS cube="Survey_Cube" output="Cube_Stats"
+```
+
+---
+
+### 5.12 Utility Operations
+
+#### 5.12.1 LISTOPS
 
 Lists all available operations for the current dataset type.
 
@@ -1861,7 +1981,7 @@ LISTOPS
 
 ---
 
-#### 5.11.2 DISPTYPE
+#### 5.12.2 DISPTYPE
 
 Displays detailed dataset type information.
 
@@ -1876,7 +1996,7 @@ DISPTYPE
 
 ---
 
-#### 5.11.3 LOAD
+#### 5.12.3 LOAD
 
 Loads a dataset from a file.
 
@@ -2904,6 +3024,9 @@ RUN_PNM_REACTIVE_TRANSPORT, SET_PNM_SPECIES, SET_PNM_MINERALS, EXPORT_PNM_RESULT
 
 ### Seismic (7 commands)
 SEIS_FILTER, SEIS_AGC, SEIS_VELOCITY_ANALYSIS, SEIS_NMO_CORRECTION, SEIS_STACK, SEIS_MIGRATION, SEIS_PICK_HORIZON
+
+**Seismic Cube (10):**
+CUBE_CREATE, CUBE_ADD_LINE, CUBE_ADD_PERPENDICULAR, CUBE_DETECT_INTERSECTIONS, CUBE_SET_NORMALIZATION, CUBE_NORMALIZE, CUBE_BUILD_VOLUME, CUBE_EXPORT_GIS, CUBE_EXPORT_SLICE, CUBE_STATISTICS
 
 ### Borehole (7 commands)
 BH_ADD_LITHOLOGY, BH_REMOVE_LITHOLOGY, BH_ADD_LOG, BH_CALCULATE_POROSITY, BH_CALCULATE_SATURATION, BH_DEPTH_SHIFT, BH_CORRELATION

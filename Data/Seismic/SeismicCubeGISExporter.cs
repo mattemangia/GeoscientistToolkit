@@ -347,21 +347,16 @@ public class SeismicCubeGISExporter
             }
         }
 
-        var layer = new GISRasterLayer
+        var bounds = new BoundingBox
         {
-            Name = $"{name}_T{timeMs}ms",
-            Width = nx,
-            Height = ny,
-            Bounds = new GISBoundingBox
-            {
-                MinLongitude = _cube.Bounds.MinX,
-                MaxLongitude = _cube.Bounds.MaxX,
-                MinLatitude = _cube.Bounds.MinY,
-                MaxLatitude = _cube.Bounds.MaxY
-            }
+            Min = new Vector2(_cube.Bounds.MinX, _cube.Bounds.MinY),
+            Max = new Vector2(_cube.Bounds.MaxX, _cube.Bounds.MaxY)
         };
 
-        layer.SetPixelData(pixelData);
+        var layer = new GISRasterLayer(pixelData, bounds)
+        {
+            Name = $"{name}_T{timeMs}ms"
+        };
 
         Logger.Log($"[SeismicCubeGISExporter] Exported time slice at {timeMs}ms as raster layer");
 

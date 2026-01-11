@@ -1359,6 +1359,127 @@ SEIS_PICK_HORIZON name=Top_Reservoir method=auto
 
 ---
 
+### Seismic Cube Commands (10 commands)
+
+#### CUBE_CREATE
+
+Create a seismic cube dataset.
+
+**Syntax:**
+```geoscript
+CUBE_CREATE name="Survey_Cube" [survey="Field_2024"] [project="Project_X"]
+```
+
+---
+
+#### CUBE_ADD_LINE
+
+Add a seismic line to a cube with geometry or header-derived coordinates.
+
+**Syntax:**
+```geoscript
+CUBE_ADD_LINE cube="Survey_Cube" line="Line_001"
+  start_x=0 start_y=0 end_x=5000 end_y=0 trace_spacing=25
+
+CUBE_ADD_LINE cube="Survey_Cube" line="Line_002" use_headers=true
+```
+
+---
+
+#### CUBE_ADD_PERPENDICULAR
+
+Add a perpendicular line at a trace index of an existing line.
+
+**Syntax:**
+```geoscript
+CUBE_ADD_PERPENDICULAR cube="Survey_Cube" base="Line_001" trace=100 line="Crossline_001"
+```
+
+---
+
+#### CUBE_DETECT_INTERSECTIONS
+
+Detect intersections between cube lines.
+
+**Syntax:**
+```geoscript
+CUBE_DETECT_INTERSECTIONS cube="Survey_Cube"
+```
+
+---
+
+#### CUBE_SET_NORMALIZATION
+
+Configure line normalization settings.
+
+**Syntax:**
+```geoscript
+CUBE_SET_NORMALIZATION cube="Survey_Cube"
+  normalize_amplitude=true amplitude_method=balanced
+  match_frequency=true frequency_low=10 frequency_high=80
+  match_phase=true smooth_transitions=true
+  transition_traces=5 window_traces=10 window_ms=500
+```
+
+---
+
+#### CUBE_NORMALIZE
+
+Apply normalization at intersections.
+
+**Syntax:**
+```geoscript
+CUBE_NORMALIZE cube="Survey_Cube"
+```
+
+---
+
+#### CUBE_BUILD_VOLUME
+
+Build the regularized 3D volume.
+
+**Syntax:**
+```geoscript
+CUBE_BUILD_VOLUME cube="Survey_Cube"
+  inline_count=200 crossline_count=200 sample_count=1500
+  inline_spacing=25 crossline_spacing=25 sample_interval=4
+```
+
+---
+
+#### CUBE_EXPORT_GIS
+
+Export the cube as a Subsurface GIS dataset.
+
+**Syntax:**
+```geoscript
+CUBE_EXPORT_GIS cube="Survey_Cube" output="Subsurface_Model"
+```
+
+---
+
+#### CUBE_EXPORT_SLICE
+
+Export a time slice as a GIS raster dataset.
+
+**Syntax:**
+```geoscript
+CUBE_EXPORT_SLICE cube="Survey_Cube" time=1500 output="Slice_1500ms"
+```
+
+---
+
+#### CUBE_STATISTICS
+
+Generate a summary table for the cube.
+
+**Syntax:**
+```geoscript
+CUBE_STATISTICS cube="Survey_Cube" output="Cube_Stats"
+```
+
+---
+
 ### Borehole Data Commands (7 commands)
 
 #### BH_ADD_LITHOLOGY
@@ -1903,6 +2024,9 @@ RUN_PNM_REACTIVE_TRANSPORT, SET_PNM_SPECIES, SET_PNM_MINERALS, EXPORT_PNM_RESULT
 **Seismic (7):**
 SEIS_FILTER, SEIS_AGC, SEIS_VELOCITY_ANALYSIS, SEIS_NMO_CORRECTION, SEIS_STACK, SEIS_MIGRATION, SEIS_PICK_HORIZON
 
+**Seismic Cube (10):**
+CUBE_CREATE, CUBE_ADD_LINE, CUBE_ADD_PERPENDICULAR, CUBE_DETECT_INTERSECTIONS, CUBE_SET_NORMALIZATION, CUBE_NORMALIZE, CUBE_BUILD_VOLUME, CUBE_EXPORT_GIS, CUBE_EXPORT_SLICE, CUBE_STATISTICS
+
 **Borehole (7):**
 BH_ADD_LITHOLOGY, BH_REMOVE_LITHOLOGY, BH_ADD_LOG, BH_CALCULATE_POROSITY, BH_CALCULATE_SATURATION, BH_DEPTH_SHIFT, BH_CORRELATION
 
@@ -1912,7 +2036,7 @@ ACOUSTIC_THRESHOLD, ACOUSTIC_EXTRACT_TARGETS, MESH_SMOOTH, MESH_DECIMATE, MESH_R
 **Utility (7):**
 LOAD, USE, SAVE, SET_PIXEL_SIZE, LISTOPS, DISPTYPE, INFO, UNLOAD
 
-**Total: 88+ Commands**
+**Total: 98+ Commands**
 
 ---
 

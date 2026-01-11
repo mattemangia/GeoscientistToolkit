@@ -786,24 +786,24 @@ public static class SeismicProcessor
             ProcessingHistory = original.ProcessingHistory + $"; NMO+Stack (fold={settings.CDPFold})"
         };
 
-        stacked.SegyData = new SegyParser
+        var header = new SegyHeader
         {
-            Header = new SegyHeader
-            {
-                NumSamples = stackedData[0].Length,
-                SampleInterval = (int)(sampleInterval * 1000), // Convert to microseconds
-                NumTraces = stackedData.Count
-            }
+            NumSamples = stackedData[0].Length,
+            SampleInterval = (int)(sampleInterval * 1000), // Convert to microseconds
+            NumTraces = stackedData.Count
         };
 
+        var traces = new List<SegyTrace>(stackedData.Count);
         for (int i = 0; i < stackedData.Count; i++)
         {
-            stacked.SegyData.Traces.Add(new SegyTrace
+            traces.Add(new SegyTrace
             {
                 TraceSequenceNumber = i + 1,
                 Samples = stackedData[i]
             });
         }
+
+        stacked.SegyData = new SegyParser(header, traces);
 
         RecalculateStatistics(stacked);
         return stacked;

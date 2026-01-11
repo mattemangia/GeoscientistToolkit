@@ -1601,20 +1601,45 @@ public class SeismicTools : IDatasetTools
             switch (_selectedNoiseMethod)
             {
                 case NoiseRemovalMethod.MedianFilter:
-                    ImGui.SliderInt("Window Size", ref _noiseSettings.FilterWindowSize, 3, 21);
+                    var filterWindowSize = _noiseSettings.FilterWindowSize;
+                    if (ImGui.SliderInt("Window Size", ref filterWindowSize, 3, 21))
+                    {
+                        _noiseSettings.FilterWindowSize = filterWindowSize;
+                    }
                     break;
                 case NoiseRemovalMethod.SingularValueDecomposition:
-                    ImGui.SliderInt("Components to Keep", ref _noiseSettings.SVDComponents, 1, 50);
+                    var svdComponents = _noiseSettings.SVDComponents;
+                    if (ImGui.SliderInt("Components to Keep", ref svdComponents, 1, 50))
+                    {
+                        _noiseSettings.SVDComponents = svdComponents;
+                    }
                     break;
                 case NoiseRemovalMethod.WaveletDenoising:
-                    ImGui.SliderFloat("Threshold", ref _noiseSettings.WaveletThreshold, 0.01f, 1.0f);
+                    var waveletThreshold = _noiseSettings.WaveletThreshold;
+                    if (ImGui.SliderFloat("Threshold", ref waveletThreshold, 0.01f, 1.0f))
+                    {
+                        _noiseSettings.WaveletThreshold = waveletThreshold;
+                    }
                     break;
                 case NoiseRemovalMethod.SpikeDeconvolution:
-                    ImGui.SliderFloat("Spike Threshold", ref _noiseSettings.SpikeThreshold, 2.0f, 10.0f);
+                    var spikeThreshold = _noiseSettings.SpikeThreshold;
+                    if (ImGui.SliderFloat("Spike Threshold", ref spikeThreshold, 2.0f, 10.0f))
+                    {
+                        _noiseSettings.SpikeThreshold = spikeThreshold;
+                    }
                     break;
                 case NoiseRemovalMethod.FKFilter:
-                    ImGui.InputFloat("Low Cut Velocity", ref _noiseSettings.FKLowCutVelocity);
-                    ImGui.InputFloat("High Cut Velocity", ref _noiseSettings.FKHighCutVelocity);
+                    var fkLowCutVelocity = _noiseSettings.FKLowCutVelocity;
+                    if (ImGui.InputFloat("Low Cut Velocity", ref fkLowCutVelocity))
+                    {
+                        _noiseSettings.FKLowCutVelocity = fkLowCutVelocity;
+                    }
+
+                    var fkHighCutVelocity = _noiseSettings.FKHighCutVelocity;
+                    if (ImGui.InputFloat("High Cut Velocity", ref fkHighCutVelocity))
+                    {
+                        _noiseSettings.FKHighCutVelocity = fkHighCutVelocity;
+                    }
                     break;
             }
         }
@@ -1642,56 +1667,124 @@ public class SeismicTools : IDatasetTools
 
         if (ImGui.CollapsingHeader("Static Corrections", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.Checkbox("Apply Static Correction", ref _correctionSettings.ApplyStaticCorrection);
+            var applyStaticCorrection = _correctionSettings.ApplyStaticCorrection;
+            if (ImGui.Checkbox("Apply Static Correction", ref applyStaticCorrection))
+            {
+                _correctionSettings.ApplyStaticCorrection = applyStaticCorrection;
+            }
             if (_correctionSettings.ApplyStaticCorrection)
             {
-                ImGui.InputFloat("Datum Shift (ms)", ref _correctionSettings.StaticShiftMs);
+                var staticShiftMs = _correctionSettings.StaticShiftMs;
+                if (ImGui.InputFloat("Datum Shift (ms)", ref staticShiftMs))
+                {
+                    _correctionSettings.StaticShiftMs = staticShiftMs;
+                }
             }
         }
 
         if (ImGui.CollapsingHeader("Amplitude Corrections"))
         {
-            ImGui.Checkbox("Spherical Divergence", ref _correctionSettings.ApplySphericalDivergence);
+            var applySphericalDivergence = _correctionSettings.ApplySphericalDivergence;
+            if (ImGui.Checkbox("Spherical Divergence", ref applySphericalDivergence))
+            {
+                _correctionSettings.ApplySphericalDivergence = applySphericalDivergence;
+            }
             if (_correctionSettings.ApplySphericalDivergence)
             {
-                ImGui.InputFloat("Average Velocity (m/s)", ref _correctionSettings.AverageVelocity);
-                ImGui.SliderFloat("Gain", ref _correctionSettings.SphericalDivergenceGain, 0.0001f, 0.01f, "%.4f");
+                var averageVelocity = _correctionSettings.AverageVelocity;
+                if (ImGui.InputFloat("Average Velocity (m/s)", ref averageVelocity))
+                {
+                    _correctionSettings.AverageVelocity = averageVelocity;
+                }
+
+                var sphericalDivergenceGain = _correctionSettings.SphericalDivergenceGain;
+                if (ImGui.SliderFloat("Gain", ref sphericalDivergenceGain, 0.0001f, 0.01f, "%.4f"))
+                {
+                    _correctionSettings.SphericalDivergenceGain = sphericalDivergenceGain;
+                }
             }
 
-            ImGui.Checkbox("Geometric Spreading", ref _correctionSettings.ApplyGeometricSpreading);
+            var applyGeometricSpreading = _correctionSettings.ApplyGeometricSpreading;
+            if (ImGui.Checkbox("Geometric Spreading", ref applyGeometricSpreading))
+            {
+                _correctionSettings.ApplyGeometricSpreading = applyGeometricSpreading;
+            }
             if (_correctionSettings.ApplyGeometricSpreading)
             {
-                ImGui.SliderFloat("Exponent", ref _correctionSettings.GeometricSpreadingExponent, 1.0f, 2.5f);
+                var geometricSpreadingExponent = _correctionSettings.GeometricSpreadingExponent;
+                if (ImGui.SliderFloat("Exponent", ref geometricSpreadingExponent, 1.0f, 2.5f))
+                {
+                    _correctionSettings.GeometricSpreadingExponent = geometricSpreadingExponent;
+                }
             }
         }
 
         if (ImGui.CollapsingHeader("Attenuation (Q) Compensation"))
         {
-            ImGui.Checkbox("Apply Q Compensation", ref _correctionSettings.ApplyAttenuation);
+            var applyAttenuation = _correctionSettings.ApplyAttenuation;
+            if (ImGui.Checkbox("Apply Q Compensation", ref applyAttenuation))
+            {
+                _correctionSettings.ApplyAttenuation = applyAttenuation;
+            }
             if (_correctionSettings.ApplyAttenuation)
             {
-                ImGui.InputFloat("Q Factor", ref _correctionSettings.QFactor);
-                ImGui.InputFloat("Dominant Frequency (Hz)", ref _correctionSettings.DominantFrequency);
-                ImGui.SliderFloat("Max Gain", ref _correctionSettings.MaxAttenuationGain, 1.0f, 20.0f);
+                var qFactor = _correctionSettings.QFactor;
+                if (ImGui.InputFloat("Q Factor", ref qFactor))
+                {
+                    _correctionSettings.QFactor = qFactor;
+                }
+
+                var dominantFrequency = _correctionSettings.DominantFrequency;
+                if (ImGui.InputFloat("Dominant Frequency (Hz)", ref dominantFrequency))
+                {
+                    _correctionSettings.DominantFrequency = dominantFrequency;
+                }
+
+                var maxAttenuationGain = _correctionSettings.MaxAttenuationGain;
+                if (ImGui.SliderFloat("Max Gain", ref maxAttenuationGain, 1.0f, 20.0f))
+                {
+                    _correctionSettings.MaxAttenuationGain = maxAttenuationGain;
+                }
             }
         }
 
         if (ImGui.CollapsingHeader("Deconvolution"))
         {
-            ImGui.Checkbox("Source Wavelet Deconvolution", ref _correctionSettings.ApplySourceWaveletDecon);
+            var applySourceWaveletDecon = _correctionSettings.ApplySourceWaveletDecon;
+            if (ImGui.Checkbox("Source Wavelet Deconvolution", ref applySourceWaveletDecon))
+            {
+                _correctionSettings.ApplySourceWaveletDecon = applySourceWaveletDecon;
+            }
             if (_correctionSettings.ApplySourceWaveletDecon)
             {
-                ImGui.SliderInt("Filter Length", ref _correctionSettings.DeconvolutionFilterLength, 10, 200);
-                ImGui.SliderFloat("Prewhitening", ref _correctionSettings.DeconvolutionPrewhitening, 0.001f, 0.1f, "%.3f");
+                var deconvolutionFilterLength = _correctionSettings.DeconvolutionFilterLength;
+                if (ImGui.SliderInt("Filter Length", ref deconvolutionFilterLength, 10, 200))
+                {
+                    _correctionSettings.DeconvolutionFilterLength = deconvolutionFilterLength;
+                }
+
+                var deconvolutionPrewhitening = _correctionSettings.DeconvolutionPrewhitening;
+                if (ImGui.SliderFloat("Prewhitening", ref deconvolutionPrewhitening, 0.001f, 0.1f, "%.3f"))
+                {
+                    _correctionSettings.DeconvolutionPrewhitening = deconvolutionPrewhitening;
+                }
             }
         }
 
         if (ImGui.CollapsingHeader("Polarity Correction"))
         {
-            ImGui.Checkbox("Apply Polarity Correction", ref _correctionSettings.ApplyPolarityCorrection);
+            var applyPolarityCorrection = _correctionSettings.ApplyPolarityCorrection;
+            if (ImGui.Checkbox("Apply Polarity Correction", ref applyPolarityCorrection))
+            {
+                _correctionSettings.ApplyPolarityCorrection = applyPolarityCorrection;
+            }
             if (_correctionSettings.ApplyPolarityCorrection)
             {
-                ImGui.InputInt("Reference Trace", ref _correctionSettings.ReferenceTrace);
+                var referenceTrace = _correctionSettings.ReferenceTrace;
+                if (ImGui.InputInt("Reference Trace", ref referenceTrace))
+                {
+                    _correctionSettings.ReferenceTrace = referenceTrace;
+                }
             }
         }
 
@@ -1716,17 +1809,50 @@ public class SeismicTools : IDatasetTools
 
         if (ImGui.CollapsingHeader("Velocity Scan Parameters", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.InputFloat("Min Velocity (m/s)", ref _velocitySettings.MinVelocity);
-            ImGui.InputFloat("Max Velocity (m/s)", ref _velocitySettings.MaxVelocity);
-            ImGui.SliderInt("Velocity Steps", ref _velocitySettings.VelocityScanSteps, 20, 200);
-            ImGui.SliderInt("Time Steps", ref _velocitySettings.TimeScanSteps, 50, 500);
+            var minVelocity = _velocitySettings.MinVelocity;
+            if (ImGui.InputFloat("Min Velocity (m/s)", ref minVelocity))
+            {
+                _velocitySettings.MinVelocity = minVelocity;
+            }
+
+            var maxVelocity = _velocitySettings.MaxVelocity;
+            if (ImGui.InputFloat("Max Velocity (m/s)", ref maxVelocity))
+            {
+                _velocitySettings.MaxVelocity = maxVelocity;
+            }
+
+            var velocityScanSteps = _velocitySettings.VelocityScanSteps;
+            if (ImGui.SliderInt("Velocity Steps", ref velocityScanSteps, 20, 200))
+            {
+                _velocitySettings.VelocityScanSteps = velocityScanSteps;
+            }
+
+            var timeScanSteps = _velocitySettings.TimeScanSteps;
+            if (ImGui.SliderInt("Time Steps", ref timeScanSteps, 50, 500))
+            {
+                _velocitySettings.TimeScanSteps = timeScanSteps;
+            }
         }
 
         if (ImGui.CollapsingHeader("Semblance Parameters"))
         {
-            ImGui.InputFloat("Window (ms)", ref _velocitySettings.SemblanceWindowMs);
-            ImGui.InputFloat("Trace Spacing (m)", ref _velocitySettings.TraceSpacing);
-            ImGui.SliderFloat("Pick Threshold", ref _velocitySettings.SemblanceThreshold, 0.1f, 0.9f);
+            var semblanceWindowMs = _velocitySettings.SemblanceWindowMs;
+            if (ImGui.InputFloat("Window (ms)", ref semblanceWindowMs))
+            {
+                _velocitySettings.SemblanceWindowMs = semblanceWindowMs;
+            }
+
+            var traceSpacing = _velocitySettings.TraceSpacing;
+            if (ImGui.InputFloat("Trace Spacing (m)", ref traceSpacing))
+            {
+                _velocitySettings.TraceSpacing = traceSpacing;
+            }
+
+            var semblanceThreshold = _velocitySettings.SemblanceThreshold;
+            if (ImGui.SliderFloat("Pick Threshold", ref semblanceThreshold, 0.1f, 0.9f))
+            {
+                _velocitySettings.SemblanceThreshold = semblanceThreshold;
+            }
         }
 
         ImGui.Separator();
@@ -1787,16 +1913,33 @@ public class SeismicTools : IDatasetTools
 
         if (ImGui.CollapsingHeader("NMO and Stacking Parameters", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.SliderInt("CDP Fold", ref _stackingSettings.CDPFold, 1, 48);
-            ImGui.InputFloat("Trace Spacing (m)", ref _stackingSettings.TraceSpacing);
+            var cdpFold = _stackingSettings.CDPFold;
+            if (ImGui.SliderInt("CDP Fold", ref cdpFold, 1, 48))
+            {
+                _stackingSettings.CDPFold = cdpFold;
+            }
+
+            var traceSpacing = _stackingSettings.TraceSpacing;
+            if (ImGui.InputFloat("Trace Spacing (m)", ref traceSpacing))
+            {
+                _stackingSettings.TraceSpacing = traceSpacing;
+            }
         }
 
         if (ImGui.CollapsingHeader("Stretch Mute"))
         {
-            ImGui.Checkbox("Apply Stretch Mute", ref _stackingSettings.ApplyStretchMute);
+            var applyStretchMute = _stackingSettings.ApplyStretchMute;
+            if (ImGui.Checkbox("Apply Stretch Mute", ref applyStretchMute))
+            {
+                _stackingSettings.ApplyStretchMute = applyStretchMute;
+            }
             if (_stackingSettings.ApplyStretchMute)
             {
-                ImGui.SliderFloat("Mute Percentage", ref _stackingSettings.StretchMutePercent, 10.0f, 80.0f);
+                var stretchMutePercent = _stackingSettings.StretchMutePercent;
+                if (ImGui.SliderFloat("Mute Percentage", ref stretchMutePercent, 10.0f, 80.0f))
+                {
+                    _stackingSettings.StretchMutePercent = stretchMutePercent;
+                }
             }
         }
 
@@ -1858,16 +2001,33 @@ public class SeismicTools : IDatasetTools
 
         if (ImGui.CollapsingHeader("Migration Parameters"))
         {
-            ImGui.InputFloat("Migration Velocity (m/s)", ref _migrationSettings.MigrationVelocity);
-            ImGui.InputFloat("Trace Spacing (m)", ref _migrationSettings.TraceSpacing);
+            var migrationVelocity = _migrationSettings.MigrationVelocity;
+            if (ImGui.InputFloat("Migration Velocity (m/s)", ref migrationVelocity))
+            {
+                _migrationSettings.MigrationVelocity = migrationVelocity;
+            }
+
+            var traceSpacing = _migrationSettings.TraceSpacing;
+            if (ImGui.InputFloat("Trace Spacing (m)", ref traceSpacing))
+            {
+                _migrationSettings.TraceSpacing = traceSpacing;
+            }
 
             if (_migrationSettings.Method == MigrationMethod.Kirchhoff)
             {
-                ImGui.SliderInt("Aperture (traces)", ref _migrationSettings.ApertureSamples, 10, 200);
+                var apertureSamples = _migrationSettings.ApertureSamples;
+                if (ImGui.SliderInt("Aperture (traces)", ref apertureSamples, 10, 200))
+                {
+                    _migrationSettings.ApertureSamples = apertureSamples;
+                }
             }
             else if (_migrationSettings.Method == MigrationMethod.FiniteDifference)
             {
-                ImGui.SliderInt("Depth Steps", ref _migrationSettings.MigrationDepthSteps, 10, 500);
+                var migrationDepthSteps = _migrationSettings.MigrationDepthSteps;
+                if (ImGui.SliderInt("Depth Steps", ref migrationDepthSteps, 10, 500))
+                {
+                    _migrationSettings.MigrationDepthSteps = migrationDepthSteps;
+                }
             }
         }
 
