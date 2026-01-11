@@ -1418,8 +1418,12 @@ CT_SEGMENT method=<method> [parameters]
 
 **Methods**:
 - `threshold` - Threshold-based segmentation
-- `region_growing` - Region growing algorithm
+- `otsu` - Otsu automatic thresholding
 - `watershed` - Watershed segmentation
+
+**Parameters**:
+- `min`, `max` (for `threshold`): Intensity bounds
+- `material`: Material ID to assign
 
 **Returns**: Segmented CT volume
 
@@ -1435,8 +1439,11 @@ CT_FILTER3D type=<filterType> [size=<value>]
 ```
 
 **Filter Types**:
-- `gaussian3d` - 3D Gaussian blur
-- `median3d` - 3D median filter
+- `gaussian` - 3D Gaussian blur
+- `median` - 3D median filter
+- `mean` - 3D mean filter
+- `nlm` - Non-local means
+- `bilateral` - Bilateral filter
 
 **Returns**: Filtered CT volume
 
@@ -1448,7 +1455,7 @@ Defines material properties for segmented phases.
 
 **Syntax**:
 ```geoscript
-CT_ADD_MATERIAL name='<name>' density=<value> [color=<hex>]
+CT_ADD_MATERIAL name='<name>' color=<r,g,b>
 ```
 
 **Returns**: Updated CT volume with material definition
@@ -1461,7 +1468,7 @@ Removes a material definition from a CT stack.
 
 **Syntax**:
 ```geoscript
-CT_REMOVE_MATERIAL name='<name>'
+CT_REMOVE_MATERIAL id=<materialId>
 ```
 
 **Returns**: Updated CT volume without the specified material
@@ -1474,7 +1481,7 @@ Calculates porosity from segmented volumes.
 
 **Syntax**:
 ```geoscript
-CT_ANALYZE_POROSITY material='<name>'
+CT_ANALYZE_POROSITY void_material=<materialId>
 ```
 
 **Returns**: Porosity analysis results

@@ -237,8 +237,8 @@ Export segmented materials as 3D meshes.
 Perform 3D segmentation.
 
 ```geoscript
-CT_SEGMENT method=threshold min=100 max=200
-CT_SEGMENT method=region_growing seed=100,100,50
+CT_SEGMENT method=threshold min=100 max=200 material=1
+CT_SEGMENT method=otsu material=1
 ```
 
 ### CT_FILTER3D
@@ -246,8 +246,8 @@ CT_SEGMENT method=region_growing seed=100,100,50
 Apply 3D filters.
 
 ```geoscript
-CT_FILTER3D type=gaussian3d size=5
-CT_FILTER3D type=median3d size=3
+CT_FILTER3D type=gaussian size=5
+CT_FILTER3D type=median size=3
 ```
 
 ### CT_ADD_MATERIAL
@@ -255,7 +255,7 @@ CT_FILTER3D type=median3d size=3
 Define material properties.
 
 ```geoscript
-CT_ADD_MATERIAL name='Pore' density=1.0 color=#0000FF
+CT_ADD_MATERIAL name='Pore' color=0,0,255
 ```
 
 ### CT_REMOVE_MATERIAL
@@ -263,7 +263,7 @@ CT_ADD_MATERIAL name='Pore' density=1.0 color=#0000FF
 Remove material definitions.
 
 ```geoscript
-CT_REMOVE_MATERIAL name='Pore'
+CT_REMOVE_MATERIAL id=1
 ```
 
 ### CT_ANALYZE_POROSITY
@@ -271,7 +271,7 @@ CT_REMOVE_MATERIAL name='Pore'
 Calculate porosity.
 
 ```geoscript
-CT_ANALYZE_POROSITY material='Pore'
+CT_ANALYZE_POROSITY void_material=1
 ```
 
 ### CT_CROP
