@@ -1002,17 +1002,42 @@ FILTER type=median size=3 |> NORMALIZE
 #### CT_SEGMENT
 3D segmentation of CT volumes.
 
+**Syntax:**
+```geoscript
+CT_SEGMENT method=<threshold|otsu|watershed> [min=<value>] [max=<value>] material=<id>
+```
+
 #### CT_FILTER3D
 Apply 3D filters to CT stacks.
+
+**Syntax:**
+```geoscript
+CT_FILTER3D type=<gaussian|median|mean|nlm|bilateral> [size=<value>]
+```
 
 #### CT_ADD_MATERIAL
 Define material properties for segmented phases.
 
+**Syntax:**
+```geoscript
+CT_ADD_MATERIAL name='<name>' color=<r,g,b>
+```
+
 #### CT_REMOVE_MATERIAL
 Remove material definitions.
 
+**Syntax:**
+```geoscript
+CT_REMOVE_MATERIAL id=<materialId>
+```
+
 #### CT_ANALYZE_POROSITY
 Calculate porosity from segmented volumes.
+
+**Syntax:**
+```geoscript
+CT_ANALYZE_POROSITY void_material=<materialId>
+```
 
 #### CT_CROP
 Crop a sub-volume from the CT stack.

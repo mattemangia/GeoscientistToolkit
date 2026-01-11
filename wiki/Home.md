@@ -143,18 +143,16 @@ See [Getting Started](Getting-Started.md) for a complete walkthrough.
 Geoscientist's Toolkit includes **GeoScript**, a domain-specific scripting language for automating workflows:
 
 ```geoscript
-// Load and process CT data
-ct = LoadCTStack("sample.ctstack")
-ct.ApplyFilter("gaussian", sigma=2.0)
+// Load a CT stack and set it as the active dataset
+LOAD "sample.ctstack" AS "CT Volume" TYPE=CtImageStack
+USE @'CT Volume'
 
-// Segment using threshold
-mask = ct.Threshold(min=100, max=255)
-material = CreateMaterial("Quartz", density=2.65)
-ct.AssignMaterial(mask, material)
+// Define a material and segment using a threshold
+CT_ADD_MATERIAL name='Quartz' color=230,230,230
+CT_FILTER3D type=gaussian size=5 |> CT_SEGMENT method=threshold min=100 max=255 material=1
 
-// Extract mesh and export
-mesh = ct.ExtractMesh(material, algorithm="MarchingCubes")
-mesh.Export("output.obj")
+// Review porosity for the segmented material
+CT_ANALYZE_POROSITY void_material=1
 ```
 
 **Learn more:** [GeoScript Manual](GeoScript-Manual.md) | [GeoScript Image Operations](GeoScript-Image-Operations.md)

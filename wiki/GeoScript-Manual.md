@@ -324,11 +324,11 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `CT_SEGMENT` | 3D segmentation | `CT_SEGMENT method=threshold` |
-| `CT_FILTER3D` | 3D filters | `CT_FILTER3D type=gaussian3d size=5` |
-| `CT_ADD_MATERIAL` | Define material | `CT_ADD_MATERIAL name='Pore' density=1.0` |
-| `CT_REMOVE_MATERIAL` | Remove material | `CT_REMOVE_MATERIAL name='Pore'` |
-| `CT_ANALYZE_POROSITY` | Calculate porosity | `CT_ANALYZE_POROSITY material='Pore'` |
+| `CT_SEGMENT` | 3D segmentation | `CT_SEGMENT method=threshold min=100 max=200 material=1` |
+| `CT_FILTER3D` | 3D filters | `CT_FILTER3D type=gaussian size=5` |
+| `CT_ADD_MATERIAL` | Define material | `CT_ADD_MATERIAL name='Pore' color=0,0,255` |
+| `CT_REMOVE_MATERIAL` | Remove material | `CT_REMOVE_MATERIAL id=1` |
+| `CT_ANALYZE_POROSITY` | Calculate porosity | `CT_ANALYZE_POROSITY void_material=1` |
 | `CT_CROP` | Crop sub-volume | `CT_CROP x=0 y=0 z=0 width=100 height=100 depth=100` |
 | `CT_EXTRACT_SLICE` | Extract 2D slice | `CT_EXTRACT_SLICE index=50 axis=z` |
 | `CT_LABEL_ANALYSIS` | Label analysis summary | `CT_LABEL_ANALYSIS` |
