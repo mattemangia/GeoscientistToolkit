@@ -524,8 +524,8 @@ public class StructuralRestoration
     private FoldStyle DetermineFoldStyle(CrossSectionGenerator.ProjectedFormation formation)
     {
         // Return the formation's stored fold style if available
-        if (formation.FoldStyle != FoldStyle.Parallel)
-            return formation.FoldStyle;
+        if (formation.FoldStyle.HasValue)
+            return formation.FoldStyle.Value;
 
         // Otherwise analyze thickness variation
         if (formation.TopBoundary.Count < 3 || formation.BottomBoundary.Count < 3)
