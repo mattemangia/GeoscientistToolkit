@@ -71,6 +71,7 @@ CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
         TwoDGeologyDataset twoDGeologyDataset => new TwoDGeologyViewerWrapper(twoDGeologyDataset),
 
         // Seismic Dataset
+        SeismicCubeDataset cubeDataset => CreateSeismicCubeViewer(cubeDataset),
         SeismicDataset seismicDataset => new SeismicViewer(seismicDataset),
 
         // PhysicoChem Dataset
@@ -104,6 +105,27 @@ private static BoreholeViewer CreateBoreholeViewer(BoreholeDataset dataset)
     return viewer;
 }
 
+// Static cache for SeismicCubeViewer instances
+private static readonly Dictionary<SeismicCubeDataset, SeismicCubeViewer> _cubeViewers = new();
+
+private static SeismicCubeViewer CreateSeismicCubeViewer(SeismicCubeDataset dataset)
+{
+    var viewer = new SeismicCubeViewer();
+    viewer.SetDataset(dataset);
+    _cubeViewers[dataset] = viewer;
+    return viewer;
+}
+
+private static SeismicCubeTools CreateSeismicCubeTools(SeismicCubeDataset dataset)
+{
+    var tools = new SeismicCubeTools();
+    if (_cubeViewers.TryGetValue(dataset, out var viewer))
+    {
+        tools.SetViewer(viewer);
+    }
+    return tools;
+}
+
 private static BoreholeTools CreateBoreholeTools(BoreholeDataset dataset)
 {
     var tools = new BoreholeTools();
@@ -133,6 +155,7 @@ public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset datase
         DatasetGroup => new DatasetGroupProperties(),
         BoreholeDataset => new BoreholePropertiesRenderer(),
         TwoDGeologyDataset => new TwoDGeologyProperties(),
+        SeismicCubeDataset => new SeismicCubePropertiesRenderer(),
         SeismicDataset => new SeismicProperties(),
         PhysicoChemDataset => new PhysicoChemPropertiesRenderer(),
         VideoDataset => new VideoDatasetProperties(),
@@ -165,6 +188,7 @@ public static IDatasetTools CreateTools(Dataset dataset)
         ImageDataset => new ImageTools(),
         BoreholeDataset boreholeDataset => CreateBoreholeTools(boreholeDataset),
         TwoDGeologyDataset => new TwoDGeologyToolsWrapper(),
+        SeismicCubeDataset cubeDataset => CreateSeismicCubeTools(cubeDataset),
         SeismicDataset => new SeismicTools(),
         PhysicoChemDataset => new PhysicoChemTools(),
         VideoDataset => new VideoDatasetTools(),
@@ -678,6 +702,92 @@ private class TextTools : IDatasetTools
             ImGui.Text($"Avg. words per line: {avgWordsPerLine:F1}");
             ImGui.Text($"File size: {FormatBytes(textDataset.GetSizeInBytes())}");
         }
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        var order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        return $"{size:0.##} {sizes[order]}";
+    }
+}
+
+// Properties renderer for SeismicCubeDataset
+private class SeismicCubePropertiesRenderer : IDatasetPropertiesRenderer
+{
+    public void Draw(Dataset dataset)
+    {
+        if (dataset is not SeismicCubeDataset cubeDataset)
+        {
+            ImGui.TextDisabled("Invalid dataset type.");
+            return;
+        }
+
+        ImGui.Text("Seismic Cube Properties");
+        ImGui.Separator();
+
+        // Survey info
+        if (ImGui.CollapsingHeader("Survey Information", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            if (!string.IsNullOrEmpty(cubeDataset.SurveyName))
+                ImGui.Text($"Survey: {cubeDataset.SurveyName}");
+            if (!string.IsNullOrEmpty(cubeDataset.ProjectName))
+                ImGui.Text($"Project: {cubeDataset.ProjectName}");
+            ImGui.Text($"Created: {cubeDataset.CreationDate:yyyy-MM-dd HH:mm}");
+        }
+
+        // Statistics
+        if (ImGui.CollapsingHeader("Statistics", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            var stats = cubeDataset.GetStatistics();
+            ImGui.Text($"Lines: {stats.LineCount}");
+            ImGui.Text($"Intersections: {stats.IntersectionCount}");
+            ImGui.Text($"Packages: {stats.PackageCount}");
+            ImGui.Text($"Total Traces: {stats.TotalTraces}");
+            ImGui.Text($"Volume Built: {(stats.HasRegularizedVolume ? "Yes" : "No")}");
+        }
+
+        // Bounds
+        if (ImGui.CollapsingHeader("Spatial Bounds"))
+        {
+            var bounds = cubeDataset.Bounds;
+            ImGui.Text($"X: {bounds.MinX:F1} - {bounds.MaxX:F1} m");
+            ImGui.Text($"Y: {bounds.MinY:F1} - {bounds.MaxY:F1} m");
+            ImGui.Text($"Time: {bounds.MinZ:F1} - {bounds.MaxZ:F1} ms");
+            ImGui.Text($"Area: {bounds.Width * bounds.Height / 1e6:F2} km²");
+        }
+
+        // Grid parameters
+        if (ImGui.CollapsingHeader("Grid Parameters"))
+        {
+            var grid = cubeDataset.GridParameters;
+            ImGui.Text($"Inlines: {grid.InlineCount}");
+            ImGui.Text($"Crosslines: {grid.CrosslineCount}");
+            ImGui.Text($"Samples: {grid.SampleCount}");
+            ImGui.Text($"IL Spacing: {grid.InlineSpacing} m");
+            ImGui.Text($"XL Spacing: {grid.CrosslineSpacing} m");
+            ImGui.Text($"Sample Interval: {grid.SampleInterval} ms");
+        }
+
+        // Lines list
+        if (ImGui.CollapsingHeader("Lines"))
+        {
+            foreach (var line in cubeDataset.Lines)
+            {
+                string perpIndicator = line.IsPerpendicular ? " [perp]" : "";
+                ImGui.BulletText($"{line.Name}{perpIndicator}");
+            }
+        }
+
+        // Size
+        ImGui.Separator();
+        ImGui.Text($"Size: {FormatBytes(cubeDataset.GetSizeInBytes())}");
     }
 
     private string FormatBytes(long bytes)

@@ -15,6 +15,7 @@ using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Data.Media;
+using GeoscientistToolkit.Data.Seismic;
 using GeoscientistToolkit.Util;
 using GeoscientistToolkit.Analysis.SlopeStability;
 using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
@@ -215,6 +216,8 @@ public class DatasetDTOConverter : JsonConverter<DatasetDTO>
                     nameof(AudioDataset) => JsonSerializer.Deserialize<AudioDatasetDTO>(rawText, options),
                     nameof(SlopeStabilityDataset) => JsonSerializer.Deserialize<SlopeStabilityDatasetDTO>(rawText, options),
                     nameof(SlopeStability2DDataset) => JsonSerializer.Deserialize<SlopeStability2DDatasetDTO>(rawText, options),
+                    nameof(SeismicDataset) => JsonSerializer.Deserialize<SeismicDatasetDTO>(rawText, options),
+                    nameof(SeismicCubeDataset) => JsonSerializer.Deserialize<SeismicCubeDatasetDTO>(rawText, options),
 
                     _ => throw new JsonException($"Unknown dataset type: {typeName}")
                 };

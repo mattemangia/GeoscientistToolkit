@@ -25,6 +25,7 @@ namespace GeoscientistToolkit.Data.Loaders
             RegisterLoader<LASLoader>(DatasetType.Borehole, ".las");
             RegisterLoader<BoreholeBinaryLoader>(DatasetType.Borehole, ".bhb");
             RegisterLoader<SeismicLoader>(DatasetType.Seismic, ".sgy", ".segy");
+            RegisterLoader<SeismicCubeLoader>(DatasetType.Seismic, ".seiscube");
             RegisterLoader<Mesh3DLoader>(DatasetType.Mesh3D, ".obj", ".stl", ".ply");
             RegisterLoader<PNMLoader>(DatasetType.PNM, ".pnm");
             RegisterLoader<VideoLoader>(DatasetType.Video, ".mp4", ".avi", ".mov");

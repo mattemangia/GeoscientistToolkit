@@ -55,6 +55,21 @@ public class SeismicTools : IDatasetTools
     private bool _filtersApplied = false;
     private float[][]? _originalSamples; // Backup for undo
 
+    // Advanced processing settings
+    private NoiseRemovalMethod _selectedNoiseMethod = NoiseRemovalMethod.MedianFilter;
+    private NoiseRemovalSettings _noiseSettings = new();
+    private DataCorrectionSettings _correctionSettings = new();
+    private VelocityAnalysisSettings _velocitySettings = new();
+    private StackingSettings _stackingSettings = new();
+    private MigrationSettings _migrationSettings = new();
+    private VelocityAnalysisResult? _velocityResult;
+
+    // Processing progress
+    private bool _isProcessing = false;
+    private float _processingProgress = 0f;
+    private string _processingMessage = "";
+    private Task? _processingTask;
+
     // Export dialogs
     private readonly ImGuiExportFileDialog _imageExportDialog;
     private readonly ImGuiExportFileDialog _segyExportDialog;
@@ -73,6 +88,7 @@ public class SeismicTools : IDatasetTools
             { ToolCategory.Packages, "Packages" },
             { ToolCategory.Analysis, "Analysis" },
             { ToolCategory.Processing, "Processing" },
+            { ToolCategory.Advanced, "Advanced" },
             { ToolCategory.Export, "Export" },
             { ToolCategory.Borehole, "Borehole" }
         };
@@ -82,6 +98,7 @@ public class SeismicTools : IDatasetTools
             { ToolCategory.Packages, "Organize line packages and automate package creation" },
             { ToolCategory.Analysis, "Analyze trace amplitudes and quality metrics" },
             { ToolCategory.Processing, "Apply filters, normalization, and gain controls" },
+            { ToolCategory.Advanced, "Noise removal, velocity analysis, stacking, and migration" },
             { ToolCategory.Export, "Export seismic data and images" },
             { ToolCategory.Borehole, "Integrate seismic data with borehole tools" }
         };
@@ -151,6 +168,42 @@ public class SeismicTools : IDatasetTools
                         Name = "Export",
                         Description = "Export images and SEG-Y files",
                         Draw = DrawExportTools
+                    }
+                }
+            },
+            {
+                ToolCategory.Advanced,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Noise Removal",
+                        Description = "Remove coherent and random noise from seismic data",
+                        Draw = DrawNoiseRemovalTools
+                    },
+                    new()
+                    {
+                        Name = "Data Correction",
+                        Description = "Apply static, geometric, and attenuation corrections",
+                        Draw = DrawDataCorrectionTools
+                    },
+                    new()
+                    {
+                        Name = "Velocity Analysis",
+                        Description = "Analyze velocity for NMO correction",
+                        Draw = DrawVelocityAnalysisTools
+                    },
+                    new()
+                    {
+                        Name = "Stacking",
+                        Description = "NMO correction and trace stacking",
+                        Draw = DrawStackingTools
+                    },
+                    new()
+                    {
+                        Name = "Migration",
+                        Description = "Migrate seismic data to reveal true structures",
+                        Draw = DrawMigrationTools
                     }
                 }
             },
@@ -1500,6 +1553,7 @@ public class SeismicTools : IDatasetTools
         Packages,
         Analysis,
         Processing,
+        Advanced,
         Export,
         Borehole
     }
@@ -1510,4 +1564,412 @@ public class SeismicTools : IDatasetTools
         public string Description { get; set; }
         public Action<SeismicDataset> Draw { get; set; }
     }
+
+    #region Advanced Processing Tools
+
+    private void DrawNoiseRemovalTools(SeismicDataset dataset)
+    {
+        // Progress indicator
+        DrawProcessingProgress();
+
+        if (ImGui.CollapsingHeader("Noise Removal Method", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            var methods = Enum.GetNames<NoiseRemovalMethod>();
+            int methodIndex = (int)_selectedNoiseMethod;
+            ImGui.SetNextItemWidth(180);
+            if (ImGui.Combo("Method", ref methodIndex, methods, methods.Length))
+            {
+                _selectedNoiseMethod = (NoiseRemovalMethod)methodIndex;
+            }
+
+            // Method descriptions
+            var description = _selectedNoiseMethod switch
+            {
+                NoiseRemovalMethod.MedianFilter => "Remove spike noise using median filtering",
+                NoiseRemovalMethod.FKFilter => "Remove coherent noise in F-K domain (linear events)",
+                NoiseRemovalMethod.SingularValueDecomposition => "SVD-based random noise attenuation",
+                NoiseRemovalMethod.WaveletDenoising => "Wavelet transform soft thresholding",
+                NoiseRemovalMethod.AdaptiveSubtraction => "Adaptive noise model subtraction",
+                NoiseRemovalMethod.SpikeDeconvolution => "Remove spike/impulse noise",
+                _ => ""
+            };
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), description);
+        }
+
+        if (ImGui.CollapsingHeader("Method Parameters"))
+        {
+            switch (_selectedNoiseMethod)
+            {
+                case NoiseRemovalMethod.MedianFilter:
+                    ImGui.SliderInt("Window Size", ref _noiseSettings.FilterWindowSize, 3, 21);
+                    break;
+                case NoiseRemovalMethod.SingularValueDecomposition:
+                    ImGui.SliderInt("Components to Keep", ref _noiseSettings.SVDComponents, 1, 50);
+                    break;
+                case NoiseRemovalMethod.WaveletDenoising:
+                    ImGui.SliderFloat("Threshold", ref _noiseSettings.WaveletThreshold, 0.01f, 1.0f);
+                    break;
+                case NoiseRemovalMethod.SpikeDeconvolution:
+                    ImGui.SliderFloat("Spike Threshold", ref _noiseSettings.SpikeThreshold, 2.0f, 10.0f);
+                    break;
+                case NoiseRemovalMethod.FKFilter:
+                    ImGui.InputFloat("Low Cut Velocity", ref _noiseSettings.FKLowCutVelocity);
+                    ImGui.InputFloat("High Cut Velocity", ref _noiseSettings.FKHighCutVelocity);
+                    break;
+            }
+        }
+
+        ImGui.Separator();
+
+        if (_isProcessing)
+            ImGui.BeginDisabled();
+
+        if (ImGui.Button("Apply Noise Removal", new Vector2(-1, 0)))
+        {
+            RunProcessing(dataset, "Noise removal", progress =>
+                SeismicProcessor.RemoveNoise(dataset, _selectedNoiseMethod, _noiseSettings, progress));
+        }
+
+        if (_isProcessing)
+            ImGui.EndDisabled();
+    }
+
+    private void DrawDataCorrectionTools(SeismicDataset dataset)
+    {
+        DrawProcessingProgress();
+
+        _correctionSettings.SampleIntervalMs = dataset.GetSampleIntervalMs();
+
+        if (ImGui.CollapsingHeader("Static Corrections", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.Checkbox("Apply Static Correction", ref _correctionSettings.ApplyStaticCorrection);
+            if (_correctionSettings.ApplyStaticCorrection)
+            {
+                ImGui.InputFloat("Datum Shift (ms)", ref _correctionSettings.StaticShiftMs);
+            }
+        }
+
+        if (ImGui.CollapsingHeader("Amplitude Corrections"))
+        {
+            ImGui.Checkbox("Spherical Divergence", ref _correctionSettings.ApplySphericalDivergence);
+            if (_correctionSettings.ApplySphericalDivergence)
+            {
+                ImGui.InputFloat("Average Velocity (m/s)", ref _correctionSettings.AverageVelocity);
+                ImGui.SliderFloat("Gain", ref _correctionSettings.SphericalDivergenceGain, 0.0001f, 0.01f, "%.4f");
+            }
+
+            ImGui.Checkbox("Geometric Spreading", ref _correctionSettings.ApplyGeometricSpreading);
+            if (_correctionSettings.ApplyGeometricSpreading)
+            {
+                ImGui.SliderFloat("Exponent", ref _correctionSettings.GeometricSpreadingExponent, 1.0f, 2.5f);
+            }
+        }
+
+        if (ImGui.CollapsingHeader("Attenuation (Q) Compensation"))
+        {
+            ImGui.Checkbox("Apply Q Compensation", ref _correctionSettings.ApplyAttenuation);
+            if (_correctionSettings.ApplyAttenuation)
+            {
+                ImGui.InputFloat("Q Factor", ref _correctionSettings.QFactor);
+                ImGui.InputFloat("Dominant Frequency (Hz)", ref _correctionSettings.DominantFrequency);
+                ImGui.SliderFloat("Max Gain", ref _correctionSettings.MaxAttenuationGain, 1.0f, 20.0f);
+            }
+        }
+
+        if (ImGui.CollapsingHeader("Deconvolution"))
+        {
+            ImGui.Checkbox("Source Wavelet Deconvolution", ref _correctionSettings.ApplySourceWaveletDecon);
+            if (_correctionSettings.ApplySourceWaveletDecon)
+            {
+                ImGui.SliderInt("Filter Length", ref _correctionSettings.DeconvolutionFilterLength, 10, 200);
+                ImGui.SliderFloat("Prewhitening", ref _correctionSettings.DeconvolutionPrewhitening, 0.001f, 0.1f, "%.3f");
+            }
+        }
+
+        if (ImGui.CollapsingHeader("Polarity Correction"))
+        {
+            ImGui.Checkbox("Apply Polarity Correction", ref _correctionSettings.ApplyPolarityCorrection);
+            if (_correctionSettings.ApplyPolarityCorrection)
+            {
+                ImGui.InputInt("Reference Trace", ref _correctionSettings.ReferenceTrace);
+            }
+        }
+
+        ImGui.Separator();
+
+        if (_isProcessing)
+            ImGui.BeginDisabled();
+
+        if (ImGui.Button("Apply Data Corrections", new Vector2(-1, 0)))
+        {
+            RunProcessing(dataset, "Data corrections", progress =>
+                SeismicProcessor.ApplyDataCorrections(dataset, _correctionSettings, progress));
+        }
+
+        if (_isProcessing)
+            ImGui.EndDisabled();
+    }
+
+    private void DrawVelocityAnalysisTools(SeismicDataset dataset)
+    {
+        DrawProcessingProgress();
+
+        if (ImGui.CollapsingHeader("Velocity Scan Parameters", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.InputFloat("Min Velocity (m/s)", ref _velocitySettings.MinVelocity);
+            ImGui.InputFloat("Max Velocity (m/s)", ref _velocitySettings.MaxVelocity);
+            ImGui.SliderInt("Velocity Steps", ref _velocitySettings.VelocityScanSteps, 20, 200);
+            ImGui.SliderInt("Time Steps", ref _velocitySettings.TimeScanSteps, 50, 500);
+        }
+
+        if (ImGui.CollapsingHeader("Semblance Parameters"))
+        {
+            ImGui.InputFloat("Window (ms)", ref _velocitySettings.SemblanceWindowMs);
+            ImGui.InputFloat("Trace Spacing (m)", ref _velocitySettings.TraceSpacing);
+            ImGui.SliderFloat("Pick Threshold", ref _velocitySettings.SemblanceThreshold, 0.1f, 0.9f);
+        }
+
+        ImGui.Separator();
+
+        if (_isProcessing)
+            ImGui.BeginDisabled();
+
+        if (ImGui.Button("Run Velocity Analysis", new Vector2(-1, 0)))
+        {
+            RunProcessingAsync(dataset, "Velocity analysis", async progress =>
+            {
+                _velocityResult = SeismicProcessor.AnalyzeVelocity(dataset, _velocitySettings, progress);
+            });
+        }
+
+        if (_isProcessing)
+            ImGui.EndDisabled();
+
+        // Display velocity analysis results
+        if (_velocityResult != null && _velocityResult.PickedVelocityFunction.Count > 0)
+        {
+            ImGui.Separator();
+            if (ImGui.CollapsingHeader("Velocity Function", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.Text($"Picked {_velocityResult.PickedVelocityFunction.Count} velocity points");
+
+                ImGui.BeginChild("VelocityPicks", new Vector2(0, 150), ImGuiChildFlags.Border);
+                ImGui.Columns(2);
+                ImGui.Text("Time (ms)"); ImGui.NextColumn();
+                ImGui.Text("Velocity (m/s)"); ImGui.NextColumn();
+                ImGui.Separator();
+
+                foreach (var (time, velocity) in _velocityResult.PickedVelocityFunction)
+                {
+                    ImGui.Text($"{time:F1}"); ImGui.NextColumn();
+                    ImGui.Text($"{velocity:F0}"); ImGui.NextColumn();
+                }
+
+                ImGui.Columns(1);
+                ImGui.EndChild();
+            }
+
+            if (ImGui.CollapsingHeader("Interval Velocities"))
+            {
+                ImGui.BeginChild("IntervalVels", new Vector2(0, 100), ImGuiChildFlags.Border);
+                foreach (var (time, vInt) in _velocityResult.IntervalVelocities)
+                {
+                    ImGui.Text($"t={time:F1}ms: Vint={vInt:F0} m/s");
+                }
+                ImGui.EndChild();
+            }
+        }
+    }
+
+    private void DrawStackingTools(SeismicDataset dataset)
+    {
+        DrawProcessingProgress();
+
+        if (ImGui.CollapsingHeader("NMO and Stacking Parameters", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.SliderInt("CDP Fold", ref _stackingSettings.CDPFold, 1, 48);
+            ImGui.InputFloat("Trace Spacing (m)", ref _stackingSettings.TraceSpacing);
+        }
+
+        if (ImGui.CollapsingHeader("Stretch Mute"))
+        {
+            ImGui.Checkbox("Apply Stretch Mute", ref _stackingSettings.ApplyStretchMute);
+            if (_stackingSettings.ApplyStretchMute)
+            {
+                ImGui.SliderFloat("Mute Percentage", ref _stackingSettings.StretchMutePercent, 10.0f, 80.0f);
+            }
+        }
+
+        ImGui.Separator();
+
+        bool hasVelocity = _velocityResult != null && _velocityResult.PickedVelocityFunction.Count > 0;
+
+        if (!hasVelocity)
+        {
+            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "Run Velocity Analysis first");
+        }
+
+        if (_isProcessing || !hasVelocity)
+            ImGui.BeginDisabled();
+
+        if (ImGui.Button("Apply NMO and Stack", new Vector2(-1, 0)))
+        {
+            RunProcessingAsync(dataset, "NMO + Stacking", async progress =>
+            {
+                var stacked = SeismicProcessor.ApplyNMOAndStack(dataset, _velocityResult, _stackingSettings, progress);
+                // Note: In real implementation, you'd add the stacked dataset to the project
+                Logger.Log($"[SeismicTools] Created stacked dataset with {stacked.GetTraceCount()} CDPs");
+            });
+        }
+
+        if (_isProcessing || !hasVelocity)
+            ImGui.EndDisabled();
+
+        ImGui.Spacing();
+        ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "Stacking improves signal-to-noise ratio");
+    }
+
+    private void DrawMigrationTools(SeismicDataset dataset)
+    {
+        DrawProcessingProgress();
+
+        _migrationSettings.SampleIntervalMs = dataset.GetSampleIntervalMs();
+
+        if (ImGui.CollapsingHeader("Migration Method", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            var methods = Enum.GetNames<MigrationMethod>();
+            int methodIndex = (int)_migrationSettings.Method;
+            ImGui.SetNextItemWidth(180);
+            if (ImGui.Combo("Method", ref methodIndex, methods, methods.Length))
+            {
+                _migrationSettings.Method = (MigrationMethod)methodIndex;
+            }
+
+            var description = _migrationSettings.Method switch
+            {
+                MigrationMethod.Kirchhoff => "Diffraction summation - handles lateral velocity variations",
+                MigrationMethod.PhaseShift => "F-K domain - fast for constant velocity",
+                MigrationMethod.FiniteDifference => "15-degree wave equation - good for dipping structures",
+                MigrationMethod.StoltFK => "Constant velocity F-K migration - very fast",
+                _ => ""
+            };
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), description);
+        }
+
+        if (ImGui.CollapsingHeader("Migration Parameters"))
+        {
+            ImGui.InputFloat("Migration Velocity (m/s)", ref _migrationSettings.MigrationVelocity);
+            ImGui.InputFloat("Trace Spacing (m)", ref _migrationSettings.TraceSpacing);
+
+            if (_migrationSettings.Method == MigrationMethod.Kirchhoff)
+            {
+                ImGui.SliderInt("Aperture (traces)", ref _migrationSettings.ApertureSamples, 10, 200);
+            }
+            else if (_migrationSettings.Method == MigrationMethod.FiniteDifference)
+            {
+                ImGui.SliderInt("Depth Steps", ref _migrationSettings.MigrationDepthSteps, 10, 500);
+            }
+        }
+
+        ImGui.Separator();
+
+        if (_isProcessing)
+            ImGui.BeginDisabled();
+
+        if (ImGui.Button("Apply Migration", new Vector2(-1, 0)))
+        {
+            RunProcessing(dataset, "Migration", progress =>
+                SeismicProcessor.ApplyMigration(dataset, _migrationSettings, progress));
+        }
+
+        if (_isProcessing)
+            ImGui.EndDisabled();
+
+        ImGui.Spacing();
+        ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "Migration repositions dipping reflectors");
+
+        if (dataset.IsMigrated)
+        {
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), "Data is migrated");
+        }
+    }
+
+    private void DrawProcessingProgress()
+    {
+        if (_isProcessing)
+        {
+            ImGui.PushStyleColor(ImGuiCol.PlotHistogram, new Vector4(0.2f, 0.8f, 0.2f, 1.0f));
+            ImGui.ProgressBar(_processingProgress, new Vector2(-1, 0), _processingMessage);
+            ImGui.PopStyleColor();
+
+            if (_processingTask?.IsCompleted == true)
+            {
+                _isProcessing = false;
+                _processingTask = null;
+                _activeViewer?.RequestRedraw();
+            }
+
+            ImGui.Separator();
+        }
+    }
+
+    private void RunProcessing(SeismicDataset dataset, string name, Action<IProgress<(float progress, string message)>> action)
+    {
+        if (_isProcessing) return;
+
+        _isProcessing = true;
+        _processingProgress = 0f;
+        _processingMessage = $"Starting {name}...";
+
+        var progress = new Progress<(float progress, string message)>(update =>
+        {
+            _processingProgress = update.progress;
+            _processingMessage = update.message;
+        });
+
+        _processingTask = Task.Run(() =>
+        {
+            try
+            {
+                action(progress);
+                Logger.Log($"[SeismicTools] {name} completed");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[SeismicTools] {name} failed: {ex.Message}");
+                _processingMessage = $"Error: {ex.Message}";
+            }
+        });
+    }
+
+    private void RunProcessingAsync(SeismicDataset dataset, string name, Func<IProgress<(float progress, string message)>, Task> action)
+    {
+        if (_isProcessing) return;
+
+        _isProcessing = true;
+        _processingProgress = 0f;
+        _processingMessage = $"Starting {name}...";
+
+        var progress = new Progress<(float progress, string message)>(update =>
+        {
+            _processingProgress = update.progress;
+            _processingMessage = update.message;
+        });
+
+        _processingTask = Task.Run(async () =>
+        {
+            try
+            {
+                await action(progress);
+                Logger.Log($"[SeismicTools] {name} completed");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[SeismicTools] {name} failed: {ex.Message}");
+                _processingMessage = $"Error: {ex.Message}";
+            }
+        });
+    }
+
+    #endregion
 }
