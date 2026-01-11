@@ -8,7 +8,7 @@ namespace GeoscientistToolkit.Data.Seismic;
 /// <summary>
 /// Dataset representing seismic reflection/refraction data loaded from SEG-Y files
 /// </summary>
-public class SeismicDataset : Dataset
+public class SeismicDataset : Dataset, ISerializableDataset
 {
     // SEG-Y data
     public SegyParser SegyData { get; set; }
@@ -175,6 +175,11 @@ public class SeismicDataset : Dataset
                 SegyData.Header.MaxAmplitude,
                 SegyData.Header.RmsAmplitude);
     }
+
+    /// <summary>
+    /// Implements ISerializableDataset
+    /// </summary>
+    public object ToSerializableObject() => ToDTO();
 
     /// <summary>
     /// Export dataset state to DTO for serialization

@@ -624,3 +624,116 @@ public class TextDatasetDTO : DatasetDTO
     public DateTime? GeneratedDate { get; set; }
     public bool IsGeneratedReport { get; set; }
 }
+
+// Seismic Cube DTOs for 3D seismic from intersecting 2D lines
+public class SeismicCubeDatasetDTO : DatasetDTO
+{
+    public string SurveyName { get; set; } = "";
+    public string ProjectName { get; set; } = "";
+    public DateTime CreationDate { get; set; }
+
+    // Lines in the cube
+    public List<SeismicCubeLineDTO> Lines { get; set; } = new();
+
+    // Intersections
+    public List<LineIntersectionDTO> Intersections { get; set; } = new();
+
+    // Packages/horizons
+    public List<SeismicCubePackageDTO> Packages { get; set; } = new();
+
+    // Bounds
+    public CubeBoundsDTO Bounds { get; set; } = new();
+
+    // Grid parameters
+    public CubeGridParametersDTO GridParameters { get; set; } = new();
+
+    // Normalization settings
+    public CubeNormalizationSettingsDTO NormalizationSettings { get; set; } = new();
+}
+
+public class SeismicCubeLineDTO
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string SeismicDataFilePath { get; set; } = "";
+    public LineGeometryDTO Geometry { get; set; } = new();
+    public bool IsVisible { get; set; } = true;
+    public bool IsPerpendicular { get; set; } = false;
+    public string BaseLineId { get; set; }
+    public int? BaseTraceIndex { get; set; }
+    public Vector4 Color { get; set; } = new Vector4(1, 1, 0, 1);
+}
+
+public class LineGeometryDTO
+{
+    public Vector3 StartPoint { get; set; }
+    public Vector3 EndPoint { get; set; }
+    public float TraceSpacing { get; set; } = 12.5f;
+    public float Azimuth { get; set; } = 0f;
+}
+
+public class LineIntersectionDTO
+{
+    public string Id { get; set; } = "";
+    public string Line1Id { get; set; } = "";
+    public string Line2Id { get; set; } = "";
+    public string Line1Name { get; set; } = "";
+    public string Line2Name { get; set; } = "";
+    public Vector3 IntersectionPoint { get; set; }
+    public int Line1TraceIndex { get; set; }
+    public int Line2TraceIndex { get; set; }
+    public float IntersectionAngle { get; set; }
+    public bool IsPerpendicular { get; set; }
+    public bool NormalizationApplied { get; set; }
+    public float AmplitudeMismatch { get; set; }
+    public float PhaseMismatch { get; set; }
+    public float FrequencyMismatch { get; set; }
+    public float TieQuality { get; set; }
+}
+
+public class CubeBoundsDTO
+{
+    public float MinX { get; set; }
+    public float MaxX { get; set; }
+    public float MinY { get; set; }
+    public float MaxY { get; set; }
+    public float MinZ { get; set; }
+    public float MaxZ { get; set; }
+}
+
+public class CubeGridParametersDTO
+{
+    public int InlineCount { get; set; } = 100;
+    public int CrosslineCount { get; set; } = 100;
+    public int SampleCount { get; set; } = 1000;
+    public float InlineSpacing { get; set; } = 25f;
+    public float CrosslineSpacing { get; set; } = 25f;
+    public float SampleInterval { get; set; } = 4f;
+}
+
+public class CubeNormalizationSettingsDTO
+{
+    public bool NormalizeAmplitude { get; set; } = true;
+    public int AmplitudeMethod { get; set; } = 0; // AmplitudeNormalizationMethod enum
+    public bool MatchFrequency { get; set; } = true;
+    public float TargetFrequencyLow { get; set; } = 10f;
+    public float TargetFrequencyHigh { get; set; } = 80f;
+    public bool MatchPhase { get; set; } = true;
+    public int MatchingWindowTraces { get; set; } = 10;
+    public float MatchingWindowMs { get; set; } = 500f;
+    public bool SmoothTransitions { get; set; } = true;
+    public int TransitionZoneTraces { get; set; } = 5;
+}
+
+public class SeismicCubePackageDTO
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Description { get; set; } = "";
+    public Vector4 Color { get; set; } = new Vector4(1, 1, 0, 1);
+    public bool IsVisible { get; set; } = true;
+    public List<Vector3> HorizonPoints { get; set; } = new();
+    public string LithologyType { get; set; } = "";
+    public string SeismicFacies { get; set; } = "";
+    public float Confidence { get; set; } = 1.0f;
+}
