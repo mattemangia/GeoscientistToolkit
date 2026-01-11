@@ -137,6 +137,195 @@ public class SimulationController : ControllerBase
     }
 
     /// <summary>
+    /// Submit a 2D geomechanical simulation job
+    /// </summary>
+    [HttpPost("geomech2d")]
+    public IActionResult SubmitGeomech2DSimulation([FromBody] Geomech2DSimulationRequest request)
+    {
+        try
+        {
+            var jobId = Guid.NewGuid().ToString();
+            var job = new JobMessage
+            {
+                JobId = jobId,
+                JobType = "Geomech2DSimulation",
+                Priority = request.Priority,
+                Parameters = new Dictionary<string, object>
+                {
+                    ["meshJson"] = request.MeshJson ?? "",
+                    ["materialsJson"] = request.MaterialsJson ?? "",
+                    ["boundaryConditionsJson"] = request.BoundaryConditionsJson ?? "",
+                    ["loadsJson"] = request.LoadsJson ?? "",
+                    ["analysisType"] = request.AnalysisType ?? "Static",
+                    ["solverType"] = request.SolverType ?? "ConjugateGradient",
+                    ["numLoadSteps"] = request.NumLoadSteps,
+                    ["tolerance"] = request.Tolerance,
+                    ["applyGravity"] = request.ApplyGravity,
+                    ["enablePlasticity"] = request.EnablePlasticity,
+                    ["partitionIndex"] = request.PartitionIndex,
+                    ["boundaryNodeIds"] = request.BoundaryNodeIds ?? new List<int>(),
+                    ["outputPath"] = request.OutputPath ?? ""
+                }
+            };
+
+            _nodeManager.SubmitJob(job);
+            _jobTracker.RegisterJob(job);
+
+            return Ok(new { jobId, message = "2D Geomechanical simulation job submitted", status = "pending" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Submit a 2D parameter sweep simulation job
+    /// </summary>
+    [HttpPost("geomech2d/parametersweep")]
+    public IActionResult SubmitGeomech2DParameterSweep([FromBody] Geomech2DParameterSweepRequest request)
+    {
+        try
+        {
+            var parentJobId = Guid.NewGuid().ToString();
+            var jobIds = new List<string>();
+
+            // Create individual jobs for each parameter set
+            foreach (var paramSet in request.ParameterSets)
+            {
+                var jobId = Guid.NewGuid().ToString();
+                var job = new JobMessage
+                {
+                    JobId = jobId,
+                    JobType = "Geomech2DParameterSweep",
+                    Priority = request.Priority,
+                    Parameters = new Dictionary<string, object>
+                    {
+                        ["parentJobId"] = parentJobId,
+                        ["meshJson"] = request.BaseMeshJson ?? "",
+                        ["materialsJson"] = request.BaseMaterialsJson ?? "",
+                        ["boundaryConditionsJson"] = request.BaseBoundaryConditionsJson ?? "",
+                        ["loadsJson"] = request.BaseLoadsJson ?? "",
+                        ["parameterSet"] = paramSet,
+                        ["analysisType"] = request.AnalysisType ?? "Static",
+                        ["solverType"] = request.SolverType ?? "ConjugateGradient",
+                        ["numLoadSteps"] = request.NumLoadSteps,
+                        ["tolerance"] = request.Tolerance
+                    }
+                };
+
+                _nodeManager.SubmitJob(job);
+                _jobTracker.RegisterJob(job);
+                jobIds.Add(jobId);
+            }
+
+            return Ok(new { parentJobId, jobIds, message = $"{jobIds.Count} parameter sweep jobs submitted", status = "pending" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Submit a 2D Monte Carlo simulation job
+    /// </summary>
+    [HttpPost("geomech2d/montecarlo")]
+    public IActionResult SubmitGeomech2DMonteCarlo([FromBody] Geomech2DMonteCarloRequest request)
+    {
+        try
+        {
+            var jobId = Guid.NewGuid().ToString();
+            var job = new JobMessage
+            {
+                JobId = jobId,
+                JobType = "Geomech2DMonteCarlo",
+                Priority = request.Priority,
+                Parameters = new Dictionary<string, object>
+                {
+                    ["meshJson"] = request.MeshJson ?? "",
+                    ["materialsJson"] = request.MaterialsJson ?? "",
+                    ["boundaryConditionsJson"] = request.BoundaryConditionsJson ?? "",
+                    ["loadsJson"] = request.LoadsJson ?? "",
+                    ["randomParameters"] = request.RandomParameters ?? new Dictionary<string, double[]>(),
+                    ["numSamples"] = request.NumSamples,
+                    ["analysisType"] = request.AnalysisType ?? "Static",
+                    ["solverType"] = request.SolverType ?? "ConjugateGradient",
+                    ["numLoadSteps"] = request.NumLoadSteps,
+                    ["tolerance"] = request.Tolerance,
+                    ["seed"] = request.RandomSeed
+                }
+            };
+
+            _nodeManager.SubmitJob(job);
+            _jobTracker.RegisterJob(job);
+
+            return Ok(new { jobId, message = $"Monte Carlo simulation with {request.NumSamples} samples submitted", status = "pending" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Submit a partitioned 2D simulation (domain decomposition)
+    /// </summary>
+    [HttpPost("geomech2d/partitioned")]
+    public IActionResult SubmitPartitionedGeomech2D([FromBody] Geomech2DPartitionedRequest request)
+    {
+        try
+        {
+            var parentJobId = Guid.NewGuid().ToString();
+            var jobIds = new List<string>();
+
+            // Create jobs for each partition
+            for (int i = 0; i < request.NumPartitions; i++)
+            {
+                var jobId = Guid.NewGuid().ToString();
+                var job = new JobMessage
+                {
+                    JobId = jobId,
+                    JobType = "Geomech2DPartition",
+                    Priority = request.Priority,
+                    Parameters = new Dictionary<string, object>
+                    {
+                        ["parentJobId"] = parentJobId,
+                        ["partitionIndex"] = i,
+                        ["numPartitions"] = request.NumPartitions,
+                        ["meshJson"] = request.MeshJson ?? "",
+                        ["materialsJson"] = request.MaterialsJson ?? "",
+                        ["boundaryConditionsJson"] = request.BoundaryConditionsJson ?? "",
+                        ["loadsJson"] = request.LoadsJson ?? "",
+                        ["analysisType"] = request.AnalysisType ?? "Static",
+                        ["solverType"] = request.SolverType ?? "ConjugateGradient",
+                        ["numLoadSteps"] = request.NumLoadSteps,
+                        ["tolerance"] = request.Tolerance,
+                        ["overlapNodes"] = request.OverlapNodes
+                    }
+                };
+
+                _nodeManager.SubmitJob(job);
+                _jobTracker.RegisterJob(job);
+                jobIds.Add(jobId);
+            }
+
+            return Ok(new
+            {
+                parentJobId,
+                jobIds,
+                numPartitions = request.NumPartitions,
+                message = $"Partitioned simulation with {request.NumPartitions} partitions submitted",
+                status = "pending"
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Get available simulation types
     /// </summary>
     [HttpGet("types")]
@@ -146,11 +335,80 @@ public class SimulationController : ControllerBase
         {
             new { type = "GeomechanicalSimulation", description = "FEM-based geomechanical analysis with plasticity and damage" },
             new { type = "AcousticSimulation", description = "Acoustic wave propagation simulation" },
-            new { type = "TriaxialSimulation", description = "Triaxial compression/extension test with multiple failure criteria" }
+            new { type = "TriaxialSimulation", description = "Triaxial compression/extension test with multiple failure criteria" },
+            new { type = "Geomech2DSimulation", description = "2D FEM geomechanical simulation with curved Mohr-Coulomb" },
+            new { type = "Geomech2DParameterSweep", description = "2D parameter sweep for sensitivity analysis" },
+            new { type = "Geomech2DMonteCarlo", description = "2D Monte Carlo probabilistic analysis" },
+            new { type = "Geomech2DPartition", description = "2D domain decomposition for parallel solving" }
         };
 
         return Ok(types);
     }
+}
+
+// Additional request models for 2D geomechanics
+
+public class Geomech2DSimulationRequest
+{
+    public string? MeshJson { get; set; }
+    public string? MaterialsJson { get; set; }
+    public string? BoundaryConditionsJson { get; set; }
+    public string? LoadsJson { get; set; }
+    public string? AnalysisType { get; set; } = "Static";
+    public string? SolverType { get; set; } = "ConjugateGradient";
+    public int NumLoadSteps { get; set; } = 10;
+    public double Tolerance { get; set; } = 1e-6;
+    public bool ApplyGravity { get; set; }
+    public bool EnablePlasticity { get; set; } = true;
+    public int PartitionIndex { get; set; } = -1;
+    public List<int>? BoundaryNodeIds { get; set; }
+    public int Priority { get; set; }
+    public string? OutputPath { get; set; }
+}
+
+public class Geomech2DParameterSweepRequest
+{
+    public string? BaseMeshJson { get; set; }
+    public string? BaseMaterialsJson { get; set; }
+    public string? BaseBoundaryConditionsJson { get; set; }
+    public string? BaseLoadsJson { get; set; }
+    public List<Dictionary<string, double>> ParameterSets { get; set; } = new();
+    public string? AnalysisType { get; set; } = "Static";
+    public string? SolverType { get; set; } = "ConjugateGradient";
+    public int NumLoadSteps { get; set; } = 10;
+    public double Tolerance { get; set; } = 1e-6;
+    public int Priority { get; set; }
+}
+
+public class Geomech2DMonteCarloRequest
+{
+    public string? MeshJson { get; set; }
+    public string? MaterialsJson { get; set; }
+    public string? BoundaryConditionsJson { get; set; }
+    public string? LoadsJson { get; set; }
+    public Dictionary<string, double[]>? RandomParameters { get; set; }  // name -> [mean, stddev]
+    public int NumSamples { get; set; } = 1000;
+    public string? AnalysisType { get; set; } = "Static";
+    public string? SolverType { get; set; } = "ConjugateGradient";
+    public int NumLoadSteps { get; set; } = 10;
+    public double Tolerance { get; set; } = 1e-6;
+    public int RandomSeed { get; set; }
+    public int Priority { get; set; }
+}
+
+public class Geomech2DPartitionedRequest
+{
+    public string? MeshJson { get; set; }
+    public string? MaterialsJson { get; set; }
+    public string? BoundaryConditionsJson { get; set; }
+    public string? LoadsJson { get; set; }
+    public int NumPartitions { get; set; } = 4;
+    public int OverlapNodes { get; set; } = 2;
+    public string? AnalysisType { get; set; } = "Static";
+    public string? SolverType { get; set; } = "ConjugateGradient";
+    public int NumLoadSteps { get; set; } = 10;
+    public double Tolerance { get; set; } = 1e-6;
+    public int Priority { get; set; }
 }
 
 // Request models
