@@ -46,17 +46,21 @@ public static class ScreenshotUtility
         var width = swapchain.Framebuffer.Width;
         var height = swapchain.Framebuffer.Height;
 
-        // Recreate capture target if needed
+        // Get the backbuffer format - must match for CopyTexture to work correctly
+        var backbufferFormat = swapchain.Framebuffer.ColorTargets[0].Target.Format;
+
+        // Recreate capture target if needed (also recreate if format changed)
         if (_lastFrameCapture == null ||
             _lastFrameCapture.Width != width ||
-            _lastFrameCapture.Height != height)
+            _lastFrameCapture.Height != height ||
+            _lastFrameCapture.Format != backbufferFormat)
         {
             _captureFramebuffer?.Dispose();
             _lastFrameCapture?.Dispose();
 
             var textureDesc = TextureDescription.Texture2D(
                 width, height, 1, 1,
-                PixelFormat.R8_G8_B8_A8_UNorm,
+                backbufferFormat,
                 TextureUsage.RenderTarget | TextureUsage.Sampled);
 
             _lastFrameCapture = factory.CreateTexture(textureDesc);
