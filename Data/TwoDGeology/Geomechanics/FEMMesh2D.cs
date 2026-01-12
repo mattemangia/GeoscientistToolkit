@@ -1464,6 +1464,463 @@ public class FEMMesh2D
     }
 
     #endregion
+
+    #region Dynamic Fault Insertion
+
+    /// <summary>
+    /// Insert a fault line into the mesh by splitting elements and creating interface elements.
+    /// This is used for automatic fault generation during simulation.
+    /// </summary>
+    /// <param name="faultStart">Start point of fault segment</param>
+    /// <param name="faultEnd">End point of fault segment</param>
+    /// <param name="normalStiffness">Normal stiffness for interface (Pa/m)</param>
+    /// <param name="shearStiffness">Shear stiffness for interface (Pa/m)</param>
+    /// <param name="cohesion">Fault cohesion (Pa)</param>
+    /// <param name="frictionAngle">Fault friction angle (degrees)</param>
+    /// <returns>List of created interface element IDs</returns>
+    public List<int> InsertFaultLine(Vector2 faultStart, Vector2 faultEnd,
+        double normalStiffness = 1e10, double shearStiffness = 1e9,
+        double cohesion = 0, double frictionAngle = 25)
+    {
+        var createdInterfaces = new List<int>();
+
+        if (Vector2.Distance(faultStart, faultEnd) < 1e-6)
+            return createdInterfaces;
+
+        // Find all elements intersected by the fault
+        var intersectedElements = FindElementsAlongLine(faultStart, faultEnd);
+        if (intersectedElements.Count == 0)
+            return createdInterfaces;
+
+        // Process each intersected element
+        foreach (var (elementId, entry, exit) in intersectedElements)
+        {
+            var interfaceId = InsertInterfaceInElement(elementId, entry, exit,
+                normalStiffness, shearStiffness, cohesion, frictionAngle);
+
+            if (interfaceId >= 0)
+                createdInterfaces.Add(interfaceId);
+        }
+
+        return createdInterfaces;
+    }
+
+    /// <summary>
+    /// Find all elements intersected by a line segment, with entry/exit points
+    /// </summary>
+    private List<(int elementId, Vector2 entry, Vector2 exit)> FindElementsAlongLine(
+        Vector2 lineStart, Vector2 lineEnd)
+    {
+        var result = new List<(int, Vector2, Vector2)>();
+        var nodesArray = Nodes.ToArray();
+
+        for (int e = 0; e < Elements.Count; e++)
+        {
+            var element = Elements[e];
+
+            // Skip interface elements
+            if (element.Type == ElementType2D.Interface4 || element.Type == ElementType2D.Interface2)
+                continue;
+
+            var vertices = element.NodeIds.Select(id => nodesArray[id].InitialPosition).ToList();
+
+            // Find intersection points with element edges
+            var intersections = FindLinePolygonIntersections(lineStart, lineEnd, vertices);
+
+            if (intersections.Count >= 2)
+            {
+                // Sort by distance from line start
+                Vector2 dir = Vector2.Normalize(lineEnd - lineStart);
+                intersections.Sort((a, b) =>
+                {
+                    float da = Vector2.Dot(a - lineStart, dir);
+                    float db = Vector2.Dot(b - lineStart, dir);
+                    return da.CompareTo(db);
+                });
+
+                result.Add((e, intersections[0], intersections[^1]));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Find intersection points of a line with polygon edges
+    /// </summary>
+    private List<Vector2> FindLinePolygonIntersections(Vector2 lineStart, Vector2 lineEnd, List<Vector2> polygon)
+    {
+        var intersections = new List<Vector2>();
+
+        for (int i = 0; i < polygon.Count; i++)
+        {
+            int j = (i + 1) % polygon.Count;
+            var intersection = ComputeLineIntersection(lineStart, lineEnd, polygon[i], polygon[j]);
+            if (intersection.HasValue)
+            {
+                // Check for duplicates
+                bool isDuplicate = intersections.Any(p =>
+                    Vector2.Distance(p, intersection.Value) < 1e-6f);
+                if (!isDuplicate)
+                {
+                    intersections.Add(intersection.Value);
+                }
+            }
+        }
+
+        return intersections;
+    }
+
+    /// <summary>
+    /// Compute intersection point between two line segments
+    /// </summary>
+    private Vector2? ComputeLineIntersection(Vector2 a1, Vector2 a2, Vector2 b1, Vector2 b2)
+    {
+        float d1x = a2.X - a1.X;
+        float d1y = a2.Y - a1.Y;
+        float d2x = b2.X - b1.X;
+        float d2y = b2.Y - b1.Y;
+
+        float cross = d1x * d2y - d1y * d2x;
+        if (Math.Abs(cross) < 1e-10f) return null;
+
+        float t = ((b1.X - a1.X) * d2y - (b1.Y - a1.Y) * d2x) / cross;
+        float u = ((b1.X - a1.X) * d1y - (b1.Y - a1.Y) * d1x) / cross;
+
+        // Check if intersection is within both segments
+        if (t >= -0.001f && t <= 1.001f && u >= -0.001f && u <= 1.001f)
+        {
+            return new Vector2(a1.X + t * d1x, a1.Y + t * d1y);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Insert an interface element within a single element along a fault segment
+    /// </summary>
+    private int InsertInterfaceInElement(int elementId, Vector2 entry, Vector2 exit,
+        double normalStiffness, double shearStiffness, double cohesion, double frictionAngle)
+    {
+        if (Vector2.Distance(entry, exit) < 1e-6f)
+            return -1;
+
+        // Calculate fault direction and normal
+        Vector2 direction = Vector2.Normalize(exit - entry);
+        Vector2 normal = new Vector2(-direction.Y, direction.X);
+
+        // Small offset for interface thickness (for numerical stability)
+        float offset = 0.0001f;
+
+        // Create four nodes for the interface element
+        // Bottom pair (minus normal direction)
+        var n1 = GetOrCreateNode(entry - normal * offset, 1e-6);
+        var n2 = GetOrCreateNode(exit - normal * offset, 1e-6);
+
+        // Top pair (plus normal direction)
+        var n3 = GetOrCreateNode(exit + normal * offset, 1e-6);
+        var n4 = GetOrCreateNode(entry + normal * offset, 1e-6);
+
+        // Create interface element
+        var interfaceElement = new InterfaceElement4
+        {
+            Id = Elements.Count,
+            NodeIds = new List<int> { n1.Id, n2.Id, n3.Id, n4.Id },
+            NormalStiffness = normalStiffness,
+            ShearStiffness = shearStiffness,
+            JointCohesion = cohesion,
+            JointFriction = frictionAngle,
+            JointTensileStrength = 0
+        };
+        interfaceElement.InitializeState();
+        Elements.Add(interfaceElement);
+
+        return interfaceElement.Id;
+    }
+
+    /// <summary>
+    /// Split an element along a line, creating two new elements and an interface
+    /// </summary>
+    /// <param name="elementId">Element to split</param>
+    /// <param name="splitStart">Start point of split line</param>
+    /// <param name="splitEnd">End point of split line</param>
+    /// <returns>Tuple of (newElement1Id, newElement2Id, interfaceId) or (-1,-1,-1) if split failed</returns>
+    public (int, int, int) SplitElementAlongLine(int elementId, Vector2 splitStart, Vector2 splitEnd)
+    {
+        if (elementId < 0 || elementId >= Elements.Count)
+            return (-1, -1, -1);
+
+        var element = Elements[elementId];
+
+        // Only support splitting triangles and quads
+        if (element.Type != ElementType2D.Triangle3 && element.Type != ElementType2D.Quad4)
+            return (-1, -1, -1);
+
+        var nodesArray = Nodes.ToArray();
+        var vertices = element.NodeIds.Select(id => nodesArray[id].InitialPosition).ToList();
+
+        // Find intersection points with element edges
+        var intersections = FindLinePolygonIntersections(splitStart, splitEnd, vertices);
+        if (intersections.Count < 2)
+            return (-1, -1, -1);
+
+        // Sort intersections
+        Vector2 dir = Vector2.Normalize(splitEnd - splitStart);
+        intersections.Sort((a, b) =>
+        {
+            float da = Vector2.Dot(a - splitStart, dir);
+            float db = Vector2.Dot(b - splitStart, dir);
+            return da.CompareTo(db);
+        });
+
+        Vector2 p1 = intersections[0];
+        Vector2 p2 = intersections[^1];
+
+        // Create new nodes at intersection points
+        var newNode1 = AddNode(p1);
+        var newNode2 = AddNode(p2);
+
+        // Determine which edges contain the intersection points
+        var edges = new List<(int startIdx, int endIdx, Vector2 start, Vector2 end)>();
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            int j = (i + 1) % vertices.Count;
+            edges.Add((i, j, vertices[i], vertices[j]));
+        }
+
+        int edge1 = -1, edge2 = -1;
+        for (int i = 0; i < edges.Count; i++)
+        {
+            if (PointOnSegment(p1, edges[i].start, edges[i].end, 0.01f))
+                edge1 = i;
+            if (PointOnSegment(p2, edges[i].start, edges[i].end, 0.01f))
+                edge2 = i;
+        }
+
+        if (edge1 < 0 || edge2 < 0 || edge1 == edge2)
+            return (-1, -1, -1);
+
+        // Create new elements based on the split
+        int matId = element.MaterialId;
+        int elem1Id = -1, elem2Id = -1;
+
+        if (element.Type == ElementType2D.Triangle3)
+        {
+            // For triangles, splitting creates two new triangles (or a triangle and quad)
+            (elem1Id, elem2Id) = SplitTriangle(element, edge1, edge2, newNode1.Id, newNode2.Id, matId);
+        }
+        else if (element.Type == ElementType2D.Quad4)
+        {
+            // For quads, splitting creates two quads (or triangles depending on geometry)
+            (elem1Id, elem2Id) = SplitQuad(element, edge1, edge2, newNode1.Id, newNode2.Id, matId);
+        }
+
+        // Create interface element between split parts
+        Vector2 normal = new Vector2(-dir.Y, dir.X);
+        float offset = 0.0001f;
+
+        var n1 = GetOrCreateNode(p1 - normal * offset, 1e-6);
+        var n2 = GetOrCreateNode(p2 - normal * offset, 1e-6);
+        var n3 = GetOrCreateNode(p2 + normal * offset, 1e-6);
+        var n4 = GetOrCreateNode(p1 + normal * offset, 1e-6);
+
+        var interfaceElem = (InterfaceElement4)AddInterface(n1.Id, n2.Id, n3.Id, n4.Id, 1e10, 1e9, 0, 25);
+        int interfaceId = interfaceElem.Id;
+
+        // Mark original element as inactive (set material to -1)
+        element.MaterialId = -1;
+
+        return (elem1Id, elem2Id, interfaceId);
+    }
+
+    /// <summary>
+    /// Check if a point lies on a line segment
+    /// </summary>
+    private bool PointOnSegment(Vector2 point, Vector2 segStart, Vector2 segEnd, float tolerance)
+    {
+        float length = Vector2.Distance(segStart, segEnd);
+        if (length < 1e-10f) return Vector2.Distance(point, segStart) < tolerance;
+
+        float d1 = Vector2.Distance(point, segStart);
+        float d2 = Vector2.Distance(point, segEnd);
+
+        return Math.Abs(d1 + d2 - length) < tolerance;
+    }
+
+    /// <summary>
+    /// Split a triangle element into two triangles
+    /// </summary>
+    private (int, int) SplitTriangle(FEMElement2D original, int edge1, int edge2,
+        int newNode1, int newNode2, int materialId)
+    {
+        var nodeIds = original.NodeIds.ToList();
+
+        // Determine which vertex is "alone" (between the two intersected edges)
+        // and which two vertices are on the "other side"
+        int aloneVertex = -1;
+        var otherVertices = new List<int>();
+
+        for (int i = 0; i < 3; i++)
+        {
+            int prevEdge = (i + 2) % 3;
+            int nextEdge = i;
+
+            if ((edge1 == prevEdge && edge2 == nextEdge) ||
+                (edge2 == prevEdge && edge1 == nextEdge))
+            {
+                aloneVertex = i;
+            }
+            else
+            {
+                otherVertices.Add(i);
+            }
+        }
+
+        if (aloneVertex < 0 || otherVertices.Count != 2)
+            return (-1, -1);
+
+        // Create first triangle: alone vertex + two new nodes
+        var elem1 = AddTriangle(nodeIds[aloneVertex], newNode1, newNode2, materialId);
+
+        // Create second triangle (or quad): other vertices + new nodes
+        // This is simplified - creates a triangle with one new node
+        var elem2 = AddTriangle(nodeIds[otherVertices[0]], nodeIds[otherVertices[1]], newNode1, materialId);
+        var elem3 = AddTriangle(nodeIds[otherVertices[1]], newNode2, newNode1, materialId);
+
+        return (elem1.Id, elem2.Id);
+    }
+
+    /// <summary>
+    /// Split a quad element into two elements
+    /// </summary>
+    private (int, int) SplitQuad(FEMElement2D original, int edge1, int edge2,
+        int newNode1, int newNode2, int materialId)
+    {
+        var nodeIds = original.NodeIds.ToList();
+
+        // For a quad, we need to determine which vertices are on each side of the split
+        var side1Vertices = new List<int>();
+        var side2Vertices = new List<int>();
+
+        int current = edge1;
+        while (current != edge2)
+        {
+            side1Vertices.Add(nodeIds[current]);
+            current = (current + 1) % 4;
+        }
+
+        current = edge2;
+        while (current != edge1)
+        {
+            side2Vertices.Add(nodeIds[current]);
+            current = (current + 1) % 4;
+        }
+
+        // Create elements based on the number of vertices on each side
+        FEMElement2D elem1, elem2;
+
+        if (side1Vertices.Count == 2)
+        {
+            // Create quad from side1 + new nodes
+            elem1 = AddQuad(side1Vertices[0], side1Vertices[1], newNode2, newNode1, materialId);
+        }
+        else
+        {
+            // Create triangle
+            elem1 = AddTriangle(side1Vertices[0], newNode2, newNode1, materialId);
+        }
+
+        if (side2Vertices.Count == 2)
+        {
+            // Create quad from side2 + new nodes
+            elem2 = AddQuad(side2Vertices[0], side2Vertices[1], newNode1, newNode2, materialId);
+        }
+        else
+        {
+            elem2 = AddTriangle(side2Vertices[0], newNode1, newNode2, materialId);
+        }
+
+        return (elem1.Id, elem2.Id);
+    }
+
+    /// <summary>
+    /// Duplicate nodes along a fault line to allow slip
+    /// </summary>
+    /// <param name="faultPoints">Ordered points defining the fault trace</param>
+    /// <returns>Dictionary mapping original node IDs to their duplicates on the +normal side</returns>
+    public Dictionary<int, int> DuplicateNodesAlongFault(List<Vector2> faultPoints)
+    {
+        var nodeMapping = new Dictionary<int, int>();
+
+        if (faultPoints.Count < 2) return nodeMapping;
+
+        // Find all nodes that lie on the fault trace
+        foreach (var node in Nodes)
+        {
+            if (IsNodeOnFault(node.InitialPosition, faultPoints, 0.01))
+            {
+                // Duplicate this node
+                var duplicate = AddNode(node.InitialPosition);
+
+                // Copy boundary conditions
+                duplicate.FixedX = node.FixedX;
+                duplicate.FixedY = node.FixedY;
+                duplicate.PrescribedUx = node.PrescribedUx;
+                duplicate.PrescribedUy = node.PrescribedUy;
+
+                nodeMapping[node.Id] = duplicate.Id;
+            }
+        }
+
+        return nodeMapping;
+    }
+
+    /// <summary>
+    /// Check if a point lies on the fault trace
+    /// </summary>
+    private bool IsNodeOnFault(Vector2 point, List<Vector2> faultPoints, double tolerance)
+    {
+        for (int i = 0; i < faultPoints.Count - 1; i++)
+        {
+            if (PointOnSegment(point, faultPoints[i], faultPoints[i + 1], (float)tolerance))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Remove invalid elements (those with MaterialId = -1)
+    /// </summary>
+    public void PruneInvalidElements()
+    {
+        Elements.RemoveAll(e => e.MaterialId < 0);
+
+        // Re-index elements
+        for (int i = 0; i < Elements.Count; i++)
+        {
+            Elements[i].Id = i;
+        }
+    }
+
+    /// <summary>
+    /// Get all interface elements in the mesh
+    /// </summary>
+    public List<InterfaceElement4> GetInterfaceElements()
+    {
+        return Elements.OfType<InterfaceElement4>().ToList();
+    }
+
+    /// <summary>
+    /// Get interface elements that represent auto-generated faults
+    /// </summary>
+    public List<InterfaceElement4> GetFaultInterfaceElements()
+    {
+        return Elements.OfType<InterfaceElement4>()
+            .Where(e => e.JointCohesion == 0 && e.JointTensileStrength == 0)
+            .ToList();
+    }
+
+    #endregion
 }
 
 /// <summary>
