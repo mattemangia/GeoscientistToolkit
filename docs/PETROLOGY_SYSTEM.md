@@ -412,21 +412,25 @@ dP/dT = ΔS(T,P) / ΔV(T,P)
 
 ## References
 
-1. **Bowen, N.L., 1928.** The Evolution of Igneous Rocks. Princeton University Press. [Classic work on reaction series]
+1. Bowen, N. L. (1928). *The evolution of the igneous rocks*. Princeton University Press.
 
-2. **Rollinson, H., 1993.** Using Geochemical Data: Evaluation, Presentation, Interpretation. Longman. [Partition coefficients]
+2. Rollinson, H. R. (1993). *Using geochemical data: Evaluation, presentation, interpretation*. Longman Scientific & Technical.
 
-3. **Henderson, P., 1982.** Inorganic Geochemistry. Pergamon Press. [Trace element geochemistry]
+3. Henderson, P. (1982). *Inorganic geochemistry*. Pergamon Press.
 
-4. **Winter, J.D., 2013.** Principles of Igneous and Metamorphic Petrology, 2nd ed. Pearson. [Modern textbook]
+4. Winter, J. D. (2010). *Principles of igneous and metamorphic petrology* (2nd ed.). Pearson.
 
-5. **Holland, T.J.B. & Powell, R., 2011.** An improved and extended internally consistent thermodynamic dataset for phases of petrological interest. Journal of Metamorphic Geology, 29(3), 333-383. [Thermodynamic data]
+5. Holland, T. J. B., & Powell, R. (2011). An improved and extended internally consistent thermodynamic dataset for phases of petrological interest, involving a new equation of state for solids. *Journal of Metamorphic Geology, 29*(3), 333–383. https://doi.org/10.1111/j.1525-1314.2010.00923.x
 
-6. **Spear, F.S., 1993.** Metamorphic Phase Equilibria and Pressure-Temperature-Time Paths. MSA Monograph. [Metamorphic petrology]
+6. Spear, F. S. (1993). *Metamorphic phase equilibria and pressure-temperature-time paths*. Mineralogical Society of America Monograph Series.
 
-7. **Richardson, S.W. & England, P.C., 1979.** Metamorphic phase diagrams. [P-T diagrams]
+7. Richardson, S. W., Gilbert, M. C., & Bell, P. M. (1969). Experimental determination of kyanite-andalusite and andalusite-sillimanite equilibria; the aluminum silicate triple point. *American Journal of Science, 267*(3), 259–272. https://doi.org/10.2475/ajs.267.3.259
 
-8. **Philpotts, A.R. & Ague, J.J., 2009.** Principles of Igneous and Metamorphic Petrology, 2nd ed. Cambridge. [Comprehensive textbook]
+8. Philpotts, A. R., & Ague, J. J. (2009). *Principles of igneous and metamorphic petrology* (2nd ed.). Cambridge University Press. https://doi.org/10.1017/CBO9780511813429
+
+9. Allègre, C. J., Treuil, M., Minster, J. F., Minster, B., & Albarède, F. (1977). Systematic use of trace element in igneous process. Part I: Fractional crystallization processes in volcanic suites. *Contributions to Mineralogy and Petrology, 60*(1), 57–75. https://doi.org/10.1007/BF00372851
+
+10. Hart, S. R., & Davis, K. E. (1978). Nickel partitioning between olivine and silicate melt. *Earth and Planetary Science Letters, 40*(2), 203–219. https://doi.org/10.1016/0012-821X(78)90091-2
 
 ---
 

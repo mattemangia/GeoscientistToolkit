@@ -346,9 +346,10 @@ WITH "CorePNM_Clean" DO
 
 ## References
 
-- Dong & Blunt (2009): Pore-network extraction
-- Valvatne & Blunt (2004): Predictive pore-scale modeling
-- Raoof & Hassanizadeh (2010): Reactive transport in pore networks
+- Dong, H., & Blunt, M. J. (2009). Pore-network extraction from micro-computerized-tomography images. *Physical Review E, 80*(3), 036307. https://doi.org/10.1103/PhysRevE.80.036307
+- Valvatne, P. H., & Blunt, M. J. (2004). Predictive pore-scale modeling of two-phase flow in mixed wet media. *Water Resources Research, 40*(7), W07406. https://doi.org/10.1029/2003WR002627
+- Raoof, A., & Hassanizadeh, S. M. (2010). A new method for generating pore-network models of porous media. *Transport in Porous Media, 81*(3), 391–407. https://doi.org/10.1007/s11242-009-9412-3
+- Fatt, I. (1956). The network model of porous media. *Transactions of the AIME, 207*(1), 144–181. https://doi.org/10.2118/574-G
 
 ---
 

@@ -188,19 +188,19 @@ Calculates HCO₃⁻ and CO₃²⁻ from field alkalinity measurements.
 
 ## References
 
-1. Holland, T.J.B. & Powell, R., 2011. An improved and extended internally consistent thermodynamic dataset for phases of petrological interest. Journal of Metamorphic Geology, 29(3), 333-383.
+1. Holland, T. J. B., & Powell, R. (2011). An improved and extended internally consistent thermodynamic dataset for phases of petrological interest, involving a new equation of state for solids. *Journal of Metamorphic Geology, 29*(3), 333–383. https://doi.org/10.1111/j.1525-1314.2010.00923.x
 
-2. Parkhurst, D.L. & Appelo, C.A.J., 2013. Description of input and examples for PHREEQC version 3. USGS Techniques and Methods, Book 6, Chapter A43.
+2. Parkhurst, D. L., & Appelo, C. A. J. (2013). *Description of input and examples for PHREEQC version 3: A computer program for speciation, batch-reaction, one-dimensional transport, and inverse geochemical calculations*. U.S. Geological Survey Techniques and Methods, Book 6, Chapter A43. https://doi.org/10.3133/tm6A43
 
-3. Robie, R.A. & Hemingway, B.S., 1995. Thermodynamic Properties of Minerals and Related Substances at 298.15 K and 1 Bar. USGS Bulletin 2131.
+3. Robie, R. A., & Hemingway, B. S. (1995). *Thermodynamic properties of minerals and related substances at 298.15 K and 1 bar (10⁵ Pascals) pressure and at higher temperatures*. U.S. Geological Survey Bulletin 2131. https://doi.org/10.3133/b2131
 
-4. Millero, F.J., 1995. Thermodynamics of the carbon dioxide system in the oceans. Geochimica et Cosmochimica Acta, 59(4), 661-677.
+4. Millero, F. J. (1995). Thermodynamics of the carbon dioxide system in the oceans. *Geochimica et Cosmochimica Acta, 59*(4), 661–677. https://doi.org/10.1016/0016-7037(94)00354-O
 
-5. Stumm, W. & Morgan, J.J., 1996. Aquatic Chemistry, 3rd ed. Wiley-Interscience.
+5. Stumm, W., & Morgan, J. J. (1996). *Aquatic chemistry: Chemical equilibria and rates in natural waters* (3rd ed.). Wiley-Interscience.
 
-6. Bethke, C.M., 2008. Geochemical and Biogeochemical Reaction Modeling, 2nd ed. Cambridge University Press.
+6. Bethke, C. M. (2008). *Geochemical and biogeochemical reaction modeling* (2nd ed.). Cambridge University Press. https://doi.org/10.1017/CBO9780511619670
 
-7. Johnson, J.W., Oelkers, E.H. & Helgeson, H.C., 1992. SUPCRT92: A software package for calculating standard molal thermodynamic properties. Computers & Geosciences, 18, 899-947.
+7. Johnson, J. W., Oelkers, E. H., & Helgeson, H. C. (1992). SUPCRT92: A software package for calculating standard molal thermodynamic properties of minerals, gases, aqueous species, and reactions from 1 to 5000 bar and 0 to 1000°C. *Computers & Geosciences, 18*(7), 899–947. https://doi.org/10.1016/0098-3004(92)90029-Q
 
 ## Implementation Notes
 

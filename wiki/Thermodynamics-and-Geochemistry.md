@@ -394,10 +394,10 @@ Properties vary with temperature using:
 
 ## References
 
-- Holland & Powell (2011): Thermodynamic dataset
-- Parkhurst & Appelo (2013): PHREEQC manual
-- Bethke (2007): Geochemical and Biogeochemical Reaction Modeling
-- Nordstrom & Munoz (1994): Geochemical Thermodynamics
+- Holland, T. J. B., & Powell, R. (2011). An improved and extended internally consistent thermodynamic dataset for phases of petrological interest. *Journal of Metamorphic Geology, 29*(3), 333–383. https://doi.org/10.1111/j.1525-1314.2010.00923.x
+- Parkhurst, D. L., & Appelo, C. A. J. (2013). *Description of input and examples for PHREEQC version 3*. U.S. Geological Survey Techniques and Methods, Book 6, Chapter A43. https://doi.org/10.3133/tm6A43
+- Bethke, C. M. (2008). *Geochemical and biogeochemical reaction modeling* (2nd ed.). Cambridge University Press. https://doi.org/10.1017/CBO9780511619670
+- Nordstrom, D. K., & Munoz, J. L. (1994). *Geochemical thermodynamics* (2nd ed.). Blackwell Scientific Publications.
 
 ---
 
