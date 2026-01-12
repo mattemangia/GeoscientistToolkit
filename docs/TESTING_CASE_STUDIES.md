@@ -88,6 +88,7 @@ The table below lists the real-case demonstrations, the key data inputs, and the
 | 16 | Nuclear | Heavy water moderation | D₂O vs H₂O cross sections, moderation ratio | Glasstone & Sesonske (1994); IAEA TECDOC-1326. |
 | 17 | Nuclear | Xenon-135 poisoning | σₐ=2.65×10⁶ barn, decay constants, flux=3×10¹³ n/cm²·s | Stacey (2007); Lamarsh (1966) iodine pit dynamics. |
 | 18 | Nuclear | Thermal efficiency & power balance | PWR: 3411 MWth/1150 MWe; CANDU: 2064 MWth/700 MWe | IAEA NP-T-1.1; World Nuclear Association data. |
+| 19 | TwoDGeology | Strip footing bearing capacity (2D geomechanics) | φ=25–30°, c=20–50 kPa; strip footing width=3–4 m; smooth-footing reduction factor | Bearing capacity factors from Meyerhof (1951), Bolton & Lau (1993), and Meyerhof (1963). |
 
 ## References and data provenance
 
@@ -116,7 +117,10 @@ If you add a new test case, please extend this document with the data source and
 - Lauwerier, H. A. (1955). The transport of heat in an oil layer caused by the injection of hot fluid. *Applied Scientific Research, Section A, 5*(2-3), 145–150. https://doi.org/10.1007/BF03184614
 - Lamarsh, J. R. (1966). *Introduction to nuclear reactor theory*. Addison-Wesley.
 - Mackenzie, K. V. (1981). Nine-term equation for sound speed in the oceans. *Journal of the Acoustical Society of America, 70*, 807. https://doi.org/10.1121/1.386920
+- Meyerhof, G. G. (1951). The ultimate bearing capacity of foundations. *Géotechnique, 2*(4), 301–332. https://doi.org/10.1680/geot.1951.2.4.301
+- Meyerhof, G. G. (1963). Some recent research on the bearing capacity of foundations. *Canadian Geotechnical Journal, 1*(1), 16–26. https://doi.org/10.1139/t63-003
 - Mucci, A. (1983). The solubility of calcite and aragonite in seawater at various temperatures, salinities, and one atmosphere total pressure. *Geochimica et Cosmochimica Acta, 47*(7), 1293–1308. https://doi.org/10.1016/0016-7037(83)90288-0
+- Bolton, M. D., & Lau, C. K. (1993). Vertical bearing capacity factors for circular and strip footings on Mohr-Coulomb soil. *Canadian Geotechnical Journal, 30*(6), 1024–1033. https://doi.org/10.1139/t93-099
 - Pelletier, J. D. (2008). *Quantitative modeling of earth surface processes*. Cambridge University Press. https://doi.org/10.1017/CBO9780511813849
 - Pruess, K., Oldenburg, C., & Moridis, G. (2012). *TOUGH2 user’s guide, version 2.0* (LBNL-43134). https://doi.org/10.2172/778134
 - Quoilin, S., et al. (2013). Techno-economic survey of Organic Rankine Cycle (ORC) systems. *Renewable and Sustainable Energy Reviews, 22*, 168–186. https://doi.org/10.1016/j.rser.2013.01.028

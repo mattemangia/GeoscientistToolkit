@@ -15,6 +15,8 @@ using GeoscientistToolkit.Analysis.Thermodynamic;
 using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Data.PhysicoChem;
 using GeoscientistToolkit.Data.Pnm;
+using GeoscientistToolkit.Data.TwoDGeology;
+using GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
 using MathNet.Numerics;
 using Xunit;
 using AcousticSimulationParameters = GeoscientistToolkit.Analysis.AcousticSimulation.SimulationParameters;
@@ -24,6 +26,8 @@ namespace VerificationTests;
 
 public class SimulationVerificationTests
 {
+    private const double SmoothFootingReductionFactor = 0.6;
+
     [Fact]
     public void SlopeStability_GravityDrop_MatchesAnalyticalFreeFall()
     {
@@ -227,6 +231,92 @@ public class SimulationVerificationTests
                        + 2f * 10f * MathF.Tan(MathF.PI / 4f + MathF.PI / 12f);
 
         Assert.InRange(peakStress, expected - 2.0f, expected + 2.0f);
+    }
+
+    [Fact]
+    public void TwoDGeology_BearingCapacityStripFooting_AlignsWithReferenceFactors()
+    {
+        const double footingWidth = 4.0;
+        const double soilDepth = 25.0;
+        const double footingHeight = 1.0;
+        const double meshSize = 1.0;
+
+        var soil = CreateBenchmarkSoil();
+        var footing = new FoundationPrimitive
+        {
+            Width = footingWidth,
+            Height = footingHeight,
+            EmbedmentDepth = 0.0
+        };
+        var expectedUltimateCapacity = footing.CalculateBearingCapacity(soil) * SmoothFootingReductionFactor;
+
+        double low = expectedUltimateCapacity * 0.98;
+        double high = expectedUltimateCapacity * 1.02;
+        double estimate = expectedUltimateCapacity;
+
+        const double failureYieldThreshold = 0.0;
+        for (int i = 0; i < 8; i++)
+        {
+            double mid = 0.5 * (low + high);
+            double yieldDelta = RunStripFootingSimulation(mid, soilDepth, footingWidth, footingHeight, meshSize);
+            estimate = mid;
+
+            if (yieldDelta > failureYieldThreshold)
+            {
+                high = mid;
+            }
+            else
+            {
+                low = mid;
+            }
+        }
+
+        double errorFraction = Math.Abs(estimate - expectedUltimateCapacity) / expectedUltimateCapacity;
+        Assert.True(errorFraction < 0.05, $"Bearing-capacity error {errorFraction:P2} exceeds 5%.");
+    }
+
+    [Fact]
+    public void TwoDGeology_BearingCapacityStripFooting_CohesiveClayMatchesReferenceFactors()
+    {
+        const double footingWidth = 3.0;
+        const double soilDepth = 20.0;
+        const double footingHeight = 1.0;
+        const double meshSize = 1.0;
+
+        var soil = CreateBenchmarkSoil(cohesion: 50e3, frictionAngle: 25.0, density: 1900.0);
+        var footing = new FoundationPrimitive
+        {
+            Width = footingWidth,
+            Height = footingHeight,
+            EmbedmentDepth = 0.0
+        };
+        var expectedUltimateCapacity = footing.CalculateBearingCapacity(soil) * SmoothFootingReductionFactor;
+
+        double low = expectedUltimateCapacity * 0.98;
+        double high = expectedUltimateCapacity * 1.02;
+        double estimate = expectedUltimateCapacity;
+
+        const double failureYieldThreshold = 0.0;
+        for (int i = 0; i < 8; i++)
+        {
+            double mid = 0.5 * (low + high);
+            double yieldDelta = RunStripFootingSimulation(
+                mid, soilDepth, footingWidth, footingHeight, meshSize,
+                cohesion: 50e3, frictionAngle: 25.0, density: 1900.0);
+            estimate = mid;
+
+            if (yieldDelta > failureYieldThreshold)
+            {
+                high = mid;
+            }
+            else
+            {
+                low = mid;
+            }
+        }
+
+        double errorFraction = Math.Abs(estimate - expectedUltimateCapacity) / expectedUltimateCapacity;
+        Assert.True(errorFraction < 0.05, $"Bearing-capacity error {errorFraction:P2} exceeds 5%.");
     }
 
     [Fact]
@@ -1807,5 +1897,152 @@ public class SimulationVerificationTests
         Console.WriteLine($"CANDU: {candu.ThermalPowerMW:F0} MWth → {candu.ElectricalPowerMW:F0} MWe ({canduEfficiency:F1}%)");
         Console.WriteLine($"CANDU coolant heat removal: {canduHeatRemoval:F0} MW");
         Console.WriteLine($"Reference: IAEA NP-T-1.1, Design Features (2009)");
+    }
+
+    private static GeomechanicalMaterial2D CreateBenchmarkSoil(
+        double cohesion = 20e3,
+        double frictionAngle = 30,
+        double density = 1800)
+    {
+        return new GeomechanicalMaterial2D
+        {
+            Name = "Benchmark Sand",
+            YoungModulus = 80e6,
+            PoissonRatio = 0.3,
+            Density = density,
+            Cohesion = cohesion,
+            FrictionAngle = frictionAngle,
+            TensileStrength = 50e6,
+            FailureCriterion = FailureCriterion2D.LinearMohrCoulomb
+        };
+    }
+
+    private static double RunStripFootingSimulation(
+        double bearingPressure,
+        double soilDepth,
+        double footingWidth,
+        double footingHeight,
+        double meshSize,
+        double cohesion = 20e3,
+        double frictionAngle = 30,
+        double density = 1800)
+    {
+        var loadedAverage = ComputeAverageYieldValue(
+            bearingPressure, soilDepth, footingWidth, footingHeight, meshSize,
+            cohesion, frictionAngle, density);
+        var baselineAverage = ComputeAverageYieldValue(
+            0.0, soilDepth, footingWidth, footingHeight, meshSize,
+            cohesion, frictionAngle, density);
+
+        return loadedAverage - baselineAverage;
+    }
+
+    private static double ComputeAverageYieldValue(
+        double bearingPressure,
+        double soilDepth,
+        double footingWidth,
+        double footingHeight,
+        double meshSize,
+        double cohesion,
+        double frictionAngle,
+        double density)
+    {
+        var dataset = new TwoDGeologyDataset("BearingCapacityBenchmark", string.Empty);
+        var simulator = dataset.GeomechanicalSimulator;
+
+        dataset.Primitives.Clear();
+        simulator.Mesh.Clear();
+        dataset.MaterialLibrary.Clear();
+
+        var soil = CreateBenchmarkSoil(cohesion, frictionAngle, density);
+        int soilId = dataset.MaterialLibrary.AddMaterial(soil);
+        var soilPrimitive = new RectanglePrimitive
+        {
+            Name = "Soil Domain",
+            Position = new Vector2((float)(footingWidth * 2.5), (float)(-soilDepth / 2.0)),
+            Width = footingWidth * 10.0,
+            Height = soilDepth,
+            MaterialId = soilId,
+            MeshSize = meshSize
+        };
+
+        dataset.Primitives.AddPrimitive(soilPrimitive);
+
+        dataset.Primitives.GenerateAllMeshes(simulator.Mesh);
+        dataset.Primitives.ApplyAllBoundaryConditions(simulator.Mesh);
+        var (minBounds, maxBounds) = simulator.Mesh.GetBoundingBox();
+        double sideTolerance = meshSize * 0.6;
+        foreach (var node in simulator.Mesh.Nodes)
+        {
+            if (Math.Abs(node.InitialPosition.X - minBounds.X) < sideTolerance ||
+                Math.Abs(node.InitialPosition.X - maxBounds.X) < sideTolerance)
+            {
+                node.FixedX = true;
+            }
+        }
+        if (bearingPressure > 0)
+            ApplyStripFootingLoad(simulator.Mesh.Nodes, bearingPressure, footingWidth, meshSize);
+        simulator.Mesh.FixBottom();
+        simulator.InitializeResults();
+
+        simulator.ApplyGravity = true;
+        simulator.AnalysisType = AnalysisType2D.Static;
+        simulator.RunAsync().GetAwaiter().GetResult();
+
+        var results = simulator.Results;
+        var nodes = simulator.Mesh.Nodes.ToArray();
+        double xCenter = footingWidth * 2.5;
+        double xMin = xCenter - (float)(footingWidth / 2.0);
+        double xMax = xCenter + (float)(footingWidth / 2.0);
+        double yMin = -(footingWidth * 0.5);
+
+        double yieldSum = 0;
+        int sampleCount = 0;
+        for (int i = 0; i < simulator.Mesh.Elements.Count; i++)
+        {
+            var centroid = simulator.Mesh.Elements[i].GetCentroid(nodes);
+            if (centroid.X >= xMin && centroid.X <= xMax && centroid.Y < 0 && centroid.Y > yMin)
+            {
+                var material = simulator.Mesh.Materials.GetMaterial(simulator.Mesh.Elements[i].MaterialId);
+                double yieldValue = material?.EvaluateYieldFunction(results.Sigma1[i], results.Sigma2[i], 0) ?? 0;
+                yieldSum += yieldValue;
+                sampleCount++;
+            }
+        }
+
+        return sampleCount == 0 ? 0 : yieldSum / sampleCount;
+    }
+
+    private static void ApplyStripFootingLoad(
+        IReadOnlyList<FEMNode2D> nodes,
+        double bearingPressure,
+        double footingWidth,
+        double meshSize)
+    {
+        double xCenter = footingWidth * 2.5;
+        double xMin = xCenter - footingWidth / 2.0;
+        double xMax = xCenter + footingWidth / 2.0;
+        double ySurface = 0.0;
+        double yTolerance = meshSize * 0.6;
+
+        var footingNodes = new List<FEMNode2D>();
+        foreach (var node in nodes)
+        {
+            if (Math.Abs(node.InitialPosition.Y - ySurface) < yTolerance &&
+                node.InitialPosition.X >= xMin && node.InitialPosition.X <= xMax)
+            {
+                footingNodes.Add(node);
+            }
+        }
+
+        if (footingNodes.Count == 0)
+            return;
+
+        double forcePerNode = bearingPressure * footingWidth / footingNodes.Count;
+        foreach (var node in footingNodes)
+        {
+            node.Fy -= forcePerNode;
+            node.FixedX = true;
+        }
     }
 }
