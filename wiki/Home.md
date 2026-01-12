@@ -251,7 +251,7 @@ We welcome contributions! See the [Contributing Guidelines](https://github.com/m
 - **Documentation**: Browse this wiki
 - **Bug Reports**: [GitHub Issues](https://github.com/mattemangia/GeoscientistToolkit/issues)
 - **Feature Requests**: [GitHub Discussions](https://github.com/mattemangia/GeoscientistToolkit/discussions)
-- **Contact**: matteo.mangia@gmail.com
+- **Contact**: m.mangiagalli@campus.uniurb.it
 
 ---
 

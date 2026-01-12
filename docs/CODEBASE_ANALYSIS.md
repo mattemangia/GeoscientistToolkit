@@ -723,13 +723,25 @@ public class EarthquakeSimulation
 
 ### 10.1 Project File Structure
 
+- **GeoscientistToolkit.sln** - Solution entrypoint
 - **GeoscientistToolkit.csproj** - Main application
-- **AddInExtractor.csproj** - Plugin build system
 - **Folder Structure**:
-  - `/AddIns/Development/` - Plugin source
-  - `/AddIns/CTSimulation/` - Example plugins
+  - `/AddIns/` - Plugin framework and sample add-ins
+  - `/Api/` - Public API contracts and helpers
+  - `/GTK/` - GTK-based UI frontend
+  - `/InstallerPackager/` - Build-time packaging tool
+  - `/InstallerWizard/` - Cross-platform installer TUI
+  - `/Network/` - Distributed node discovery/messaging
+  - `/NodeEndpoint/` - ASP.NET Core node service
+  - `/ONNX/` - Model assets and runtime helpers
+  - `/OpenCL/` - GPU kernels
+  - `/Scripting/` - GeoScript language runtime + commands
   - `/Shaders/` - GLSL shader code
   - `/Settings/` - Configuration schemas
+  - `/Tests/` - Unit/integration tests
+  - `/VerificationTests/` - Verification test harness
+  - `/docs/` - End-user documentation
+  - `/wiki/` - Developer documentation
 
 ### 10.2 Build Targets
 
@@ -863,4 +875,3 @@ Logger.LogError(message);
 - Bowen - Magmatic crystallization series
 
 ---
-

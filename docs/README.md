@@ -64,6 +64,7 @@ This folder contains all project documentation for Geoscientist's Toolkit.
 ## Developer Resources
 
 - **[CODEBASE_ANALYSIS.md](CODEBASE_ANALYSIS.md)** - Analysis of the codebase structure
+- **[TECHNOLOGY_REFERENCES.md](TECHNOLOGY_REFERENCES.md)** - Technology and dataset references (APA format)
 - **[../Api/README.md](../Api/README.md)** - API usage for external automation
 - **[../NodeEndpoint/README.md](../NodeEndpoint/README.md)** - NodeEndpoint network service documentation
 - **[../NodeEndpoint/IMPLEMENTATION_SUMMARY.md](../NodeEndpoint/IMPLEMENTATION_SUMMARY.md)** - NodeEndpoint implementation details
