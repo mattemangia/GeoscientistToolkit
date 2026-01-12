@@ -245,6 +245,89 @@ Monitor progress with:
 - Residual norm (convergence indicator)
 - Maximum displacement
 - Number of plastic/failed elements
+- Number of generated faults (if auto-fault is enabled)
+
+### Automatic Fault Generation
+
+The simulation supports **automatic fault generation** based on rupture criteria. When enabled, the system detects regions of failure and automatically nucleates and propagates faults as the simulation progresses.
+
+#### Enabling Auto-Fault Generation
+
+Enable automatic fault generation through:
+
+1. **GUI**: Toggle "Auto-Generate Faults" in the simulation settings
+2. **Code**: Call `EnableAutoFaultGeneration()` on the dataset or simulator
+3. **GeoScript**: Use `GEOMECH_ENABLE_AUTOFAULT` command
+
+#### How It Works
+
+The fault propagation engine:
+
+1. **Rupture Detection**: Monitors yield index across elements during simulation
+2. **Cluster Analysis**: Groups adjacent failed elements into rupture zones
+3. **Fault Nucleation**: Creates faults when clusters exceed minimum size threshold
+4. **Propagation**: Extends faults following stress-guided or Coulomb angle directions
+5. **Interface Insertion**: Inserts interface elements along fault traces for discontinuous deformation
+
+#### Rupture Modes
+
+The system identifies different rupture modes:
+
+| Mode | Description | Typical Angle |
+|------|-------------|---------------|
+| **Tensile (Mode I)** | Opening fractures aligned with σ₁ | Perpendicular to σ₃ |
+| **Shear (Mode II)** | Sliding faults at Coulomb angle | θ = 45° - φ/2 from σ₁ |
+| **Mixed Mode** | Combined tensile and shear | Intermediate orientation |
+
+#### Configuration Options
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `RuptureThreshold` | 1.0 | Yield index threshold to trigger fault (f > threshold) |
+| `MinFailedClusterSize` | 3 | Minimum failed elements to nucleate a fault |
+| `PropagationStrategy` | ConjugateAngle | Direction strategy: StressGuided, EnergyMinimizing, ConjugateAngle |
+| `MaxPropagationPerStep` | 10.0 m | Maximum fault growth per simulation step |
+| `FaultFrictionAngle` | 25° | Friction angle for generated faults |
+| `FaultCohesion` | 0 Pa | Cohesion for generated faults (typically 0 for new ruptures) |
+
+#### Using Manually Drawn Faults
+
+Faults drawn manually in the cross-section are automatically included in simulations:
+
+1. Use the **Draw Fault** tool (E key) to trace fault lines
+2. Set fault properties (dip, friction, cohesion) in the properties panel
+3. When generating mesh, faults are converted to interface elements
+4. During simulation, these faults act as discontinuities with their assigned properties
+
+Both manual and auto-generated faults can coexist in the same simulation.
+
+#### GeoScript Commands for Auto-Fault
+
+```geoscript
+# Enable automatic fault generation
+GEOMECH_ENABLE_AUTOFAULT threshold=1.0 min_cluster=3 strategy=conjugate
+
+# Run simulation with auto-faults
+GEOMECH_RUN_WITH_AUTOFAULTS analysis=quasistatic steps=20
+
+# Get generated faults
+GEOMECH_GET_AUTOFAULTS output_file=generated_faults.json
+
+# Disable auto-fault generation
+GEOMECH_DISABLE_AUTOFAULT
+```
+
+#### Visualizing Generated Faults
+
+Auto-generated faults are displayed with color-coded rupture modes:
+- **Red**: Tensile opening (Mode I)
+- **Blue**: Shear sliding (Mode II)
+- **Purple**: Mixed mode
+
+The simulation state panel shows:
+- Number of generated faults
+- Total fault length
+- Number of rupture sites detected
 
 ### Visualization Options
 

@@ -323,16 +323,73 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
                 EndPoint = fault.FaultTrace.LastOrDefault(),
                 DipAngle = fault.Dip,
                 FrictionAngle = 20,
-                Cohesion = 0
+                Cohesion = 0,
+                NormalStiffness = 1e10,
+                ShearStiffness = 1e9
             };
             jointSet.Joints.Add(joint);
             _jointSets.AddJointSet(jointSet);
         }
 
+        // Insert all defined faults and joints as interface elements in the mesh
+        InsertFaultsAndJointsIntoMesh();
+
         // Apply default boundary conditions
         _geomechanicalSimulator.Mesh.FixBottom();
 
         Logger.Log($"Generated mesh: {_geomechanicalSimulator.Mesh.Nodes.Count} nodes, {_geomechanicalSimulator.Mesh.Elements.Count} elements");
+    }
+
+    /// <summary>
+    /// Insert all defined faults and joints into the mesh as interface elements.
+    /// This allows faults to act as discontinuities during simulation.
+    /// </summary>
+    public void InsertFaultsAndJointsIntoMesh()
+    {
+        int insertedCount = 0;
+
+        foreach (var joint in _jointSets.GetAllJoints())
+        {
+            // Skip joints with insufficient points
+            if (joint.Points.Count < 2 && joint.StartPoint == joint.EndPoint)
+                continue;
+
+            Vector2 start = joint.Points.Count > 0 ? joint.Points.First() : joint.StartPoint;
+            Vector2 end = joint.Points.Count > 0 ? joint.Points.Last() : joint.EndPoint;
+
+            if (Vector2.Distance(start, end) < 0.1)
+                continue;
+
+            // Insert as interface elements
+            var interfaces = _geomechanicalSimulator.Mesh.InsertFaultLine(
+                start, end,
+                joint.NormalStiffness,
+                joint.ShearStiffness,
+                joint.Cohesion,
+                joint.FrictionAngle);
+
+            insertedCount += interfaces.Count;
+
+            // For multi-segment faults, insert each segment
+            for (int i = 0; i < joint.Points.Count - 1; i++)
+            {
+                if (i == 0 && joint.Points.Count == 2) continue; // Already handled above
+
+                var segInterfaces = _geomechanicalSimulator.Mesh.InsertFaultLine(
+                    joint.Points[i], joint.Points[i + 1],
+                    joint.NormalStiffness,
+                    joint.ShearStiffness,
+                    joint.Cohesion,
+                    joint.FrictionAngle);
+
+                insertedCount += segInterfaces.Count;
+            }
+        }
+
+        if (insertedCount > 0)
+        {
+            Logger.Log($"Inserted {insertedCount} interface elements from faults/joints");
+        }
     }
 
     /// <summary>
@@ -351,6 +408,101 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
         _geomechanicalSimulator.NumLoadSteps = 10;
 
         await _geomechanicalSimulator.RunAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Run geomechanical simulation with automatic fault generation based on rupture criteria
+    /// </summary>
+    /// <param name="ruptureThreshold">Minimum yield index to trigger fault nucleation (default 1.0)</param>
+    /// <param name="minClusterSize">Minimum failed elements to nucleate a fault (default 3)</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    public async Task RunGeomechanicalSimulationWithAutoFaultsAsync(
+        double ruptureThreshold = 1.0,
+        int minClusterSize = 3,
+        CancellationToken cancellationToken = default)
+    {
+        if (_geomechanicalSimulator.Mesh.Elements.Count == 0)
+        {
+            Logger.LogWarning("No mesh available. Generate mesh first.");
+            return;
+        }
+
+        // Enable automatic fault generation
+        _geomechanicalSimulator.EnableAutoFaultGeneration(
+            ruptureThreshold,
+            minClusterSize,
+            PropagationStrategy.ConjugateAngle);
+
+        _geomechanicalSimulator.ApplyGravity = true;
+        _geomechanicalSimulator.AnalysisType = AnalysisType2D.QuasiStatic;
+        _geomechanicalSimulator.NumLoadSteps = 20; // More steps for fault development
+
+        await _geomechanicalSimulator.RunAsync(cancellationToken);
+
+        // Add auto-generated faults to joint set manager for visualization
+        var generatedFaults = _geomechanicalSimulator.GetGeneratedFaultsAsDiscontinuities();
+        if (generatedFaults.Count > 0)
+        {
+            var autoFaultSet = new JointSet2D
+            {
+                Name = "Auto-Generated Faults",
+                Type = DiscontinuityType.Fault,
+                Color = new Vector4(1.0f, 0.2f, 0.2f, 1.0f) // Red for auto faults
+            };
+
+            foreach (var fault in generatedFaults)
+            {
+                autoFaultSet.Joints.Add(fault);
+            }
+
+            _jointSets.AddJointSet(autoFaultSet);
+            Logger.Log($"Added {generatedFaults.Count} auto-generated faults to joint sets");
+        }
+    }
+
+    /// <summary>
+    /// Enable automatic fault generation during simulation
+    /// </summary>
+    /// <param name="ruptureThreshold">Minimum yield index to trigger fault nucleation</param>
+    /// <param name="minClusterSize">Minimum failed elements to nucleate a fault</param>
+    /// <param name="strategy">Fault propagation direction strategy</param>
+    public void EnableAutoFaultGeneration(
+        double ruptureThreshold = 1.0,
+        int minClusterSize = 3,
+        PropagationStrategy strategy = PropagationStrategy.ConjugateAngle)
+    {
+        _geomechanicalSimulator.EnableAutoFaultGeneration(ruptureThreshold, minClusterSize, strategy);
+        Logger.Log($"Auto-fault generation enabled: threshold={ruptureThreshold}, minCluster={minClusterSize}");
+    }
+
+    /// <summary>
+    /// Disable automatic fault generation
+    /// </summary>
+    public void DisableAutoFaultGeneration()
+    {
+        _geomechanicalSimulator.DisableAutoFaultGeneration();
+    }
+
+    /// <summary>
+    /// Get all faults including both manually drawn and auto-generated
+    /// </summary>
+    public List<Discontinuity2D> GetAllFaults()
+    {
+        var faults = new List<Discontinuity2D>();
+
+        // Get manually defined faults from joint sets
+        foreach (var joint in _jointSets.GetAllJoints())
+        {
+            if (joint.Type == DiscontinuityType.Fault)
+            {
+                faults.Add(joint);
+            }
+        }
+
+        // Get auto-generated faults
+        faults.AddRange(_geomechanicalSimulator.GetGeneratedFaultsAsDiscontinuities());
+
+        return faults;
     }
 
     /// <summary>

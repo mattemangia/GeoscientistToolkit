@@ -53,6 +53,21 @@ public class SimulationState2D
     public double MaxDisplacement { get; set; }
     public double MaxStress { get; set; }
     public string StatusMessage { get; set; }
+
+    /// <summary>
+    /// Number of auto-generated faults during simulation
+    /// </summary>
+    public int NumGeneratedFaults { get; set; }
+
+    /// <summary>
+    /// Total length of all generated faults (m)
+    /// </summary>
+    public double TotalFaultLength { get; set; }
+
+    /// <summary>
+    /// Number of detected rupture sites awaiting fault nucleation
+    /// </summary>
+    public int NumRuptureSites { get; set; }
 }
 
 /// <summary>
@@ -159,6 +174,16 @@ public class TwoDGeomechanicalSimulator
     public SimulationState2D State { get; } = new();
     public SimulationResults2D Results { get; private set; }
 
+    /// <summary>
+    /// Fault propagation engine for automatic fault generation during simulation
+    /// </summary>
+    public FaultPropagationEngine FaultEngine { get; } = new();
+
+    /// <summary>
+    /// Settings for automatic fault generation based on rupture criteria
+    /// </summary>
+    public AutoFaultSettings AutoFaultSettings => FaultEngine.Settings;
+
     // Analysis settings
     public AnalysisType2D AnalysisType { get; set; } = AnalysisType2D.Static;
     public SolverType2D SolverType { get; set; } = SolverType2D.ConjugateGradient;
@@ -194,6 +219,16 @@ public class TwoDGeomechanicalSimulator
     public event Action<SimulationResults2D> OnSimulationCompleted;
     public event Action<string> OnMessage;
 
+    /// <summary>
+    /// Event fired when a new fault is generated during simulation
+    /// </summary>
+    public event EventHandler<FaultGeneratedEventArgs> OnFaultGenerated;
+
+    /// <summary>
+    /// Event fired when rupture is detected (before fault forms)
+    /// </summary>
+    public event EventHandler<FaultNucleationSite> OnRuptureDetected;
+
     #endregion
 
     #region Private Fields
@@ -216,6 +251,31 @@ public class TwoDGeomechanicalSimulator
     public TwoDGeomechanicalSimulator()
     {
         Mesh = new FEMMesh2D();
+        InitializeFaultEngine();
+    }
+
+    /// <summary>
+    /// Initialize fault propagation engine and wire up events
+    /// </summary>
+    private void InitializeFaultEngine()
+    {
+        FaultEngine.OnFaultNucleated += (sender, args) =>
+        {
+            OnFaultGenerated?.Invoke(this, args);
+            OnMessage?.Invoke($"Fault nucleated at step {args.SimulationStep}: " +
+                $"Mode={args.Fault.Mode}, Length={args.Fault.Length:F2}m");
+        };
+
+        FaultEngine.OnFaultPropagated += (sender, args) =>
+        {
+            OnFaultGenerated?.Invoke(this, args);
+            OnMessage?.Invoke($"Fault {args.Fault.Id} propagated to length {args.Fault.Length:F2}m");
+        };
+
+        FaultEngine.OnRuptureDetected += (sender, site) =>
+        {
+            OnRuptureDetected?.Invoke(this, site);
+        };
     }
 
     public void SetMesh(FEMMesh2D mesh)
@@ -331,6 +391,10 @@ public class TwoDGeomechanicalSimulator
         UpdateStressStrain();
         ComputeDerivedQuantities();
 
+        // Process automatic fault generation based on rupture criteria
+        // (for static analysis, only check once at the end)
+        ProcessAutoFaultGeneration(1, 0);
+
         State.CurrentStep = 1;
         State.IsConverged = true;
         OnStepCompleted?.Invoke(State);
@@ -395,6 +459,10 @@ public class TwoDGeomechanicalSimulator
             }
 
             ComputeDerivedQuantities();
+
+            // Process automatic fault generation based on rupture criteria
+            ProcessAutoFaultGeneration(step, step * TimeStep);
+
             RecordHistory(step * TimeStep);
             OnStepCompleted?.Invoke(State);
         }
@@ -470,6 +538,10 @@ public class TwoDGeomechanicalSimulator
             if (step % 100 == 0)
             {
                 ComputeDerivedQuantities();
+
+                // Process automatic fault generation based on rupture criteria
+                ProcessAutoFaultGeneration(step, t);
+
                 RecordHistory(t);
                 OnStepCompleted?.Invoke(State);
             }
@@ -544,6 +616,10 @@ public class TwoDGeomechanicalSimulator
             if (step % 10 == 0)
             {
                 ComputeDerivedQuantities();
+
+                // Process automatic fault generation based on rupture criteria
+                ProcessAutoFaultGeneration(step, t);
+
                 RecordHistory(t);
                 OnStepCompleted?.Invoke(State);
             }
@@ -551,6 +627,102 @@ public class TwoDGeomechanicalSimulator
 
         ComputeDerivedQuantities();
         State.IsConverged = true;
+    }
+
+    #endregion
+
+    #region Automatic Fault Generation
+
+    /// <summary>
+    /// Process automatic fault generation based on rupture criteria
+    /// </summary>
+    /// <param name="step">Current simulation step</param>
+    /// <param name="time">Current simulation time</param>
+    private void ProcessAutoFaultGeneration(int step, double time)
+    {
+        if (!AutoFaultSettings.Enabled) return;
+        if (step < AutoFaultSettings.StartAtLoadStep) return;
+        if (step % AutoFaultSettings.CheckInterval != 0) return;
+
+        // Generate faults from detected rupture sites
+        var newFaults = FaultEngine.GenerateFaults(Mesh, Results, step, time);
+
+        // Update state with fault information
+        State.NumGeneratedFaults = FaultEngine.GeneratedFaults.Count;
+        State.TotalFaultLength = FaultEngine.GeneratedFaults.Sum(f => f.Length);
+        State.NumRuptureSites = FaultEngine.PotentialNucleationSites.Count;
+
+        // If new faults were generated, need to update the system
+        if (newFaults.Count > 0)
+        {
+            OnMessage?.Invoke($"Generated {newFaults.Count} new fault(s) at step {step}. " +
+                $"Total faults: {State.NumGeneratedFaults}, Total length: {State.TotalFaultLength:F2}m");
+
+            // Re-number DOFs to account for new nodes from interface elements
+            Mesh.NumberDOF();
+
+            // Reinitialize arrays if DOF count changed
+            if (Mesh.TotalDOF != _globalK.GetLength(0))
+            {
+                InitializeGlobalArrays();
+                Results.Initialize(Mesh.Nodes.Count, Mesh.Elements.Count);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Enable automatic fault generation with default settings
+    /// </summary>
+    public void EnableAutoFaultGeneration()
+    {
+        AutoFaultSettings.Enabled = true;
+    }
+
+    /// <summary>
+    /// Enable automatic fault generation with custom settings
+    /// </summary>
+    /// <param name="ruptureThreshold">Minimum yield index to trigger fault nucleation</param>
+    /// <param name="minClusterSize">Minimum number of failed elements to nucleate a fault</param>
+    /// <param name="strategy">Fault propagation direction strategy</param>
+    public void EnableAutoFaultGeneration(double ruptureThreshold, int minClusterSize,
+        PropagationStrategy strategy = PropagationStrategy.ConjugateAngle)
+    {
+        AutoFaultSettings.Enabled = true;
+        AutoFaultSettings.RuptureThreshold = ruptureThreshold;
+        AutoFaultSettings.MinFailedClusterSize = minClusterSize;
+        AutoFaultSettings.PropagationStrategy = strategy;
+    }
+
+    /// <summary>
+    /// Disable automatic fault generation
+    /// </summary>
+    public void DisableAutoFaultGeneration()
+    {
+        AutoFaultSettings.Enabled = false;
+    }
+
+    /// <summary>
+    /// Get all generated faults from the simulation
+    /// </summary>
+    public List<GeneratedFault> GetGeneratedFaults()
+    {
+        return FaultEngine.GeneratedFaults.ToList();
+    }
+
+    /// <summary>
+    /// Get generated faults converted to Discontinuity2D objects
+    /// </summary>
+    public List<Discontinuity2D> GetGeneratedFaultsAsDiscontinuities()
+    {
+        return FaultEngine.ConvertToDiscontinuities();
+    }
+
+    /// <summary>
+    /// Clear all generated faults and reset fault engine
+    /// </summary>
+    public void ClearGeneratedFaults()
+    {
+        FaultEngine.Reset();
     }
 
     #endregion
