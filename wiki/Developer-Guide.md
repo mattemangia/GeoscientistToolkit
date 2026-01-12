@@ -22,30 +22,69 @@ This guide covers:
 
 ```
 GeoscientistToolkit/
+├── AddIns/                    # Plugin framework + sample add-ins
 ├── Analysis/                  # Simulation and analysis engines
-│   ├── Geothermal/           # Heat transfer simulations
 │   ├── AcousticSimulation/   # Wave propagation
+│   ├── AmbientOcclusionSegmentation/ # CT segmentation helpers
+│   ├── Geomechanics/         # Stress/strain analysis
+│   ├── Geothermal/           # Heat transfer simulations
+│   ├── Hydrological/         # Flow and hydrology solvers
+│   ├── ImageAdjustement/     # Image enhancement pipelines
+│   ├── MaterialStatistics/   # Material metrics
+│   ├── Materials/            # Material property analysis
+│   ├── Multiphase/           # Multiphase flow modeling
 │   ├── NMR/                  # NMR relaxation modeling
-│   ├── MaterialManager/      # Material properties
-│   └── ThermalConductivity/  # FEM heat solver
+│   ├── ParticleSeparator/    # Particle separation tools
+│   ├── Photogrammetry/       # Image-to-geometry workflows
+│   ├── PhysicoChem/          # Physicochemical simulations
+│   ├── PNM/                  # Pore network modeling
+│   ├── RockCoreExtractor/    # Core extraction utilities
+│   ├── Seismology/           # Seismic analysis
+│   ├── SlopeStability/       # Slope stability simulation
+│   ├── TextureClassification/ # Texture ML pipelines
+│   ├── ThermalConductivity/  # FEM heat solver
+│   ├── Thermodynamic/        # Thermodynamics engines
+│   └── Transform/            # Geometry transforms
+├── Api/                       # Public API contracts and helpers
 ├── Business/                  # Project management, serialization
 ├── Data/                      # Dataset classes
+│   ├── AcousticVolume/       # Acoustic datasets
 │   ├── Borehole/             # Well log data
+│   ├── CrustalModels/        # Crustal model datasets
 │   ├── CtImageStack/         # CT scan management
-│   ├── Seismic/              # Seismic data handling
+│   ├── GIS/                  # Geographic information
+│   ├── Image/                # Image datasets
+│   ├── Loaders/              # File loaders/importers
+│   ├── Materials/            # Material datasets
+│   ├── Media/                # Media assets
 │   ├── Mesh3D/               # 3D mesh operations
-│   └── GIS/                  # Geographic information
-├── Tools/                     # Cross-dataset integration
-├── UI/                        # User interface components
-│   ├── Viewers/              # Dataset viewers
-│   ├── Tools/                # Tool panels
-│   ├── Properties/           # Property editors
-│   └── MainWindow.cs         # Main window
+│   ├── Nerf/                 # Neural radiance field data
+│   ├── PNM/                  # Pore network data
+│   ├── PhysicoChem/          # Physicochemical datasets
+│   ├── Seismic/              # Seismic data handling
+│   ├── Table/                # Tabular datasets
+│   ├── Text/                 # Text datasets
+│   ├── TwoDGeology/          # 2D geology datasets
+│   └── VolumeData/           # Volume datasets
+├── Documentation/             # Specialized domain docs
+├── Examples/                  # Sample workflows and assets
+├── GTK/                       # GTK-based UI frontend
+├── InstallerPackager/         # Build-time packaging tool
+├── InstallerWizard/           # Cross-platform installer TUI
+├── Network/                   # Distributed node discovery/messaging
 ├── NodeEndpoint/              # Network service
-├── Util/                      # Utilities
+├── ONNX/                      # Model assets and runtime helpers
+├── OpenCL/                    # GPU kernels
+├── Scripting/                 # GeoScript language runtime + commands
 ├── Settings/                  # Configuration
 ├── Shaders/                   # Graphics shaders
-└── docs/                      # Documentation
+├── Tests/                     # Unit/integration tests
+├── Tools/                     # Cross-dataset integration
+├── UI/                        # ImGui user interface components
+├── Util/                      # Utilities
+├── VerificationTests/         # Verification test harness
+├── docs/                      # End-user documentation
+└── wiki/                      # Developer documentation
 ```
 
 ### Key Design Patterns

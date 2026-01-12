@@ -237,4 +237,4 @@ Visualize temperature distribution and flow paths
 
 ---
 
-**Need help?** Open an issue on [GitHub](https://github.com/mattemangia/GeoscientistToolkit/issues) or contact matteo.mangia@gmail.com
+**Need help?** Open an issue on [GitHub](https://github.com/mattemangia/GeoscientistToolkit/issues) or contact m.mangiagalli@campus.uniurb.it
