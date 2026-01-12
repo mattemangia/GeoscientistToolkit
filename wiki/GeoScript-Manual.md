@@ -271,6 +271,7 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | `EXPLODE` | Multi-part to single | `EXPLODE` |
 | `CLEAN` | Fix invalid geometries | `CLEAN` |
 | `RECLASSIFY` | Reclassify raster | `RECLASSIFY INTO 'Classes' RANGES(0-50: 1, 50-100: 2)` |
+| `RASTER_CALCULATE` | Raster math expression | `RASTER_CALCULATE EXPR '(A + B) / 2' AS 'MeanElevation'` |
 | `SLOPE` | Calculate slope | `SLOPE AS 'SlopeMap'` |
 | `ASPECT` | Calculate aspect | `ASPECT AS 'AspectMap'` |
 | `CONTOUR` | Generate contours | `CONTOUR INTERVAL 10 AS 'Contours'` |

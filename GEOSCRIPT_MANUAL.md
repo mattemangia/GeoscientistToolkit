@@ -837,7 +837,30 @@ RECLASSIFY INTO 'Classes' RANGES(0-50: 1, 50-100: 2, 100-255: 3)
 
 ---
 
-#### 5.3.2 SLOPE
+#### 5.3.2 RASTER_CALCULATE
+
+Calculates a new raster layer from an expression applied across raster layers.
+
+**Syntax**:
+```geoscript
+RASTER_CALCULATE EXPR 'A + B * 2' AS 'NewLayerName'
+```
+
+**Examples**:
+```geoscript
+RASTER_CALCULATE EXPR '(A + B) / 2' AS 'MeanElevation'
+RASTER_CALCULATE EXPR 'A > 100 ? 255 : 0' AS 'Thresholded'
+```
+
+**Notes**:
+- Raster layers are referenced by letter in dataset order: A, B, C, ...
+- All raster layers must have the same dimensions.
+
+**Returns**: Calculated raster layer
+
+---
+
+#### 5.3.3 SLOPE
 
 Calculates slope from a Digital Elevation Model.
 
@@ -855,7 +878,7 @@ SLOPE AS 'SlopeMap'
 
 ---
 
-#### 5.3.3 ASPECT
+#### 5.3.4 ASPECT
 
 Calculates aspect (slope direction) from a DEM.
 
@@ -868,7 +891,7 @@ ASPECT AS 'NewLayerName'
 
 ---
 
-#### 5.3.4 CONTOUR
+#### 5.3.5 CONTOUR
 
 Generates contour lines from a raster.
 
@@ -3002,8 +3025,8 @@ SELECT, CALCULATE, SORTBY, GROUPBY, RENAME, DROP, TAKE, UNIQUE, JOIN
 ### GIS Vector (4 commands)
 BUFFER, DISSOLVE, EXPLODE, CLEAN
 
-### GIS Raster (4 commands)
-RECLASSIFY, SLOPE, ASPECT, CONTOUR
+### GIS Raster (5 commands)
+RECLASSIFY, RASTER_CALCULATE, SLOPE, ASPECT, CONTOUR
 
 ### GIS Extended (8 commands)
 GIS_ADD_LAYER, GIS_REMOVE_LAYER, GIS_INTERSECT, GIS_UNION, GIS_CLIP, GIS_CALCULATE_AREA, GIS_CALCULATE_LENGTH, GIS_REPROJECT
