@@ -351,6 +351,7 @@ public static class CommandRegistry
 
             // GIS Raster Commands
             new ReclassifyCommand(),
+            new RasterCalculateCommand(),
             new SlopeCommand(),
             new AspectCommand(),
             new ContourCommand(),
@@ -1234,6 +1235,90 @@ public class ReclassifyCommand : IGeoScriptCommand
 
         var newGisDs = new GISDataset($"{gisDs.Name}_Reclassified", "");
         var newRasterLayer = new GISRasterLayer(newData, sourceLayer.Bounds) { Name = newLayerName };
+        newGisDs.Layers.Add(newRasterLayer);
+        newGisDs.UpdateBounds();
+
+        return Task.FromResult<Dataset>(newGisDs);
+    }
+}
+
+public class RasterCalculateCommand : IGeoScriptCommand
+{
+    public string Name => "RASTER_CALCULATE";
+    public string HelpText => "Calculates a new raster by evaluating an expression across raster layers.";
+    public string Usage => "RASTER_CALCULATE EXPR 'A + B * 2' AS 'NewLayerName'";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not GISDataset gisDs)
+            throw new NotSupportedException("RASTER_CALCULATE only works on GIS Datasets.");
+
+        var rasterLayers = gisDs.Layers.OfType<GISRasterLayer>().ToList();
+        if (rasterLayers.Count == 0)
+            throw new NotSupportedException("Input dataset has no raster layers for calculation.");
+
+        if (rasterLayers.Count > 26)
+            throw new NotSupportedException("RASTER_CALCULATE supports up to 26 raster layers (A-Z).");
+
+        var cmd = (CommandNode)node;
+        var match = Regex.Match(cmd.FullText, @"EXPR\s+'([^']+)'\s+AS\s+'([^']+)'", RegexOptions.IgnoreCase);
+        if (!match.Success)
+            throw new ArgumentException("Invalid RASTER_CALCULATE syntax.");
+
+        var expressionText = match.Groups[1].Value;
+        var newLayerName = match.Groups[2].Value;
+
+        if (string.IsNullOrWhiteSpace(expressionText))
+            throw new ArgumentException("Raster calculation expression cannot be empty.");
+
+        if (string.IsNullOrWhiteSpace(newLayerName))
+            throw new ArgumentException("Raster calculation output layer name cannot be empty.");
+
+        var referencedLetters = Regex.Matches(expressionText, @"\b[A-Z]\b")
+            .Select(m => m.Value[0])
+            .Distinct()
+            .ToList();
+
+        foreach (var letter in referencedLetters)
+        {
+            var index = letter - 'A';
+            if (index < 0 || index >= rasterLayers.Count)
+                throw new ArgumentException($"Layer '{letter}' not found. Available layers: A-{(char)('A' + rasterLayers.Count - 1)}.");
+        }
+
+        var firstLayer = rasterLayers[0];
+        var width = firstLayer.Width;
+        var height = firstLayer.Height;
+
+        foreach (var layer in rasterLayers)
+        {
+            if (layer.Width != width || layer.Height != height)
+                throw new ArgumentException("All raster layers must have the same dimensions.");
+        }
+
+        var rasterData = rasterLayers.Select(layer => layer.GetPixelData()).ToList();
+        var expression = new Expression(expressionText);
+        var newData = new float[width, height];
+
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            for (var i = 0; i < rasterData.Count; i++)
+            {
+                var letter = (char)('A' + i);
+                expression.Parameters[letter.ToString()] = rasterData[i][x, y];
+            }
+
+            var result = expression.Evaluate();
+            var value = Convert.ToSingle(result, CultureInfo.InvariantCulture);
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                value = 0f;
+
+            newData[x, y] = value;
+        }
+
+        var newGisDs = new GISDataset($"{gisDs.Name}_RasterCalc", "");
+        var newRasterLayer = new GISRasterLayer(newData, firstLayer.Bounds) { Name = newLayerName };
         newGisDs.Layers.Add(newRasterLayer);
         newGisDs.UpdateBounds();
 

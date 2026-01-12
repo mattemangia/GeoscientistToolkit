@@ -529,7 +529,7 @@ CLEAN |> BUFFER 0.1
 
 ---
 
-### GIS Raster Operations (4 commands)
+### GIS Raster Operations (5 commands)
 
 #### RECLASSIFY
 
@@ -543,6 +543,22 @@ RECLASSIFY INTO 'NewLayer' RANGES(min-max: new_val, ...)
 **Example:**
 ```geoscript
 RECLASSIFY INTO 'Classes' RANGES(0-50: 1, 50-100: 2, 100-255: 3)
+```
+
+---
+
+#### RASTER_CALCULATE
+
+Calculates a new raster layer from an expression applied across raster layers.
+
+**Syntax:**
+```geoscript
+RASTER_CALCULATE EXPR 'A + B * 2' AS 'NewLayerName'
+```
+
+**Example:**
+```geoscript
+RASTER_CALCULATE EXPR '(A + B) / 2' AS 'MeanElevation'
 ```
 
 ---
@@ -2025,8 +2041,8 @@ SELECT, CALCULATE, SORTBY, GROUPBY, RENAME, DROP, TAKE, UNIQUE, JOIN
 **GIS Vector (4):**
 BUFFER, DISSOLVE, EXPLODE, CLEAN
 
-**GIS Raster (4):**
-RECLASSIFY, SLOPE, ASPECT, CONTOUR
+**GIS Raster (5):**
+RECLASSIFY, RASTER_CALCULATE, SLOPE, ASPECT, CONTOUR
 
 **GIS Extended (8):**
 GIS_ADD_LAYER, GIS_REMOVE_LAYER, GIS_INTERSECT, GIS_UNION, GIS_CLIP, GIS_CALCULATE_AREA, GIS_CALCULATE_LENGTH, GIS_REPROJECT
