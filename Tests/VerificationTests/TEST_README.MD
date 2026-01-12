@@ -78,5 +78,5 @@ This suite verifies the simulations described in `VerificationReport.md` using d
   - Dullien, F. A. L. (1992). *Porous Media: Fluid Transport and Pore Structure* (2nd ed.). Academic Press.
 
 ## Operational notes
-- The tests **do not** cover data loaders, as requested.
+
 - Each simulation has a dedicated report in `Reports/`.
