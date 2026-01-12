@@ -1,6 +1,6 @@
 # VerificationTests – Peer‑Reviewed Benchmarks
 
-This suite verifies the simulations described in `VerificationReport.md` using data and parameters published in peer‑reviewed studies. Each test calls the **GeoscientistToolkit** APIs (no external simulations) and compares results against expected values derived from the literature.
+This suite verifies the simulations described in `VerificationReport.md` using data and parameters published in peer‑reviewed studies. Each test calls the **GeoscientistToolkit** APIs (no external simulations) and compares results against expected values derived from the literature. Detailed verification metadata (DOI source, inputs, equations, theoretical results, actual results, error, pass/fail) lives in the per-test reports under `Reports/`.
 
 ## Covered tests
 
@@ -75,7 +75,7 @@ This suite verifies the simulations described in `VerificationReport.md` using d
 - **Reference data**: Poiseuille flow in a single capillary and the Darcy permeability relationship.
 - **Use of data**: compare the calculated permeability for a single tube with the theoretical order of magnitude for capillaries.
 - **Sources (APA)**:
-  - Dullien, F. A. L. (1992). *Porous Media: Fluid Transport and Pore Structure* (2nd ed.). Academic Press.
+  - Fatt, I. (1956). The network model of porous media. *Transactions of the AIME, 207*, 144–159. https://doi.org/10.2118/574-G
 
 ## Operational notes
 
