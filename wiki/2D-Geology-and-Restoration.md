@@ -164,6 +164,15 @@ The TwoDGeologyDataset includes a comprehensive 2D finite element geomechanical 
 - **Engineering Primitives**: Foundations, tunnels, dams, retaining walls, indenters
 - **Dynamic Analysis**: Static, quasi-static, explicit dynamic, and implicit dynamic solvers
 
+### Benchmark: Strip Footing Bearing Capacity
+
+The automated verification suite includes 2D strip-footing benchmarks that check the FEM-based collapse pressure against published bearing-capacity factors for Mohr-Coulomb soils (two cohesive parameter sets), using the smooth-footing reduction factor reported in the literature. The benchmarks are implemented in `Tests/VerificationTests/SimulationVerificationTests.cs` under `TwoDGeology_BearingCapacityStripFooting_AlignsWithReferenceFactors` and `TwoDGeology_BearingCapacityStripFooting_CohesiveClayMatchesReferenceFactors`.
+
+**References:**
+- Meyerhof, G. G. (1951). *The ultimate bearing capacity of foundations*. Géotechnique, 2(4), 301–332. https://doi.org/10.1680/geot.1951.2.4.301
+- Bolton, M. D., & Lau, C. K. (1993). *Vertical bearing capacity factors for circular and strip footings on Mohr-Coulomb soil*. Canadian Geotechnical Journal, 30(6), 1024–1033. https://doi.org/10.1139/t93-099
+- Meyerhof, G. G. (1963). *Some recent research on the bearing capacity of foundations*. Canadian Geotechnical Journal, 1(1), 16–26. https://doi.org/10.1139/t63-003
+
 ### Accessing Geomechanics Tools
 
 1. Select a 2D Geology dataset
