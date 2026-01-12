@@ -352,10 +352,10 @@ See [Verification and Testing](Verification-and-Testing.md) for detailed results
 
 ## References
 
-- Beier et al. (2011): Thermal response test analysis
-- Lauwerier (1955): Heat flow in porous media
-- Pruess et al. (1999): TOUGH2 User's Guide
-- Pan & Oldenburg (2014): T2Well Manual
+- Beier, R. A., Smith, M. D., & Spitler, J. D. (2011). Reference data sets for vertical borehole ground heat exchanger models and thermal response test analysis. *Geothermics, 40*(1), 79–85. https://doi.org/10.1016/j.geothermics.2010.10.007
+- Lauwerier, H. A. (1955). The transport of heat in an oil layer caused by the injection of hot fluid. *Applied Scientific Research, Section A, 5*(2–3), 145–150. https://doi.org/10.1007/BF03184614
+- Pruess, K., Oldenburg, C., & Moridis, G. (1999). *TOUGH2 user's guide, version 2.0* (Report LBNL-43134). Lawrence Berkeley National Laboratory. https://doi.org/10.2172/778134
+- Pan, L., & Oldenburg, C. M. (2014). T2Well—An integrated wellbore–reservoir simulator. *Computers & Geosciences, 65*, 46–55. https://doi.org/10.1016/j.cageo.2013.06.005
 
 ---
 

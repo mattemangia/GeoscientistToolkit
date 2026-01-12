@@ -340,10 +340,10 @@ SLOPE_SIMULATE mode=dynamic time=10
 
 ## References
 
-- Hoek & Brown (2019): The Hoek-Brown failure criterion
-- Barton & Choubey (1977): The shear strength of rock joints
-- Newmark (1965): Effects of earthquakes on dams and embankments
-- Itasca (2019): UDEC/3DEC Theory and Background
+- Hoek, E., & Brown, E. T. (2019). The Hoek–Brown failure criterion and GSI – 2018 edition. *Journal of Rock Mechanics and Geotechnical Engineering, 11*(3), 445–463. https://doi.org/10.1016/j.jrmge.2018.08.001
+- Barton, N., & Choubey, V. (1977). The shear strength of rock joints in theory and practice. *Rock Mechanics, 10*(1–2), 1–54. https://doi.org/10.1007/BF01261801
+- Newmark, N. M. (1965). Effects of earthquakes on dams and embankments. *Géotechnique, 15*(2), 139–160. https://doi.org/10.1680/geot.1965.15.2.139
+- Dorren, L. K. A. (2003). A review of rockfall mechanics and modelling approaches. *Progress in Physical Geography, 27*(1), 69–87. https://doi.org/10.1191/0309133303pp359ra
 
 ---
 
