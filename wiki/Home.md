@@ -275,7 +275,9 @@ If you use Geoscientist's Toolkit in your research, please cite:
 This project is licensed under the MIT License.
 
 **Author:** Matteo Mangiagalli
+
 **Institution:** Universita degli Studi di Urbino Carlo Bo
+
 **Email:** m.mangiagalli@campus.uniurb.it
 
 ---
