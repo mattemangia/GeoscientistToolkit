@@ -28,6 +28,13 @@ public sealed class PhysicalMaterial
     public double? CompressiveStrength_MPa { get; set; } // Uniaxial Compressive Strength (UCS)
     public double? TensileStrength_MPa { get; set; } // Direct or Brazilian tensile strength
     public double? YieldStrength_MPa { get; set; } // Primarily for ductile materials like metals
+    public double? Cohesion_MPa { get; set; } // Mohr-Coulomb cohesion (c)
+    public double? DilationAngle_deg { get; set; } // Plasticity dilation angle (ψ)
+
+    // --- Hoek-Brown Parameters for Rock Mass ---
+    public double? HoekBrown_mi { get; set; } // Intact rock constant mi
+    public double? GSI { get; set; } // Geological Strength Index (0-100)
+    public double? DisturbanceFactor_D { get; set; } // Blast/excavation damage factor (0-1)
 
     // --- Thermal Properties for Heat Exchange Sims ---
     public double? ThermalConductivity_W_mK { get; set; } // W/m·K

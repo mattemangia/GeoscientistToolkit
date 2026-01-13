@@ -453,6 +453,8 @@ SIMULATE_GEOMECH porosity=examplepnmdataset.porosity sigma1=100 sigma2=50 sigma3
 | `SLOPE_CALCULATE_FOS` | Compute factor of safety | `SLOPE_CALCULATE_FOS` |
 | `SLOPE_SIMULATE` | Run slope simulation | `SLOPE_SIMULATE mode=dynamic time=10` |
 | `SLOPE_EXPORT` | Export slope results | `SLOPE_EXPORT path=\"results.json\"` |
+| `SLOPE_SET_GRAVITY` | Set custom gravity | `SLOPE_SET_GRAVITY preset=mars` |
+| `SLOPE2D_SET_GRAVITY` | Set 2D slope gravity | `SLOPE2D_SET_GRAVITY magnitude=1.62` |
 
 ### 2D Geomechanical Simulation Operations
 
@@ -467,12 +469,22 @@ These commands work with TwoDGeologyDataset for 2D finite element geomechanical 
 | `GEOMECH_ADD_PRIMITIVE` | Add geometric primitive | `GEOMECH_ADD_PRIMITIVE type=foundation x=50 y=50 width=10 height=2` |
 | `GEOMECH_ADD_JOINTSET` | Add discontinuity joint set | `GEOMECH_ADD_JOINTSET dip=45 spacing=2 friction=30 cohesion=0` |
 
+#### Material Assignment from Library
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `GEOMECH_ASSIGN_MATERIAL` | Assign material from library to formation | `GEOMECH_ASSIGN_MATERIAL formation="Sandstone" material="Sandstone (quartz-rich)"` |
+| `GEOMECH_AUTO_ASSIGN_MATERIALS` | Auto-assign materials by name matching | `GEOMECH_AUTO_ASSIGN_MATERIALS` |
+| `GEOMECH_LIST_MATERIALS` | List available library materials | `GEOMECH_LIST_MATERIALS filter=sand` |
+| `GEOMECH_VALIDATE_MATERIALS` | Validate material assignments | `GEOMECH_VALIDATE_MATERIALS` |
+
 #### Boundary Conditions and Loads
 
 | Command | Description | Example |
 |---------|-------------|---------|
 | `GEOMECH_FIX_BOUNDARY` | Apply fixed boundary conditions | `GEOMECH_FIX_BOUNDARY side=bottom` |
 | `GEOMECH_APPLY_LOAD` | Apply loads (force, pressure, displacement) | `GEOMECH_APPLY_LOAD type=pressure pressure=100000` |
+| `GEOMECH_SET_GRAVITY` | Set custom gravity for simulation | `GEOMECH_SET_GRAVITY preset=moon` |
 
 #### Simulation and Results
 
@@ -531,6 +543,38 @@ For **Hoek-Brown**:
 | `displacement`, `displacement_x`, `displacement_y` | Displacements |
 | `strain` | Strain magnitude |
 | `yield` | Yield index (0-1) |
+
+#### Custom Gravity Settings
+
+The `GEOMECH_SET_GRAVITY` and `SLOPE_SET_GRAVITY` commands support custom gravitational acceleration:
+
+**Planetary Presets:**
+| Preset | Gravity (m/s²) |
+|--------|---------------|
+| `earth` | 9.81 |
+| `moon` | 1.62 |
+| `mars` | 3.72 |
+| `venus` | 8.87 |
+| `jupiter` | 24.79 |
+| `saturn` | 10.44 |
+| `mercury` | 3.70 |
+
+**Usage Examples:**
+```geoscript
+# Use preset
+GEOMECH_SET_GRAVITY preset=moon
+
+# Set magnitude (direction is downward)
+GEOMECH_SET_GRAVITY magnitude=1.62
+
+# Set custom vector
+GEOMECH_SET_GRAVITY x=0 y=-3.72
+
+# For slope stability
+SLOPE_SET_GRAVITY preset=mars
+SLOPE2D_SET_GRAVITY magnitude=1.62
+SLOPE_SET_GRAVITY x=0 y=0 z=-3.72 custom=true
+```
 
 ### Utility Operations
 
@@ -752,7 +796,7 @@ Solution: Ensure dataset exists before using @'DatasetName'
 
 ---
 
-**Total Commands:** 117
+**Total Commands:** 124
 
 **Document Version:** 1.0
 **Last Updated:** January 2026

@@ -364,6 +364,15 @@ public class Geomech2DSimulationRequest
     public List<int>? BoundaryNodeIds { get; set; }
     public int Priority { get; set; }
     public string? OutputPath { get; set; }
+
+    /// <summary>Custom gravity X component (m/s²). Default: 0</summary>
+    public float GravityX { get; set; } = 0;
+
+    /// <summary>Custom gravity Y component (m/s²). Default: -9.81 (Earth downward)</summary>
+    public float GravityY { get; set; } = -9.81f;
+
+    /// <summary>Planetary preset for gravity. Options: earth, moon, mars, venus, jupiter, saturn, mercury</summary>
+    public string? GravityPreset { get; set; }
 }
 
 public class Geomech2DParameterSweepRequest

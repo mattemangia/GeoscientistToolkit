@@ -210,11 +210,14 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         }
 
         /// <summary>
-        /// Apply gravitational forces to all blocks.
+        /// Apply gravitational forces to all blocks using configured gravity from parameters.
         /// </summary>
         private void ApplyGravity()
         {
-            var gravity = new Vector2(0, -9.81f); // Down is negative Y
+            // Use gravity from parameters (convert 3D to 2D: use X and Z components, Z becomes Y in 2D)
+            // Default is (0, 0, -9.81) so we get (0, -9.81) in 2D
+            var gravity3D = _params.Gravity;
+            var gravity = new Vector2(gravity3D.X, gravity3D.Z);
 
             foreach (var block in _blocks)
             {
@@ -231,13 +234,14 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         }
 
         /// <summary>
-        /// Apply earthquake pseudo-static forces.
+        /// Apply earthquake pseudo-static forces using configured gravity magnitude.
         /// </summary>
         private void ApplyEarthquakeForces()
         {
-            // Simplified earthquake loading: horizontal acceleration
+            // Simplified earthquake loading: horizontal acceleration as fraction of gravity
             float kh = _params.EarthquakeIntensity; // Horizontal seismic coefficient
-            var earthquakeAccel = new Vector2(kh * 9.81f, 0);
+            float gravityMagnitude = _params.Gravity.Length(); // Use configured gravity magnitude
+            var earthquakeAccel = new Vector2(kh * gravityMagnitude, 0);
 
             foreach (var block in _blocks)
             {
@@ -648,7 +652,8 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
 
             float area = Math.Max(block.Area * _sectionThickness, 1e-6f);
             float sigmaX = contactNormal / area;
-            float sigmaY = block.GetMass(material.Density) * _sectionThickness * 9.81f / area;
+            float gravityMagnitude = _params.Gravity.Length(); // Use configured gravity magnitude
+            float sigmaY = block.GetMass(material.Density) * _sectionThickness * gravityMagnitude / area;
             float tauXY = contactShear / area;
 
             float vonMises = MathF.Sqrt(

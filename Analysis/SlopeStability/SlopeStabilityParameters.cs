@@ -43,6 +43,12 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         public float SlopeAngle { get; set; }           // degrees (0-90), auto-rotates gravity direction
         public bool UseCustomGravityDirection { get; set; }  // if true, uses Gravity vector directly
 
+        /// <summary>
+        /// Gravitational acceleration magnitude (m/s²). Default 9.81 for Earth.
+        /// Use different values for other celestial bodies (e.g., 1.62 for Moon, 3.72 for Mars).
+        /// </summary>
+        public float GravityMagnitude { get; set; }
+
         // Damping (for quasi-static analysis)
         public float LocalDamping { get; set; }         // 0-1, local non-viscous damping
         public bool UseAdaptiveDamping { get; set; }
@@ -110,7 +116,8 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             TotalTime = 10.0f;              // 10 seconds
             MaxIterations = 100000;
             ConvergenceThreshold = 1e-6f;   // 1 micron
-            Gravity = new Vector3(0, 0, -9.81f);  // Standard gravity downward
+            GravityMagnitude = 9.81f;       // Standard Earth gravity (configurable)
+            Gravity = new Vector3(0, 0, -GravityMagnitude);  // Standard gravity downward
             SlopeAngle = 0.0f;              // Horizontal by default
             UseCustomGravityDirection = false;
             LocalDamping = 0.05f;
@@ -187,7 +194,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         }
 
         /// <summary>
-        /// Updates gravity direction based on slope angle.
+        /// Updates gravity direction based on slope angle using the configured GravityMagnitude.
         /// Slope angle tilts the gravity vector to simulate inclined terrain.
         /// </summary>
         public void UpdateGravityFromSlopeAngle()
@@ -195,20 +202,30 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
             if (!UseCustomGravityDirection && Math.Abs(SlopeAngle) > 0.01f)
             {
                 float angleRad = SlopeAngle * MathF.PI / 180.0f;
-                float gravityMagnitude = 9.81f;
 
                 // Rotate gravity vector in X-Z plane (tilt forward)
                 // Positive angle = slope going down in +X direction
                 Gravity = new Vector3(
-                    gravityMagnitude * MathF.Sin(angleRad),   // Downslope component
+                    GravityMagnitude * MathF.Sin(angleRad),   // Downslope component
                     0.0f,
-                    -gravityMagnitude * MathF.Cos(angleRad)   // Vertical component
+                    -GravityMagnitude * MathF.Cos(angleRad)   // Vertical component
                 );
             }
             else if (!UseCustomGravityDirection)
             {
-                Gravity = new Vector3(0, 0, -9.81f);
+                Gravity = new Vector3(0, 0, -GravityMagnitude);
             }
+        }
+
+        /// <summary>
+        /// Set the gravitational acceleration magnitude.
+        /// Common values: Earth = 9.81 m/s², Moon = 1.62 m/s², Mars = 3.72 m/s²
+        /// </summary>
+        /// <param name="magnitude">Gravitational acceleration in m/s²</param>
+        public void SetGravityMagnitude(float magnitude)
+        {
+            GravityMagnitude = Math.Abs(magnitude);
+            UpdateGravityFromSlopeAngle();
         }
 
         /// <summary>

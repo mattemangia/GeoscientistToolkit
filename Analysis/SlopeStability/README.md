@@ -194,6 +194,39 @@ Console.WriteLine($"Computation time: {results.ComputationTimeSeconds:F2} s");
   - Dynamic: Full inertial analysis
   - Quasi-Static: Strong damping for equilibrium
   - Static: Strength reduction method
+- **Gravity Magnitude**: Configurable gravitational acceleration (default: 9.81 m/s²)
+
+### Custom Gravitational Acceleration
+
+The simulation supports custom gravity for different celestial bodies or specialized scenarios:
+
+| Celestial Body | Gravity (m/s²) |
+|----------------|---------------|
+| Earth | 9.81 |
+| Moon | 1.62 |
+| Mars | 3.72 |
+| Venus | 8.87 |
+
+**Setting Custom Gravity:**
+
+```csharp
+// Set gravity magnitude (direction is automatically calculated based on slope angle)
+parameters.SetGravityMagnitude(1.62f); // Moon gravity
+
+// Or set the full gravity vector directly
+parameters.UseCustomGravityDirection = true;
+parameters.Gravity = new Vector3(0, 0, -3.72f); // Mars gravity
+```
+
+**GeoScript:**
+
+```geoscript
+# Set gravity magnitude
+SLOPE_SET_GRAVITY magnitude=1.62
+
+# Or set custom gravity vector
+SLOPE_SET_GRAVITY x=0 y=0 z=-3.72 custom=true
+```
 
 ### Material Properties
 
