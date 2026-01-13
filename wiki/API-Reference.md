@@ -420,6 +420,77 @@ Api/
 
 Use with IntelliSense in Visual Studio for auto-completion and inline documentation.
 
+## Geomechanical Simulation API
+
+### Custom Gravity in REST API
+
+The 2D geomechanical simulation endpoint supports custom gravity through the `Geomech2DSimulationRequest`:
+
+```json
+POST /api/simulation/geomech2d
+{
+    "meshJson": "...",
+    "materialsJson": "...",
+    "applyGravity": true,
+    "gravityX": 0,
+    "gravityY": -1.62,
+    "gravityPreset": "moon"
+}
+```
+
+**Gravity Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `gravityX` | float | X component of gravity (m/s²). Default: 0 |
+| `gravityY` | float | Y component of gravity (m/s²). Default: -9.81 |
+| `gravityPreset` | string | Planetary preset: earth, moon, mars, venus, jupiter, saturn, mercury |
+
+**Planetary Presets:**
+
+| Preset | Gravity (m/s²) |
+|--------|---------------|
+| earth | 9.81 |
+| moon | 1.62 |
+| mars | 3.72 |
+| venus | 8.87 |
+| jupiter | 24.79 |
+| saturn | 10.44 |
+| mercury | 3.70 |
+
+### C# API for Custom Gravity
+
+```csharp
+// TwoDGeologyDataset gravity methods
+dataset.SetGravity(0, -1.62f);           // Set gravity vector
+dataset.SetGravityMagnitude(1.62f);       // Set magnitude (downward)
+Vector2 gravity = dataset.GetGravity();   // Get current gravity
+
+// Material gravity constant (affects UnitWeight, HydraulicConductivity)
+GeomechanicalMaterial2D.GravityConstant = 1.62;
+
+// Slope stability gravity
+parameters.SetGravityMagnitude(1.62f);
+parameters.Gravity = new Vector3(0, 0, -1.62f);
+parameters.UseCustomGravityDirection = true;
+```
+
+### Material Assignment API
+
+```csharp
+// Assign material from library to formation
+dataset.AssignMaterialToFormation("Sandstone Layer", "Sandstone (quartz-rich, dense)");
+
+// Auto-assign all formations based on name matching
+int assigned = dataset.AutoAssignMaterialsFromLibrary();
+
+// Validate material assignments
+List<string> issues = dataset.ValidateMaterialAssignments();
+
+// Get available library materials
+List<string> materials = dataset.GetAvailableLibraryMaterials();
+```
+
 ---
 
 ## Related Pages
