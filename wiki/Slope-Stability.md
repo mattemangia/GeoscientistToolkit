@@ -192,6 +192,35 @@ Auto-calculated from magnitude and distance:
 | Time Step | Integration step | 0.001 s |
 | Total Time | Simulation duration | 10 s |
 | Damping | Energy dissipation | 0.05 |
+| Gravity Magnitude | Gravitational acceleration | 9.81 m/s² |
+
+### Custom Gravitational Acceleration
+
+The slope stability simulation supports custom gravity for different celestial bodies or specialized scenarios:
+
+| Celestial Body | Gravity (m/s²) |
+|----------------|---------------|
+| Earth | 9.81 |
+| Moon | 1.62 |
+| Mars | 3.72 |
+
+**Setting Custom Gravity:**
+
+```csharp
+// Set gravity magnitude
+parameters.SetGravityMagnitude(1.62f); // Moon gravity
+
+// Or set full gravity vector for tilted terrain
+parameters.Gravity = new Vector3(0, 0, -3.72f); // Mars, vertical
+parameters.UseCustomGravityDirection = true;
+```
+
+**Via GeoScript:**
+```geoscript
+# Set gravity for slope stability
+SLOPE_SET_GRAVITY magnitude=1.62  # Moon gravity
+SLOPE_SET_GRAVITY x=0 y=0 z=-3.72 custom=true  # Mars with direction
+```
 
 ### Simulation Modes
 

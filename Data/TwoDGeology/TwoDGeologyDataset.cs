@@ -3,7 +3,9 @@
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
+using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Business.GIS;
+using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.Util;
@@ -677,6 +679,268 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
         if (lower.Contains("sand"))
             return 1600;
         return 2500;
+    }
+
+    #endregion
+
+    #region Material Assignment from Library
+
+    /// <summary>
+    /// Assign a physical material from the global MaterialLibrary to a formation.
+    /// Converts the PhysicalMaterial to GeomechanicalMaterial2D and adds it to the simulation.
+    /// </summary>
+    /// <param name="formationName">Name of the formation to assign the material to</param>
+    /// <param name="materialName">Name of the material in the MaterialLibrary</param>
+    /// <returns>True if assignment was successful, false otherwise</returns>
+    public bool AssignMaterialToFormation(string formationName, string materialName)
+    {
+        // Find the formation
+        var formation = ProfileData?.Formations.FirstOrDefault(f =>
+            string.Equals(f.Name, formationName, StringComparison.OrdinalIgnoreCase));
+
+        if (formation == null)
+        {
+            Logger.LogWarning($"Formation '{formationName}' not found in profile data");
+            return false;
+        }
+
+        // Find the physical material in the library
+        var physMat = MaterialLibrary.Instance.Find(materialName);
+        if (physMat == null)
+        {
+            Logger.LogWarning($"Material '{materialName}' not found in MaterialLibrary");
+            return false;
+        }
+
+        // Convert to geomechanical material
+        var geomMat = GeomechanicalMaterial2D.CreateFromPhysicalMaterial(physMat);
+        geomMat.Name = formationName; // Use formation name for mesh identification
+        geomMat.Color = formation.Color;
+
+        // Check if material already exists for this formation
+        var existingMat = _materialLibrary.Materials.Values
+            .FirstOrDefault(m => string.Equals(m.Name, formationName, StringComparison.OrdinalIgnoreCase));
+
+        if (existingMat != null)
+        {
+            // Update existing material
+            _materialLibrary.RemoveMaterial(existingMat.Id);
+        }
+
+        // Add the new material
+        int matId = _materialLibrary.AddMaterial(geomMat);
+
+        Logger.Log($"Assigned material '{materialName}' to formation '{formationName}' (Material ID: {matId})");
+        MarkAsModified();
+        return true;
+    }
+
+    /// <summary>
+    /// Assign a physical material directly to a formation.
+    /// </summary>
+    /// <param name="formationName">Name of the formation to assign the material to</param>
+    /// <param name="physMat">The PhysicalMaterial to assign</param>
+    /// <returns>True if assignment was successful, false otherwise</returns>
+    public bool AssignMaterialToFormation(string formationName, PhysicalMaterial physMat)
+    {
+        if (physMat == null)
+        {
+            Logger.LogWarning("Cannot assign null material to formation");
+            return false;
+        }
+
+        // Find the formation
+        var formation = ProfileData?.Formations.FirstOrDefault(f =>
+            string.Equals(f.Name, formationName, StringComparison.OrdinalIgnoreCase));
+
+        if (formation == null)
+        {
+            Logger.LogWarning($"Formation '{formationName}' not found in profile data");
+            return false;
+        }
+
+        // Convert to geomechanical material
+        var geomMat = GeomechanicalMaterial2D.CreateFromPhysicalMaterial(physMat);
+        geomMat.Name = formationName;
+        geomMat.Color = formation.Color;
+
+        // Check if material already exists for this formation
+        var existingMat = _materialLibrary.Materials.Values
+            .FirstOrDefault(m => string.Equals(m.Name, formationName, StringComparison.OrdinalIgnoreCase));
+
+        if (existingMat != null)
+        {
+            _materialLibrary.RemoveMaterial(existingMat.Id);
+        }
+
+        int matId = _materialLibrary.AddMaterial(geomMat);
+
+        Logger.Log($"Assigned material '{physMat.Name}' to formation '{formationName}' (Material ID: {matId})");
+        MarkAsModified();
+        return true;
+    }
+
+    /// <summary>
+    /// Auto-assign materials from the MaterialLibrary to all formations based on name matching.
+    /// Attempts to find a material in the library that matches or contains the formation name.
+    /// </summary>
+    /// <returns>Number of formations successfully matched</returns>
+    public int AutoAssignMaterialsFromLibrary()
+    {
+        if (ProfileData?.Formations == null || ProfileData.Formations.Count == 0)
+        {
+            Logger.LogWarning("No formations available for material assignment");
+            return 0;
+        }
+
+        int assigned = 0;
+        var library = MaterialLibrary.Instance.Materials;
+
+        foreach (var formation in ProfileData.Formations)
+        {
+            var formationLower = formation.Name.ToLower();
+
+            // Try to find a matching material
+            PhysicalMaterial matchedMat = null;
+
+            // First try exact match
+            matchedMat = library.FirstOrDefault(m =>
+                string.Equals(m.Name, formation.Name, StringComparison.OrdinalIgnoreCase));
+
+            // Try partial match if no exact match
+            if (matchedMat == null)
+            {
+                matchedMat = library.FirstOrDefault(m =>
+                    m.Name.ToLower().Contains(formationLower) ||
+                    formationLower.Contains(m.Name.ToLower().Split(' ')[0]));
+            }
+
+            // Try keyword matching
+            if (matchedMat == null)
+            {
+                var keywords = new[] { "granite", "basalt", "sandstone", "limestone", "shale",
+                    "clay", "sand", "marble", "quartzite", "coal", "dolomite", "mudstone" };
+
+                foreach (var keyword in keywords)
+                {
+                    if (formationLower.Contains(keyword))
+                    {
+                        matchedMat = library.FirstOrDefault(m =>
+                            m.Name.ToLower().Contains(keyword));
+                        if (matchedMat != null) break;
+                    }
+                }
+            }
+
+            if (matchedMat != null)
+            {
+                if (AssignMaterialToFormation(formation.Name, matchedMat))
+                {
+                    assigned++;
+                }
+            }
+            else
+            {
+                Logger.Log($"No matching material found for formation '{formation.Name}', using defaults");
+            }
+        }
+
+        Logger.Log($"Auto-assigned {assigned}/{ProfileData.Formations.Count} formation materials from library");
+        return assigned;
+    }
+
+    /// <summary>
+    /// Get a list of all available materials from the MaterialLibrary that are suitable
+    /// for geomechanical simulation (solid phase materials with mechanical properties).
+    /// </summary>
+    /// <returns>List of suitable PhysicalMaterial names</returns>
+    public List<string> GetAvailableLibraryMaterials()
+    {
+        return MaterialLibrary.Instance.Materials
+            .Where(m => m.Phase == PhaseType.Solid &&
+                       (m.YoungModulus_GPa.HasValue || m.Density_kg_m3.HasValue))
+            .Select(m => m.Name)
+            .OrderBy(n => n)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Get a PhysicalMaterial from the library by name.
+    /// </summary>
+    /// <param name="materialName">Name of the material</param>
+    /// <returns>The PhysicalMaterial if found, null otherwise</returns>
+    public PhysicalMaterial GetLibraryMaterial(string materialName)
+    {
+        return MaterialLibrary.Instance.Find(materialName);
+    }
+
+    /// <summary>
+    /// Check if all formations have valid geomechanical materials assigned
+    /// with the minimum required properties for simulation.
+    /// </summary>
+    /// <returns>List of formation names missing required material properties</returns>
+    public List<string> ValidateMaterialAssignments()
+    {
+        var missing = new List<string>();
+
+        if (ProfileData?.Formations == null)
+            return missing;
+
+        foreach (var formation in ProfileData.Formations)
+        {
+            var mat = _materialLibrary.Materials.Values
+                .FirstOrDefault(m => string.Equals(m.Name, formation.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (mat == null)
+            {
+                missing.Add($"{formation.Name}: No material assigned");
+            }
+            else
+            {
+                var issues = new List<string>();
+
+                if (mat.YoungModulus <= 0)
+                    issues.Add("Young's modulus");
+                if (mat.Density <= 0)
+                    issues.Add("Density");
+                if (mat.PoissonRatio <= 0 || mat.PoissonRatio >= 0.5)
+                    issues.Add("Poisson's ratio (must be 0 < ν < 0.5)");
+
+                if (issues.Count > 0)
+                    missing.Add($"{formation.Name}: Invalid {string.Join(", ", issues)}");
+            }
+        }
+
+        return missing;
+    }
+
+    /// <summary>
+    /// Set custom gravitational acceleration for the geomechanical simulation.
+    /// </summary>
+    /// <param name="gravityX">X component of gravity (m/s²)</param>
+    /// <param name="gravityY">Y component of gravity (m/s²), typically negative for downward</param>
+    public void SetGravity(float gravityX, float gravityY)
+    {
+        _geomechanicalSimulator.Gravity = new Vector2(gravityX, gravityY);
+        Logger.Log($"Set gravity to ({gravityX}, {gravityY}) m/s²");
+    }
+
+    /// <summary>
+    /// Set custom gravitational acceleration magnitude (positive value, direction is downward).
+    /// </summary>
+    /// <param name="gravityMagnitude">Magnitude of gravity in m/s² (e.g., 9.81 for Earth, 1.62 for Moon)</param>
+    public void SetGravityMagnitude(float gravityMagnitude)
+    {
+        _geomechanicalSimulator.Gravity = new Vector2(0, -Math.Abs(gravityMagnitude));
+        Logger.Log($"Set gravity magnitude to {gravityMagnitude} m/s²");
+    }
+
+    /// <summary>
+    /// Get the current gravity setting for the simulation.
+    /// </summary>
+    public Vector2 GetGravity()
+    {
+        return _geomechanicalSimulator.Gravity;
     }
 
     #endregion

@@ -226,6 +226,72 @@ Define materials with these properties:
 | Tensile Strength | T | Maximum tensile stress (Pa) |
 | Dilation Angle | ψ | Plastic volumetric strain ratio |
 
+### Assigning Materials from the Material Library
+
+Materials can be assigned from the global **Material Library** which contains pre-defined physical materials with comprehensive geomechanical properties including FLAC2D-compatible parameters.
+
+#### Available Methods
+
+1. **Assign by Name**: Assign a specific material from the library to a formation
+2. **Auto-Assign**: Automatically match formations to library materials based on name patterns
+3. **Validate**: Check if all formations have valid material assignments for simulation
+
+#### Key Properties Converted
+
+When assigning from the library, the following properties are converted:
+
+| Library Property | Geomech Property | Conversion |
+|-----------------|------------------|------------|
+| `YoungModulus_GPa` | `YoungModulus` | × 10⁹ (GPa → Pa) |
+| `Density_kg_m3` | `Density` | Direct copy |
+| `PoissonRatio` | `PoissonRatio` | Direct copy |
+| `FrictionAngle_deg` | `FrictionAngle` | Direct copy |
+| `Cohesion_MPa` | `Cohesion` | × 10⁶ (MPa → Pa) |
+| `TensileStrength_MPa` | `TensileStrength` | × 10⁶ (MPa → Pa) |
+| `DilationAngle_deg` | `DilationAngle` | Direct copy |
+| `HoekBrown_mi` | `HB_mi` | Direct copy |
+| `GSI` | `GSI` | Direct copy |
+| `DisturbanceFactor_D` | `DisturbanceFactor` | Direct copy |
+
+If some properties are missing, they are estimated from available data (e.g., cohesion from UCS).
+
+#### GeoScript Commands
+
+```geoscript
+# Assign a specific material from library to a formation
+GEOMECH_ASSIGN_MATERIAL formation="Sandstone Layer" material="Sandstone (quartz-rich, dense)"
+
+# Auto-assign materials to all formations based on name matching
+GEOMECH_AUTO_ASSIGN_MATERIALS
+
+# List available library materials
+GEOMECH_LIST_MATERIALS
+
+# Validate material assignments
+GEOMECH_VALIDATE_MATERIALS
+```
+
+#### Code Example
+
+```csharp
+// Assign material from library to formation
+dataset.AssignMaterialToFormation("Sandstone Layer", "Sandstone (quartz-rich, dense)");
+
+// Auto-assign all formations
+int assigned = dataset.AutoAssignMaterialsFromLibrary();
+
+// Validate assignments
+var issues = dataset.ValidateMaterialAssignments();
+if (issues.Count > 0)
+{
+    foreach (var issue in issues)
+        Console.WriteLine(issue);
+}
+
+// Get list of available materials
+var available = dataset.GetAvailableLibraryMaterials();
+```
+
 #### Curved Mohr-Coulomb Criterion
 
 The curved envelope τ = A(σₙ + T)^B models the nonlinear strength of rocks at low confining stress:
@@ -240,6 +306,60 @@ For rock masses with joints and fractures:
 - **m_i**: Intact rock parameter (from 4 for mudstone to 35 for granite)
 - **GSI**: Geological Strength Index (10-100)
 - **D**: Disturbance factor (0 = undisturbed, 1 = heavily blasted)
+
+### Custom Gravitational Acceleration
+
+The geomechanical simulation supports custom gravitational acceleration for simulations on different celestial bodies or specialized scenarios.
+
+#### Setting Custom Gravity
+
+| Celestial Body | Gravity (m/s²) |
+|----------------|---------------|
+| Earth | 9.81 |
+| Moon | 1.62 |
+| Mars | 3.72 |
+| Venus | 8.87 |
+| Jupiter (surface) | 24.79 |
+
+#### Configuration Methods
+
+**Via TwoDGeologyDataset:**
+```csharp
+// Set gravity vector (X, Y components)
+dataset.SetGravity(0, -9.81f);
+
+// Set just the magnitude (direction is downward)
+dataset.SetGravityMagnitude(1.62f); // Moon gravity
+
+// Get current gravity
+Vector2 gravity = dataset.GetGravity();
+```
+
+**Via GeomechanicalMaterial2D (affects unit weight calculations):**
+```csharp
+// Set global gravity constant for material calculations
+GeomechanicalMaterial2D.GravityConstant = 1.62; // Moon gravity
+
+// Unit weight will now use this value: γ = ρ × g
+double unitWeight = material.UnitWeight; // Uses GravityConstant
+```
+
+**Via GeoScript:**
+```geoscript
+# Set custom gravity for geomechanical simulation
+GEOMECH_SET_GRAVITY magnitude=1.62  # Moon gravity
+GEOMECH_SET_GRAVITY x=0 y=-3.72     # Mars gravity with direction
+
+# Set gravity for material library calculations
+GEOMECH_SET_GRAVITY_CONSTANT value=9.81
+```
+
+#### Important Notes
+
+- Gravity affects body forces, unit weight calculations, and hydraulic conductivity
+- Both the simulator and material properties use the configured gravity
+- The default is Earth gravity (9.81 m/s²)
+- Changing `GeomechanicalMaterial2D.GravityConstant` affects all materials globally
 
 ### Running Simulations
 

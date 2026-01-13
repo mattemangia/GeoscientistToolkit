@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using GeoscientistToolkit.Data.Materials;
 
 namespace GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
 
@@ -87,11 +88,17 @@ public class GeomechanicalMaterial2D
 
     #region Density and Weight
 
+    /// <summary>
+    /// Global gravitational acceleration constant (m/s²). Default is 9.81 for Earth.
+    /// Can be changed for simulations on other celestial bodies (e.g., 1.62 for Moon, 3.72 for Mars).
+    /// </summary>
+    public static double GravityConstant { get; set; } = 9.81;
+
     /// <summary>Mass density (kg/m³)</summary>
     public double Density { get; set; } = 2700.0;
 
     /// <summary>Unit weight γ = ρg (N/m³)</summary>
-    public double UnitWeight => Density * 9.81;
+    public double UnitWeight => Density * GravityConstant;
 
     /// <summary>Saturated density (kg/m³)</summary>
     public double SaturatedDensity { get; set; } = 2800.0;
@@ -371,8 +378,14 @@ public class GeomechanicalMaterial2D
     /// <summary>Intrinsic permeability k (m²)</summary>
     public double Permeability { get; set; } = 1e-15;
 
-    /// <summary>Hydraulic conductivity K (m/s) = k·ρ_w·g/μ_w</summary>
-    public double HydraulicConductivity => Permeability * 1000 * 9.81 / 0.001;
+    /// <summary>Hydraulic conductivity K (m/s) = k·ρ_w·g/μ_w (using configurable gravity)</summary>
+    public double HydraulicConductivity => Permeability * WaterDensity * GravityConstant / WaterViscosity;
+
+    /// <summary>Water density for hydraulic conductivity calculation (kg/m³). Default 1000.</summary>
+    public static double WaterDensity { get; set; } = 1000.0;
+
+    /// <summary>Water dynamic viscosity for hydraulic conductivity calculation (Pa·s). Default 0.001.</summary>
+    public static double WaterViscosity { get; set; } = 0.001;
 
     /// <summary>Permeability can change with volumetric strain</summary>
     public bool StrainDependentPermeability { get; set; }
@@ -844,6 +857,162 @@ public class GeomechanicalMaterial2D
             FrictionAngle = 0,
             TensileStrength = 400e6
         };
+    }
+
+    /// <summary>
+    /// Create a GeomechanicalMaterial2D from a PhysicalMaterial in the material library.
+    /// Converts units and estimates missing parameters based on typical rock/soil relationships.
+    /// </summary>
+    /// <param name="physMat">The source physical material</param>
+    /// <returns>A new GeomechanicalMaterial2D with converted properties</returns>
+    public static GeomechanicalMaterial2D CreateFromPhysicalMaterial(PhysicalMaterial physMat)
+    {
+        if (physMat == null)
+            throw new ArgumentNullException(nameof(physMat));
+
+        var geomMat = new GeomechanicalMaterial2D
+        {
+            Name = physMat.Name
+        };
+
+        // Density (kg/m³) - direct copy
+        if (physMat.Density_kg_m3.HasValue)
+            geomMat.Density = physMat.Density_kg_m3.Value;
+
+        // Young's Modulus: Convert from GPa to Pa
+        if (physMat.YoungModulus_GPa.HasValue)
+            geomMat.YoungModulus = physMat.YoungModulus_GPa.Value * 1e9;
+
+        // Poisson's Ratio - direct copy (dimensionless)
+        if (physMat.PoissonRatio.HasValue)
+            geomMat.PoissonRatio = physMat.PoissonRatio.Value;
+
+        // Friction angle (degrees) - direct copy
+        if (physMat.FrictionAngle_deg.HasValue)
+            geomMat.FrictionAngle = physMat.FrictionAngle_deg.Value;
+
+        // Cohesion: Convert from MPa to Pa
+        if (physMat.Cohesion_MPa.HasValue)
+        {
+            geomMat.Cohesion = physMat.Cohesion_MPa.Value * 1e6;
+        }
+        else if (physMat.CompressiveStrength_MPa.HasValue && physMat.FrictionAngle_deg.HasValue)
+        {
+            // Estimate cohesion from UCS using Mohr-Coulomb relationship:
+            // UCS = 2c * cos(φ) / (1 - sin(φ))
+            // c = UCS * (1 - sin(φ)) / (2 * cos(φ))
+            double phi = physMat.FrictionAngle_deg.Value * Math.PI / 180.0;
+            double ucs_Pa = physMat.CompressiveStrength_MPa.Value * 1e6;
+            geomMat.Cohesion = ucs_Pa * (1 - Math.Sin(phi)) / (2 * Math.Cos(phi));
+        }
+        else if (physMat.CompressiveStrength_MPa.HasValue)
+        {
+            // Rough estimate: c ≈ UCS / 4 for typical rocks
+            geomMat.Cohesion = physMat.CompressiveStrength_MPa.Value * 1e6 / 4.0;
+        }
+
+        // Tensile strength: Convert from MPa to Pa
+        if (physMat.TensileStrength_MPa.HasValue)
+            geomMat.TensileStrength = physMat.TensileStrength_MPa.Value * 1e6;
+        else if (physMat.CompressiveStrength_MPa.HasValue)
+            // Typical rock: T ≈ UCS / 10 to UCS / 20
+            geomMat.TensileStrength = physMat.CompressiveStrength_MPa.Value * 1e6 / 15.0;
+
+        // Dilation angle (degrees) - direct copy or estimate
+        if (physMat.DilationAngle_deg.HasValue)
+            geomMat.DilationAngle = physMat.DilationAngle_deg.Value;
+        else if (physMat.FrictionAngle_deg.HasValue)
+            // Typical non-associated flow: ψ ≈ φ/3 to φ/2
+            geomMat.DilationAngle = physMat.FrictionAngle_deg.Value / 3.0;
+
+        // Hoek-Brown parameters
+        if (physMat.HoekBrown_mi.HasValue)
+            geomMat.HB_mi = physMat.HoekBrown_mi.Value;
+        else
+            // Estimate mi from material name (common defaults)
+            geomMat.HB_mi = EstimateHoekBrownMi(physMat.Name);
+
+        if (physMat.GSI.HasValue)
+            geomMat.GSI = physMat.GSI.Value;
+        else
+            geomMat.GSI = 60; // Default for moderately jointed rock
+
+        if (physMat.DisturbanceFactor_D.HasValue)
+            geomMat.DisturbanceFactor = physMat.DisturbanceFactor_D.Value;
+
+        // Calculate Hoek-Brown mb, s, a from mi, GSI, D
+        geomMat.CalculateHoekBrownFromGSI();
+
+        // Thermal properties
+        if (physMat.ThermalConductivity_W_mK.HasValue)
+            geomMat.ThermalConductivity = physMat.ThermalConductivity_W_mK.Value;
+
+        if (physMat.SpecificHeatCapacity_J_kgK.HasValue)
+            geomMat.SpecificHeat = physMat.SpecificHeatCapacity_J_kgK.Value;
+
+        // Porosity
+        if (physMat.TypicalPorosity_fraction.HasValue)
+            geomMat.Porosity = physMat.TypicalPorosity_fraction.Value;
+
+        // Set color based on material type
+        geomMat.Color = GetDefaultColorForMaterial(physMat.Name);
+
+        return geomMat;
+    }
+
+    /// <summary>
+    /// Estimate Hoek-Brown mi constant based on rock type name
+    /// </summary>
+    private static double EstimateHoekBrownMi(string materialName)
+    {
+        var lower = materialName.ToLower();
+
+        // Values from Hoek (2007) "Practical Rock Engineering"
+        if (lower.Contains("granite")) return 32;
+        if (lower.Contains("basalt")) return 25;
+        if (lower.Contains("diorite")) return 25;
+        if (lower.Contains("gabbro")) return 27;
+        if (lower.Contains("rhyolite")) return 25;
+        if (lower.Contains("andesite")) return 25;
+        if (lower.Contains("sandstone")) return 17;
+        if (lower.Contains("limestone")) return 12;
+        if (lower.Contains("dolomite")) return 9;
+        if (lower.Contains("shale")) return 6;
+        if (lower.Contains("mudstone")) return 4;
+        if (lower.Contains("claystone")) return 4;
+        if (lower.Contains("marble")) return 9;
+        if (lower.Contains("quartzite")) return 20;
+        if (lower.Contains("gneiss")) return 28;
+        if (lower.Contains("schist")) return 12;
+        if (lower.Contains("slate")) return 7;
+        if (lower.Contains("coal")) return 6;
+        if (lower.Contains("clay")) return 4;
+        if (lower.Contains("sand")) return 17;
+
+        return 10; // Default for unknown rock
+    }
+
+    /// <summary>
+    /// Get a default display color based on material name
+    /// </summary>
+    private static Vector4 GetDefaultColorForMaterial(string materialName)
+    {
+        var lower = materialName.ToLower();
+
+        if (lower.Contains("granite")) return new Vector4(0.7f, 0.7f, 0.7f, 1);
+        if (lower.Contains("basalt")) return new Vector4(0.3f, 0.3f, 0.35f, 1);
+        if (lower.Contains("sandstone")) return new Vector4(0.9f, 0.8f, 0.5f, 1);
+        if (lower.Contains("limestone")) return new Vector4(0.85f, 0.85f, 0.75f, 1);
+        if (lower.Contains("shale")) return new Vector4(0.4f, 0.4f, 0.5f, 1);
+        if (lower.Contains("clay")) return new Vector4(0.6f, 0.5f, 0.3f, 1);
+        if (lower.Contains("sand")) return new Vector4(0.95f, 0.9f, 0.6f, 1);
+        if (lower.Contains("marble")) return new Vector4(0.95f, 0.95f, 0.95f, 1);
+        if (lower.Contains("quartzite")) return new Vector4(0.9f, 0.9f, 0.85f, 1);
+        if (lower.Contains("coal")) return new Vector4(0.2f, 0.2f, 0.2f, 1);
+        if (lower.Contains("steel")) return new Vector4(0.4f, 0.45f, 0.5f, 1);
+        if (lower.Contains("concrete")) return new Vector4(0.6f, 0.6f, 0.6f, 1);
+
+        return new Vector4(0.5f, 0.5f, 0.5f, 1); // Default gray
     }
 
     #endregion

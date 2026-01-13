@@ -281,6 +281,57 @@ reactor.AddForceField(
     angularVelocity: 100.0);  // rad/s
 ```
 
+### Custom Gravitational Acceleration
+
+The PhysicoChem module supports custom gravity through the `GravityProperties` class with full planetary body presets and spatial variations:
+
+**Planetary Body Presets:**
+| Body | Surface Gravity (m/s²) |
+|------|----------------------|
+| Earth | 9.81 |
+| Moon | 1.62 |
+| Mars | 3.72 |
+| Venus | 8.87 |
+| Jupiter | 24.79 |
+| Saturn | 10.44 |
+| Mercury | 3.70 |
+| Microgravity | ~0 |
+
+**Configuration:**
+```csharp
+// Simple custom gravity vector
+var gravityForce = new ForceField("Gravity", ForceType.Gravity)
+{
+    GravityVector = (0, 0, -1.62)  // Moon gravity
+};
+
+// Using planetary presets with advanced features
+var gravityForce = new ForceField("Gravity", ForceType.Gravity)
+{
+    Gravity = new GravityProperties
+    {
+        UsePreset = true,
+        PlanetaryBody = PlanetaryBody.Mars,  // Auto-sets 3.72 m/s²
+        EnableAltitudeVariation = true,      // g varies with height
+        EnableLatitudeVariation = false,     // For Earth latitude effects
+        PlanetRadius = 3.3895e6              // Mars radius for altitude
+    }
+};
+reactor.Forces.Add(gravityForce);
+```
+
+**GeoScript:**
+```geoscript
+# Set custom gravity
+PHYSICOCHEM_SET_GRAVITY vector="(0, 0, -1.62)"
+
+# Use planetary preset
+PHYSICOCHEM_SET_GRAVITY preset=mars
+
+# Full configuration
+PHYSICOCHEM_SET_GRAVITY preset=earth altitude_variation=true latitude=45
+```
+
 ---
 
 ## Nucleation and Crystal Growth
