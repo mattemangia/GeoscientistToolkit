@@ -1,11 +1,13 @@
 // GeoscientistToolkit/Business/GeoScript/GeoScriptGeomechanicsCommands.cs
 
 using System;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Numerics;
 using GeoscientistToolkit.Business.GeoScript;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
 using GeoscientistToolkit.Util;
@@ -631,4 +633,226 @@ public class GeomechSetDisplayCommand : IGeoScriptCommand
         return match.Success ? match.Groups[1].Value : defaultValue;
     }
 
+}
+
+/// <summary>
+/// GEOMECH_SET_GRAVITY - Set custom gravitational acceleration for geomechanical simulation
+/// Usage: GEOMECH_SET_GRAVITY magnitude=9.81 OR GEOMECH_SET_GRAVITY x=0 y=-9.81
+/// </summary>
+public class GeomechSetGravityCommand : IGeoScriptCommand
+{
+    public string Name => "GEOMECH_SET_GRAVITY";
+    public string HelpText => "Set custom gravitational acceleration for geomechanical simulation";
+    public string Usage => @"GEOMECH_SET_GRAVITY [magnitude=<m/s²>] [x=<m/s²>] [y=<m/s²>] [preset=<earth|moon|mars|venus|jupiter>]
+    magnitude: Gravity magnitude (direction is downward)
+    x, y: Custom gravity vector components
+    preset: Use planetary preset (earth=9.81, moon=1.62, mars=3.72, venus=8.87, jupiter=24.79)
+
+Examples:
+    GEOMECH_SET_GRAVITY magnitude=1.62  # Moon gravity
+    GEOMECH_SET_GRAVITY preset=mars     # Mars gravity (3.72 m/s²)
+    GEOMECH_SET_GRAVITY x=0 y=-3.72     # Custom direction";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not TwoDGeologyDataset geoDs)
+            throw new NotSupportedException("GEOMECH_SET_GRAVITY requires a TwoDGeologyDataset");
+
+        var cmd = (CommandNode)node;
+
+        // Check for preset first
+        string preset = ParseStringParameter(cmd.FullText, "preset", "");
+        if (!string.IsNullOrEmpty(preset))
+        {
+            float mag = preset.ToLower() switch
+            {
+                "earth" => 9.81f,
+                "moon" => 1.62f,
+                "mars" => 3.72f,
+                "venus" => 8.87f,
+                "jupiter" => 24.79f,
+                "saturn" => 10.44f,
+                "mercury" => 3.70f,
+                _ => throw new ArgumentException($"Unknown preset: {preset}. Use earth, moon, mars, venus, jupiter, saturn, or mercury.")
+            };
+
+            geoDs.SetGravityMagnitude(mag);
+            GeomechanicalMaterial2D.GravityConstant = mag;
+            Logger.Log($"Set gravity to {preset} preset: {mag} m/s²");
+            return Task.FromResult<Dataset>(geoDs);
+        }
+
+        // Check for magnitude
+        bool hasMagnitude = Regex.IsMatch(cmd.FullText, @"magnitude\s*=", RegexOptions.IgnoreCase);
+        if (hasMagnitude)
+        {
+            float magnitude = ParseFloatParameter(cmd.FullText, "magnitude", 9.81f);
+            geoDs.SetGravityMagnitude(magnitude);
+            GeomechanicalMaterial2D.GravityConstant = magnitude;
+            Logger.Log($"Set gravity magnitude to {magnitude} m/s²");
+            return Task.FromResult<Dataset>(geoDs);
+        }
+
+        // Check for x, y components
+        float gx = ParseFloatParameter(cmd.FullText, "x", 0);
+        float gy = ParseFloatParameter(cmd.FullText, "y", -9.81f);
+        geoDs.SetGravity(gx, gy);
+        GeomechanicalMaterial2D.GravityConstant = Math.Abs(gy);
+        Logger.Log($"Set gravity vector to ({gx}, {gy}) m/s²");
+
+        return Task.FromResult<Dataset>(geoDs);
+    }
+
+    private float ParseFloatParameter(string fullText, string paramName, float defaultValue)
+    {
+        var match = Regex.Match(fullText, paramName + @"\s*=\s*([-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)", RegexOptions.IgnoreCase);
+        return match.Success ? float.Parse(match.Groups[1].Value) : defaultValue;
+    }
+
+    private string ParseStringParameter(string fullText, string paramName, string defaultValue)
+    {
+        var match = Regex.Match(fullText, paramName + @"\s*=\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value : defaultValue;
+    }
+}
+
+/// <summary>
+/// GEOMECH_ASSIGN_MATERIAL - Assign a material from the library to a formation
+/// Usage: GEOMECH_ASSIGN_MATERIAL formation="Sandstone Layer" material="Sandstone"
+/// </summary>
+public class GeomechAssignMaterialCommand : IGeoScriptCommand
+{
+    public string Name => "GEOMECH_ASSIGN_MATERIAL";
+    public string HelpText => "Assign a physical material from the library to a geological formation";
+    public string Usage => @"GEOMECH_ASSIGN_MATERIAL formation=<name> material=<library_material_name>
+    formation: Name of the geological formation
+    material: Name of the material in the MaterialLibrary
+
+Example:
+    GEOMECH_ASSIGN_MATERIAL formation=""Sandstone Layer"" material=""Sandstone (quartz-rich, dense)""";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not TwoDGeologyDataset geoDs)
+            throw new NotSupportedException("GEOMECH_ASSIGN_MATERIAL requires a TwoDGeologyDataset");
+
+        var cmd = (CommandNode)node;
+        string formation = ParseQuotedParameter(cmd.FullText, "formation", "");
+        string material = ParseQuotedParameter(cmd.FullText, "material", "");
+
+        if (string.IsNullOrEmpty(formation) || string.IsNullOrEmpty(material))
+            throw new ArgumentException("Both formation and material parameters are required");
+
+        bool success = geoDs.AssignMaterialToFormation(formation, material);
+        if (success)
+            Logger.Log($"Assigned material '{material}' to formation '{formation}'");
+        else
+            Logger.LogError($"Failed to assign material. Check formation and material names.");
+
+        return Task.FromResult<Dataset>(geoDs);
+    }
+
+    private string ParseQuotedParameter(string fullText, string paramName, string defaultValue)
+    {
+        // Try quoted string first
+        var match = Regex.Match(fullText, paramName + @"\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase);
+        if (match.Success)
+            return match.Groups[1].Value;
+
+        // Try unquoted
+        match = Regex.Match(fullText, paramName + @"\s*=\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value : defaultValue;
+    }
+}
+
+/// <summary>
+/// GEOMECH_AUTO_ASSIGN_MATERIALS - Auto-assign materials from library to formations by name matching
+/// Usage: GEOMECH_AUTO_ASSIGN_MATERIALS
+/// </summary>
+public class GeomechAutoAssignMaterialsCommand : IGeoScriptCommand
+{
+    public string Name => "GEOMECH_AUTO_ASSIGN_MATERIALS";
+    public string HelpText => "Automatically assign materials from the library to formations based on name matching";
+    public string Usage => @"GEOMECH_AUTO_ASSIGN_MATERIALS
+Attempts to match formation names to materials in the library (e.g., 'Sandstone Formation' matches 'Sandstone').";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not TwoDGeologyDataset geoDs)
+            throw new NotSupportedException("GEOMECH_AUTO_ASSIGN_MATERIALS requires a TwoDGeologyDataset");
+
+        int assigned = geoDs.AutoAssignMaterialsFromLibrary();
+        Logger.Log($"Auto-assigned {assigned} formation(s) from material library");
+
+        return Task.FromResult<Dataset>(geoDs);
+    }
+}
+
+/// <summary>
+/// GEOMECH_LIST_MATERIALS - List available materials in the library
+/// Usage: GEOMECH_LIST_MATERIALS
+/// </summary>
+public class GeomechListMaterialsCommand : IGeoScriptCommand
+{
+    public string Name => "GEOMECH_LIST_MATERIALS";
+    public string HelpText => "List all available materials in the MaterialLibrary suitable for geomechanical simulation";
+    public string Usage => "GEOMECH_LIST_MATERIALS [filter=<search_term>]";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not TwoDGeologyDataset geoDs)
+            throw new NotSupportedException("GEOMECH_LIST_MATERIALS requires a TwoDGeologyDataset");
+
+        var cmd = (CommandNode)node;
+        string filter = ParseStringParameter(cmd.FullText, "filter", "");
+
+        var materials = geoDs.GetAvailableLibraryMaterials();
+
+        if (!string.IsNullOrEmpty(filter))
+            materials = materials.Where(m => m.ToLower().Contains(filter.ToLower())).ToList();
+
+        Logger.Log($"Available materials ({materials.Count}):");
+        foreach (var mat in materials)
+            Logger.Log($"  - {mat}");
+
+        return Task.FromResult<Dataset>(geoDs);
+    }
+
+    private string ParseStringParameter(string fullText, string paramName, string defaultValue)
+    {
+        var match = Regex.Match(fullText, paramName + @"\s*=\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value : defaultValue;
+    }
+}
+
+/// <summary>
+/// GEOMECH_VALIDATE_MATERIALS - Validate that all formations have valid material assignments
+/// Usage: GEOMECH_VALIDATE_MATERIALS
+/// </summary>
+public class GeomechValidateMaterialsCommand : IGeoScriptCommand
+{
+    public string Name => "GEOMECH_VALIDATE_MATERIALS";
+    public string HelpText => "Validate that all formations have valid material assignments for simulation";
+    public string Usage => "GEOMECH_VALIDATE_MATERIALS";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not TwoDGeologyDataset geoDs)
+            throw new NotSupportedException("GEOMECH_VALIDATE_MATERIALS requires a TwoDGeologyDataset");
+
+        var issues = geoDs.ValidateMaterialAssignments();
+
+        if (issues.Count == 0)
+        {
+            Logger.Log("All formations have valid material assignments.");
+        }
+        else
+        {
+            Logger.LogWarning($"Found {issues.Count} issue(s) with material assignments:");
+            foreach (var issue in issues)
+                Logger.LogWarning($"  - {issue}");
+        }
+
+        return Task.FromResult<Dataset>(geoDs);
+    }
 }
