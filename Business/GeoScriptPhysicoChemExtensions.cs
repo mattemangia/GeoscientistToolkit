@@ -84,13 +84,13 @@ public class CreateReactorCommand : IGeoScriptCommand
 
 /// <summary>
 /// RUN_SIMULATION: Runs the PhysicoChem simulation
-/// Usage: RUN_SIMULATION [total_time] [time_step]
+/// Usage: RUN_SIMULATION [total_time] [time_step] [convergence_tolerance=1e-6]
 /// </summary>
 public class RunSimulationCommand : IGeoScriptCommand
 {
     public string Name => "RUN_SIMULATION";
     public string HelpText => "Runs the PhysicoChem reactor simulation";
-    public string Usage => "RUN_SIMULATION [total_time_s] [time_step_s]";
+    public string Usage => "RUN_SIMULATION [total_time_s] [time_step_s] [convergence_tolerance=1e-6]";
 
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
@@ -106,10 +106,14 @@ public class RunSimulationCommand : IGeoScriptCommand
 
         double totalTime = double.Parse(parts[1], CultureInfo.InvariantCulture);
         double timeStep = double.Parse(parts[2], CultureInfo.InvariantCulture);
+        var args = GeoScriptArgumentParser.ParseArguments(cmd.FullText);
+        var convergenceTolerance = GeoScriptArgumentParser.GetDouble(args, "convergence_tolerance",
+            dataset.SimulationParams.ConvergenceTolerance, context);
 
         dataset.SimulationParams.TotalTime = totalTime;
         dataset.SimulationParams.TimeStep = timeStep;
         dataset.SimulationParams.OutputInterval = totalTime / 10.0; // 10 outputs
+        dataset.SimulationParams.ConvergenceTolerance = convergenceTolerance;
 
         // Generate mesh if not exists
         if (dataset.GeneratedMesh == null)

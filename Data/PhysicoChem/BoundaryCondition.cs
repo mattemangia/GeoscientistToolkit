@@ -301,6 +301,9 @@ public class NucleationSite
     public string MineralType { get; set; }
 
     [JsonProperty]
+    public string MaterialID { get; set; }
+
+    [JsonProperty]
     public double NucleationRate { get; set; } // nuclei/s
 
     [JsonProperty]
@@ -319,11 +322,13 @@ public class NucleationSite
     {
     }
 
-    public NucleationSite(string name, (double X, double Y, double Z) position, string mineralType)
+    public NucleationSite(string name, (double X, double Y, double Z) position, string mineralType,
+        string materialId = "")
     {
         Name = name;
         Position = position;
         MineralType = mineralType;
+        MaterialID = materialId;
     }
 
     /// <summary>

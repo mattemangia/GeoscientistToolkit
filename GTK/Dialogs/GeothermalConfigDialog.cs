@@ -25,6 +25,7 @@ public class GeothermalConfigDialog : Dialog
     private readonly SpinButton _thermalConductivityInput;
     private readonly SpinButton _simulationTimeInput;
     private readonly SpinButton _timeStepInput;
+    private readonly SpinButton _convergenceToleranceInput;
     private readonly CheckButton _multiphaseCheckbox;
     private readonly CheckButton _reactiveTransportCheckbox;
     private readonly SpinButton _heatDiffusivityMultiplierInput;
@@ -87,6 +88,11 @@ public class GeothermalConfigDialog : Dialog
         _thermalConductivityInput = new SpinButton(0.5, 10, 0.1) { Value = 2.5 };
         _simulationTimeInput = new SpinButton(1, 365 * 100, 1) { Value = 365 }; // days
         _timeStepInput = new SpinButton(0.001, 1, 0.01) { Value = 0.1 }; // days
+        _convergenceToleranceInput = new SpinButton(1e-12, 1e-2, 1e-6)
+        {
+            Value = _existingDataset?.SimulationParams.ConvergenceTolerance ?? 1e-6,
+            Digits = 8
+        };
         _multiphaseCheckbox = new CheckButton("Enable multiphase flow (water-steam)") { Active = false };
         _reactiveTransportCheckbox = new CheckButton("Enable reactive transport") { Active = false };
         _heatDiffusivityMultiplierInput = new SpinButton(1, 1e8, 1000) { Value = 1e6 };
@@ -257,6 +263,9 @@ public class GeothermalConfigDialog : Dialog
 
         simGrid.Attach(new Label("Time Step (days):") { Xalign = 0 }, 0, row, 1, 1);
         simGrid.Attach(_timeStepInput, 1, row++, 1, 1);
+
+        simGrid.Attach(new Label("Convergence Tolerance:"), 0, row, 1, 1);
+        simGrid.Attach(_convergenceToleranceInput, 1, row++, 1, 1);
 
         simGrid.Attach(_multiphaseCheckbox, 0, row++, 2, 1);
         simGrid.Attach(_reactiveTransportCheckbox, 0, row++, 2, 1);
@@ -580,6 +589,7 @@ public class GeothermalConfigDialog : Dialog
         // Set simulation parameters
         dataset.SimulationParams.TotalTime = _simulationTimeInput.Value * 86400; // days to seconds
         dataset.SimulationParams.TimeStep = _timeStepInput.Value * 86400;
+        dataset.SimulationParams.ConvergenceTolerance = _convergenceToleranceInput.Value;
         dataset.SimulationParams.EnableFlow = true;
         dataset.SimulationParams.EnableHeatTransfer = true;
         dataset.SimulationParams.EnableReactiveTransport = _reactiveTransportCheckbox.Active;
@@ -644,6 +654,7 @@ public class GeothermalConfigDialog : Dialog
         // Populate other fields...
         _simulationTimeInput.Value = _existingDataset.SimulationParams.TotalTime / 86400;
         _timeStepInput.Value = _existingDataset.SimulationParams.TimeStep / 86400;
+        _convergenceToleranceInput.Value = _existingDataset.SimulationParams.ConvergenceTolerance;
         _reactiveTransportCheckbox.Active = _existingDataset.SimulationParams.EnableReactiveTransport;
         _multiphaseCheckbox.Active = _existingDataset.SimulationParams.EnableMultiphaseFlow;
         _heatDiffusivityMultiplierInput.Value = _existingDataset.SimulationParams.HeatDiffusivityMultiplier;

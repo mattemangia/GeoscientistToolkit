@@ -159,7 +159,7 @@ public class MainGtkWindow : Gtk.Window
         toolsMenu.Append(CreateMenuItem("Thermodynamic Sweep...", (_, _) => OpenThermodynamicSweepDialog()));
         toolsMenu.Append(CreateMenuItem("Boolean Operations...", (_, _) => OpenBooleanOperationsUI()));
         toolsMenu.Append(CreateMenuItem("Geothermal Deep Wells Wizard...", (_, _) => OpenGeothermalConfigDialog()));
-        toolsMenu.Append(CreateMenuItem("Add Nucleation Point", (_, _) => AddNucleationPoint()));
+        toolsMenu.Append(CreateMenuItem("Add Nucleation Site", (_, _) => AddNucleationPoint()));
         toolsMenuItem.Submenu = toolsMenu;
         menuBar.Append(toolsMenuItem);
 
@@ -2054,50 +2054,118 @@ public class MainGtkWindow : Gtk.Window
     {
         if (_selectedDataset is not PhysicoChemDataset physico) return;
 
-        var dialog = new Dialog("Add Nucleation Point", this, DialogFlags.Modal);
+        var dialog = new Dialog("Add Nucleation Site", this, DialogFlags.Modal);
         dialog.AddButton("Cancel", ResponseType.Cancel);
         dialog.AddButton("Add", ResponseType.Ok);
-        dialog.AddButton("Add Random", ResponseType.Apply);
+        dialog.AddButton("Add From Object", ResponseType.Apply);
 
         var content = dialog.ContentArea;
         var grid = new Grid { ColumnSpacing = 8, RowSpacing = 8, BorderWidth = 10 };
 
+        var nameEntry = new Entry("Nucleation");
         var xSpin = new SpinButton(-1000, 1000, 0.1) { Value = 0 };
         var ySpin = new SpinButton(-1000, 1000, 0.1) { Value = 0 };
         var zSpin = new SpinButton(-1000, 1000, 0.1) { Value = 0 };
+        var mineralEntry = new Entry("Calcite");
+        var rateSpin = new SpinButton(1e-6, 1e9, 1e-6) { Value = 1e3, Digits = 4 };
 
-        grid.Attach(new Label("X:"), 0, 0, 1, 1); grid.Attach(xSpin, 1, 0, 1, 1);
-        grid.Attach(new Label("Y:"), 0, 1, 1, 1); grid.Attach(ySpin, 1, 1, 1, 1);
-        grid.Attach(new Label("Z:"), 0, 2, 1, 1); grid.Attach(zSpin, 1, 2, 1, 1);
+        var materialCombo = new ComboBoxText();
+        materialCombo.AppendText("Any");
+        foreach (var material in physico.Materials)
+            materialCombo.AppendText(material.MaterialID);
+        materialCombo.Active = 0;
+
+        var objectCombo = new ComboBoxText();
+        objectCombo.AppendText("None");
+        foreach (var obj in physico.Mesh.ReactorObjects)
+            objectCombo.AppendText(obj.Name);
+        objectCombo.Active = 0;
+
+        var objectCountSpin = new SpinButton(1, 1000, 1) { Value = 1 };
+
+        int row = 0;
+        grid.Attach(new Label("Name:"), 0, row, 1, 1); grid.Attach(nameEntry, 1, row++, 1, 1);
+        grid.Attach(new Label("X:"), 0, row, 1, 1); grid.Attach(xSpin, 1, row++, 1, 1);
+        grid.Attach(new Label("Y:"), 0, row, 1, 1); grid.Attach(ySpin, 1, row++, 1, 1);
+        grid.Attach(new Label("Z:"), 0, row, 1, 1); grid.Attach(zSpin, 1, row++, 1, 1);
+        grid.Attach(new Label("Mineral Type:"), 0, row, 1, 1); grid.Attach(mineralEntry, 1, row++, 1, 1);
+        grid.Attach(new Label("Nucleation Rate:"), 0, row, 1, 1); grid.Attach(rateSpin, 1, row++, 1, 1);
+        grid.Attach(new Label("Material:"), 0, row, 1, 1); grid.Attach(materialCombo, 1, row++, 1, 1);
+        grid.Attach(new Label("Reactor Object:"), 0, row, 1, 1); grid.Attach(objectCombo, 1, row++, 1, 1);
+        grid.Attach(new Label("Object Site Count:"), 0, row, 1, 1); grid.Attach(objectCountSpin, 1, row++, 1, 1);
 
         content.PackStart(grid, true, true, 0);
         dialog.ShowAll();
 
         var response = (ResponseType)dialog.Run();
+        var materialId = materialCombo.ActiveText == "Any" ? string.Empty : materialCombo.ActiveText ?? string.Empty;
+        var mineralType = mineralEntry.Text?.Trim() ?? "Calcite";
+        var nucleationRate = rateSpin.Value;
 
         if (response == ResponseType.Ok)
         {
-            var point = new NucleationPoint
+            var site = new NucleationSite(nameEntry.Text?.Trim() ?? "Nucleation",
+                (xSpin.Value, ySpin.Value, zSpin.Value),
+                mineralType,
+                materialId)
             {
-                ID = $"Nuc_{physico.Mesh.NucleationPoints.Count + 1}",
-                Position = (xSpin.Value, ySpin.Value, zSpin.Value)
+                NucleationRate = nucleationRate
             };
-            physico.Mesh.NucleationPoints.Add(point);
-            SetStatus($"Added Nucleation Point at ({point.Position.X}, {point.Position.Y}, {point.Position.Z}).");
+            physico.NucleationSites.Add(site);
+            SetStatus($"Added Nucleation Site at ({site.Position.X}, {site.Position.Y}, {site.Position.Z}).");
         }
         else if (response == ResponseType.Apply)
         {
-            var rand = new Random();
-            var point = new NucleationPoint
+            var objectIndex = objectCombo.Active;
+            if (objectIndex > 0 && objectIndex - 1 < physico.Mesh.ReactorObjects.Count)
             {
-                ID = $"Nuc_{physico.Mesh.NucleationPoints.Count + 1}",
-                Position = (rand.NextDouble() * 20 - 10, rand.NextDouble() * 20 - 10, rand.NextDouble() * 100) // Approx range
-            };
-            physico.Mesh.NucleationPoints.Add(point);
-            SetStatus($"Added Random Nucleation Point at ({point.Position.X:F1}, {point.Position.Y:F1}, {point.Position.Z:F1}).");
+                var obj = physico.Mesh.ReactorObjects[objectIndex - 1];
+                var count = (int)objectCountSpin.Value;
+                AddNucleationSitesFromObject(physico, obj, count, materialId, mineralType, nucleationRate, nameEntry.Text);
+                SetStatus($"Added {count} nucleation site(s) for object '{obj.Name}'.");
+            }
+            else
+            {
+                SetStatus("Select a reactor object to add nucleation sites from geometry.");
+            }
         }
 
         dialog.Destroy();
+    }
+
+    private static void AddNucleationSitesFromObject(PhysicoChemDataset dataset, ReactorObject obj, int count,
+        string fallbackMaterialId, string mineralType, double nucleationRate, string baseName)
+    {
+        var materialId = string.IsNullOrWhiteSpace(fallbackMaterialId) ? obj.MaterialID : fallbackMaterialId;
+        var random = new Random();
+
+        for (int i = 0; i < count; i++)
+        {
+            var position = SamplePointInObject(obj, random);
+            var site = new NucleationSite($"{baseName}_{i + 1}", position, mineralType, materialId)
+            {
+                NucleationRate = nucleationRate
+            };
+            dataset.NucleationSites.Add(site);
+        }
+    }
+
+    private static (double X, double Y, double Z) SamplePointInObject(ReactorObject obj, Random random)
+    {
+        if (obj.IsCylinder)
+        {
+            var angle = random.NextDouble() * Math.PI * 2;
+            var radius = Math.Sqrt(random.NextDouble()) * obj.Radius;
+            var x = obj.Center.X + radius * Math.Cos(angle);
+            var y = obj.Center.Y + radius * Math.Sin(angle);
+            var z = obj.Center.Z + (random.NextDouble() - 0.5) * obj.Height;
+            return (x, y, z);
+        }
+
+        var xBox = obj.Center.X + (random.NextDouble() - 0.5) * obj.Size.X;
+        var yBox = obj.Center.Y + (random.NextDouble() - 0.5) * obj.Size.Y;
+        var zBox = obj.Center.Z + (random.NextDouble() - 0.5) * obj.Size.Z;
+        return (xBox, yBox, zBox);
     }
 
     private void EnsureDefaultReactor()

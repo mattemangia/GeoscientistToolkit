@@ -453,6 +453,7 @@ POST /api/simulation/geomechanical
 {
     "meshFile": "sample.mesh",
     "enablePlasticity": true,
+    "convergenceTolerance": 1e-6,
     "applyGravity": true,
     "gravityX": 0,
     "gravityY": 0,
@@ -468,6 +469,12 @@ POST /api/simulation/geomechanical
 | `gravityX` | float | X component of gravity (m/s²). Default: 0 |
 | `gravityY` | float | Y component of gravity (m/s²). Default: 0 |
 | `gravityZ` | float | Z component of gravity (m/s²). Default: -9.81 |
+
+**3D Solver Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `convergenceTolerance` | double | Solver convergence tolerance for iterative solves. Default: 1e-6 |
 
 **Planetary Presets:**
 

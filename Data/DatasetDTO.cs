@@ -508,6 +508,7 @@ public class NucleationSiteDTO
     public string Name { get; set; }
     public Vector3 Position { get; set; }
     public string MineralType { get; set; }
+    public string MaterialID { get; set; }
     public double NucleationRate { get; set; }
     public double InitialRadius { get; set; }
     public double ActivationEnergy { get; set; }

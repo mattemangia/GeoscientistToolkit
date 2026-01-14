@@ -19,13 +19,14 @@ namespace GeoscientistToolkit.Business;
 
 /// <summary>
 /// RUN_PNM_REACTIVE_TRANSPORT: Runs reactive transport simulation through a PNM
-/// Usage: RUN_PNM_REACTIVE_TRANSPORT [total_time] [time_step] [temp] [inlet_P] [outlet_P]
+/// Usage: RUN_PNM_REACTIVE_TRANSPORT [total_time] [time_step] [temp] [inlet_P] [outlet_P] [convergence_tolerance=1e-6]
 /// </summary>
 public class RunPNMReactiveTransportCommand : IGeoScriptCommand
 {
     public string Name => "RUN_PNM_REACTIVE_TRANSPORT";
     public string HelpText => "Runs reactive transport simulation through a pore network model";
-    public string Usage => "RUN_PNM_REACTIVE_TRANSPORT [total_time_s] [time_step_s] [inlet_temp_K] [inlet_pressure_Pa] [outlet_pressure_Pa]";
+    public string Usage =>
+        "RUN_PNM_REACTIVE_TRANSPORT [total_time_s] [time_step_s] [inlet_temp_K] [inlet_pressure_Pa] [outlet_pressure_Pa] [convergence_tolerance=1e-6]";
 
     public async Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
@@ -34,13 +35,18 @@ public class RunPNMReactiveTransportCommand : IGeoScriptCommand
 
         var cmd = (CommandNode)node;
 
-        // Parse: RUN_PNM_REACTIVE_TRANSPORT total_time time_step temp inlet_P outlet_P
+        // Parse: RUN_PNM_REACTIVE_TRANSPORT total_time time_step temp inlet_P outlet_P [convergence_tolerance=...]
         var match = Regex.Match(cmd.FullText,
             @"RUN_PNM_REACTIVE_TRANSPORT\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)",
             RegexOptions.IgnoreCase);
 
         if (!match.Success)
             throw new ArgumentException("RUN_PNM_REACTIVE_TRANSPORT requires 5 arguments: total_time, time_step, inlet_temp, inlet_pressure, outlet_pressure");
+
+        var args = GeoScriptArgumentParser.ParseArguments(cmd.FullText);
+        var convergenceTolerance = GeoScriptArgumentParser.GetDouble(args, "convergence_tolerance", double.NaN, context);
+        if (double.IsNaN(convergenceTolerance))
+            convergenceTolerance = GeoScriptArgumentParser.GetDouble(args, "tolerance", 1e-6, context);
 
         double totalTime = double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
         double timeStep = double.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
@@ -59,7 +65,8 @@ public class RunPNMReactiveTransportCommand : IGeoScriptCommand
             OutletPressure = (float)outletPressure,
             FlowAxis = FlowAxis.Z,
             EnableReactions = true,
-            UpdateGeometry = true
+            UpdateGeometry = true,
+            ConvergenceTolerance = (float)convergenceTolerance
         };
 
         Logger.Log($"[RUN_PNM_REACTIVE_TRANSPORT] Starting simulation: {totalTime}s, dt={timeStep}s");

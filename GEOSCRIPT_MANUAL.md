@@ -1207,7 +1207,7 @@ Runs the PhysicoChem simulation.
 
 **Syntax**:
 ```geoscript
-RUN_SIMULATION
+RUN_SIMULATION <total_time_s> <time_step_s> [convergence_tolerance=1e-6]
 ```
 
 ---
@@ -1747,12 +1747,12 @@ Runs reactive transport simulation through the pore network.
 
 **Syntax**:
 ```geoscript
-RUN_PNM_REACTIVE_TRANSPORT <total_time_s> <time_step_s> <inlet_temp_K> <inlet_pressure_Pa> <outlet_pressure_Pa>
+RUN_PNM_REACTIVE_TRANSPORT <total_time_s> <time_step_s> <inlet_temp_K> <inlet_pressure_Pa> <outlet_pressure_Pa> [convergence_tolerance=1e-6]
 ```
 
 **Examples**:
 ```geoscript
-RUN_PNM_REACTIVE_TRANSPORT 1000 0.01 298 1.5e7 1.0e7
+RUN_PNM_REACTIVE_TRANSPORT 1000 0.01 298 1.5e7 1.0e7 convergence_tolerance=1e-6
 ```
 
 ---

@@ -29,7 +29,7 @@ PhysicoChem simulations are driven by the **PhysicoChem dataset** (stored as a G
 - **Boundary Conditions**: Fixed value/flux/convective constraints (temperature, pressure, species).
 - **Forces**: Gravity, vortices, or custom forces applied per cell.
 - **Nucleation Sites**: Explicit nucleation points for crystal growth.
-- **Simulation Parameters**: Time step, solver tolerance, heat/flow/reactive transport toggles.
+- **Simulation Parameters**: Time step, convergence tolerance, heat/flow/reactive transport toggles.
 - **Tracking & Parameter Sweep**: Simulation trackers and sweep configuration.
 
 ### Simulation Parameters (Highlights)
@@ -37,6 +37,7 @@ PhysicoChem simulations are driven by the **PhysicoChem dataset** (stored as a G
 | Parameter | Purpose |
 |-----------|---------|
 | TotalTime / TimeStep | Time-based simulation control |
+| ConvergenceTolerance | Solver convergence criterion |
 | EnableReactiveTransport | Species transport & reactions |
 | EnableHeatTransfer | Heat equation solving |
 | EnableFlow | Fluid flow coupling |
@@ -77,12 +78,13 @@ See [Multiphase Flow](Multiphase-Flow.md) for full details.
   - Domain/cell management (material assignment, active/visible toggles)
   - Mesh editing & deformation
   - Boundary conditions and force fields
-  - Nucleation sites, simulation parameters, and sweeps
+  - Nucleation sites, simulation parameters (including convergence tolerance), and sweeps
   - Export (CSV/JSON/VTK/TOUGH2)
 - **GTK Toolkit**
   - Reactor Builder (grid + mesh import)
   - Cell Operations (select, activate, hide/show)
   - Material/force/boundary configuration dialogs
+  - Simulation Setup Wizard (time stepping and convergence tolerance)
 
 > Visibility toggles affect what you see; simulation activation uses the *Active* flag.
 
@@ -347,6 +349,12 @@ PHYSICOCHEM_ADD_FORCE name=MarsGravity type=gravity gravity_preset=mars
 ---
 
 ## Nucleation and Crystal Growth
+
+You can define **explicit nucleation sites** in both the ImGui tools panel and the GTK toolkit:
+
+- **Point sites**: enter XYZ coordinates, mineral type, and nucleation rate.
+- **Geometry-based sites**: select a reactor object (box/cylinder) and generate multiple sites inside it.
+- **Material assignment**: optionally bind a site to a material ID so nucleation only occurs in matching cells.
 
 ### Homogeneous Nucleation
 

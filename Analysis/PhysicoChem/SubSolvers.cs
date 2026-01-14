@@ -768,7 +768,7 @@ public class NucleationSolver
     /// <summary>
     /// Update nucleation and crystal growth
     /// </summary>
-    public void UpdateNucleation(PhysicoChemState state, List<NucleationSite> sites, double dt)
+    public void UpdateNucleation(PhysicoChemDataset dataset, PhysicoChemState state, List<NucleationSite> sites, double dt)
     {
         // Check for new nucleation events
         foreach (var site in sites)
@@ -777,6 +777,8 @@ public class NucleationSolver
 
             // Get local conditions at nucleation site
             var (i, j, k) = FindNearestCell(site.Position, state);
+            if (!IsMaterialMatch(dataset, site))
+                continue;
 
             double temperature = state.Temperature[i, j, k];
 
@@ -809,6 +811,34 @@ public class NucleationSolver
         int k = Math.Clamp((int)(position.Z * 10), 0, nz - 1);
 
         return (i, j, k);
+    }
+
+    private bool IsMaterialMatch(PhysicoChemDataset dataset, NucleationSite site)
+    {
+        if (dataset?.Mesh?.Cells == null || dataset.Mesh.Cells.Count == 0)
+            return true;
+
+        if (string.IsNullOrWhiteSpace(site.MaterialID))
+            return true;
+
+        string nearestMaterial = null;
+        double bestDistSq = double.MaxValue;
+
+        foreach (var cell in dataset.Mesh.Cells.Values)
+        {
+            var dx = cell.Center.X - site.Position.X;
+            var dy = cell.Center.Y - site.Position.Y;
+            var dz = cell.Center.Z - site.Position.Z;
+            var distSq = dx * dx + dy * dy + dz * dz;
+
+            if (distSq < bestDistSq)
+            {
+                bestDistSq = distSq;
+                nearestMaterial = cell.MaterialID;
+            }
+        }
+
+        return string.Equals(nearestMaterial, site.MaterialID, StringComparison.OrdinalIgnoreCase);
     }
 
     private double CalculateSupersaturation(PhysicoChemState state, NucleationSite site, int i, int j, int k)
