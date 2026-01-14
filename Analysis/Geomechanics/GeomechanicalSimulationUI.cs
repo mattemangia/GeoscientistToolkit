@@ -118,6 +118,8 @@ public class GeomechanicalSimulationUI : IDisposable
     private Vector3 _sigma1Direction = new(0, 0, 1);
     private float _sigma2 = 50f;
     private float _sigma3 = 20f;
+    private bool _applyGravity;
+    private Vector3 _gravityAcceleration = new(0, 0, -9.81f);
 
     // Simulation extent
     private BoundingBox _simulationExtent;
@@ -456,6 +458,17 @@ public class GeomechanicalSimulationUI : IDisposable
         ImGui.Spacing();
         ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1),
             "Positive = compression, Negative = tension");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Text("Body Forces");
+        var applyGravity = _applyGravity;
+        if (ImGui.Checkbox("Apply Gravity Body Force", ref applyGravity))
+            _applyGravity = applyGravity;
+
+        var gravity = _gravityAcceleration;
+        if (ImGui.InputFloat3("Gravity (m/s²)", ref gravity))
+            _gravityAcceleration = gravity;
     }
 
     private void DrawMaterialProperties(CtImageStackDataset dataset)
@@ -1373,6 +1386,8 @@ public class GeomechanicalSimulationUI : IDisposable
                 Sigma2 = _sigma2,
                 Sigma3 = _sigma3,
                 Sigma1Direction = _sigma1Direction,
+                ApplyGravity = _applyGravity,
+                GravityAcceleration = _gravityAcceleration,
 
                 // Pore pressure
                 UsePorePressure = _usePorePressure,

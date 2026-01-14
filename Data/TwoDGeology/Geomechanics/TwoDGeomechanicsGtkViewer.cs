@@ -33,6 +33,8 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
     private readonly ListStore _primitiveStore;
     private readonly ListStore _materialStore;
     private readonly ListStore _jointSetStore;
+    private readonly ListStore _forceStore;
+    private TreeView _forceList;
 
     // Panels
     private Box _toolsPanel;
@@ -42,6 +44,14 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
     private Scale _deformationScale;
     private ProgressBar _progressBar;
     private Label _statusLabel;
+    private CheckButton _applyGravityCheck;
+    private SpinButton _gravityXSpin;
+    private SpinButton _gravityYSpin;
+    private SpinButton _forceXSpin;
+    private SpinButton _forceYSpin;
+    private int _selectedForceNodeId = -1;
+    private double _applyForceX;
+    private double _applyForceY = -10000;
 
     // Visualization state
     private ResultField2D _displayField = ResultField2D.DisplacementMagnitude;
@@ -92,6 +102,7 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
         _primitiveStore = new ListStore(typeof(string), typeof(string), typeof(int));
         _materialStore = new ListStore(typeof(string), typeof(int));
         _jointSetStore = new ListStore(typeof(string), typeof(int), typeof(int));
+        _forceStore = new ListStore(typeof(string), typeof(int));
 
         // Left panel - Tools
         _toolsPanel = CreateToolsPanel();
@@ -131,6 +142,7 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
         _simulator.OnMessage += OnSimulationMessage;
 
         ShowAll();
+        UpdateForceList();
     }
 
     #endregion
@@ -180,13 +192,19 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
         var bcBox = new Box(Orientation.Vertical, 2);
         var fixBottomBtn = new Button("Fix Bottom");
         fixBottomBtn.Clicked += (s, e) => { _simulator.Mesh.FixBottom(); _canvas.QueueDraw(); };
+        var fixTopBtn = new Button("Fix Top");
+        fixTopBtn.Clicked += (s, e) => { _simulator.Mesh.FixTop(); _canvas.QueueDraw(); };
         var fixLeftBtn = new Button("Fix Left");
         fixLeftBtn.Clicked += (s, e) => { _simulator.Mesh.FixLeft(); _canvas.QueueDraw(); };
         var fixRightBtn = new Button("Fix Right");
         fixRightBtn.Clicked += (s, e) => { _simulator.Mesh.FixRight(); _canvas.QueueDraw(); };
+        var clearBcBtn = new Button("Clear BCs");
+        clearBcBtn.Clicked += (s, e) => { _simulator.Mesh.ClearBoundaryConditions(); _canvas.QueueDraw(); };
         bcBox.PackStart(fixBottomBtn, false, false, 2);
+        bcBox.PackStart(fixTopBtn, false, false, 2);
         bcBox.PackStart(fixLeftBtn, false, false, 2);
         bcBox.PackStart(fixRightBtn, false, false, 2);
+        bcBox.PackStart(clearBcBtn, false, false, 2);
         bcFrame.Add(bcBox);
         panel.PackStart(bcFrame, false, false, 5);
 
@@ -301,6 +319,73 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
         visFrame.Add(visBox);
         panel.PackStart(visFrame, false, false, 5);
 
+        // Gravity controls
+        var gravityFrame = new Frame("Gravity");
+        var gravityBox = new Box(Orientation.Vertical, 5);
+
+        _applyGravityCheck = new CheckButton("Apply Gravity") { Active = _simulator.ApplyGravity };
+        _applyGravityCheck.Toggled += (s, e) => { _simulator.ApplyGravity = _applyGravityCheck.Active; };
+        gravityBox.PackStart(_applyGravityCheck, false, false, 2);
+
+        var gravityXBox = new Box(Orientation.Horizontal, 5);
+        gravityXBox.PackStart(new Label("Gravity X (m/s²):"), false, false, 5);
+        _gravityXSpin = new SpinButton(new Adjustment(_simulator.Gravity.X, -100, 100, 0.1, 1, 0), 0.1, 2);
+        _gravityXSpin.ValueChanged += (s, e) => UpdateGravityFromSpins();
+        gravityXBox.PackStart(_gravityXSpin, true, true, 5);
+        gravityBox.PackStart(gravityXBox, false, false, 2);
+
+        var gravityYBox = new Box(Orientation.Horizontal, 5);
+        gravityYBox.PackStart(new Label("Gravity Y (m/s²):"), false, false, 5);
+        _gravityYSpin = new SpinButton(new Adjustment(_simulator.Gravity.Y, -100, 100, 0.1, 1, 0), 0.1, 2);
+        _gravityYSpin.ValueChanged += (s, e) => UpdateGravityFromSpins();
+        gravityYBox.PackStart(_gravityYSpin, true, true, 5);
+        gravityBox.PackStart(gravityYBox, false, false, 2);
+
+        gravityFrame.Add(gravityBox);
+        panel.PackStart(gravityFrame, false, false, 5);
+
+        // Force controls
+        var forceFrame = new Frame("Forces");
+        var forceBox = new Box(Orientation.Vertical, 5);
+
+        var forceInputBox = new Box(Orientation.Horizontal, 5);
+        forceInputBox.PackStart(new Label("Force X (N):"), false, false, 5);
+        _forceXSpin = new SpinButton(new Adjustment(_applyForceX, -1e9, 1e9, 100, 1000, 0), 100, 2);
+        _forceXSpin.ValueChanged += (s, e) => _applyForceX = _forceXSpin.Value;
+        forceInputBox.PackStart(_forceXSpin, true, true, 5);
+        forceBox.PackStart(forceInputBox, false, false, 2);
+
+        var forceYBox = new Box(Orientation.Horizontal, 5);
+        forceYBox.PackStart(new Label("Force Y (N):"), false, false, 5);
+        _forceYSpin = new SpinButton(new Adjustment(_applyForceY, -1e9, 1e9, 100, 1000, 0), 100, 2);
+        _forceYSpin.ValueChanged += (s, e) => _applyForceY = _forceYSpin.Value;
+        forceYBox.PackStart(_forceYSpin, true, true, 5);
+        forceBox.PackStart(forceYBox, false, false, 2);
+
+        forceBox.PackStart(new Label("Use the Force tool and click a node to apply."), false, false, 2);
+
+        var forceListLabel = new Label("Applied Node Forces");
+        forceBox.PackStart(forceListLabel, false, false, 2);
+
+        var forceScroll = new ScrolledWindow { HeightRequest = 120 };
+        _forceList = new TreeView(_forceStore);
+        _forceList.AppendColumn("Node Force", new CellRendererText(), "text", 0);
+        _forceList.Selection.Changed += OnForceSelectionChanged;
+        forceScroll.Add(_forceList);
+        forceBox.PackStart(forceScroll, true, true, 2);
+
+        var forceBtnBox = new Box(Orientation.Horizontal, 5);
+        var removeForceBtn = new Button("Remove Selected");
+        removeForceBtn.Clicked += (s, e) => RemoveSelectedForce();
+        var clearForceBtn = new Button("Clear All");
+        clearForceBtn.Clicked += (s, e) => ClearAllForces();
+        forceBtnBox.PackStart(removeForceBtn, true, true, 2);
+        forceBtnBox.PackStart(clearForceBtn, true, true, 2);
+        forceBox.PackStart(forceBtnBox, false, false, 2);
+
+        forceFrame.Add(forceBox);
+        panel.PackStart(forceFrame, false, false, 5);
+
         // Materials list
         var matFrame = new Frame("Materials");
         var matScroll = new ScrolledWindow { HeightRequest = 150 };
@@ -369,6 +454,65 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
         {
             _jointSetStore.AppendValues(set.Name, set.Id, set.Joints.Count);
         }
+    }
+
+    private void UpdateGravityFromSpins()
+    {
+        _simulator.Gravity = new Vector2((float)_gravityXSpin.Value, (float)_gravityYSpin.Value);
+    }
+
+    private void UpdateForceList()
+    {
+        _forceStore.Clear();
+        foreach (var node in _simulator.Mesh.Nodes)
+        {
+            if (Math.Abs(node.Fx) < 1e-6 && Math.Abs(node.Fy) < 1e-6)
+                continue;
+
+            _forceStore.AppendValues($"Node {node.Id}: Fx={node.Fx:F1}, Fy={node.Fy:F1}", node.Id);
+        }
+    }
+
+    private void OnForceSelectionChanged(object sender, EventArgs e)
+    {
+        if (_forceList.Selection.GetSelected(out TreeIter iter))
+        {
+            _selectedForceNodeId = (int)_forceStore.GetValue(iter, 1);
+        }
+    }
+
+    private void ApplyForceAt(Vector2 worldPos)
+    {
+        var node = _simulator.Mesh.FindNearestNode(worldPos, 5);
+        if (node != null)
+        {
+            _simulator.Mesh.ApplyNodalForce(node.Id, _applyForceX, _applyForceY);
+            UpdateForceList();
+            _canvas.QueueDraw();
+        }
+    }
+
+    private void RemoveSelectedForce()
+    {
+        if (_selectedForceNodeId >= 0)
+        {
+            _simulator.Mesh.ClearNodalForce(_selectedForceNodeId);
+            _selectedForceNodeId = -1;
+            UpdateForceList();
+            _canvas.QueueDraw();
+        }
+    }
+
+    private void ClearAllForces()
+    {
+        foreach (var node in _simulator.Mesh.Nodes)
+        {
+            node.Fx = 0;
+            node.Fy = 0;
+        }
+        _selectedForceNodeId = -1;
+        UpdateForceList();
+        _canvas.QueueDraw();
     }
 
     #endregion
@@ -867,6 +1011,9 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
             case GeomechanicsToolMode.DrawFoundation:
                 PlaceFoundation(worldPos);
                 break;
+            case GeomechanicsToolMode.ApplyForce:
+                ApplyForceAt(worldPos);
+                break;
             case GeomechanicsToolMode.FixBoundary:
                 FixBoundaryAt(worldPos);
                 break;
@@ -937,6 +1084,7 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
         _jointSets.InsertIntoMesh(_simulator.Mesh);
 
         _statusLabel.Text = $"Mesh: {_simulator.Mesh.Nodes.Count} nodes, {_simulator.Mesh.Elements.Count} elements";
+        UpdateForceList();
         _canvas.QueueDraw();
     }
 
@@ -971,6 +1119,7 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
     {
         _simulator.Mesh.Reset();
         _simulator.InitializeResults();
+        UpdateForceList();
         _canvas.QueueDraw();
     }
 

@@ -60,6 +60,14 @@ public class PhysicoChemTools : IDatasetTools
     private readonly string[] _bcVariables = Enum.GetNames(typeof(BoundaryVariable));
     private float _bcValue = 0.0f;
     private float _bcFluxValue = 0.0f;
+    private string _editBCName = "";
+    private int _editBCTypeIndex = 0;
+    private int _editBCLocationIndex = 0;
+    private int _editBCVariableIndex = 0;
+    private float _editBCValue = 0.0f;
+    private float _editBCFluxValue = 0.0f;
+    private bool _editBCActive = true;
+    private int _lastSelectedBCIndex = -1;
 
     // Force field state
     private string _newForceName = "Force";
@@ -69,6 +77,14 @@ public class PhysicoChemTools : IDatasetTools
     private Vector3 _vortexCenter = Vector3.Zero;
     private float _vortexStrength = 1.0f;
     private float _vortexRadius = 1.0f;
+    private string _editForceName = "";
+    private int _editForceTypeIndex = 0;
+    private bool _editForceActive = true;
+    private Vector3 _editGravityVector = new Vector3(0, 0, -9.81f);
+    private Vector3 _editVortexCenter = Vector3.Zero;
+    private float _editVortexStrength = 1.0f;
+    private float _editVortexRadius = 1.0f;
+    private int _lastSelectedForceIndex = -1;
 
     // Nucleation state
     private string _newNucleationName = "Nucleation";
@@ -842,6 +858,65 @@ public class PhysicoChemTools : IDatasetTools
             }
         }
 
+        if (_selectedBCIndex != _lastSelectedBCIndex &&
+            _selectedBCIndex >= 0 && _selectedBCIndex < dataset.BoundaryConditions.Count)
+        {
+            var bc = dataset.BoundaryConditions[_selectedBCIndex];
+            _editBCName = bc.Name;
+            _editBCTypeIndex = (int)bc.Type;
+            _editBCLocationIndex = (int)bc.Location;
+            _editBCVariableIndex = (int)bc.Variable;
+            _editBCValue = (float)bc.Value;
+            _editBCFluxValue = (float)bc.FluxValue;
+            _editBCActive = bc.IsActive;
+            _lastSelectedBCIndex = _selectedBCIndex;
+        }
+
+        if (_selectedBCIndex >= 0 && _selectedBCIndex < dataset.BoundaryConditions.Count)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Text("Edit Selected Boundary Condition:");
+
+            ImGui.InputText("Name##bc_edit", ref _editBCName, 64);
+            ImGui.Combo("Type##bc_edit", ref _editBCTypeIndex, _bcTypes, _bcTypes.Length);
+            ImGui.Combo("Location##bc_edit", ref _editBCLocationIndex, _bcLocations, _bcLocations.Length);
+            ImGui.Combo("Variable##bc_edit", ref _editBCVariableIndex, _bcVariables, _bcVariables.Length);
+            ImGui.Checkbox("Active##bc_edit", ref _editBCActive);
+
+            var editType = (BoundaryType)_editBCTypeIndex;
+            if (editType == BoundaryType.FixedValue || editType == BoundaryType.Convective)
+            {
+                ImGui.InputFloat("Value##bc_edit", ref _editBCValue, 0, 0, "%.2e");
+            }
+
+            if (editType == BoundaryType.FixedFlux)
+            {
+                ImGui.InputFloat("Flux Value##bc_edit", ref _editBCFluxValue, 0, 0, "%.2e");
+            }
+
+            if (ImGui.Button("Update Selected BC"))
+            {
+                var bc = dataset.BoundaryConditions[_selectedBCIndex];
+                bc.Name = _editBCName;
+                bc.Type = (BoundaryType)_editBCTypeIndex;
+                bc.Location = (BoundaryLocation)_editBCLocationIndex;
+                bc.Variable = (BoundaryVariable)_editBCVariableIndex;
+                bc.Value = _editBCValue;
+                bc.FluxValue = _editBCFluxValue;
+                bc.IsActive = _editBCActive;
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+            }
+
+            if (ImGui.Button("Remove Selected BC"))
+            {
+                dataset.BoundaryConditions.RemoveAt(_selectedBCIndex);
+                _selectedBCIndex = -1;
+                _lastSelectedBCIndex = -1;
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+            }
+        }
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Text("Add New Boundary Condition:");
@@ -918,6 +993,72 @@ public class PhysicoChemTools : IDatasetTools
                     ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
                 }
                 ImGui.EndPopup();
+            }
+        }
+
+        if (_selectedForceIndex != _lastSelectedForceIndex &&
+            _selectedForceIndex >= 0 && _selectedForceIndex < dataset.Forces.Count)
+        {
+            var force = dataset.Forces[_selectedForceIndex];
+            _editForceName = force.Name;
+            _editForceTypeIndex = (int)force.Type;
+            _editForceActive = force.IsActive;
+            _editGravityVector = new Vector3((float)force.GravityVector.X, (float)force.GravityVector.Y, (float)force.GravityVector.Z);
+            _editVortexCenter = new Vector3((float)force.VortexCenter.X, (float)force.VortexCenter.Y, (float)force.VortexCenter.Z);
+            _editVortexStrength = (float)force.VortexStrength;
+            _editVortexRadius = (float)force.VortexRadius;
+            _lastSelectedForceIndex = _selectedForceIndex;
+        }
+
+        if (_selectedForceIndex >= 0 && _selectedForceIndex < dataset.Forces.Count)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Text("Edit Selected Force Field:");
+
+            ImGui.InputText("Name##force_edit", ref _editForceName, 64);
+            ImGui.Combo("Type##force_edit", ref _editForceTypeIndex, _forceTypes, _forceTypes.Length);
+            ImGui.Checkbox("Active##force_edit", ref _editForceActive);
+
+            var editType = (ForceType)_editForceTypeIndex;
+            if (editType == ForceType.Gravity)
+            {
+                ImGui.DragFloat3("Gravity Vector (m/s²)##force_edit", ref _editGravityVector, 0.1f);
+            }
+            else if (editType == ForceType.Vortex || editType == ForceType.Centrifugal)
+            {
+                ImGui.DragFloat3("Center##force_edit", ref _editVortexCenter, 0.1f);
+                ImGui.DragFloat("Strength (rad/s)##force_edit", ref _editVortexStrength, 0.1f, 0.0f, 100.0f);
+                ImGui.DragFloat("Radius (m)##force_edit", ref _editVortexRadius, 0.1f, 0.1f, 50.0f);
+            }
+
+            if (ImGui.Button("Update Selected Force"))
+            {
+                var force = dataset.Forces[_selectedForceIndex];
+                force.Name = _editForceName;
+                force.Type = (ForceType)_editForceTypeIndex;
+                force.IsActive = _editForceActive;
+
+                if (force.Type == ForceType.Gravity)
+                {
+                    force.GravityVector = (_editGravityVector.X, _editGravityVector.Y, _editGravityVector.Z);
+                }
+                else if (force.Type == ForceType.Vortex || force.Type == ForceType.Centrifugal)
+                {
+                    force.VortexCenter = (_editVortexCenter.X, _editVortexCenter.Y, _editVortexCenter.Z);
+                    force.VortexStrength = _editVortexStrength;
+                    force.VortexRadius = _editVortexRadius;
+                }
+
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+            }
+
+            if (ImGui.Button("Remove Selected Force"))
+            {
+                dataset.Forces.RemoveAt(_selectedForceIndex);
+                _selectedForceIndex = -1;
+                _lastSelectedForceIndex = -1;
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             }
         }
 

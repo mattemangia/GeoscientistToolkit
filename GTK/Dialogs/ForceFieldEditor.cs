@@ -13,6 +13,9 @@ namespace GeoscientistToolkit.GtkUI.Dialogs
         private readonly TreeView _treeView;
         private readonly ComboBoxText _typeCombo;
         private readonly Entry _nameEntry;
+        private readonly SpinButton _gravityXSpin;
+        private readonly SpinButton _gravityYSpin;
+        private readonly SpinButton _gravityZSpin;
 
         public ForceFieldEditor(Window parent, List<ForceField> forces) : base("Force Field Editor", parent, DialogFlags.Modal)
         {
@@ -57,7 +60,25 @@ namespace GeoscientistToolkit.GtkUI.Dialogs
             _typeCombo = new ComboBoxText();
             foreach (var t in Enum.GetNames(typeof(ForceType)))
                 _typeCombo.AppendText(t);
+            _typeCombo.Changed += (s, e) =>
+            {
+                var isGravity = string.Equals(_typeCombo.ActiveText, ForceType.Gravity.ToString(), StringComparison.OrdinalIgnoreCase);
+                SetGravityInputsSensitive(isGravity);
+            };
+            _typeCombo.Active = 0;
             grid.Attach(_typeCombo, 1, 1, 1, 1);
+
+            grid.Attach(new Label("Gravity X (m/s²):") { Xalign = 0 }, 0, 2, 1, 1);
+            _gravityXSpin = new SpinButton(new Adjustment(0, -100, 100, 0.1, 1, 0), 0.1, 2);
+            grid.Attach(_gravityXSpin, 1, 2, 1, 1);
+
+            grid.Attach(new Label("Gravity Y (m/s²):") { Xalign = 0 }, 0, 3, 1, 1);
+            _gravityYSpin = new SpinButton(new Adjustment(0, -100, 100, 0.1, 1, 0), 0.1, 2);
+            grid.Attach(_gravityYSpin, 1, 3, 1, 1);
+
+            grid.Attach(new Label("Gravity Z (m/s²):") { Xalign = 0 }, 0, 4, 1, 1);
+            _gravityZSpin = new SpinButton(new Adjustment(-9.81, -100, 100, 0.1, 1, 0), 0.1, 2);
+            grid.Attach(_gravityZSpin, 1, 4, 1, 1);
 
             // Note: Full property editing for all Force types is complex.
             // We stick to basic ID/Type for this editor in this iteration.
@@ -73,6 +94,7 @@ namespace GeoscientistToolkit.GtkUI.Dialogs
             AddButton("Close", ResponseType.Close);
 
             RefreshList();
+            SetGravityInputsSensitive(true);
             ShowAll();
         }
 
@@ -120,6 +142,11 @@ namespace GeoscientistToolkit.GtkUI.Dialogs
                     }
                     i++;
                 }
+
+                _gravityXSpin.Value = f.GravityVector.X;
+                _gravityYSpin.Value = f.GravityVector.Y;
+                _gravityZSpin.Value = f.GravityVector.Z;
+                SetGravityInputsSensitive(f.Type == ForceType.Gravity);
             }
         }
 
@@ -133,8 +160,21 @@ namespace GeoscientistToolkit.GtkUI.Dialogs
                 {
                     f.Type = type;
                 }
+
+                if (f.Type == ForceType.Gravity)
+                {
+                    f.GravityVector = (_gravityXSpin.Value, _gravityYSpin.Value, _gravityZSpin.Value);
+                }
+
                 RefreshList();
             }
+        }
+
+        private void SetGravityInputsSensitive(bool sensitive)
+        {
+            _gravityXSpin.Sensitive = sensitive;
+            _gravityYSpin.Sensitive = sensitive;
+            _gravityZSpin.Sensitive = sensitive;
         }
     }
 }

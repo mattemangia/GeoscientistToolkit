@@ -1690,6 +1690,8 @@ __kernel void apply_damage_to_stress(
         var fixedDOFs = _isDirichlet.Count(b => b);
         var freeDOFs = _numDOFs - fixedDOFs;
 
+        ApplyGravityForces();
+
         Logger.Log("==========================================================");
         Logger.Log("[GeomechGPU] BOUNDARY CONDITIONS SUMMARY:");
         Logger.Log("  Type: DISPLACEMENT-CONTROLLED");
@@ -1697,7 +1699,7 @@ __kernel void apply_damage_to_stress(
         Logger.Log($"  Top displacement: {delta_z * 1000:F3} μm ({topConstrained:N0} nodes)");
         Logger.Log($"  Total fixed DOFs: {fixedDOFs:N0}");
         Logger.Log($"  Free DOFs: {freeDOFs:N0}");
-        Logger.Log("  No external forces (displacement-driven)");
+        Logger.Log(_params.ApplyGravity ? "  Gravity forces enabled" : "  No external forces (displacement-driven)");
         Logger.Log("  Units: mm-MPa system");
         Logger.Log("==========================================================");
 
@@ -1710,10 +1712,46 @@ __kernel void apply_damage_to_stress(
         _bufDirichletValue = CreateAndFillBuffer(_dirichletValue, MemFlags.ReadOnly, out error);
         CheckError(error, "bufDirichletValue");
 
-        EnqueueWriteBuffer(_bufForce, _force); // All zeros for displacement-controlled
+        EnqueueWriteBuffer(_bufForce, _force);
         _cl.Finish(_queue);
 
         Logger.Log($"[GeomechGPU] Boundary conditions applied in {sw.ElapsedMilliseconds} ms");
+    }
+
+    private void ApplyGravityForces()
+    {
+        if (!_params.ApplyGravity)
+            return;
+
+        var gravity = _params.GravityAcceleration;
+        if (gravity.LengthSquared() < 1e-12f)
+            return;
+
+        var dxMeters = _params.PixelSize / 1e6f;
+        var nodeVolume = dxMeters * dxMeters * dxMeters;
+        var nodeMass = _params.Density * nodeVolume;
+
+        var fx = nodeMass * gravity.X;
+        var fy = nodeMass * gravity.Y;
+        var fz = nodeMass * gravity.Z;
+
+        for (var dof = 0; dof < _numDOFs; dof++)
+        {
+            if (_isDirichlet[dof])
+            {
+                _force[dof] = 0;
+                continue;
+            }
+
+            _force[dof] = dof % 3 switch
+            {
+                0 => fx,
+                1 => fy,
+                _ => fz
+            };
+        }
+
+        Logger.Log($"[GeomechGPU] Applied gravity body forces: ({gravity.X:F3}, {gravity.Y:F3}, {gravity.Z:F3}) m/s²");
     }
 
     // ========== FLUID/THERMAL INITIALIZATION ==========

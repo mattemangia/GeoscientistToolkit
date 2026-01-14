@@ -1328,6 +1328,16 @@ public class FEMMesh2D
         }
     }
 
+    public void FixTop(double tolerance = 1e-6)
+    {
+        if (Nodes.Count == 0) return;
+        double maxY = Nodes.Max(n => n.InitialPosition.Y);
+        foreach (var node in Nodes.Where(n => Math.Abs(n.InitialPosition.Y - maxY) < tolerance))
+        {
+            node.FixedY = true;
+        }
+    }
+
     public void FixRight(double tolerance = 1e-6)
     {
         if (Nodes.Count == 0) return;
@@ -1362,6 +1372,26 @@ public class FEMMesh2D
         {
             Nodes[nodeId].Fx += fx;
             Nodes[nodeId].Fy += fy;
+        }
+    }
+
+    public void ClearNodalForce(int nodeId)
+    {
+        if (nodeId >= 0 && nodeId < Nodes.Count)
+        {
+            Nodes[nodeId].Fx = 0;
+            Nodes[nodeId].Fy = 0;
+        }
+    }
+
+    public void ClearBoundaryConditions()
+    {
+        foreach (var node in Nodes)
+        {
+            node.FixedX = false;
+            node.FixedY = false;
+            node.PrescribedUx = null;
+            node.PrescribedUy = null;
         }
     }
 

@@ -65,6 +65,7 @@ public class TwoDGeomechanicsTools
     private Discontinuity2D _selectedJoint;
     private int _selectedElementId = -1;
     private int _selectedNodeId = -1;
+    private int _selectedForceNodeId = -1;
 
     // Drawing state
     private readonly List<Vector2> _tempPoints = new();
@@ -807,6 +808,10 @@ public class TwoDGeomechanicsTools
             {
                 _simulator.Mesh.FixBottom();
             }
+            if (ImGui.Button("Fix Top", new Vector2(-1, 0)))
+            {
+                _simulator.Mesh.FixTop();
+            }
             if (ImGui.Button("Fix Left", new Vector2(-1, 0)))
             {
                 _simulator.Mesh.FixLeft();
@@ -820,12 +825,63 @@ public class TwoDGeomechanicsTools
                 _simulator.Mesh.FixLeft();
                 _simulator.Mesh.FixRight();
             }
+            if (ImGui.Button("Clear Boundary Conditions", new Vector2(-1, 0)))
+            {
+                _simulator.Mesh.ClearBoundaryConditions();
+            }
 
             // Gravity
             bool applyGravity = _simulator.ApplyGravity;
             if (ImGui.Checkbox("Apply Gravity", ref applyGravity))
             {
                 _simulator.ApplyGravity = applyGravity;
+            }
+
+            var gravity = _simulator.Gravity;
+            if (ImGui.DragFloat2("Gravity (m/s²)", ref gravity, 0.1f))
+            {
+                _simulator.Gravity = gravity;
+            }
+
+            ImGui.Separator();
+            ImGui.Text("Applied Node Forces");
+
+            var nodesWithForces = _simulator.Mesh.Nodes
+                .Where(n => Math.Abs(n.Fx) > 1e-6 || Math.Abs(n.Fy) > 1e-6)
+                .ToList();
+
+            ImGui.Text($"Active forces: {nodesWithForces.Count}");
+
+            if (ImGui.BeginChild("##force_list", new Vector2(0, 120), ImGuiChildFlags.Border))
+            {
+                foreach (var node in nodesWithForces)
+                {
+                    bool isSelected = _selectedForceNodeId == node.Id;
+                    var label = $"Node {node.Id}: Fx={node.Fx:F1}, Fy={node.Fy:F1}";
+                    if (ImGui.Selectable(label, isSelected))
+                    {
+                        _selectedForceNodeId = node.Id;
+                    }
+                }
+                ImGui.EndChild();
+            }
+
+            if (_selectedForceNodeId >= 0)
+            {
+                if (ImGui.Button("Remove Selected Force", new Vector2(-1, 0)))
+                {
+                    _simulator.Mesh.ClearNodalForce(_selectedForceNodeId);
+                    _selectedForceNodeId = -1;
+                }
+            }
+
+            if (ImGui.Button("Clear All Forces", new Vector2(-1, 0)))
+            {
+                foreach (var node in nodesWithForces)
+                {
+                    _simulator.Mesh.ClearNodalForce(node.Id);
+                }
+                _selectedForceNodeId = -1;
             }
         }
     }
