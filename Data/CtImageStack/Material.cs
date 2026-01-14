@@ -1,4 +1,4 @@
-// Copyright 2026 Matteo Mangiagalli - matteo.mangiagalli@unifr.ch
+// Copyright 2026 Matteo Mangiagalli - m.mangiagalli@campus.uniurb.it
 
 using System.Numerics;
 
