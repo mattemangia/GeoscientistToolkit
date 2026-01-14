@@ -276,7 +276,8 @@ public class PhysicoChemTools : IDatasetTools
         ImGui.BeginChild("cell_list", new Vector2(200, 200), ImGuiChildFlags.Border);
         foreach (var cell in dataset.Mesh.Cells.Values)
         {
-            if (ImGui.Selectable(cell.ID, cell.ID == _selectedCellID))
+            var label = cell.IsVisible ? cell.ID : $"{cell.ID} (Hidden)";
+            if (ImGui.Selectable($"{label}##{cell.ID}", cell.ID == _selectedCellID))
             {
                 _selectedCellID = cell.ID;
             }
@@ -296,6 +297,12 @@ public class PhysicoChemTools : IDatasetTools
             if (ImGui.Checkbox("Is Active", ref isActive))
             {
                 selectedCell.IsActive = isActive;
+            }
+
+            bool isVisible = selectedCell.IsVisible;
+            if (ImGui.Checkbox("Is Visible", ref isVisible))
+            {
+                selectedCell.IsVisible = isVisible;
             }
 
             var materialIDs = dataset.Materials.Select(m => m.MaterialID).ToArray();

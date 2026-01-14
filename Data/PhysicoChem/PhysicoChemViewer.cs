@@ -1,6 +1,7 @@
 // GeoscientistToolkit/Data/PhysicoChem/PhysicoChemViewer.cs
 
 using System;
+using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
@@ -448,6 +449,8 @@ public class PhysicoChemViewer : IDatasetViewer
         {
             foreach (var cell in _dataset.Mesh.Cells.Values)
             {
+                if (!cell.IsVisible)
+                    continue;
                 bool isSelected = _dataset.SelectedCellIDs.Contains(cell.ID);
                 DrawCellBox(drawList, center, cell, renderMode, isSelected);
             }
@@ -601,7 +604,8 @@ public class PhysicoChemViewer : IDatasetViewer
         var textColor = ImGui.GetColorU32(new Vector4(1, 1, 1, 0.9f));
         var bgColor = ImGui.GetColorU32(new Vector4(0, 0, 0, 0.5f));
 
-        string info = $"Cells: {_dataset.Mesh.Cells.Count}\n";
+        int visibleCells = _dataset.Mesh.Cells.Values.Count(cell => cell.IsVisible);
+        string info = $"Cells: {visibleCells}/{_dataset.Mesh.Cells.Count}\n";
         info += $"BCs: {_dataset.BoundaryConditions.Count}\n";
         info += $"Field: {_fieldOptions[_selectedFieldIndex]}";
 
