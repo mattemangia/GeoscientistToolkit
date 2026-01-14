@@ -629,7 +629,7 @@ Changes coordinate reference system.
 
 ---
 
-### Thermodynamics Commands (6 commands)
+### Thermodynamics Commands (7 commands)
 
 #### CREATE_DIAGRAM
 
@@ -655,6 +655,21 @@ CREATE_DIAGRAM TERNARY FROM 'SiO2', 'Al2O3', 'CaO' TEMP 1500 K PRES 1 BAR
 # Pressure-Temperature diagram
 CREATE_DIAGRAM PT FOR COMP('H2O'=1.0,'CO2'=0.1) T_RANGE(273-373) K P_RANGE(1-100) BAR
 ```
+
+---
+
+#### THERMO_SWEEP
+
+Runs a thermodynamic sweep over temperature and pressure and outputs a table dataset.
+
+**Syntax:**
+```geoscript
+THERMO_SWEEP composition="'H2O'=55.5,'CO2'=1.0" minT=273 maxT=473 minP=1 maxP=1000 grid=25 name=ThermoSweep
+```
+
+**Notes:**
+- `composition` uses `'<species>'=<moles>` pairs, comma-separated.
+- `grid` controls the resolution of the P–T grid.
 
 ---
 
@@ -828,6 +843,49 @@ DIAGNOSE_SPECIATE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]
 **Output:**
 - Same result table as `SPECIATE`.
 - Additional console trace showing parsing, normalization, dissociation products, and solver status.
+
+---
+
+### PhysicoChem Commands (2 commands)
+
+#### PHYSICOCHEM_SWEEP
+
+Adds a parameter sweep curve that is applied during PhysicoChem simulations.
+
+**Syntax:**
+```geoscript
+PHYSICOCHEM_SWEEP name=Temperature target=Domains[0].InitialConditions.Temperature min=273 max=373 mode=Temporal
+```
+
+---
+
+#### RUN_SIMULATION
+
+Runs a PhysicoChem reactor simulation on the current dataset.
+
+---
+
+### 2D Geomechanics Commands (2 commands)
+
+#### GEOMECH_SWEEP
+
+Configures a parameter sweep for 2D geomechanics simulations.
+
+**Syntax:**
+```geoscript
+GEOMECH_SWEEP name=LoadFactor target=LoadFactor min=0.5 max=1.5 mode=Step
+```
+
+---
+
+#### GEOMECH_RUN
+
+Runs a 2D geomechanical simulation for a TwoDGeology dataset.
+
+**Syntax:**
+```geoscript
+GEOMECH_RUN analysis=quasistatic steps=10 solver=PCG
+```
 
 ---
 

@@ -367,6 +367,7 @@ public static class CommandRegistry
             new SpeciateCommand(),
             new DiagnoseSpeciateCommand(),
             new DiagnosticThermodynamicCommand(),
+            new GeoscientistToolkit.Business.GeoScriptParameterSweepCommands.ThermoSweepCommand(),
 
             // Thermodynamics Extensions
             new CalculatePhasesCommand(),
@@ -381,6 +382,7 @@ public static class CommandRegistry
             new CreateReactorCommand(),
             new RunSimulationCommand(),
             new PhysicoChemAddForceCommand(),
+            new GeoscientistToolkit.Business.GeoScriptParameterSweepCommands.PhysicoChemSweepCommand(),
             new AddCellCommand(),
             new SetCellMaterialCommand(),
 
@@ -508,7 +510,10 @@ public static class CommandRegistry
             new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeTrackBlocksCommand(),
             new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeCalculateFOSCommand(),
             new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSimulateCommand(),
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeExportCommand()
+            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeExportCommand(),
+
+            // Geomechanics parameter sweeps
+            new GeoscientistToolkit.Business.GeoScriptParameterSweepCommands.GeomechSweepCommand()
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }

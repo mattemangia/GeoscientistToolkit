@@ -146,6 +146,12 @@ public class TableTools : IDatasetTools
                         Name = "Phase Diagram Generator",
                         Description = "Generate binary, ternary, P-T, and composition diagrams.",
                         Tool = new DiagramGeneratorTool()
+                    },
+                    new()
+                    {
+                        Name = "Parameter Sweep",
+                        Description = "Run equilibrium sweeps over temperature and pressure.",
+                        Tool = new ThermodynamicSweepTool()
                     }
                 }
             },
@@ -1265,6 +1271,82 @@ public class TableTools : IDatasetTools
             catch (Exception ex)
             {
                 Logger.LogError($"Failed to generate diagram: {ex.Message}");
+            }
+        }
+
+        private Dictionary<string, double> ParseComposition(string compStr)
+        {
+            var composition = new Dictionary<string, double>();
+            var parts = compStr.Split(',');
+            foreach (var part in parts)
+            {
+                var pair = part.Split('=');
+                if (pair.Length == 2)
+                {
+                    var name = pair[0].Trim().Trim('\'');
+                    var moles = double.Parse(pair[1].Trim(), CultureInfo.InvariantCulture);
+                    composition[name] = moles;
+                }
+            }
+
+            return composition;
+        }
+    }
+
+    /// <summary>
+    ///     Parameter sweep tool for thermodynamic equilibrium runs.
+    /// </summary>
+    private class ThermodynamicSweepTool : IDatasetTools
+    {
+        private float _minP = 1.0f;
+        private float _maxP = 1000.0f;
+        private float _minT = 273.15f;
+        private float _maxT = 473.15f;
+        private int _gridPoints = 25;
+        private string _composition = "'H₂O'=55.5, 'CO₂'=1.0";
+        private string _datasetName = "ThermoSweep";
+
+        public void Draw(Dataset dataset)
+        {
+            ImGui.TextWrapped("Sweep thermodynamic equilibrium across temperature and pressure.");
+            ImGui.InputText("Composition (moles)", ref _composition, 256);
+            ImGui.InputText("Result Dataset Name", ref _datasetName, 128);
+            ImGui.DragFloatRange2("Temperature Range (K)", ref _minT, ref _maxT, 5, 273, 2000, "Min: %.2f K",
+                "Max: %.2f K");
+            ImGui.DragFloatRange2("Pressure Range (bar)", ref _minP, ref _maxP, 10, 1, 10000, "Min: %.2f bar",
+                "Max: %.2f bar");
+            ImGui.SliderInt("Grid Points", ref _gridPoints, 10, 50);
+
+            if (ImGui.Button("Run Sweep"))
+            {
+                RunSweep();
+            }
+        }
+
+        private void RunSweep()
+        {
+            try
+            {
+                var generator = new PhaseDiagramGenerator();
+                var composition = ParseComposition(_composition);
+                var ptData = generator.GeneratePTDiagram(composition, _minT, _maxT, _minP, _maxP, _gridPoints);
+
+                var resultTable = new DataTable(_datasetName);
+                resultTable.Columns.Add("Temperature_K", typeof(double));
+                resultTable.Columns.Add("Pressure_bar", typeof(double));
+                resultTable.Columns.Add("DominantPhase", typeof(string));
+
+                foreach (var p in ptData.Points)
+                    resultTable.Rows.Add(p.Temperature_K, p.Pressure_bar, p.DominantPhase);
+
+                var newDataset = new TableDataset(string.IsNullOrWhiteSpace(_datasetName) ? "ThermoSweep" : _datasetName,
+                    resultTable);
+                ProjectManager.Instance.AddDataset(newDataset);
+                Logger.Log($"Created thermodynamic sweep dataset: {newDataset.Name}");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Thermodynamic sweep failed: {ex.Message}");
             }
         }
 

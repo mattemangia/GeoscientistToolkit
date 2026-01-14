@@ -87,6 +87,13 @@ public class TwoDGeomechanicsTools
     private bool _showMohrCircle;
     private bool _showSnappingOptions;
     private bool _showCoordinates = true;
+    private int _selectedSweepIndex = -1;
+    private string _sweepName = "LoadFactor";
+    private string _sweepTargetPath = "LoadFactor";
+    private double _sweepMinValue = 0.5;
+    private double _sweepMaxValue = 1.5;
+    private int _sweepInterpolationIndex = 0;
+    private int _sweepModeIndex = 0;
 
     // New primitive parameters
     private float _newRectWidth = 5f;
@@ -929,6 +936,10 @@ public class TwoDGeomechanicsTools
             }
 
             ImGui.Separator();
+            RenderParameterSweepSection();
+            ImGui.Separator();
+
+            ImGui.Separator();
 
             // Mesh operations
             if (ImGui.Button("Generate Mesh", new Vector2(-1, 0)))
@@ -976,6 +987,132 @@ public class TwoDGeomechanicsTools
                 _simulator.Mesh.Reset();
                 _simulator.InitializeResults();
                 _renderer.Results = _simulator.Results;
+            }
+        }
+    }
+
+    private void RenderParameterSweepSection()
+    {
+        if (!ImGui.CollapsingHeader("Parameter Sweep"))
+            return;
+
+        var sweepManager = _simulator.ParameterSweepManager;
+        bool sweepEnabled = sweepManager.Enabled;
+        if (ImGui.Checkbox("Enable Parameter Sweep", ref sweepEnabled))
+        {
+            sweepManager.Enabled = sweepEnabled;
+        }
+
+        int modeIndex = (int)sweepManager.Mode;
+        var modeNames = Enum.GetNames<GeomechanicsSweepMode>();
+        if (ImGui.Combo("Sweep Mode", ref modeIndex, modeNames, modeNames.Length))
+        {
+            sweepManager.Mode = (GeomechanicsSweepMode)modeIndex;
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Configured Sweeps");
+
+        if (sweepManager.Sweeps.Count == 0)
+        {
+            ImGui.TextDisabled("No sweeps configured.");
+        }
+        else
+        {
+            for (int i = 0; i < sweepManager.Sweeps.Count; i++)
+            {
+                var sweep = sweepManager.Sweeps[i];
+                bool isSelected = _selectedSweepIndex == i;
+                string label = $"{sweep.ParameterName} -> {sweep.TargetPath}";
+                if (ImGui.Selectable(label, isSelected))
+                {
+                    _selectedSweepIndex = i;
+                }
+            }
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Add Sweep");
+        ImGui.InputText("Name", ref _sweepName, 64);
+        ImGui.InputText("Target Path", ref _sweepTargetPath, 128);
+
+        ImGui.InputDouble("Min Value", ref _sweepMinValue);
+        ImGui.InputDouble("Max Value", ref _sweepMaxValue);
+
+        if (ImGui.Combo("Interpolation", ref _sweepInterpolationIndex,
+                Enum.GetNames<GeomechanicsInterpolationType>(),
+                Enum.GetValues<GeomechanicsInterpolationType>().Length))
+        {
+        }
+
+        if (ImGui.Button("Add Sweep", new Vector2(-1, 0)))
+        {
+            var sweep = new GeomechanicsParameterSweep
+            {
+                ParameterName = _sweepName,
+                TargetPath = _sweepTargetPath,
+                MinValue = _sweepMinValue,
+                MaxValue = _sweepMaxValue,
+                Interpolation = (GeomechanicsInterpolationType)_sweepInterpolationIndex
+            };
+            sweepManager.Sweeps.Add(sweep);
+            _selectedSweepIndex = sweepManager.Sweeps.Count - 1;
+        }
+
+        if (_selectedSweepIndex >= 0 && _selectedSweepIndex < sweepManager.Sweeps.Count)
+        {
+            ImGui.Separator();
+            ImGui.Text("Selected Sweep");
+
+            var selected = sweepManager.Sweeps[_selectedSweepIndex];
+            bool enabled = selected.Enabled;
+            if (ImGui.Checkbox("Enabled##SelectedSweep", ref enabled))
+            {
+                selected.Enabled = enabled;
+            }
+
+            var selectedName = selected.ParameterName ?? string.Empty;
+            if (ImGui.InputText("Name##SelectedSweep", ref selectedName, 64))
+            {
+                selected.ParameterName = selectedName;
+            }
+
+            var selectedTarget = selected.TargetPath ?? string.Empty;
+            if (ImGui.InputText("Target##SelectedSweep", ref selectedTarget, 128))
+            {
+                selected.TargetPath = selectedTarget;
+            }
+
+            double minVal = selected.MinValue;
+            double maxVal = selected.MaxValue;
+            if (ImGui.InputDouble("Min##SelectedSweep", ref minVal))
+            {
+                selected.MinValue = minVal;
+            }
+            if (ImGui.InputDouble("Max##SelectedSweep", ref maxVal))
+            {
+                selected.MaxValue = maxVal;
+            }
+
+            int interpolationIndex = (int)selected.Interpolation;
+            if (ImGui.Combo("Interpolation##SelectedSweep", ref interpolationIndex,
+                    Enum.GetNames<GeomechanicsInterpolationType>(),
+                    Enum.GetValues<GeomechanicsInterpolationType>().Length))
+            {
+                selected.Interpolation = (GeomechanicsInterpolationType)interpolationIndex;
+            }
+
+            if (ImGui.Button("Edit Curve", new Vector2(-1, 0)))
+            {
+                selected.GetCurveEditor().Open();
+            }
+
+            selected.GetCurveEditor().Submit(out _);
+
+            if (ImGui.Button("Remove Sweep", new Vector2(-1, 0)))
+            {
+                sweepManager.Sweeps.RemoveAt(_selectedSweepIndex);
+                _selectedSweepIndex = -1;
             }
         }
     }

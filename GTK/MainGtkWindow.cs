@@ -156,6 +156,7 @@ public class MainGtkWindow : Gtk.Window
         toolsMenu.Append(CreateMenuItem("Force Field Editor...", (_, _) => OpenForceFieldEditor()));
         toolsMenu.Append(new SeparatorMenuItem());
         toolsMenu.Append(CreateMenuItem("Simulation Setup Wizard...", (_, _) => OpenSimulationSetupWizard()));
+        toolsMenu.Append(CreateMenuItem("Thermodynamic Sweep...", (_, _) => OpenThermodynamicSweepDialog()));
         toolsMenu.Append(CreateMenuItem("Boolean Operations...", (_, _) => OpenBooleanOperationsUI()));
         toolsMenu.Append(CreateMenuItem("Geothermal Deep Wells Wizard...", (_, _) => OpenGeothermalConfigDialog()));
         toolsMenu.Append(CreateMenuItem("Add Nucleation Point", (_, _) => AddNucleationPoint()));
@@ -1878,13 +1879,44 @@ public class MainGtkWindow : Gtk.Window
 
     private void OpenSimulationSetupWizard()
     {
-        var dialog = new SimulationSetupWizard(this);
+        if (_selectedDataset is not PhysicoChemDataset physico)
+        {
+            var msg = new MessageDialog(this, DialogFlags.Modal, MessageType.Warning, ButtonsType.Ok,
+                "Please select a PhysicoChem dataset to configure simulation settings.");
+            msg.Run();
+            msg.Destroy();
+            return;
+        }
+
+        var dialog = new SimulationSetupWizard(this, physico);
         var response = (ResponseType)dialog.Run();
+        if (response == ResponseType.Ok)
+        {
+            dialog.ApplySettings();
+            _detailsView.Buffer.Text = BuildDatasetSummary(physico);
+        }
         dialog.Destroy();
         if (response == ResponseType.Ok)
         {
             SetStatus("Simulation configuration saved.");
         }
+    }
+
+    private void OpenThermodynamicSweepDialog()
+    {
+        var dialog = new ThermodynamicSweepDialog(this);
+        var response = (ResponseType)dialog.Run();
+        if (response == ResponseType.Ok)
+        {
+            dialog.RunSweep();
+            if (dialog.CreatedDataset != null)
+            {
+                _projectManager.AddDataset(dialog.CreatedDataset);
+                RefreshDatasetList();
+                SetStatus($"Thermodynamic sweep created: {dialog.CreatedDataset.Name}");
+            }
+        }
+        dialog.Destroy();
     }
 
     private void OpenBooleanOperationsUI()
