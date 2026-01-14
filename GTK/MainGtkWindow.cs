@@ -575,20 +575,42 @@ public class MainGtkWindow : Gtk.Window
         });
         cellOpsGrid.Attach(toggleActiveButton, 0, 1, 2, 1);
 
+        // Hide/Show selected cells
+        var hideCellsButton = CreateSlimActionButton("Hide Selected Cells", IconSymbol.PhysicoChem, (_, _) =>
+        {
+            _meshViewport.SetSelectedCellsVisible(false);
+            SetStatus("Hidden selected cells");
+        });
+        cellOpsGrid.Attach(hideCellsButton, 0, 2, 1, 1);
+
+        var showCellsButton = CreateSlimActionButton("Show Selected Cells", IconSymbol.PhysicoChem, (_, _) =>
+        {
+            _meshViewport.SetSelectedCellsVisible(true);
+            SetStatus("Shown selected cells");
+        });
+        cellOpsGrid.Attach(showCellsButton, 1, 2, 1, 1);
+
+        var showAllCellsButton = CreateSlimActionButton("Show All Cells", IconSymbol.Refresh, (_, _) =>
+        {
+            _meshViewport.ShowAllCells();
+            SetStatus("All cells visible");
+        });
+        cellOpsGrid.Attach(showAllCellsButton, 0, 3, 2, 1);
+
         // Clear selection
         var clearSelButton = CreateSlimActionButton("Clear Selection", IconSymbol.Refresh, (_, _) =>
         {
             _meshViewport.ClearSelection();
             SetStatus("Selection cleared");
         });
-        cellOpsGrid.Attach(clearSelButton, 0, 2, 2, 1);
+        cellOpsGrid.Attach(clearSelButton, 0, 4, 2, 1);
 
         // Add a hint for plane selection
         var planeSelectionHint = new Label("For plane selection, use the 'Selection' dropdown above.")
             { Xalign = 0, Wrap = true };
         var hintFrame = new Frame();
         hintFrame.Add(planeSelectionHint);
-        cellOpsGrid.Attach(hintFrame, 0, 3, 2, 1);
+        cellOpsGrid.Attach(hintFrame, 0, 5, 2, 1);
 
 
         cellOpsFrame.Add(cellOpsGrid);

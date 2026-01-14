@@ -71,6 +71,21 @@ See [Multiphase Flow](Multiphase-Flow.md) for full details.
 5. Run simulation
 6. Visualize results (temperature, pressure, species)
 
+### GUI Panels (ImGui + GTK)
+
+- **ImGui Tools Panel**
+  - Domain/cell management (material assignment, active/visible toggles)
+  - Mesh editing & deformation
+  - Boundary conditions and force fields
+  - Nucleation sites, simulation parameters, and sweeps
+  - Export (CSV/JSON/VTK/TOUGH2)
+- **GTK Toolkit**
+  - Reactor Builder (grid + mesh import)
+  - Cell Operations (select, activate, hide/show)
+  - Material/force/boundary configuration dialogs
+
+> Visibility toggles affect what you see; simulation activation uses the *Active* flag.
+
 ### Default Test Reactor
 
 The toolkit includes a default exothermic reactor for testing:

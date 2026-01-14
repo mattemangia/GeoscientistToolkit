@@ -34,6 +34,12 @@ namespace GeoscientistToolkit.Data.PhysicoChem
         public bool IsActive { get; set; } = true;
 
         /// <summary>
+        ///     Whether the cell is visible in viewers.
+        /// </summary>
+        [JsonProperty]
+        public bool IsVisible { get; set; } = true;
+
+        /// <summary>
         ///     Initial conditions for this cell.
         /// </summary>
         [JsonProperty]
@@ -363,6 +369,7 @@ namespace GeoscientistToolkit.Data.PhysicoChem
                     ID = id,
                     MaterialID = originalCell?.MaterialID ?? "Default",
                     IsActive = originalCell?.IsActive ?? true,
+                    IsVisible = originalCell?.IsVisible ?? true,
                     InitialConditions = originalCell?.InitialConditions,
                     Center = center,
                     Volume = volume
@@ -414,6 +421,7 @@ namespace GeoscientistToolkit.Data.PhysicoChem
                     ID = id,
                     MaterialID = "Default",
                     IsActive = true,
+                    IsVisible = true,
                     InitialConditions = new InitialConditions(),
                     Center = center,
                     Volume = volume
@@ -452,6 +460,7 @@ namespace GeoscientistToolkit.Data.PhysicoChem
                     ID = id,
                     MaterialID = "Default",
                     IsActive = true,
+                    IsVisible = true,
                     InitialConditions = new InitialConditions(),
                     Center = center,
                     Volume = volume
@@ -513,6 +522,7 @@ namespace GeoscientistToolkit.Data.PhysicoChem
                     ID = id,
                     MaterialID = "Default",
                     IsActive = true,
+                    IsVisible = true,
                     InitialConditions = new InitialConditions(),
                     Center = center,
                 };
