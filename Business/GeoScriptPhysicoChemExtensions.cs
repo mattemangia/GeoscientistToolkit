@@ -141,6 +141,48 @@ public class RunSimulationCommand : IGeoScriptCommand
 }
 
 /// <summary>
+/// PHYSICOCHEM_ADD_NUCLEATION_SITE: Adds a nucleation site to a PhysicoChem dataset
+/// Usage: PHYSICOCHEM_ADD_NUCLEATION_SITE name=Site1 x=0 y=0 z=0 mineral=Calcite material_id=ReactorFluid rate=1e6 active=true
+/// </summary>
+public class PhysicoChemAddNucleationSiteCommand : IGeoScriptCommand
+{
+    public string Name => "PHYSICOCHEM_ADD_NUCLEATION_SITE";
+    public string HelpText => "Adds a nucleation site (point) to a PhysicoChem dataset";
+    public string Usage =>
+        "PHYSICOCHEM_ADD_NUCLEATION_SITE [name=Site1] [x=0] [y=0] [z=0] " +
+        "[mineral=Calcite] [material_id=] [rate=1e6] [active=true]";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not PhysicoChemDataset dataset)
+            throw new NotSupportedException("PHYSICOCHEM_ADD_NUCLEATION_SITE only works on PhysicoChem datasets");
+
+        var cmd = (CommandNode)node;
+        var args = GeoScriptArgumentParser.ParseArguments(cmd.FullText);
+
+        var name = GeoScriptArgumentParser.GetString(args, "name", $"Nucleation{dataset.NucleationSites.Count + 1}", context);
+        var x = GeoScriptArgumentParser.GetDouble(args, "x", 0.0, context);
+        var y = GeoScriptArgumentParser.GetDouble(args, "y", 0.0, context);
+        var z = GeoScriptArgumentParser.GetDouble(args, "z", 0.0, context);
+        var mineral = GeoScriptArgumentParser.GetString(args, "mineral", "Calcite", context);
+        var materialId = GeoScriptArgumentParser.GetString(args, "material_id", string.Empty, context);
+        var rate = GeoScriptArgumentParser.GetDouble(args, "rate", 1e6, context);
+        var active = GeoScriptArgumentParser.GetBool(args, "active", true, context);
+
+        var site = new NucleationSite(name, (x, y, z), mineral, materialId)
+        {
+            NucleationRate = rate,
+            IsActive = active
+        };
+
+        dataset.NucleationSites.Add(site);
+        Logger.Log($"[PHYSICOCHEM_ADD_NUCLEATION_SITE] Added '{name}' at ({x}, {y}, {z}) mineral={mineral} material={materialId}");
+
+        return Task.FromResult<Dataset>(dataset);
+    }
+}
+
+/// <summary>
 /// PHYSICOCHEM_ADD_FORCE: Adds a force field to a PhysicoChem dataset
 /// Usage: PHYSICOCHEM_ADD_FORCE name=Gravity type=gravity gravity=0,0,-9.81
 /// </summary>

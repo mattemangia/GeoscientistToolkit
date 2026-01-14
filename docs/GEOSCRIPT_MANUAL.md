@@ -875,6 +875,17 @@ RUN_SIMULATION 3600 1.0 convergence_tolerance=1e-6
 
 ---
 
+#### PHYSICOCHEM_ADD_NUCLEATION_SITE
+
+Adds a nucleation site (point) to a PhysicoChem dataset.
+
+**Syntax:**
+```geoscript
+PHYSICOCHEM_ADD_NUCLEATION_SITE name=Site1 x=0 y=0 z=0 mineral=Calcite material_id=ReactorFluid rate=1e6 active=true
+```
+
+---
+
 ### 2D Geomechanics Commands (2 commands)
 
 #### GEOMECH_SWEEP

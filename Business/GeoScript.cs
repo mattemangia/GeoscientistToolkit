@@ -382,6 +382,7 @@ public static class CommandRegistry
             new CreateReactorCommand(),
             new RunSimulationCommand(),
             new PhysicoChemAddForceCommand(),
+            new PhysicoChemAddNucleationSiteCommand(),
             new GeoscientistToolkit.Business.GeoScriptParameterSweepCommands.PhysicoChemSweepCommand(),
             new AddCellCommand(),
             new SetCellMaterialCommand(),
