@@ -176,7 +176,7 @@ SET_PNM_SPECIES Ca2+ 0.01 0.005
 SET_PNM_MINERALS Calcite 0.02
 
 # Run simulation
-RUN_PNM_REACTIVE_TRANSPORT 1000 0.01 298 1.5e7 1.0e7
+RUN_PNM_REACTIVE_TRANSPORT 1000 0.01 298 1.5e7 1.0e7 convergence_tolerance=1e-6
 
 # Export results
 EXPORT_PNM_RESULTS 'results.csv'

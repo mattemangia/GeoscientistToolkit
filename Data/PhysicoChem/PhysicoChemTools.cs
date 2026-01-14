@@ -91,6 +91,9 @@ public class PhysicoChemTools : IDatasetTools
     private Vector3 _nucleationPos = Vector3.Zero;
     private string _mineralType = "Calcite";
     private float _nucleationRate = 1e3f;
+    private int _nucleationMaterialIndex = 0;
+    private int _nucleationObjectIndex = 0;
+    private int _nucleationObjectCount = 1;
 
     // Simulation state
     private bool _isSimulating = false;
@@ -1142,7 +1145,8 @@ public class PhysicoChemTools : IDatasetTools
 
             ImGui.SameLine();
 
-            if (ImGui.Selectable($"{site.Name} ({site.MineralType})##nuc{i}", isSelected))
+            var materialLabel = string.IsNullOrWhiteSpace(site.MaterialID) ? "Any" : site.MaterialID;
+            if (ImGui.Selectable($"{site.Name} ({site.MineralType}, {materialLabel})##nuc{i}", isSelected))
             {
                 _selectedNucleationIndex = i;
             }
@@ -1169,21 +1173,85 @@ public class PhysicoChemTools : IDatasetTools
         ImGui.InputText("Mineral Type##nuc", ref _mineralType, 64);
         ImGui.InputFloat("Nucleation Rate (nuclei/s)", ref _nucleationRate, 0, 0, "%.2e");
 
+        var materialIds = new List<string> { "Any" };
+        materialIds.AddRange(dataset.Materials.Select(m => m.MaterialID));
+        var materialLabels = materialIds.ToArray();
+        if (_nucleationMaterialIndex >= materialLabels.Length)
+            _nucleationMaterialIndex = 0;
+        ImGui.Combo("Material##nuc", ref _nucleationMaterialIndex, materialLabels, materialLabels.Length);
+
+        var objectNames = new List<string> { "None" };
+        objectNames.AddRange(dataset.Mesh.ReactorObjects.Select(o => o.Name));
+        var objectLabels = objectNames.ToArray();
+        if (_nucleationObjectIndex >= objectLabels.Length)
+            _nucleationObjectIndex = 0;
+        ImGui.Combo("Reactor Object##nuc", ref _nucleationObjectIndex, objectLabels, objectLabels.Length);
+        ImGui.InputInt("Object Site Count", ref _nucleationObjectCount);
+        _nucleationObjectCount = Math.Clamp(_nucleationObjectCount, 1, 1000);
+
         if (ImGui.Button("Add Nucleation Site"))
         {
-            var site = new NucleationSite(_newNucleationName,
-                (_nucleationPos.X, _nucleationPos.Y, _nucleationPos.Z),
-                _mineralType)
+            var selectedMaterial = _nucleationMaterialIndex > 0 ? materialLabels[_nucleationMaterialIndex] : string.Empty;
+            if (_nucleationObjectIndex > 0 && _nucleationObjectIndex - 1 < dataset.Mesh.ReactorObjects.Count)
             {
-                NucleationRate = _nucleationRate
-            };
+                var obj = dataset.Mesh.ReactorObjects[_nucleationObjectIndex - 1];
+                AddNucleationSitesFromObject(dataset, obj, _nucleationObjectCount, selectedMaterial);
+            }
+            else
+            {
+                var site = new NucleationSite(_newNucleationName,
+                    (_nucleationPos.X, _nucleationPos.Y, _nucleationPos.Z),
+                    _mineralType,
+                    selectedMaterial)
+                {
+                    NucleationRate = _nucleationRate
+                };
 
-            dataset.NucleationSites.Add(site);
-            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
-            Logger.Log($"Added nucleation site: {_newNucleationName}");
+                dataset.NucleationSites.Add(site);
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+                Logger.Log($"Added nucleation site: {_newNucleationName}");
+            }
 
             _newNucleationName = "Nucleation" + (dataset.NucleationSites.Count + 1);
         }
+    }
+
+    private void AddNucleationSitesFromObject(PhysicoChemDataset dataset, ReactorObject obj, int count,
+        string fallbackMaterialId)
+    {
+        var materialId = string.IsNullOrWhiteSpace(fallbackMaterialId) ? obj.MaterialID : fallbackMaterialId;
+        var random = new Random();
+
+        for (int i = 0; i < count; i++)
+        {
+            var position = SamplePointInObject(obj, random);
+            var site = new NucleationSite($"{_newNucleationName}_{i + 1}", position, _mineralType, materialId)
+            {
+                NucleationRate = _nucleationRate
+            };
+            dataset.NucleationSites.Add(site);
+        }
+
+        ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+        Logger.Log($"Added {count} nucleation site(s) in object '{obj.Name}'.");
+    }
+
+    private static (double X, double Y, double Z) SamplePointInObject(ReactorObject obj, Random random)
+    {
+        if (obj.IsCylinder)
+        {
+            var angle = random.NextDouble() * Math.PI * 2;
+            var radius = Math.Sqrt(random.NextDouble()) * obj.Radius;
+            var x = obj.Center.X + radius * Math.Cos(angle);
+            var y = obj.Center.Y + radius * Math.Sin(angle);
+            var z = obj.Center.Z + (random.NextDouble() - 0.5) * obj.Height;
+            return (x, y, z);
+        }
+
+        var xBox = obj.Center.X + (random.NextDouble() - 0.5) * obj.Size.X;
+        var yBox = obj.Center.Y + (random.NextDouble() - 0.5) * obj.Size.Y;
+        var zBox = obj.Center.Z + (random.NextDouble() - 0.5) * obj.Size.Z;
+        return (xBox, yBox, zBox);
     }
 
     private void DrawSimulationParameters(PhysicoChemDataset dataset)

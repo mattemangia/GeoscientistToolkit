@@ -34,8 +34,8 @@ public class ReactiveTransportSolver : SimulatorNodeSupport
     private readonly KineticsSolver _kineticsSolver;
 
     // Iteration parameters
-    private const int MAX_OUTER_ITERATIONS = 10;
-    private const double CONVERGENCE_TOLERANCE = 1e-6;
+    public int MaxOuterIterations { get; set; } = 10;
+    public double ConvergenceTolerance { get; set; } = 1e-6;
 
     public ReactiveTransportSolver() : this(null)
     {
@@ -67,7 +67,7 @@ public class ReactiveTransportSolver : SimulatorNodeSupport
         var newState = state.Clone();
 
         // Outer iteration loop for coupling
-        for (int iter = 0; iter < MAX_OUTER_ITERATIONS; iter++)
+        for (int iter = 0; iter < MaxOuterIterations; iter++)
         {
             var oldConcentrations = CloneConcentrations(newState.Concentrations);
 
@@ -86,15 +86,15 @@ public class ReactiveTransportSolver : SimulatorNodeSupport
             // Check convergence
             double maxChange = CalculateMaxConcentrationChange(oldConcentrations, newState.Concentrations);
 
-            if (maxChange < CONVERGENCE_TOLERANCE)
+            if (maxChange < ConvergenceTolerance)
             {
                 Logger.Log($"[ReactiveTransport] Converged in {iter + 1} outer iterations");
                 break;
             }
 
-            if (iter == MAX_OUTER_ITERATIONS - 1)
+            if (iter == MaxOuterIterations - 1)
             {
-                Logger.LogWarning($"[ReactiveTransport] Did not converge in {MAX_OUTER_ITERATIONS} iterations. Max change: {maxChange:E3}");
+                Logger.LogWarning($"[ReactiveTransport] Did not converge in {MaxOuterIterations} iterations. Max change: {maxChange:E3}");
             }
         }
 

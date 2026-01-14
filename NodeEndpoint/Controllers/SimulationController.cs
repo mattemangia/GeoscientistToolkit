@@ -41,6 +41,7 @@ public class SimulationController : ControllerBase
                     ["enableDamage"] = request.EnableDamage,
                     ["enableFluidCoupling"] = request.EnableFluidCoupling,
                     ["timeSteps"] = request.TimeSteps,
+                    ["convergenceTolerance"] = request.ConvergenceTolerance,
                     ["applyGravity"] = request.ApplyGravity,
                     ["gravityX"] = request.GravityX,
                     ["gravityY"] = request.GravityY,
@@ -435,6 +436,7 @@ public class GeomechanicalSimulationRequest
     public bool EnableDamage { get; set; }
     public bool EnableFluidCoupling { get; set; }
     public int TimeSteps { get; set; } = 100;
+    public double ConvergenceTolerance { get; set; } = 1e-6;
     public string? OutputPath { get; set; }
     public bool ApplyGravity { get; set; }
     public float GravityX { get; set; } = 0;

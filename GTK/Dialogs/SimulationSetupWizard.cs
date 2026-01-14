@@ -17,6 +17,7 @@ namespace GeoscientistToolkit.GtkUI.Dialogs
         // Step 2: Time Stepping
         private SpinButton _dtInput;
         private CheckButton _adaptiveTimeCheck;
+        private SpinButton _convergenceToleranceInput;
 
         // Step 3: Output
         private CheckButton _saveVtkCheck;
@@ -107,6 +108,14 @@ namespace GeoscientistToolkit.GtkUI.Dialogs
             _adaptiveTimeCheck = new CheckButton("Use Adaptive Time Stepping");
             _adaptiveTimeCheck.Active = true;
             grid.Attach(_adaptiveTimeCheck, 0, 1, 2, 1);
+
+            grid.Attach(new Label("Convergence Tolerance:"), 0, 2, 1, 1);
+            _convergenceToleranceInput = new SpinButton(1e-12, 1e-2, 1e-6)
+            {
+                Value = _dataset?.SimulationParams.ConvergenceTolerance ?? 1e-6,
+                Digits = 8
+            };
+            grid.Attach(_convergenceToleranceInput, 1, 2, 1, 1);
 
             box.PackStart(grid, false, false, 0);
             return box;
@@ -210,6 +219,7 @@ namespace GeoscientistToolkit.GtkUI.Dialogs
 
             _dataset.SimulationParams.TotalTime = _durationInput.Value;
             _dataset.SimulationParams.TimeStep = _dtInput.Value;
+            _dataset.SimulationParams.ConvergenceTolerance = _convergenceToleranceInput.Value;
             _dataset.SimulationParams.EnableParameterSweep = _enableSweepCheck.Active;
             _dataset.ParameterSweepManager.Enabled = _enableSweepCheck.Active;
             _dataset.ParameterSweepManager.Mode = (SweepMode)_sweepModeCombo.Active;

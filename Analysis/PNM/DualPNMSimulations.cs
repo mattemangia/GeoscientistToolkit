@@ -167,6 +167,7 @@ public static class DualPNMSimulations
             OutletPressure = baseOptions.OutletPressure,
             FluidViscosity = baseOptions.FluidViscosity,
             FluidDensity = baseOptions.FluidDensity,
+            ConvergenceTolerance = baseOptions.ConvergenceTolerance,
             InletTemperature = baseOptions.InletTemperature,
             ThermalConductivity = baseOptions.ThermalConductivity,
             SpecificHeat = baseOptions.SpecificHeat,

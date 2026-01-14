@@ -191,6 +191,7 @@ Auto-calculated from magnitude and distance:
 |-----------|-------------|---------|
 | Time Step | Integration step | 0.001 s |
 | Total Time | Simulation duration | 10 s |
+| Convergence Threshold | Velocity convergence tolerance | 1e-6 |
 | Damping | Energy dissipation | 0.05 |
 | Gravity Magnitude | Gravitational acceleration | 9.81 m/s² |
 

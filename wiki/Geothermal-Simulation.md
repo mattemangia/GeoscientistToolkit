@@ -192,6 +192,7 @@ Typical speedup with GPU: 5-20x
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | Max Iterations | 1000 | Per time step |
+| Convergence Tolerance | 5e-3 | Overall convergence threshold |
 | Temperature Tolerance | 1e-6 | Relative change |
 | Pressure Tolerance | 1e-5 | Relative change |
 
