@@ -294,6 +294,7 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | Command | Description | Example |
 |---------|-------------|---------|
 | `CREATE_DIAGRAM` | Generate phase diagrams | `CREATE_DIAGRAM BINARY FROM 'NaCl' AND 'H2O' TEMP 298 K PRES 1 BAR` |
+| `THERMO_SWEEP` | Sweep equilibrium across T/P | `THERMO_SWEEP composition="'H2O'=55.5,'CO2'=1.0" minT=273 maxT=473 minP=1 maxP=1000 grid=25 name=ThermoSweep` |
 | `EQUILIBRATE` | Calculate equilibrium | `EQUILIBRATE` |
 | `SATURATION` | Calculate saturation indices | `SATURATION MINERALS 'Calcite', 'Gypsum'` |
 | `BALANCE_REACTION` | Balance reactions | `BALANCE_REACTION 'Calcite'` |
@@ -320,8 +321,16 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | `CREATE_REACTOR` | Create a PhysicoChem reactor | `CREATE_REACTOR` |
 | `RUN_SIMULATION` | Run PhysicoChem simulation | `RUN_SIMULATION` |
 | `PHYSICOCHEM_ADD_FORCE` | Add force fields (gravity/vortex) | `PHYSICOCHEM_ADD_FORCE name=MoonGravity type=gravity gravity=0,0,-1.62` |
+| `PHYSICOCHEM_SWEEP` | Configure PhysicoChem parameter sweep | `PHYSICOCHEM_SWEEP name=Temp target=Domains[0].InitialConditions.Temperature min=273 max=373 mode=Temporal` |
 | `ADD_CELL` | Add cell to reactor grid | `ADD_CELL x=10 y=12 z=4 material='Sandstone'` |
 | `SET_CELL_MATERIAL` | Set reactor cell material | `SET_CELL_MATERIAL id=12 material='Clay'` |
+
+### 2D Geomechanics Operations
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `GEOMECH_RUN` | Run 2D geomechanical simulation | `GEOMECH_RUN analysis=quasistatic steps=10 solver=PCG` |
+| `GEOMECH_SWEEP` | Configure geomechanics parameter sweep | `GEOMECH_SWEEP name=LoadFactor target=LoadFactor min=0.5 max=1.5 mode=Step` |
 
 ### CT Image Stack Operations
 

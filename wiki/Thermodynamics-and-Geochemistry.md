@@ -164,6 +164,18 @@ CREATE_DIAGRAM ENERGY FROM 'CaCO3' AND 'MgCO3' TEMP 298 K PRES 1 BAR
 
 ---
 
+## Parameter Sweeps (P–T Grid)
+
+Run equilibrium sweeps across temperature and pressure from the **Thermodynamics → Parameter Sweep**
+tool (ImGui) or the **Tools → Thermodynamic Sweep...** dialog (GTK). Results are exported as a table dataset.
+
+**GeoScript:**
+```geoscript
+THERMO_SWEEP composition="'H2O'=55.5,'CO2'=1.0" minT=273 maxT=473 minP=1 maxP=1000 grid=25 name=ThermoSweep
+```
+
+---
+
 ## Saturation Analysis
 
 ### Saturation Index

@@ -375,26 +375,35 @@ Systematic exploration of parameter space.
 
 ### Configuration
 
+Use the **Simulation Parameters → Parameter Sweep** panel (ImGui) or **Simulation Setup Wizard → Parameter Sweep**
+(GTK) to add sweep curves that are applied each time step or simulation step.
+
 ```csharp
-var sweep = new ParameterSweep(reactor);
+dataset.SimulationParams.EnableParameterSweep = true;
+dataset.ParameterSweepManager.Enabled = true;
+dataset.ParameterSweepManager.Mode = SweepMode.Temporal;
 
-// Define parameters to vary
-sweep.AddParameter("Temperature", 20, 80, steps: 10);
-sweep.AddParameter("FlowRate", 1e-7, 1e-5, steps: 5);
+dataset.ParameterSweepManager.Sweeps.Add(new ParameterSweep
+{
+    ParameterName = "Temperature",
+    TargetPath = "Domains[0].InitialConditions.Temperature",
+    MinValue = 273,
+    MaxValue = 373
+});
 
-// Run sweep
-var results = sweep.Execute();
+new PhysicoChemSolver(dataset).RunSimulation();
+```
 
-// Analyze sensitivity
-var sensitivity = results.ComputeSensitivity("ConversionRate");
+**GeoScript:**
+```geoscript
+PHYSICOCHEM_SWEEP name=Temperature target=Domains[0].InitialConditions.Temperature min=273 max=373 mode=Temporal
+RUN_SIMULATION
 ```
 
 ### Output
 
-- Parameter combinations
-- Output metrics for each
-- Sensitivity indices
-- Optimization results
+- Sweep curve values applied per step/time
+- Updated simulation history and tracked metrics
 
 ---
 
