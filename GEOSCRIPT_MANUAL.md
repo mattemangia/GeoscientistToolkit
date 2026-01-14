@@ -351,7 +351,7 @@ Available geometric properties:
 | Dataset Type | Description | File Formats | Common Operations |
 |--------------|-------------|--------------|-------------------|
 | **SingleImage** | Single 2D raster images | PNG, JPG, BMP, TIFF | BRIGHTNESS_CONTRAST, FILTER, THRESHOLD |
-| **CtImageStack** | 3D CT scan volumes | DICOM, TIFF stack, .ctstack | CT_SEGMENT, CT_FILTER3D |
+| **CtImageStack** | 3D CT scan volumes | DICOM, TIFF stack, .ctstack | CT_SEGMENT, CT_FILTER3D, CT_LIST_MATERIALS, CT_MATERIAL_STATS |
 | **CtBinaryFile** | CT binary volume files | .bin, .raw | LOAD, DISPTYPE |
 | **MicroXrf** | Micro-XRF maps | Custom format | FILTER, INFO |
 | **PointCloud** | Point clouds | LAS, LAZ, PLY | INFO, SAVE |
@@ -1538,7 +1538,33 @@ CT_REMOVE_MATERIAL id=<materialId>
 
 ---
 
-#### 5.8.5 CT_ANALYZE_POROSITY
+#### 5.8.5 CT_LIST_MATERIALS
+
+Lists materials in the CT stack (ID and name).
+
+**Syntax**:
+```geoscript
+CT_LIST_MATERIALS [include_exterior=<true|false>]
+```
+
+**Returns**: CT dataset (logs the material list)
+
+---
+
+#### 5.8.6 CT_MATERIAL_STATS
+
+Exports material statistics to a table dataset.
+
+**Syntax**:
+```geoscript
+CT_MATERIAL_STATS
+```
+
+**Returns**: Material statistics table
+
+---
+
+#### 5.8.7 CT_ANALYZE_POROSITY
 
 Calculates porosity from segmented volumes.
 
@@ -1551,7 +1577,7 @@ CT_ANALYZE_POROSITY void_material=<materialId>
 
 ---
 
-#### 5.8.6 CT_CROP
+#### 5.8.8 CT_CROP
 
 Crops a sub-volume from the CT stack.
 
@@ -1564,7 +1590,7 @@ CT_CROP x=<start> y=<start> z=<start> width=<w> height=<h> depth=<d>
 
 ---
 
-#### 5.8.7 CT_EXTRACT_SLICE
+#### 5.8.9 CT_EXTRACT_SLICE
 
 Extracts a 2D slice from the 3D volume.
 
@@ -1577,7 +1603,7 @@ CT_EXTRACT_SLICE index=<sliceNumber> [axis=<x|y|z>]
 
 ---
 
-#### 5.8.8 CT_LABEL_ANALYSIS
+#### 5.8.10 CT_LABEL_ANALYSIS
 
 Summarizes label connectivity and size statistics.
 
@@ -3083,7 +3109,7 @@ CREATE_REACTOR, RUN_SIMULATION, PHYSICOCHEM_ADD_FORCE, ADD_CELL, SET_CELL_MATERI
 BRIGHTNESS_CONTRAST, FILTER, THRESHOLD, BINARIZE, GRAYSCALE, INVERT, NORMALIZE
 
 ### CT Image Stack (8 commands)
-CT_SEGMENT, CT_FILTER3D, CT_ADD_MATERIAL, CT_REMOVE_MATERIAL, CT_ANALYZE_POROSITY, CT_CROP, CT_EXTRACT_SLICE, CT_LABEL_ANALYSIS
+CT_SEGMENT, CT_FILTER3D, CT_ADD_MATERIAL, CT_REMOVE_MATERIAL, CT_LIST_MATERIALS, CT_MATERIAL_STATS, CT_ANALYZE_POROSITY, CT_CROP, CT_EXTRACT_SLICE, CT_LABEL_ANALYSIS
 
 ### PNM (7 commands)
 PNM_FILTER_PORES, PNM_FILTER_THROATS, PNM_CALCULATE_PERMEABILITY, PNM_DRAINAGE_SIMULATION, PNM_IMBIBITION_SIMULATION, PNM_EXTRACT_LARGEST_CLUSTER, PNM_STATISTICS

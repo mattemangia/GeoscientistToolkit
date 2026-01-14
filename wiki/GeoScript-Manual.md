@@ -341,6 +341,8 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | `CT_FILTER3D` | 3D filters | `CT_FILTER3D type=gaussian size=5` |
 | `CT_ADD_MATERIAL` | Define material | `CT_ADD_MATERIAL name='Pore' color=0,0,255` |
 | `CT_REMOVE_MATERIAL` | Remove material | `CT_REMOVE_MATERIAL id=1` |
+| `CT_LIST_MATERIALS` | List materials (ID/Name) | `CT_LIST_MATERIALS include_exterior=false` |
+| `CT_MATERIAL_STATS` | Material statistics table | `CT_MATERIAL_STATS` |
 | `CT_ANALYZE_POROSITY` | Calculate porosity | `CT_ANALYZE_POROSITY void_material=1` |
 | `CT_CROP` | Crop sub-volume | `CT_CROP x=0 y=0 z=0 width=100 height=100 depth=100` |
 | `CT_EXTRACT_SLICE` | Extract 2D slice | `CT_EXTRACT_SLICE index=50 axis=z` |
