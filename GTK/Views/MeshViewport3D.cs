@@ -601,6 +601,8 @@ public class MeshViewport3D : DrawingArea
 
                 // 2. Isosurface Filtering
                 var cellInfo = FindCellForFace(i);
+                if (cellInfo?.Cell.IsVisible == false)
+                    continue;
                 if (ShowIsosurface && cellInfo != null)
                 {
                     double val = GetValueForColorMode(cellInfo.Cell);
@@ -626,6 +628,8 @@ public class MeshViewport3D : DrawingArea
 
                 // Find which cell this face belongs to
                 var cellInfo = FindCellForFace(originalIdx);
+                if (cellInfo?.Cell.IsVisible == false)
+                    continue;
                 bool isSelected = cellInfo != null && SelectedCellIDs.Contains(cellInfo.ID);
                 bool isHovered = cellInfo != null && _hoveredCellIndex.HasValue &&
                                 _hoveredCellIndex.Value < _cells.Count &&
@@ -698,18 +702,15 @@ public class MeshViewport3D : DrawingArea
         }
 
         // Render edges (wireframe mode)
-        if ((RenderMode == RenderMode.Wireframe || RenderMode == RenderMode.SolidWireframe) && _edges.Count > 0)
+        if ((RenderMode == RenderMode.Wireframe || RenderMode == RenderMode.SolidWireframe) && _cells.Count > 0)
         {
             cr.SetSourceRGB(0.25, 0.55, 0.95);
             cr.LineWidth = 1.2;
 
-            foreach (var edge in _edges)
+            foreach (var cellInfo in _cells)
             {
-                var start = Project(projected[edge.Start], min, scale, width, height);
-                var end = Project(projected[edge.End], min, scale, width, height);
-                cr.MoveTo(start.X, start.Y);
-                cr.LineTo(end.X, end.Y);
-                cr.Stroke();
+                if (!cellInfo.Cell.IsVisible) continue;
+                DrawCellEdges(cr, projected, cellInfo, min, scale, width, height);
             }
             
             // Highlight selected cells in wireframe mode
@@ -718,6 +719,7 @@ public class MeshViewport3D : DrawingArea
                 foreach (var cellInfo in _cells)
                 {
                     if (!SelectedCellIDs.Contains(cellInfo.ID)) continue;
+                    if (!cellInfo.Cell.IsVisible) continue;
                     
                     int startIdx = cellInfo.VertexStartIndex;
                     
@@ -737,7 +739,7 @@ public class MeshViewport3D : DrawingArea
             if (_hoveredCellIndex.HasValue && _hoveredCellIndex.Value < _cells.Count && RenderMode == RenderMode.Wireframe)
             {
                 var cellInfo = _cells[_hoveredCellIndex.Value];
-                if (!SelectedCellIDs.Contains(cellInfo.ID))
+                if (cellInfo.Cell.IsVisible && !SelectedCellIDs.Contains(cellInfo.ID))
                 {
                     cr.SetSourceRGBA(0.3, 0.95, 0.95, 0.8);
                     cr.LineWidth = 2.0;
@@ -1112,6 +1114,8 @@ public class MeshViewport3D : DrawingArea
         for (int i = 0; i < _cells.Count; i++)
         {
             var cell = _cells[i];
+            if (!cell.Cell.IsVisible)
+                continue;
             // Project the actual cell center, not a vertex
             var rotatedCenter = Vector3.Transform(cell.Center - _meshCenter, rotation);
             var projectedCenter = new Vector2(rotatedCenter.X, rotatedCenter.Y);
@@ -1253,7 +1257,7 @@ public class MeshViewport3D : DrawingArea
                 _ => false
             };
 
-            if (inPlane && cellInfo.Cell.IsActive)
+            if (inPlane && cellInfo.Cell.IsActive && cellInfo.Cell.IsVisible)
                 SelectedCellIDs.Add(cellInfo.ID);
         }
 
@@ -1275,6 +1279,58 @@ public class MeshViewport3D : DrawingArea
         QueueDraw();
     }
 
+    public void ToggleSelectedCellsVisible()
+    {
+        if (_activePhysicoMesh == null) return;
+
+        foreach (var cellId in SelectedCellIDs)
+        {
+            if (_activePhysicoMesh.Cells.TryGetValue(cellId, out var cell))
+            {
+                cell.IsVisible = !cell.IsVisible;
+            }
+        }
+
+        SelectedCellIDs.RemoveWhere(id => _activePhysicoMesh.Cells.TryGetValue(id, out var cell) && !cell.IsVisible);
+        CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
+        QueueDraw();
+    }
+
+    public void SetSelectedCellsVisible(bool isVisible)
+    {
+        if (_activePhysicoMesh == null) return;
+
+        foreach (var cellId in SelectedCellIDs)
+        {
+            if (_activePhysicoMesh.Cells.TryGetValue(cellId, out var cell))
+            {
+                cell.IsVisible = isVisible;
+            }
+        }
+
+        if (!isVisible)
+        {
+            SelectedCellIDs.Clear();
+            CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(new List<string>()));
+        }
+        else
+        {
+            CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
+        }
+        QueueDraw();
+    }
+
+    public void ShowAllCells()
+    {
+        if (_activePhysicoMesh == null) return;
+
+        foreach (var cell in _activePhysicoMesh.Cells.Values)
+        {
+            cell.IsVisible = true;
+        }
+        QueueDraw();
+    }
+
     public void ClearSelection()
     {
         SelectedCellIDs.Clear();
@@ -1290,7 +1346,10 @@ public class MeshViewport3D : DrawingArea
         SelectedCellIDs.Clear();
 
         foreach (var cell in _cells)
-            SelectedCellIDs.Add(cell.ID);
+        {
+            if (cell.Cell.IsVisible)
+                SelectedCellIDs.Add(cell.ID);
+        }
 
         CellSelectionChanged?.Invoke(this, new CellSelectionEventArgs(SelectedCellIDs.ToList()));
         QueueDraw();
@@ -1333,6 +1392,8 @@ public class MeshViewport3D : DrawingArea
         var cellsWithDepth = new List<(CellInfo cell, float depth, Vector2 screenPos)>();
         foreach (var cellInfo in _cells)
         {
+            if (!cellInfo.Cell.IsVisible)
+                continue;
             // Transform cell center to view space
             var rotatedCenter = Vector3.Transform(cellInfo.Center - _meshCenter, rotation);
             var projectedCenter = new Vector2(rotatedCenter.X, rotatedCenter.Y);
@@ -1369,7 +1430,7 @@ public class MeshViewport3D : DrawingArea
                 continue;
 
             // This cell is visible - add it to selection
-            if (cellInfo.Cell.IsActive)
+            if (cellInfo.Cell.IsActive && cellInfo.Cell.IsVisible)
             {
                 selectedCells.Add(cellInfo.ID);
                 occupiedPositions.Add(gridPos);

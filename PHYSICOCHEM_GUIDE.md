@@ -25,6 +25,34 @@ The **PHYSICOCHEM** dataset system provides a comprehensive framework for buildi
 
 ## Quick Start
 
+## GUI Workflows (ImGui + GTK)
+
+Both front-ends expose the PhysicoChem dataset features so you can build reactors, assign materials, set forces, and visualize results without scripting.
+
+### ImGui (Main Desktop App)
+
+- **Tools → PhysicoChem** provides structured panels for:
+  - **Domain & cell management** (select cells, assign materials, toggle *Active* and *Visible* states).
+  - **Mesh editing & deformation** (translate/rotate/scale, mirror, normalize, and deformation tools).
+  - **Boundary conditions** (temperature, pressure, inlet/outlet, flux).
+  - **Force fields** (gravity, vortex, custom forces, chemical reactions).
+  - **Nucleation sites** (crystal growth controls).
+  - **Simulation parameters & sweeps** (time, solvers, reactive transport, multiphase).
+  - **Export options** (CSV, JSON, VTK, TOUGH2).
+- The **PhysicoChem viewer** supports:
+  - Field variable selection (temperature, pressure, species).
+  - 2D slice views and color maps.
+  - 3D mesh rendering with selection overlays.
+
+### GTK (Toolkit GUI)
+
+- **Reactor Builder**: create grid-based reactors or import meshes.
+- **Cell Operations**: select cells, toggle *Active*, hide/show cells, and restore visibility.
+- **Dialogs** for materials, forces, boundaries, and simulation setup link directly to the dataset.
+- **Mesh viewport**: inspect and interact with 3D results.
+
+> **Note:** *Visible* controls affect rendering and selection only. Use *Active* to enable/disable cells in the simulation itself.
+
 ### Example 1: Simple Box Reactor with Two Reactants
 
 ```csharp
