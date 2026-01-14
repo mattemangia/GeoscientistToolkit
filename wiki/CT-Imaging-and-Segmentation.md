@@ -266,6 +266,23 @@ Remove material definitions.
 CT_REMOVE_MATERIAL id=1
 ```
 
+### CT_LIST_MATERIALS
+
+List materials (ID and name).
+
+```geoscript
+CT_LIST_MATERIALS
+CT_LIST_MATERIALS include_exterior=false
+```
+
+### CT_MATERIAL_STATS
+
+Generate a material statistics table.
+
+```geoscript
+CT_MATERIAL_STATS
+```
+
 ### CT_ANALYZE_POROSITY
 
 Calculate porosity.

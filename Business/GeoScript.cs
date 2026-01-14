@@ -421,6 +421,8 @@ public static class CommandRegistry
             new CtFilter3DCommand(),
             new CtAddMaterialCommand(),
             new CtRemoveMaterialCommand(),
+            new CtListMaterialsCommand(),
+            new CtMaterialStatsCommand(),
             new CtAnalyzePorosityCommand(),
             new CtCropCommand(),
             new CtExtractSliceCommand(),

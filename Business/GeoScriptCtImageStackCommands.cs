@@ -17,6 +17,7 @@ using GeoscientistToolkit.Analysis.ThermalConductivity;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Materials;
+using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Data.VolumeData;
 using GeoscientistToolkit.Util;
 
@@ -188,6 +189,71 @@ public class CtRemoveMaterialCommand : IGeoScriptCommand
     {
         var match = Regex.Match(fullText, paramName + @"\s*=\s*([-+]?[0-9]*\.?[0-9]+)", RegexOptions.IgnoreCase);
         return match.Success ? float.Parse(match.Groups[1].Value) : defaultValue;
+    }
+}
+
+/// <summary>
+/// CT_LIST_MATERIALS - List materials in the CT stack
+/// Usage: CT_LIST_MATERIALS [include_exterior=true]
+/// </summary>
+public class CtListMaterialsCommand : IGeoScriptCommand
+{
+    public string Name => "CT_LIST_MATERIALS";
+    public string HelpText => "List materials in the CT image stack (ID and Name)";
+    public string Usage => "CT_LIST_MATERIALS [include_exterior=<true|false>]";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not CtImageStackDataset ctDs)
+            throw new NotSupportedException("CT_LIST_MATERIALS only works with CT Image Stack datasets");
+
+        var cmd = (CommandNode)node;
+        bool includeExterior = ParseBoolParameter(cmd.FullText, "include_exterior", true);
+
+        var materials = ctDs.Materials ?? new List<Material>();
+        if (!includeExterior)
+            materials = materials.Where(m => m.ID != 0).ToList();
+
+        Logger.Log($"CT materials ({materials.Count}):");
+        foreach (var material in materials.OrderBy(m => m.ID))
+            Logger.Log($"  {material.ID}: {material.Name}");
+
+        return Task.FromResult<Dataset>(ctDs);
+    }
+
+    private bool ParseBoolParameter(string fullText, string paramName, bool defaultValue)
+    {
+        var match = Regex.Match(fullText, paramName + @"\s*=\s*(true|false)", RegexOptions.IgnoreCase);
+        if (!match.Success)
+            return defaultValue;
+
+        return bool.TryParse(match.Groups[1].Value, out var value) ? value : defaultValue;
+    }
+}
+
+/// <summary>
+/// CT_MATERIAL_STATS - Export material statistics to a table dataset
+/// Usage: CT_MATERIAL_STATS
+/// </summary>
+public class CtMaterialStatsCommand : IGeoScriptCommand
+{
+    public string Name => "CT_MATERIAL_STATS";
+    public string HelpText => "Generate material statistics table from a CT image stack";
+    public string Usage => "CT_MATERIAL_STATS";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not CtImageStackDataset ctDs)
+            throw new NotSupportedException("CT_MATERIAL_STATS only works with CT Image Stack datasets");
+
+        var tableDataset = TableExporter.ExportMaterialStatistics(ctDs);
+        if (tableDataset == null)
+        {
+            Logger.LogError("CT_MATERIAL_STATS failed to generate material statistics.");
+            return Task.FromResult<Dataset>(ctDs);
+        }
+
+        return Task.FromResult<Dataset>(tableDataset);
     }
 }
 
