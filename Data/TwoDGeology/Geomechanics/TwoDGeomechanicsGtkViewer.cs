@@ -34,7 +34,16 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
     private readonly ListStore _materialStore;
     private readonly ListStore _jointSetStore;
     private readonly ListStore _forceStore;
+    private readonly ListStore _sweepStore;
     private TreeView _forceList;
+    private TreeView _sweepList;
+    private CheckButton _enableSweepCheck;
+    private ComboBoxText _sweepModeCombo;
+    private Entry _sweepNameEntry;
+    private Entry _sweepTargetEntry;
+    private SpinButton _sweepMinSpin;
+    private SpinButton _sweepMaxSpin;
+    private ComboBoxText _sweepInterpolationCombo;
 
     // Panels
     private Box _toolsPanel;
@@ -103,6 +112,8 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
         _materialStore = new ListStore(typeof(string), typeof(int));
         _jointSetStore = new ListStore(typeof(string), typeof(int), typeof(int));
         _forceStore = new ListStore(typeof(string), typeof(int));
+        _sweepStore = new ListStore(typeof(bool), typeof(string), typeof(string), typeof(double), typeof(double),
+            typeof(string));
 
         // Left panel - Tools
         _toolsPanel = CreateToolsPanel();
@@ -143,6 +154,7 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
 
         ShowAll();
         UpdateForceList();
+        RefreshSweepList();
     }
 
     #endregion
@@ -231,6 +243,86 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
         simFrame.Add(simBox);
         panel.PackStart(simFrame, false, false, 5);
 
+        // Parameter sweep controls
+        var sweepFrame = new Frame("Parameter Sweep");
+        var sweepBox = new Box(Orientation.Vertical, 4);
+
+        _enableSweepCheck = new CheckButton("Enable Parameter Sweep");
+        _enableSweepCheck.Active = _simulator.ParameterSweepManager.Enabled;
+        _enableSweepCheck.Toggled += (_, _) =>
+        {
+            _simulator.ParameterSweepManager.Enabled = _enableSweepCheck.Active;
+        };
+        sweepBox.PackStart(_enableSweepCheck, false, false, 2);
+
+        var modeBox = new Box(Orientation.Horizontal, 5);
+        modeBox.PackStart(new Label("Mode:"), false, false, 2);
+        _sweepModeCombo = new ComboBoxText();
+        foreach (var mode in Enum.GetValues<GeomechanicsSweepMode>())
+            _sweepModeCombo.AppendText(mode.ToString());
+        _sweepModeCombo.Active = (int)_simulator.ParameterSweepManager.Mode;
+        _sweepModeCombo.Changed += (_, _) =>
+        {
+            _simulator.ParameterSweepManager.Mode = (GeomechanicsSweepMode)_sweepModeCombo.Active;
+        };
+        modeBox.PackStart(_sweepModeCombo, true, true, 2);
+        sweepBox.PackStart(modeBox, false, false, 2);
+
+        _sweepList = new TreeView(_sweepStore);
+        var enabledCell = new CellRendererToggle();
+        enabledCell.Toggled += OnSweepEnabledToggled;
+        _sweepList.AppendColumn("On", enabledCell, "active", 0);
+        _sweepList.AppendColumn("Name", new CellRendererText(), "text", 1);
+        _sweepList.AppendColumn("Target", new CellRendererText(), "text", 2);
+        _sweepList.AppendColumn("Min", new CellRendererText(), "text", 3);
+        _sweepList.AppendColumn("Max", new CellRendererText(), "text", 4);
+        _sweepList.AppendColumn("Interp", new CellRendererText(), "text", 5);
+        var sweepScroll = new ScrolledWindow { HeightRequest = 120 };
+        sweepScroll.Add(_sweepList);
+        sweepBox.PackStart(sweepScroll, true, true, 2);
+
+        var nameBox = new Box(Orientation.Horizontal, 4);
+        nameBox.PackStart(new Label("Name:"), false, false, 2);
+        _sweepNameEntry = new Entry("LoadFactor");
+        nameBox.PackStart(_sweepNameEntry, true, true, 2);
+        sweepBox.PackStart(nameBox, false, false, 2);
+
+        var targetBox = new Box(Orientation.Horizontal, 4);
+        targetBox.PackStart(new Label("Target:"), false, false, 2);
+        _sweepTargetEntry = new Entry("LoadFactor");
+        targetBox.PackStart(_sweepTargetEntry, true, true, 2);
+        sweepBox.PackStart(targetBox, false, false, 2);
+
+        var rangeBox = new Box(Orientation.Horizontal, 4);
+        rangeBox.PackStart(new Label("Min:"), false, false, 2);
+        _sweepMinSpin = new SpinButton(-1e6, 1e6, 0.1) { Value = 0.5 };
+        rangeBox.PackStart(_sweepMinSpin, true, true, 2);
+        rangeBox.PackStart(new Label("Max:"), false, false, 2);
+        _sweepMaxSpin = new SpinButton(-1e6, 1e6, 0.1) { Value = 1.5 };
+        rangeBox.PackStart(_sweepMaxSpin, true, true, 2);
+        sweepBox.PackStart(rangeBox, false, false, 2);
+
+        var interpBox = new Box(Orientation.Horizontal, 4);
+        interpBox.PackStart(new Label("Interpolation:"), false, false, 2);
+        _sweepInterpolationCombo = new ComboBoxText();
+        foreach (var interp in Enum.GetValues<GeomechanicsInterpolationType>())
+            _sweepInterpolationCombo.AppendText(interp.ToString());
+        _sweepInterpolationCombo.Active = 0;
+        interpBox.PackStart(_sweepInterpolationCombo, true, true, 2);
+        sweepBox.PackStart(interpBox, false, false, 2);
+
+        var sweepButtons = new Box(Orientation.Horizontal, 4);
+        var addSweepBtn = new Button("Add Sweep");
+        addSweepBtn.Clicked += (_, _) => AddSweep();
+        var removeSweepBtn = new Button("Remove Selected");
+        removeSweepBtn.Clicked += (_, _) => RemoveSelectedSweep();
+        sweepButtons.PackStart(addSweepBtn, true, true, 2);
+        sweepButtons.PackStart(removeSweepBtn, true, true, 2);
+        sweepBox.PackStart(sweepButtons, false, false, 2);
+
+        sweepFrame.Add(sweepBox);
+        panel.PackStart(sweepFrame, false, false, 5);
+
         return panel;
     }
 
@@ -254,6 +346,59 @@ public class TwoDGeomechanicsGtkViewer : Gtk.Box
             {
                 tb.Active = false;
             }
+        }
+    }
+
+    private void AddSweep()
+    {
+        var sweep = new GeomechanicsParameterSweep
+        {
+            ParameterName = _sweepNameEntry.Text,
+            TargetPath = _sweepTargetEntry.Text,
+            MinValue = _sweepMinSpin.Value,
+            MaxValue = _sweepMaxSpin.Value,
+            Interpolation = (GeomechanicsInterpolationType)_sweepInterpolationCombo.Active
+        };
+
+        _simulator.ParameterSweepManager.Sweeps.Add(sweep);
+        RefreshSweepList();
+    }
+
+    private void RemoveSelectedSweep()
+    {
+        if (_sweepList.Selection.GetSelected(out var model, out var iter))
+        {
+            var name = (string)model.GetValue(iter, 1);
+            var sweep = _simulator.ParameterSweepManager.Sweeps.FirstOrDefault(s => s.ParameterName == name);
+            if (sweep != null)
+            {
+                _simulator.ParameterSweepManager.Sweeps.Remove(sweep);
+                RefreshSweepList();
+            }
+        }
+    }
+
+    private void RefreshSweepList()
+    {
+        _sweepStore.Clear();
+        foreach (var sweep in _simulator.ParameterSweepManager.Sweeps)
+        {
+            _sweepStore.AppendValues(sweep.Enabled, sweep.ParameterName, sweep.TargetPath, sweep.MinValue,
+                sweep.MaxValue, sweep.Interpolation.ToString());
+        }
+    }
+
+    private void OnSweepEnabledToggled(object o, ToggledArgs args)
+    {
+        if (!_sweepStore.GetIter(out var iter, new TreePath(args.Path))) return;
+        bool enabled = (bool)_sweepStore.GetValue(iter, 0);
+        _sweepStore.SetValue(iter, 0, !enabled);
+
+        var name = (string)_sweepStore.GetValue(iter, 1);
+        var sweep = _simulator.ParameterSweepManager.Sweeps.FirstOrDefault(s => s.ParameterName == name);
+        if (sweep != null)
+        {
+            sweep.Enabled = !enabled;
         }
     }
 

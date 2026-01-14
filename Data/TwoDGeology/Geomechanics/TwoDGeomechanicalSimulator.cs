@@ -184,6 +184,11 @@ public class TwoDGeomechanicalSimulator
     /// </summary>
     public AutoFaultSettings AutoFaultSettings => FaultEngine.Settings;
 
+    /// <summary>
+    /// Parameter sweep manager for time/step-based parameter variation.
+    /// </summary>
+    public GeomechanicsParameterSweepManager ParameterSweepManager { get; } = new();
+
     // Analysis settings
     public AnalysisType2D AnalysisType { get; set; } = AnalysisType2D.Static;
     public SolverType2D SolverType { get; set; } = SolverType2D.ConjugateGradient;
@@ -371,6 +376,8 @@ public class TwoDGeomechanicalSimulator
         State.CurrentStep = 0;
         State.StatusMessage = "Running static analysis...";
 
+        ApplyParameterSweep(1, 1, 0.0, 1.0);
+
         // Assemble global stiffness matrix
         AssembleStiffnessMatrix();
 
@@ -412,6 +419,8 @@ public class TwoDGeomechanicalSimulator
             State.CurrentStep = step;
             State.CurrentLoad = (double)step / NumLoadSteps;
             State.StatusMessage = $"Load step {step}/{NumLoadSteps}";
+
+            ApplyParameterSweep(step, NumLoadSteps, step * TimeStep, NumLoadSteps * TimeStep);
 
             // Scale forces
             double loadFactor = (double)step / NumLoadSteps;
@@ -490,6 +499,8 @@ public class TwoDGeomechanicalSimulator
             double t = step * TimeStep;
             State.CurrentStep = step;
             State.CurrentTime = t;
+
+            ApplyParameterSweep(step, numSteps, t, TotalTime);
 
             // Central difference scheme
             // u(n+1) = u(n) + dt*v(n) + 0.5*dt²*a(n)
@@ -574,6 +585,8 @@ public class TwoDGeomechanicalSimulator
             State.CurrentStep = step;
             State.CurrentTime = t;
 
+            ApplyParameterSweep(step, numSteps, t, TotalTime);
+
             // Predictor
             var uPred = new double[Mesh.TotalDOF];
             var vPred = new double[Mesh.TotalDOF];
@@ -627,6 +640,18 @@ public class TwoDGeomechanicalSimulator
 
         ComputeDerivedQuantities();
         State.IsConverged = true;
+    }
+
+    private void ApplyParameterSweep(int step, int totalSteps, double time, double totalTime)
+    {
+        if (!ParameterSweepManager.Enabled || ParameterSweepManager.Sweeps.Count == 0) return;
+
+        double normalized = ParameterSweepManager.Mode == GeomechanicsSweepMode.Time
+            ? (totalTime > 0 ? time / totalTime : 0.0)
+            : (totalSteps > 0 ? (double)step / totalSteps : 0.0);
+
+        normalized = Math.Clamp(normalized, 0.0, 1.0);
+        ParameterSweepManager.Apply(this, normalized);
     }
 
     #endregion

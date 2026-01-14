@@ -184,6 +184,22 @@ The automated verification suite includes 2D strip-footing benchmarks that check
    - Apply loads (point forces, distributed pressure, gravity)
    - Run simulations and visualize results
 
+### Parameter Sweep (Step/Time)
+
+Use the **Simulation → Parameter Sweep** panel in the ImGui tools or the **Parameter Sweep** panel
+in the GTK viewer to vary solver parameters over the simulation progress.
+
+**Typical sweep targets:**
+- `LoadFactor`
+- `Gravity.X`, `Gravity.Y`
+- `TimeStep`
+
+**GeoScript example:**
+```geoscript
+GEOMECH_SWEEP name=LoadFactor target=LoadFactor min=0.5 max=1.5 mode=Step
+GEOMECH_RUN analysis=quasistatic steps=10
+```
+
 ### Tool Modes
 
 | Tool | Description |

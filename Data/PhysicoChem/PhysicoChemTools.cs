@@ -96,6 +96,12 @@ public class PhysicoChemTools : IDatasetTools
     private bool _isSimulating = false;
     private float _simulationProgress = 0.0f;
     private string _simulationStatus = "";
+    private int _selectedSweepIndex = -1;
+    private string _sweepName = "Temperature";
+    private string _sweepTargetPath = "SimulationParams.TotalTime";
+    private double _sweepMinValue = 0.0;
+    private double _sweepMaxValue = 1.0;
+    private int _sweepInterpolationIndex = 0;
 
     // Selected items
     private int _selectedDomainIndex = -1;
@@ -1245,6 +1251,123 @@ public class PhysicoChemTools : IDatasetTools
 
         if (ImGui.InputFloat("Gas Buoyancy Velocity (m/s)", ref gasBuoyancyVelocity, 0, 0, "%.3f"))
             simParams.GasBuoyancyVelocity = Math.Max(0.0, gasBuoyancyVelocity);
+
+        ImGui.Separator();
+        DrawParameterSweepOptions(dataset);
+    }
+
+    private void DrawParameterSweepOptions(PhysicoChemDataset dataset)
+    {
+        if (!ImGui.CollapsingHeader("Parameter Sweep"))
+            return;
+
+        var manager = dataset.ParameterSweepManager ??= new ParameterSweepManager();
+        var simParams = dataset.SimulationParams;
+
+        bool enableSweep = simParams.EnableParameterSweep;
+        if (ImGui.Checkbox("Enable Parameter Sweep", ref enableSweep))
+        {
+            simParams.EnableParameterSweep = enableSweep;
+            manager.Enabled = enableSweep;
+        }
+
+        int modeIndex = (int)manager.Mode;
+        if (ImGui.Combo("Sweep Mode", ref modeIndex, Enum.GetNames<SweepMode>(), Enum.GetValues<SweepMode>().Length))
+        {
+            manager.Mode = (SweepMode)modeIndex;
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Configured Sweeps");
+
+        if (manager.Sweeps.Count == 0)
+        {
+            ImGui.TextDisabled("No sweeps configured.");
+        }
+        else
+        {
+            for (int i = 0; i < manager.Sweeps.Count; i++)
+            {
+                var sweep = manager.Sweeps[i];
+                bool isSelected = _selectedSweepIndex == i;
+                string label = $"{sweep.ParameterName} -> {sweep.TargetPath}";
+                if (ImGui.Selectable(label, isSelected))
+                {
+                    _selectedSweepIndex = i;
+                }
+            }
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Add Sweep");
+        ImGui.InputText("Name", ref _sweepName, 64);
+        ImGui.InputText("Target Path", ref _sweepTargetPath, 128);
+        ImGui.InputDouble("Min Value", ref _sweepMinValue);
+        ImGui.InputDouble("Max Value", ref _sweepMaxValue);
+
+        if (ImGui.Combo("Interpolation", ref _sweepInterpolationIndex, Enum.GetNames<InterpolationType>(),
+                Enum.GetValues<InterpolationType>().Length))
+        {
+        }
+
+        if (ImGui.Button("Add Sweep", new Vector2(-1, 0)))
+        {
+            manager.Sweeps.Add(new ParameterSweep
+            {
+                ParameterName = _sweepName,
+                TargetPath = _sweepTargetPath,
+                MinValue = _sweepMinValue,
+                MaxValue = _sweepMaxValue,
+                Interpolation = (InterpolationType)_sweepInterpolationIndex
+            });
+            _selectedSweepIndex = manager.Sweeps.Count - 1;
+        }
+
+        if (_selectedSweepIndex >= 0 && _selectedSweepIndex < manager.Sweeps.Count)
+        {
+            ImGui.Separator();
+            ImGui.Text("Selected Sweep");
+            var selected = manager.Sweeps[_selectedSweepIndex];
+
+            bool enabled = selected.Enabled;
+            if (ImGui.Checkbox("Enabled##SelectedSweep", ref enabled))
+                selected.Enabled = enabled;
+
+            var selectedName = selected.ParameterName ?? string.Empty;
+            if (ImGui.InputText("Name##SelectedSweep", ref selectedName, 64))
+                selected.ParameterName = selectedName;
+
+            var selectedTarget = selected.TargetPath ?? string.Empty;
+            if (ImGui.InputText("Target##SelectedSweep", ref selectedTarget, 128))
+                selected.TargetPath = selectedTarget;
+
+            double minVal = selected.MinValue;
+            double maxVal = selected.MaxValue;
+            if (ImGui.InputDouble("Min##SelectedSweep", ref minVal))
+                selected.MinValue = minVal;
+            if (ImGui.InputDouble("Max##SelectedSweep", ref maxVal))
+                selected.MaxValue = maxVal;
+
+            int interpolationIndex = (int)selected.Interpolation;
+            if (ImGui.Combo("Interpolation##SelectedSweep", ref interpolationIndex, Enum.GetNames<InterpolationType>(),
+                    Enum.GetValues<InterpolationType>().Length))
+            {
+                selected.Interpolation = (InterpolationType)interpolationIndex;
+            }
+
+            if (ImGui.Button("Edit Curve", new Vector2(-1, 0)))
+            {
+                selected.GetCurveEditor().Open();
+            }
+
+            selected.GetCurveEditor().Submit(out _);
+
+            if (ImGui.Button("Remove Sweep", new Vector2(-1, 0)))
+            {
+                manager.Sweeps.RemoveAt(_selectedSweepIndex);
+                _selectedSweepIndex = -1;
+            }
+        }
     }
 
     private void DrawSimulationControls(PhysicoChemDataset dataset)

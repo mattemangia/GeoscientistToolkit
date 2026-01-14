@@ -322,7 +322,7 @@ solver.RunSimulation();
 
 ---
 
-## Example 6: Parameter Sweep
+## Example 6: Parameter Sweep (Runtime Curves)
 
 ```csharp
 var dataset = new PhysicoChemDataset("ParamSweepReactor");
@@ -338,7 +338,30 @@ var box = new ReactorDomain("Reactor", new ReactorGeometry
 box.Material = new MaterialProperties { Porosity = 0.3 };
 dataset.AddDomain(box);
 
-// Configure parameter sweep
+// Enable sweep application during simulation
+dataset.SimulationParams.EnableParameterSweep = true;
+dataset.ParameterSweepManager.Enabled = true;
+dataset.ParameterSweepManager.Mode = SweepMode.Temporal;
+
+// Add a sweep curve (normalized 0..1 across time or step)
+dataset.ParameterSweepManager.Sweeps.Add(new ParameterSweep
+{
+    ParameterName = "Porosity",
+    TargetPath = "Domains[0].Material.Porosity",
+    MinValue = 0.1,
+    MaxValue = 0.5
+});
+
+// Run simulation with parameter sweeps applied each step
+var solver = new PhysicoChemSolver(dataset);
+solver.RunSimulation();
+```
+
+### Batch Sweeps (Sensitivity Analysis)
+
+For offline parameter combinations, configure `ParameterSweepConfig` and call `RunParameterSweep()`:
+
+```csharp
 dataset.ParameterSweep = new ParameterSweepConfig
 {
     Type = SweepType.LatinHypercube,
@@ -346,7 +369,6 @@ dataset.ParameterSweep = new ParameterSweepConfig
     ParallelExecution = true
 };
 
-// Add parameters to sweep
 dataset.ParameterSweep.Parameters.Add(new ParameterRange
 {
     Name = "Porosity",
@@ -356,40 +378,7 @@ dataset.ParameterSweep.Parameters.Add(new ParameterRange
     TargetPath = "Domains[0].Material.Porosity"
 });
 
-dataset.ParameterSweep.Parameters.Add(new ParameterRange
-{
-    Name = "Temperature",
-    Min = 273,
-    Max = 373,
-    Scale = ParameterScaleType.Linear,
-    TargetPath = "Domains[0].InitialConditions.Temperature"
-});
-
-dataset.ParameterSweep.Parameters.Add(new ParameterRange
-{
-    Name = "Permeability",
-    Min = 1e-14,
-    Max = 1e-10,
-    Scale = ParameterScaleType.Logarithmic,
-    TargetPath = "Domains[0].Material.Permeability"
-});
-
-// Define output metrics
-dataset.ParameterSweep.OutputMetrics.Add("FinalTemperature_Mean");
-dataset.ParameterSweep.OutputMetrics.Add("Ca2+_Final_Mean");
-
-// Run parameter sweep
-var solver = new PhysicoChemSolver(dataset);
-var results = solver.RunParameterSweep();
-
-// Analyze sensitivity
-var sensitivities = results.CalculateSensitivities("FinalTemperature_Mean");
-foreach (var kvp in sensitivities.OrderByDescending(x => x.Value))
-{
-    Console.WriteLine($"{kvp.Key}: {kvp.Value:F4}");
-}
-
-// Export to CSV
+var results = new PhysicoChemSolver(dataset).RunParameterSweep();
 File.WriteAllText("sweep_results.csv", results.ExportToCsv());
 ```
 

@@ -87,14 +87,17 @@ public class GeoScriptEditorWindow
         "TEXT_SEARCH", "TEXT_REPLACE", "TEXT_STATISTICS",
 
         // Thermodynamics commands
-        "CREATEDIAGRAM", "EQUILIBRATE", "SATURATION", "BALANCEREACTION", "EVAPORATE", "REACT",
+        "CREATEDIAGRAM", "EQUILIBRATE", "SATURATION", "BALANCEREACTION", "EVAPORATE", "REACT", "THERMO_SWEEP",
         "CALCULATEPHASES", "CALCULATECARBONATEALKALINITY",
 
         // Petrology commands
         "FRACTIONATEMAGMA", "LIQUIDUSSOLIDUS", "METAMORPHICPT",
 
         // Reactor commands
-        "CREATEREACTOR", "ADDDOMAIN", "SETMINERALS", "RUNSIMULATION",
+        "CREATEREACTOR", "ADDDOMAIN", "SETMINERALS", "RUNSIMULATION", "PHYSICOCHEM_SWEEP",
+
+        // Geomechanics commands
+        "GEOMECH_RUN", "GEOMECH_SWEEP",
 
         // Utility commands
         "LISTOPS", "DISPTYPE", "UNLOAD", "INFO"
@@ -130,7 +133,8 @@ public class GeoScriptEditorWindow
         "pattern=", "case_sensitive=", "find=", "replace=",
 
         // General
-        "WHERE", "value=", "radius=", "distance=", "tolerance="
+        "WHERE", "value=", "radius=", "distance=", "tolerance=", "target=", "min=", "max=",
+        "mode=", "interp=", "grid=", "minT=", "maxT=", "minP=", "maxP=", "composition="
     };
 
     public void Show()
