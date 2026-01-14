@@ -481,7 +481,7 @@ If you use Geoscientist's Toolkit in your research, please cite:
 ```bibtex
 @software{geoscientist_toolkit,
   title = {Geoscientist's Toolkit: Integrated Geoscientific Analysis Platform},
-  author = {Mangia, Matteo},
+  author = {Mangiagalli, Matteo},
   year = {2026},
   url = {https://github.com/mattemangia/GeoscientistToolkit}
 }
