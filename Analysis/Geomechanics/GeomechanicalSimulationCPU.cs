@@ -448,8 +448,65 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
                     fixedDOFs++;
         }
 
+        ApplyGravityForces();
+
         Logger.Log(
             $"[GeomechCPU] Applied displacement-controlled BCs in {sw.ElapsedMilliseconds} ms. Fixed DOFs: {fixedDOFs:N0} / {_numDOFs:N0}");
+    }
+
+    private void ApplyGravityForces()
+    {
+        if (!_params.ApplyGravity)
+            return;
+
+        var gravity = _params.GravityAcceleration;
+        if (gravity.LengthSquared() < 1e-12f)
+            return;
+
+        var dxMeters = _params.PixelSize / 1e6f;
+        var nodeVolume = dxMeters * dxMeters * dxMeters;
+        var nodeMass = _params.Density * nodeVolume;
+
+        var fx = nodeMass * gravity.X;
+        var fy = nodeMass * gravity.Y;
+        var fz = nodeMass * gravity.Z;
+
+        const int batchSize = 1_048_576;
+        var forceBuffer = new float[batchSize];
+        var dirBuffer = new bool[batchSize];
+
+        for (long i = 0; i < _numDOFs; i += batchSize)
+        {
+            var chunkSize = (int)Math.Min(batchSize, _numDOFs - i);
+            if (forceBuffer.Length != chunkSize)
+            {
+                forceBuffer = new float[chunkSize];
+                dirBuffer = new bool[chunkSize];
+            }
+
+            _isDirichlet.ReadChunk(i, dirBuffer);
+
+            for (var j = 0; j < chunkSize; j++)
+            {
+                if (dirBuffer[j])
+                {
+                    forceBuffer[j] = 0;
+                    continue;
+                }
+
+                var comp = (int)((i + j) % 3);
+                forceBuffer[j] = comp switch
+                {
+                    0 => fx,
+                    1 => fy,
+                    _ => fz
+                };
+            }
+
+            _force.WriteChunk(i, forceBuffer);
+        }
+
+        Logger.Log($"[GeomechCPU] Applied gravity body forces: ({gravity.X:F3}, {gravity.Y:F3}, {gravity.Z:F3}) m/s²");
     }
 
     private bool SolveSystem(IProgress<float> progress, CancellationToken token)

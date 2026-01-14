@@ -47,6 +47,10 @@ public partial class GeomechanicalParameters
 
     public bool EnablePlasticity { get; set; } = false;
 
+    // Body forces (gravity/custom acceleration)
+    public bool ApplyGravity { get; set; } = false;
+    public Vector3 GravityAcceleration { get; set; } = new(0, 0, -9.81f); // m/s²
+
     // Pore pressure effects
     public bool UsePorePressure { get; set; }
     public float PorePressure { get; set; } = 10f; // MPa

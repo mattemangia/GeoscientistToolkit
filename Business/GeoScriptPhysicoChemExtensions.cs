@@ -135,3 +135,108 @@ public class RunSimulationCommand : IGeoScriptCommand
         return Task.FromResult<Dataset>(dataset);
     }
 }
+
+/// <summary>
+/// PHYSICOCHEM_ADD_FORCE: Adds a force field to a PhysicoChem dataset
+/// Usage: PHYSICOCHEM_ADD_FORCE name=Gravity type=gravity gravity=0,0,-9.81
+/// </summary>
+public class PhysicoChemAddForceCommand : IGeoScriptCommand
+{
+    public string Name => "PHYSICOCHEM_ADD_FORCE";
+    public string HelpText => "Adds a force field (gravity/vortex/centrifugal) to a PhysicoChem dataset";
+    public string Usage =>
+        "PHYSICOCHEM_ADD_FORCE [name=Force1] [type=gravity] [active=true] " +
+        "[gravity=0,0,-9.81] [gravity_x=0] [gravity_y=0] [gravity_z=-9.81] " +
+        "[gravity_preset=earth|moon|mars|venus|jupiter|saturn|mercury] [gravity_magnitude=9.81] " +
+        "[center=0,0,0] [axis=0,0,1] [strength=1] [radius=1]";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not PhysicoChemDataset dataset)
+            throw new NotSupportedException("PHYSICOCHEM_ADD_FORCE only works on PhysicoChem datasets");
+
+        var cmd = (CommandNode)node;
+        var args = GeoScriptArgumentParser.ParseArguments(cmd.FullText);
+
+        var name = GeoScriptArgumentParser.GetString(args, "name", $"Force{dataset.Forces.Count + 1}", context);
+        var typeName = GeoScriptArgumentParser.GetString(args, "type", ForceType.Gravity.ToString(), context);
+        if (!Enum.TryParse<ForceType>(typeName, true, out var forceType))
+            throw new ArgumentException($"Unknown force type: {typeName}");
+
+        var force = new ForceField(name, forceType)
+        {
+            IsActive = GeoScriptArgumentParser.GetBool(args, "active", true, context)
+        };
+
+        switch (forceType)
+        {
+            case ForceType.Gravity:
+                var gravity = GeoScriptArgumentParser.GetVector3(args, "gravity", new Vector3(0, 0, -9.81f), context);
+
+                if (GeoScriptArgumentParser.TryGetString(args, "gravity_preset", out var preset))
+                {
+                    var mag = preset.ToLowerInvariant() switch
+                    {
+                        "earth" => 9.81f,
+                        "moon" => 1.62f,
+                        "mars" => 3.72f,
+                        "venus" => 8.87f,
+                        "jupiter" => 24.79f,
+                        "saturn" => 10.44f,
+                        "mercury" => 3.70f,
+                        _ => throw new ArgumentException($"Unknown gravity preset: {preset}")
+                    };
+                    gravity = new Vector3(0, 0, -mag);
+                }
+
+                if (GeoScriptArgumentParser.TryGetString(args, "gravity_magnitude", out var magnitudeValue))
+                {
+                    var magnitude = float.Parse(magnitudeValue, CultureInfo.InvariantCulture);
+                    gravity = new Vector3(0, 0, -MathF.Abs(magnitude));
+                }
+
+                if (GeoScriptArgumentParser.TryGetString(args, "gravity_x", out var gx))
+                    gravity.X = float.Parse(gx, CultureInfo.InvariantCulture);
+                if (GeoScriptArgumentParser.TryGetString(args, "gravity_y", out var gy))
+                    gravity.Y = float.Parse(gy, CultureInfo.InvariantCulture);
+                if (GeoScriptArgumentParser.TryGetString(args, "gravity_z", out var gz))
+                    gravity.Z = float.Parse(gz, CultureInfo.InvariantCulture);
+
+                force.GravityVector = (gravity.X, gravity.Y, gravity.Z);
+                break;
+
+            case ForceType.Vortex:
+            case ForceType.Centrifugal:
+                var center = GeoScriptArgumentParser.GetVector3(args, "center", Vector3.Zero, context);
+                if (GeoScriptArgumentParser.TryGetString(args, "vortex_center", out var vortexCenterValue))
+                    center = ParseVector3(vortexCenterValue, center);
+
+                var axis = GeoScriptArgumentParser.GetVector3(args, "axis", new Vector3(0, 0, 1), context);
+                if (GeoScriptArgumentParser.TryGetString(args, "vortex_axis", out var vortexAxisValue))
+                    axis = ParseVector3(vortexAxisValue, axis);
+
+                force.VortexCenter = (center.X, center.Y, center.Z);
+                force.VortexAxis = (axis.X, axis.Y, axis.Z);
+                force.VortexStrength = GeoScriptArgumentParser.GetDouble(args, "strength", 1.0, context);
+                force.VortexRadius = GeoScriptArgumentParser.GetDouble(args, "radius", 1.0, context);
+                break;
+        }
+
+        dataset.Forces.Add(force);
+        Logger.Log($"[PHYSICOCHEM_ADD_FORCE] Added {forceType} force '{name}'");
+
+        return Task.FromResult<Dataset>(dataset);
+    }
+
+    private static Vector3 ParseVector3(string value, Vector3 fallback)
+    {
+        var parts = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 3)
+            return fallback;
+
+        return new Vector3(
+            float.Parse(parts[0], CultureInfo.InvariantCulture),
+            float.Parse(parts[1], CultureInfo.InvariantCulture),
+            float.Parse(parts[2], CultureInfo.InvariantCulture));
+    }
+}

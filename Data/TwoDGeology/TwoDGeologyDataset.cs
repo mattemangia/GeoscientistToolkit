@@ -705,7 +705,7 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
         }
 
         // Find the physical material in the library
-        var physMat = MaterialLibrary.Instance.Find(materialName);
+        var physMat = GeoscientistToolkit.Business.MaterialLibrary.Instance.Find(materialName);
         if (physMat == null)
         {
             Logger.LogWarning($"Material '{materialName}' not found in MaterialLibrary");
@@ -794,7 +794,7 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
         }
 
         int assigned = 0;
-        var library = MaterialLibrary.Instance.Materials;
+        var library = GeoscientistToolkit.Business.MaterialLibrary.Instance.Materials;
 
         foreach (var formation in ProfileData.Formations)
         {
@@ -856,7 +856,7 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
     /// <returns>List of suitable PhysicalMaterial names</returns>
     public List<string> GetAvailableLibraryMaterials()
     {
-        return MaterialLibrary.Instance.Materials
+        return GeoscientistToolkit.Business.MaterialLibrary.Instance.Materials
             .Where(m => m.Phase == PhaseType.Solid &&
                        (m.YoungModulus_GPa.HasValue || m.Density_kg_m3.HasValue))
             .Select(m => m.Name)
@@ -871,7 +871,7 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
     /// <returns>The PhysicalMaterial if found, null otherwise</returns>
     public PhysicalMaterial GetLibraryMaterial(string materialName)
     {
-        return MaterialLibrary.Instance.Find(materialName);
+        return GeoscientistToolkit.Business.MaterialLibrary.Instance.Find(materialName);
     }
 
     /// <summary>

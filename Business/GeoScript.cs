@@ -380,6 +380,7 @@ public static class CommandRegistry
             // PhysicoChem Reactor Commands
             new CreateReactorCommand(),
             new RunSimulationCommand(),
+            new PhysicoChemAddForceCommand(),
             new AddCellCommand(),
             new SetCellMaterialCommand(),
 

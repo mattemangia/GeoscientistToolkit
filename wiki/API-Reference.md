@@ -446,6 +446,29 @@ POST /api/simulation/geomech2d
 | `gravityY` | float | Y component of gravity (m/s²). Default: -9.81 |
 | `gravityPreset` | string | Planetary preset: earth, moon, mars, venus, jupiter, saturn, mercury |
 
+The 3D geomechanical simulation endpoint accepts body force gravity settings via `GeomechanicalSimulationRequest`:
+
+```json
+POST /api/simulation/geomechanical
+{
+    "meshFile": "sample.mesh",
+    "enablePlasticity": true,
+    "applyGravity": true,
+    "gravityX": 0,
+    "gravityY": 0,
+    "gravityZ": -9.81
+}
+```
+
+**3D Gravity Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `applyGravity` | bool | Enables gravity body forces for the 3D solver. |
+| `gravityX` | float | X component of gravity (m/s²). Default: 0 |
+| `gravityY` | float | Y component of gravity (m/s²). Default: 0 |
+| `gravityZ` | float | Z component of gravity (m/s²). Default: -9.81 |
+
 **Planetary Presets:**
 
 | Preset | Gravity (m/s²) |

@@ -1212,7 +1212,35 @@ RUN_SIMULATION
 
 ---
 
-#### 5.6.3 ADD_CELL
+#### 5.6.3 PHYSICOCHEM_ADD_FORCE
+
+Adds a force field (gravity/vortex/centrifugal) to a PhysicoChem dataset.
+
+**Syntax**:
+```geoscript
+PHYSICOCHEM_ADD_FORCE name=<name> type=<gravity|vortex|centrifugal> [options]
+```
+
+**Gravity Options**:
+- `gravity` (x,y,z)
+- `gravity_x`, `gravity_y`, `gravity_z`
+- `gravity_preset` (earth, moon, mars, venus, jupiter, saturn, mercury)
+- `gravity_magnitude`
+
+**Vortex/Centrifugal Options**:
+- `center` (x,y,z)
+- `axis` (x,y,z)
+- `strength`, `radius`
+
+**Examples**:
+```geoscript
+PHYSICOCHEM_ADD_FORCE name=MoonGravity type=gravity gravity=0,0,-1.62
+PHYSICOCHEM_ADD_FORCE name=Vortex type=vortex center=0,0,0 axis=0,1,0 strength=2.5 radius=5
+```
+
+---
+
+#### 5.6.4 ADD_CELL
 
 Adds a cell to the reactor grid.
 
@@ -1223,7 +1251,7 @@ ADD_CELL x=<int> y=<int> z=<int> material='<name>'
 
 ---
 
-#### 5.6.4 SET_CELL_MATERIAL
+#### 5.6.5 SET_CELL_MATERIAL
 
 Sets a material for an existing reactor cell.
 
@@ -3037,8 +3065,8 @@ CREATE_DIAGRAM, EQUILIBRATE, SATURATION, SATURATION_INDEX, BALANCE_REACTION, EVA
 ### Petrology (3 commands)
 FRACTIONATE_MAGMA, LIQUIDUS_SOLIDUS, METAMORPHIC_PT
 
-### PhysicoChem Reactor (4 commands)
-CREATE_REACTOR, RUN_SIMULATION, ADD_CELL, SET_CELL_MATERIAL
+### PhysicoChem Reactor (5 commands)
+CREATE_REACTOR, RUN_SIMULATION, PHYSICOCHEM_ADD_FORCE, ADD_CELL, SET_CELL_MATERIAL
 
 ### Image Processing (7 commands)
 BRIGHTNESS_CONTRAST, FILTER, THRESHOLD, BINARIZE, GRAYSCALE, INVERT, NORMALIZE

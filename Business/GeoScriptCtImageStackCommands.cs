@@ -611,6 +611,55 @@ public class SimulateGeomechCommand : IGeoScriptCommand
         var selectedMaterials = GeoScriptArgumentParser.GetByteSet(args, "materials", context) ??
                                 ctDs.Materials.Where(m => m.ID != 0).Select(m => m.ID).ToHashSet();
 
+        var applyGravity = GeoScriptArgumentParser.GetBool(args, "apply_gravity", false, context);
+        var gravity = GeoScriptArgumentParser.GetVector3(args, "gravity", new Vector3(0, 0, -9.81f), context);
+        var gravitySpecified = false;
+
+        if (GeoScriptArgumentParser.TryGetString(args, "gravity_preset", out var gravityPreset))
+        {
+            gravitySpecified = true;
+            var magnitude = gravityPreset.ToLowerInvariant() switch
+            {
+                "earth" => 9.81f,
+                "moon" => 1.62f,
+                "mars" => 3.72f,
+                "venus" => 8.87f,
+                "jupiter" => 24.79f,
+                "saturn" => 10.44f,
+                "mercury" => 3.70f,
+                _ => throw new ArgumentException($"Unknown gravity preset: {gravityPreset}")
+            };
+            gravity = new Vector3(0, 0, -magnitude);
+        }
+
+        if (GeoScriptArgumentParser.TryGetString(args, "gravity_magnitude", out var gravityMagnitudeValue))
+        {
+            gravitySpecified = true;
+            var magnitude = float.Parse(gravityMagnitudeValue, CultureInfo.InvariantCulture);
+            gravity = new Vector3(0, 0, -MathF.Abs(magnitude));
+        }
+
+        if (GeoScriptArgumentParser.TryGetString(args, "gravity_x", out var gravityXValue))
+        {
+            gravitySpecified = true;
+            gravity.X = float.Parse(gravityXValue, CultureInfo.InvariantCulture);
+        }
+
+        if (GeoScriptArgumentParser.TryGetString(args, "gravity_y", out var gravityYValue))
+        {
+            gravitySpecified = true;
+            gravity.Y = float.Parse(gravityYValue, CultureInfo.InvariantCulture);
+        }
+
+        if (GeoScriptArgumentParser.TryGetString(args, "gravity_z", out var gravityZValue))
+        {
+            gravitySpecified = true;
+            gravity.Z = float.Parse(gravityZValue, CultureInfo.InvariantCulture);
+        }
+
+        if (gravitySpecified)
+            applyGravity = true;
+
         var parameters = new GeomechanicalParameters
         {
             Width = extent.Width,
@@ -630,6 +679,8 @@ public class SimulateGeomechCommand : IGeoScriptCommand
             Sigma2 = GeoScriptArgumentParser.GetFloat(args, "sigma2", 50f, context),
             Sigma3 = GeoScriptArgumentParser.GetFloat(args, "sigma3", 20f, context),
             Sigma1Direction = GeoScriptArgumentParser.GetVector3(args, "sigma1_direction", new Vector3(0, 0, 1), context),
+            ApplyGravity = applyGravity,
+            GravityAcceleration = gravity,
             UsePorePressure = GeoScriptArgumentParser.GetBool(args, "use_pore_pressure", false, context),
             PorePressure = GeoScriptArgumentParser.GetFloat(args, "pore_pressure", 10f, context),
             BiotCoefficient = GeoScriptArgumentParser.GetFloat(args, "biot_coefficient", 0.8f, context),

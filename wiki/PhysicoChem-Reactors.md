@@ -322,14 +322,11 @@ reactor.Forces.Add(gravityForce);
 
 **GeoScript:**
 ```geoscript
-# Set custom gravity
-PHYSICOCHEM_SET_GRAVITY vector="(0, 0, -1.62)"
+# Set custom gravity (vector components)
+PHYSICOCHEM_ADD_FORCE name=MoonGravity type=gravity gravity=0,0,-1.62
 
 # Use planetary preset
-PHYSICOCHEM_SET_GRAVITY preset=mars
-
-# Full configuration
-PHYSICOCHEM_SET_GRAVITY preset=earth altitude_variation=true latitude=45
+PHYSICOCHEM_ADD_FORCE name=MarsGravity type=gravity gravity_preset=mars
 ```
 
 ---

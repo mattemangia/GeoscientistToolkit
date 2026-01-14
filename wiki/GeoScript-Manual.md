@@ -319,6 +319,7 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 |---------|-------------|---------|
 | `CREATE_REACTOR` | Create a PhysicoChem reactor | `CREATE_REACTOR` |
 | `RUN_SIMULATION` | Run PhysicoChem simulation | `RUN_SIMULATION` |
+| `PHYSICOCHEM_ADD_FORCE` | Add force fields (gravity/vortex) | `PHYSICOCHEM_ADD_FORCE name=MoonGravity type=gravity gravity=0,0,-1.62` |
 | `ADD_CELL` | Add cell to reactor grid | `ADD_CELL x=10 y=12 z=4 material='Sandstone'` |
 | `SET_CELL_MATERIAL` | Set reactor cell material | `SET_CELL_MATERIAL id=12 material='Clay'` |
 
@@ -337,12 +338,18 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | `SIMULATE_ACOUSTIC` | Acoustic wave simulation | `SIMULATE_ACOUSTIC materials=1,2 tx=0.1,0.5,0.5 rx=0.9,0.5,0.5` |
 | `SIMULATE_NMR` | NMR random walk simulation | `SIMULATE_NMR pore_material_id=1 steps=1000` |
 | `SIMULATE_THERMAL_CONDUCTIVITY` | Thermal conductivity solver | `SIMULATE_THERMAL_CONDUCTIVITY direction=z temperature_hot=373.15` |
-| `SIMULATE_GEOMECH` | Geomechanical simulation | `SIMULATE_GEOMECH sigma1=100 sigma2=50 sigma3=20 use_gpu=true` |
+| `SIMULATE_GEOMECH` | Geomechanical simulation | `SIMULATE_GEOMECH sigma1=100 sigma2=50 sigma3=20 apply_gravity=true gravity=0,0,-9.81` |
 
 **Parameter values can reference dataset fields**, for example:
 
 ```geoscript
 SIMULATE_GEOMECH porosity=examplepnmdataset.porosity sigma1=100 sigma2=50 sigma3=20
+```
+
+Gravity body forces can be enabled with `apply_gravity` and a full 3D vector:
+
+```geoscript
+SIMULATE_GEOMECH apply_gravity=true gravity=0,0,-9.81
 ```
 
 ### Borehole Operations
