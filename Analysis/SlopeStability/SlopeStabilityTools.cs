@@ -470,6 +470,10 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
                 if (ImGui.InputInt("Max Iterations", ref maxIter))
                     param.MaxIterations = Math.Max(maxIter, 100);
 
+                float convergenceThreshold = param.ConvergenceThreshold;
+                if (ImGui.InputFloat("Convergence Threshold", ref convergenceThreshold, 0, 0, "%.2e"))
+                    param.ConvergenceThreshold = Math.Max(convergenceThreshold, 1e-9f);
+
                 ImGui.Text($"Estimated Steps: {param.GetNumSteps()}");
             }
 

@@ -100,6 +100,8 @@ public class PhysicoChemSolver : SimulatorNodeSupport
         _heatTransfer.HeatParams.SubgridMixingFactor = simParams.HeatSubgridMixingFactor;
         _heatTransfer.HeatParams.SubgridCoolingBias = simParams.HeatSubgridCoolingBias;
         _flowSolver.MultiphaseParams.GasBuoyancyVelocity = simParams.GasBuoyancyVelocity;
+        _reactiveTransport.MaxOuterIterations = simParams.MaxIterations;
+        _reactiveTransport.ConvergenceTolerance = simParams.ConvergenceTolerance;
 
         // Initialize tracking if enabled
         if (simParams.EnableTracking && _dataset.TrackingManager != null)
@@ -187,7 +189,7 @@ public class PhysicoChemSolver : SimulatorNodeSupport
                 // 5. Handle nucleation
                 if (simParams.EnableNucleation && _dataset.NucleationSites.Count > 0)
                 {
-                    _nucleationSolver.UpdateNucleation(newState, _dataset.NucleationSites, dt);
+                    _nucleationSolver.UpdateNucleation(_dataset, newState, _dataset.NucleationSites, dt);
                 }
 
                 // 6. Apply boundary conditions

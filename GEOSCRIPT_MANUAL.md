@@ -1207,7 +1207,7 @@ Runs the PhysicoChem simulation.
 
 **Syntax**:
 ```geoscript
-RUN_SIMULATION
+RUN_SIMULATION <total_time_s> <time_step_s> [convergence_tolerance=1e-6]
 ```
 
 ---
@@ -1240,7 +1240,18 @@ PHYSICOCHEM_ADD_FORCE name=Vortex type=vortex center=0,0,0 axis=0,1,0 strength=2
 
 ---
 
-#### 5.6.4 ADD_CELL
+#### 5.6.4 PHYSICOCHEM_ADD_NUCLEATION_SITE
+
+Adds a nucleation site (point) to a PhysicoChem dataset.
+
+**Syntax**:
+```geoscript
+PHYSICOCHEM_ADD_NUCLEATION_SITE name=Site1 x=0 y=0 z=0 mineral=Calcite material_id=ReactorFluid rate=1e6 active=true
+```
+
+---
+
+#### 5.6.5 ADD_CELL
 
 Adds a cell to the reactor grid.
 
@@ -1251,7 +1262,7 @@ ADD_CELL x=<int> y=<int> z=<int> material='<name>'
 
 ---
 
-#### 5.6.5 SET_CELL_MATERIAL
+#### 5.6.6 SET_CELL_MATERIAL
 
 Sets a material for an existing reactor cell.
 
@@ -1747,12 +1758,12 @@ Runs reactive transport simulation through the pore network.
 
 **Syntax**:
 ```geoscript
-RUN_PNM_REACTIVE_TRANSPORT <total_time_s> <time_step_s> <inlet_temp_K> <inlet_pressure_Pa> <outlet_pressure_Pa>
+RUN_PNM_REACTIVE_TRANSPORT <total_time_s> <time_step_s> <inlet_temp_K> <inlet_pressure_Pa> <outlet_pressure_Pa> [convergence_tolerance=1e-6]
 ```
 
 **Examples**:
 ```geoscript
-RUN_PNM_REACTIVE_TRANSPORT 1000 0.01 298 1.5e7 1.0e7
+RUN_PNM_REACTIVE_TRANSPORT 1000 0.01 298 1.5e7 1.0e7 convergence_tolerance=1e-6
 ```
 
 ---

@@ -198,10 +198,11 @@ var vortex = new ForceField("CentralVortex", ForceType.Vortex)
 
 dataset.Forces.Add(vortex);
 
-// Add nucleation site at center
+// Add nucleation site at center (optionally restricted to a material ID)
 var nucleationSite = new NucleationSite("CenterNucleation",
     (0, 0, 0.5),
-    "Calcite");
+    "Calcite",
+    materialId: "ReactorFluid");
 
 nucleationSite.NucleationRate = 1e6; // nuclei/s
 nucleationSite.CriticalSupersaturation = 1.2;
@@ -551,7 +552,7 @@ solver.RunSimulation();
 ### Nucleation Control 
 
 ```csharp
-var site = new NucleationSite("Site1", position, "Calcite");
+var site = new NucleationSite("Site1", position, "Calcite", materialId: "ReactorFluid");
 site.NucleationRate = 1e6; // nuclei/s
 site.CriticalSupersaturation = 1.5;
 site.ActivationEnergy = 50000; // J/mol

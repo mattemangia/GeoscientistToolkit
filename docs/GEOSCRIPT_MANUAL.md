@@ -863,6 +863,27 @@ PHYSICOCHEM_SWEEP name=Temperature target=Domains[0].InitialConditions.Temperatu
 
 Runs a PhysicoChem reactor simulation on the current dataset.
 
+**Syntax:**
+```geoscript
+RUN_SIMULATION <total_time_s> <time_step_s> [convergence_tolerance=1e-6]
+```
+
+**Example:**
+```geoscript
+RUN_SIMULATION 3600 1.0 convergence_tolerance=1e-6
+```
+
+---
+
+#### PHYSICOCHEM_ADD_NUCLEATION_SITE
+
+Adds a nucleation site (point) to a PhysicoChem dataset.
+
+**Syntax:**
+```geoscript
+PHYSICOCHEM_ADD_NUCLEATION_SITE name=Site1 x=0 y=0 z=0 mineral=Calcite material_id=ReactorFluid rate=1e6 active=true
+```
+
 ---
 
 ### 2D Geomechanics Commands (2 commands)
@@ -1284,12 +1305,12 @@ Execute reactive transport simulation on pore network.
 
 **Syntax:**
 ```geoscript
-RUN_PNM_REACTIVE_TRANSPORT <time> <timestep> <temp> <inlet_P> <outlet_P>
+RUN_PNM_REACTIVE_TRANSPORT <time> <timestep> <temp> <inlet_P> <outlet_P> [convergence_tolerance=1e-6]
 ```
 
 **Example:**
 ```geoscript
-RUN_PNM_REACTIVE_TRANSPORT 3600 1.0 298.15 2.0 0.0
+RUN_PNM_REACTIVE_TRANSPORT 3600 1.0 298.15 2.0 0.0 convergence_tolerance=1e-6
 ```
 
 ---

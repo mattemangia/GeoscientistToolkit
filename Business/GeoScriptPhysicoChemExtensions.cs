@@ -84,13 +84,13 @@ public class CreateReactorCommand : IGeoScriptCommand
 
 /// <summary>
 /// RUN_SIMULATION: Runs the PhysicoChem simulation
-/// Usage: RUN_SIMULATION [total_time] [time_step]
+/// Usage: RUN_SIMULATION [total_time] [time_step] [convergence_tolerance=1e-6]
 /// </summary>
 public class RunSimulationCommand : IGeoScriptCommand
 {
     public string Name => "RUN_SIMULATION";
     public string HelpText => "Runs the PhysicoChem reactor simulation";
-    public string Usage => "RUN_SIMULATION [total_time_s] [time_step_s]";
+    public string Usage => "RUN_SIMULATION [total_time_s] [time_step_s] [convergence_tolerance=1e-6]";
 
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
@@ -106,10 +106,14 @@ public class RunSimulationCommand : IGeoScriptCommand
 
         double totalTime = double.Parse(parts[1], CultureInfo.InvariantCulture);
         double timeStep = double.Parse(parts[2], CultureInfo.InvariantCulture);
+        var args = GeoScriptArgumentParser.ParseArguments(cmd.FullText);
+        var convergenceTolerance = GeoScriptArgumentParser.GetDouble(args, "convergence_tolerance",
+            dataset.SimulationParams.ConvergenceTolerance, context);
 
         dataset.SimulationParams.TotalTime = totalTime;
         dataset.SimulationParams.TimeStep = timeStep;
         dataset.SimulationParams.OutputInterval = totalTime / 10.0; // 10 outputs
+        dataset.SimulationParams.ConvergenceTolerance = convergenceTolerance;
 
         // Generate mesh if not exists
         if (dataset.GeneratedMesh == null)
@@ -131,6 +135,48 @@ public class RunSimulationCommand : IGeoScriptCommand
         solver.RunSimulation();
 
         Logger.Log($"[RUN_SIMULATION] Completed: {dataset.ResultHistory.Count} timesteps");
+
+        return Task.FromResult<Dataset>(dataset);
+    }
+}
+
+/// <summary>
+/// PHYSICOCHEM_ADD_NUCLEATION_SITE: Adds a nucleation site to a PhysicoChem dataset
+/// Usage: PHYSICOCHEM_ADD_NUCLEATION_SITE name=Site1 x=0 y=0 z=0 mineral=Calcite material_id=ReactorFluid rate=1e6 active=true
+/// </summary>
+public class PhysicoChemAddNucleationSiteCommand : IGeoScriptCommand
+{
+    public string Name => "PHYSICOCHEM_ADD_NUCLEATION_SITE";
+    public string HelpText => "Adds a nucleation site (point) to a PhysicoChem dataset";
+    public string Usage =>
+        "PHYSICOCHEM_ADD_NUCLEATION_SITE [name=Site1] [x=0] [y=0] [z=0] " +
+        "[mineral=Calcite] [material_id=] [rate=1e6] [active=true]";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not PhysicoChemDataset dataset)
+            throw new NotSupportedException("PHYSICOCHEM_ADD_NUCLEATION_SITE only works on PhysicoChem datasets");
+
+        var cmd = (CommandNode)node;
+        var args = GeoScriptArgumentParser.ParseArguments(cmd.FullText);
+
+        var name = GeoScriptArgumentParser.GetString(args, "name", $"Nucleation{dataset.NucleationSites.Count + 1}", context);
+        var x = GeoScriptArgumentParser.GetDouble(args, "x", 0.0, context);
+        var y = GeoScriptArgumentParser.GetDouble(args, "y", 0.0, context);
+        var z = GeoScriptArgumentParser.GetDouble(args, "z", 0.0, context);
+        var mineral = GeoScriptArgumentParser.GetString(args, "mineral", "Calcite", context);
+        var materialId = GeoScriptArgumentParser.GetString(args, "material_id", string.Empty, context);
+        var rate = GeoScriptArgumentParser.GetDouble(args, "rate", 1e6, context);
+        var active = GeoScriptArgumentParser.GetBool(args, "active", true, context);
+
+        var site = new NucleationSite(name, (x, y, z), mineral, materialId)
+        {
+            NucleationRate = rate,
+            IsActive = active
+        };
+
+        dataset.NucleationSites.Add(site);
+        Logger.Log($"[PHYSICOCHEM_ADD_NUCLEATION_SITE] Added '{name}' at ({x}, {y}, {z}) mineral={mineral} material={materialId}");
 
         return Task.FromResult<Dataset>(dataset);
     }

@@ -23,6 +23,9 @@ public sealed class PNMReactiveTransportOptions
     public double TimeStep { get; set; } = 1.0; // seconds
     public double OutputInterval { get; set; } = 60.0; // seconds
 
+    // Convergence control
+    public float ConvergenceTolerance { get; set; } = 1e-6f;
+
     // Flow parameters
     public FlowAxis FlowAxis { get; set; } = FlowAxis.Z;
     public float InletPressure { get; set; } = 1.0f; // Pa
@@ -324,7 +327,7 @@ public static class PNMReactiveTransport
         }
 
         // Solve for pressures
-        var pressures = SolveCG(matrix, b);
+        var pressures = SolveCG(matrix, b, options.ConvergenceTolerance);
 
         // Update state
         foreach (var pore in pnm.Pores)

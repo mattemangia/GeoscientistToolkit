@@ -319,8 +319,9 @@ CT_SEGMENT   # Error: Operation not supported for this dataset type
 | Command | Description | Example |
 |---------|-------------|---------|
 | `CREATE_REACTOR` | Create a PhysicoChem reactor | `CREATE_REACTOR` |
-| `RUN_SIMULATION` | Run PhysicoChem simulation | `RUN_SIMULATION` |
+| `RUN_SIMULATION` | Run PhysicoChem simulation | `RUN_SIMULATION 3600 1.0 convergence_tolerance=1e-6` |
 | `PHYSICOCHEM_ADD_FORCE` | Add force fields (gravity/vortex) | `PHYSICOCHEM_ADD_FORCE name=MoonGravity type=gravity gravity=0,0,-1.62` |
+| `PHYSICOCHEM_ADD_NUCLEATION_SITE` | Add nucleation site | `PHYSICOCHEM_ADD_NUCLEATION_SITE name=Site1 x=0 y=0 z=0 mineral=Calcite material_id=ReactorFluid rate=1e6` |
 | `PHYSICOCHEM_SWEEP` | Configure PhysicoChem parameter sweep | `PHYSICOCHEM_SWEEP name=Temp target=Domains[0].InitialConditions.Temperature min=273 max=373 mode=Temporal` |
 | `ADD_CELL` | Add cell to reactor grid | `ADD_CELL x=10 y=12 z=4 material='Sandstone'` |
 | `SET_CELL_MATERIAL` | Set reactor cell material | `SET_CELL_MATERIAL id=12 material='Clay'` |
@@ -386,7 +387,7 @@ SIMULATE_GEOMECH apply_gravity=true gravity=0,0,-9.81
 | `PNM_STATISTICS` | Network statistics | `PNM_STATISTICS` |
 | `SET_PNM_SPECIES` | Set reactive species concentrations | `SET_PNM_SPECIES Ca2+ 0.01 0.005` |
 | `SET_PNM_MINERALS` | Set initial mineral content | `SET_PNM_MINERALS Calcite 0.02` |
-| `RUN_PNM_REACTIVE_TRANSPORT` | Reactive transport simulation | `RUN_PNM_REACTIVE_TRANSPORT 1000 0.01 298 1.5e7 1.0e7` |
+| `RUN_PNM_REACTIVE_TRANSPORT` | Reactive transport simulation | `RUN_PNM_REACTIVE_TRANSPORT 1000 0.01 298 1.5e7 1.0e7 convergence_tolerance=1e-6` |
 | `EXPORT_PNM_RESULTS` | Export reactive transport results | `EXPORT_PNM_RESULTS \"results.csv\"` |
 
 ### Seismic Operations
