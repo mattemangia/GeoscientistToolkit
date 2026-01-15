@@ -409,12 +409,12 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
             if (met)
             {
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.2f, 1, 0.2f, 1));
-                ImGui.Text("✓");
+                ImGui.Text("OK");
             }
             else
             {
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0.3f, 0.3f, 1));
-                ImGui.Text("✗");
+                ImGui.Text("Missing");
             }
             ImGui.PopStyleColor();
             ImGui.SameLine();

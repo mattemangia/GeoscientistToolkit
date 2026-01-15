@@ -43,7 +43,7 @@ public class PropertiesPanel : BasePanel
             DrawProperty("Modified", _dataset.DateModified.ToString("yyyy-MM-dd HH:mm"));
 
             if (_dataset.IsMissing)
-                ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "⚠ Source file/directory not found");
+                ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "⚠ Warning: Source file/directory not found");
             ImGui.Unindent();
         }
 

@@ -166,7 +166,7 @@ public class BoreholeCrossSectionViewer
         {
             ImGui.Separator();
             ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.8f, 0.3f, 0.2f, 1.0f));
-            if (ImGui.CollapsingHeader("🎬 BTES Animation", ImGuiTreeNodeFlags.DefaultOpen))
+            if (ImGui.CollapsingHeader("BTES Animation", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 var currentTime = _availableTimeFrames[_selectedTimeFrameIndex];
                 var days = currentTime / 86400.0;
@@ -184,7 +184,7 @@ public class BoreholeCrossSectionViewer
                 ImGui.Spacing();
                 if (_isPlaying)
                 {
-                    if (ImGui.Button("⏸ Pause", new Vector2(-1, 30)))
+                    if (ImGui.Button("Pause", new Vector2(-1, 30)))
                     {
                         _isPlaying = false;
                     }

@@ -72,9 +72,9 @@ public class AcceleratedProcessor : IDisposable
     public (string Message, Vector4 Color) GetAccelerationStatus()
     {
         var simdAvailable = Vector.IsHardwareAccelerated;
-        if (_gpuAvailable) return ("✓ GPU Available", new Vector4(0, 1, 0, 1));
-        if (simdAvailable) return ("✓ SIMD Available", new Vector4(0.5f, 1, 0, 1));
-        return ("✓ Multi-threaded CPU", new Vector4(1, 1, 0, 1));
+        if (_gpuAvailable) return ("GPU Available", new Vector4(0, 1, 0, 1));
+        if (simdAvailable) return ("SIMD Available", new Vector4(0.5f, 1, 0, 1));
+        return ("Multi-threaded CPU", new Vector4(1, 1, 0, 1));
     }
 
     public ParticleSeparationResult SeparateParticles(CtImageStackDataset dataset, Material material, bool use3D,

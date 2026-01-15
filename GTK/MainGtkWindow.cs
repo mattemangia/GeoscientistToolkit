@@ -1665,7 +1665,7 @@ public class MainGtkWindow : Gtk.Window
 
     private void SetStatus(string message)
     {
-        _statusBar.Text = "🔹 " + message;
+        _statusBar.Text = "- " + message;
         Logger.Log(message);
     }
 

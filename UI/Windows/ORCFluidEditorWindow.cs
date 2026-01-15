@@ -411,21 +411,21 @@ public class ORCFluidEditorWindow
         ImGui.BulletText($"Ozone Depletion Potential (ODP): {fluid.ODP:F4}");
         ImGui.Indent();
         if (fluid.ODP == 0)
-            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.3f, 1.0f), "✓ No ozone depletion");
+            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.3f, 1.0f), "No ozone depletion");
         else if (fluid.ODP < 0.05f)
-            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.3f, 1.0f), "⚠ Low ozone depletion");
+            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.3f, 1.0f), "Low ozone depletion");
         else
-            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "✗ Significant ozone depletion");
+            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Significant ozone depletion");
         ImGui.Unindent();
 
         ImGui.BulletText($"Global Warming Potential (100-year): {fluid.GWP100:F0}");
         ImGui.Indent();
         if (fluid.GWP100 < 150)
-            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.3f, 1.0f), "✓ Low GWP (natural refrigerant level)");
+            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.3f, 1.0f), "Low GWP (natural refrigerant level)");
         else if (fluid.GWP100 < 750)
-            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.3f, 1.0f), "⚠ Medium GWP");
+            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.3f, 1.0f), "Medium GWP");
         else
-            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "✗ High GWP");
+            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "High GWP");
         ImGui.Unindent();
 
         ImGui.BulletText($"Atmospheric Lifetime: {fluid.AtmosphericLifetime_years:F2} years");
@@ -441,10 +441,10 @@ public class ORCFluidEditorWindow
         ImGui.Indent();
         string safetyDesc = fluid.Safety switch
         {
-            SafetyClass.A1 => "✓ Low toxicity, non-flammable (safest)",
-            SafetyClass.A2L => "⚠ Low toxicity, mildly flammable",
-            SafetyClass.A3 => "⚠ Low toxicity, flammable",
-            SafetyClass.B1 => "⚠ Higher toxicity, non-flammable",
+            SafetyClass.A1 => "Low toxicity, non-flammable (safest)",
+            SafetyClass.A2L => "Low toxicity, mildly flammable",
+            SafetyClass.A3 => "Low toxicity, flammable",
+            SafetyClass.B1 => "Higher toxicity, non-flammable",
             _ => "See ASHRAE Standard 34 for details"
         };
         ImGui.TextWrapped(safetyDesc);

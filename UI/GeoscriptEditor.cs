@@ -91,7 +91,7 @@ public class GeoScriptEditor
             );
 
             // 2. Draw title text on the bar (centered)
-            var title = "⚠ No Dataset Selected";
+            var title = "No Dataset Selected";
             var titleSize = ImGui.CalcTextSize(title);
             ImGui.SetCursorPos(new Vector2(
                 (windowSize.X - titleSize.X) * 0.5f,

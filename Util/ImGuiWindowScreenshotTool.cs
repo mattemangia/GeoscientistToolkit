@@ -98,7 +98,7 @@ public class ImGuiWindowScreenshotTool
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
 
             // Center the warning symbol and text
-            var warningText = "⚠ Screenshot Functionality not supported on Metal (MTL - MacOS) backend.";
+            var warningText = "⚠ Warning: Screenshot functionality not supported on Metal (MTL - MacOS) backend.";
             var textWidth = ImGui.CalcTextSize(warningText).X;
             var windowWidth = ImGui.GetContentRegionAvail().X;
             var indent = (windowWidth - textWidth) * 0.5f;

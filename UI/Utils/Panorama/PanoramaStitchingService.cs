@@ -111,7 +111,7 @@ namespace GeoscientistToolkit
             {
                 if (_runningTask != null && !_runningTask.IsCompleted)
                 {
-                    Log("⏳ Processing already running, skipping re-entry.");
+                    Log("Processing already running, skipping re-entry.");
                     return _runningTask;
                 }
 
@@ -144,7 +144,7 @@ namespace GeoscientistToolkit
                             {
                                 token.ThrowIfCancellationRequested();
                                 ds.Load();
-                                if (ds.ImageData == null) { Log($"⚠️ Skip {ds.Name}: No image data"); continue; }
+                                if (ds.ImageData == null) { Log($"⚠ Warning: Skip {ds.Name}: No image data"); continue; }
 
                                 var img = new PanoramaImage(ds);
                                 _images.Add(img);
@@ -157,7 +157,7 @@ namespace GeoscientistToolkit
                                 };
                             }
                         }
-                        Log($"✓ Loaded {GetImages().Count} images");
+                        Log($"Loaded {GetImages().Count} images");
 
                         token.ThrowIfCancellationRequested();
                         await DetectFeaturesAsync(token);
@@ -176,12 +176,12 @@ namespace GeoscientistToolkit
                     catch (OperationCanceledException)
                     {
                         State = PanoramaState.Failed;
-                        Log("🛑 Canceled");
+                        Log("Canceled");
                     }
                     catch (Exception ex)
                     {
                         State = PanoramaState.Failed;
-                        Log($"❌ FATAL: {ex.Message}");
+                        Log($"FATAL: {ex.Message}");
                         Logger.LogError($"[Panorama] {ex}");
                     }
                 }, token);
@@ -203,14 +203,14 @@ namespace GeoscientistToolkit
                 {
                     var feats = await detector.DetectAsync(image.Dataset, token);
                     lock(_dataLock) { _sift[image.Id] = feats; }
-                    Log($" ✓ {image.Dataset.Name}: {feats.KeyPoints.Count} SIFT");
+                    Log($" {image.Dataset.Name}: {feats.KeyPoints.Count} SIFT");
                 }
-                catch (Exception ex) { Log($" ✗ {image.Dataset.Name}: {ex.Message}"); }
+                catch (Exception ex) { Log($" {image.Dataset.Name}: {ex.Message}"); }
                 finally { Interlocked.Increment(ref count); UpdateProgress((float)count / images.Count, $"Features ({count}/{images.Count})"); }
             });
 
             await Task.WhenAll(tasks);
-            Log("✓ Feature detection complete\n");
+            Log("Feature detection complete\n");
         }
         
         private async Task MatchFeaturesAsync(CancellationToken token)
@@ -249,16 +249,16 @@ namespace GeoscientistToolkit
 
                 try
                 {
-                    Log($"🔍 Processing: {img1.Dataset.Name} ↔ {img2.Dataset.Name} ({f1.KeyPoints.Count} vs {f2.KeyPoints.Count} feats)");
+                    Log($"Processing: {img1.Dataset.Name} <-> {img2.Dataset.Name} ({f1.KeyPoints.Count} vs {f2.KeyPoints.Count} feats)");
 
-                    if (f1.KeyPoints.Count < 8 || f2.KeyPoints.Count < 8) { Log(" ⚠️ SKIP: Insufficient features\n"); return; }
+                    if (f1.KeyPoints.Count < 8 || f2.KeyPoints.Count < 8) { Log(" Skip: Insufficient features\n"); return; }
 
                     List<FeatureMatch> m12 = await matcher.MatchFeaturesAsync(f1, f2, token);
                     List<FeatureMatch> m21 = await matcher.MatchFeaturesAsync(f2, f1, token);
                     var matches = FilterMatchesBidirectional(m12, m21);
                     Log($" Bidirectional matches: {matches.Count}");
 
-                    if (matches.Count < 8) { Log(" ⚠️ SKIP: Not enough bidirectional matches\n"); return; }
+                    if (matches.Count < 8) { Log(" Skip: Not enough bidirectional matches\n"); return; }
 
                     var (R, t, inliers) = FindPoseRANSAC(
                         matches, f1.KeyPoints, f2.KeyPoints, cam1, cam2, 5000, 1.5f
@@ -266,16 +266,16 @@ namespace GeoscientistToolkit
 
                     if (R.HasValue && inliers.Count >= 8)
                     {
-                        Log($" ✓ Relative pose found! Inliers: {inliers.Count}/{matches.Count}");
+                        Log($" Relative pose found! Inliers: {inliers.Count}/{matches.Count}");
                         
                         var H = cam2.K * R.Value * cam1.K_inv;
 
                         Graph.AddEdge(img1, img2, inliers, H);
-                        Log(" ✓ EDGE ADDED\n");
+                        Log(" Edge added\n");
                     }
-                    else Log(" ✗ No robust geometric model found\n");
+                    else Log(" No robust geometric model found\n");
                 }
-                catch (Exception ex) { Log($" ✗ Exception: {ex.Message}\n"); }
+                catch (Exception ex) { Log($" Exception: {ex.Message}\n"); }
                 finally
                 {
                     Interlocked.Increment(ref processed);
@@ -285,7 +285,7 @@ namespace GeoscientistToolkit
 
             await Task.WhenAll(tasks);
             int edgeCount = Graph._adj.Sum(kv => kv.Value.Count);
-            Log($"✓ Matching complete. Edges: {edgeCount / 2}\n");
+            Log($"Matching complete. Edges: {edgeCount / 2}\n");
         }
 
         private static List<FeatureMatch> FilterMatchesBidirectional(List<FeatureMatch> m12, List<FeatureMatch> m21)
@@ -310,12 +310,12 @@ namespace GeoscientistToolkit
 
             if (centralImage == null)
             {
-                Log("⚠️ Could not determine a central image.");
+                Log("⚠ Warning: Could not determine a central image.");
                 State = PanoramaState.Failed;
                 return;
             }
             
-            Log($"✓ Anchor: '{centralImage.Dataset.Name}'");
+            Log($"Anchor: '{centralImage.Dataset.Name}'");
             
             // Set anchor to identity
             lock(_dataLock) 
@@ -410,7 +410,7 @@ namespace GeoscientistToolkit
                 }
             }
             
-            Log("✓ Rotation optimization complete\n");
+            Log("Rotation optimization complete\n");
         }
 
         private (Matrix3x3? R, Vector3? t, List<FeatureMatch> inliers) FindPoseRANSAC(
@@ -633,7 +633,7 @@ namespace GeoscientistToolkit
 
     if (State != PanoramaState.ReadyForPreview && State != PanoramaState.Completed)
     {
-        Log("⚠️ Not ready for blending"); return;
+        Log("⚠ Warning: Not ready for blending"); return;
     }
 
     State = PanoramaState.Blending;
@@ -886,7 +886,7 @@ namespace GeoscientistToolkit
         });
     });
 
-    Log("✓ Blending complete");
+    Log("Blending complete");
 
     // 6) Save to disk (safe path using SKImage.FromPixels)
     var info = new SKImageInfo(outW, outH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
@@ -897,7 +897,7 @@ namespace GeoscientistToolkit
     encoded.SaveTo(f);
 
     State = PanoramaState.Completed;
-    Log($"✓ Saved: {path}");
+    Log($"Saved: {path}");
 
     // ──────────────────────────────── Local helpers ───────────────────────────────
     static Vector4 SampleBilinearVec4(byte[] img, int w, int h, float u, float v)
@@ -1088,13 +1088,13 @@ namespace GeoscientistToolkit
             {
                 if (_runningTask != null && !_runningTask.IsCompleted)
                 {
-                    Log("⏳ Processing already running, skipping refinement.");
+                    Log("Processing already running, skipping refinement.");
                     return _runningTask;
                 }
 
                 if (manualPairs.Count < 8)
                 {
-                    Log($"⚠️ Refinement requires at least 8 point pairs, but got {manualPairs.Count}.");
+                    Log($"⚠ Warning: Refinement requires at least 8 point pairs, but got {manualPairs.Count}.");
                     return Task.CompletedTask;
                 }
 
@@ -1146,32 +1146,32 @@ namespace GeoscientistToolkit
                             throw new InvalidOperationException("Could not decompose Essential Matrix to find a valid rotation.");
                         }
 
-                        Log($"✓ Refined relative rotation found from {inliers.Count} manual points.");
+                        Log($"Refined relative rotation found from {inliers.Count} manual points.");
 
                         // 5. Create a new "pseudo-homography" from the refined rotation
                         var H_refined = cam2.K * R.Value * cam1.K_inv;
 
                         // 6. Update the graph with this high-confidence link
                         Graph.UpdateEdge(img1, img2, inliers, H_refined);
-                        Log("✓ Stitch graph updated with high-confidence manual link.");
+                        Log("Stitch graph updated with high-confidence manual link.");
 
                         // 7. Re-run the global rotation optimization
                         token.ThrowIfCancellationRequested();
                         await EstimateCameraRotationsAsync(token);
 
                         State = PanoramaState.ReadyForPreview;
-                        Log("✓ Refinement complete. Panorama is ready for preview.");
+                        Log("Refinement complete. Panorama is ready for preview.");
                         Log("════════════════════════════════════════════════════════════");
                     }
                     catch (OperationCanceledException)
                     {
                         State = PanoramaState.Failed;
-                        Log("🛑 Refinement Canceled");
+                        Log("Refinement canceled");
                     }
                     catch (Exception ex)
                     {
                         State = PanoramaState.Failed;
-                        Log($"❌ REFINEMENT FATAL: {ex.Message}");
+                        Log($"REFINEMENT FATAL: {ex.Message}");
                         Logger.LogError($"[Panorama Refine] {ex}");
                     }
                 }, token);

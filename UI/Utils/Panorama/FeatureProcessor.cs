@@ -186,7 +186,7 @@ namespace GeoscientistToolkit
 
             if (image1.SiftFeatures?.KeyPoints == null || image2.SiftFeatures?.KeyPoints == null || image1.SiftFeatures.KeyPoints.Count < 30 || image2.SiftFeatures.KeyPoints.Count < 30)
             {
-                _service.Log("  ⚠ Skipping - insufficient keypoints.");
+                _service.Log("  Skipping - insufficient keypoints.");
                 return false;
             }
 
@@ -197,7 +197,7 @@ namespace GeoscientistToolkit
 
             if (bidirectionalMatches.Count < 30)
             {
-                _service.Log("  ⚠ Skipping - too few bidirectional matches.");
+                _service.Log("  Skipping - too few bidirectional matches.");
                 return false;
             }
 
@@ -206,12 +206,12 @@ namespace GeoscientistToolkit
             if (inliers.Count > MIN_INLIERS_FOR_ACCEPTANCE && pose.HasValue)
             {
                 graph.AddEdge(image1, image2, inliers, pose.Value);
-                _service.Log($"  ✓ Successfully matched with {inliers.Count} inliers");
+                _service.Log($"  Successfully matched with {inliers.Count} inliers");
                 return true;
             }
             else
             {
-                _service.Log($"  ✗ Failed to establish connection (inliers: {inliers.Count}, pose valid: {pose.HasValue})");
+                _service.Log($"  Failed to establish connection (inliers: {inliers.Count}, pose valid: {pose.HasValue})");
                 if (inliers.Count <= MIN_INLIERS_FOR_ACCEPTANCE) _service.Log($"    Reason: Too few inliers after RANSAC ({inliers.Count})");
                 if (!pose.HasValue) _service.Log("    Reason: Could not compute valid relative pose");
                 return false;
@@ -492,11 +492,11 @@ namespace GeoscientistToolkit
             
             if (maxInFront >= minRequiredPoints)
             {
-                _service.Log($"    ✓ Pose decomposition successful with {maxInFront} valid points");
+                _service.Log($"    Pose decomposition successful with {maxInFront} valid points");
                 return bestPose;
             }
 
-            _service.Log($"    ✗ Pose decomposition failed: only {maxInFront} points passed cheirality check (need >= {minRequiredPoints})");
+            _service.Log($"    Pose decomposition failed: only {maxInFront} points passed cheirality check (need >= {minRequiredPoints})");
             return (null, null);
         }
 

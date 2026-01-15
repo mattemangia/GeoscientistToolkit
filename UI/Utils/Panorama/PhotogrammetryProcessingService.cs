@@ -312,7 +312,7 @@ namespace GeoscientistToolkit
                 int imagesWithoutExif = Images.Count(img => !img.FocalLengthMm.HasValue || !img.SensorWidthMm.HasValue);
                 if (imagesWithoutExif > 0)
                 {
-                    Log($"⚠ {imagesWithoutExif}/{Images.Count} images are using estimated focal length.");
+                    Log($"⚠ Warning: {imagesWithoutExif}/{Images.Count} images are using estimated focal length.");
                     Log("  Recommendation: Try adjusting focal length multiplier in CameraCalibration.cs");
                     Log("  Common values: 0.8× (wide angle), 1.0× (normal), 1.3× (telephoto)");
                     Log("  Or capture images with a camera that saves EXIF data.");
@@ -459,7 +459,7 @@ namespace GeoscientistToolkit
                 ds.Load();
                 if (ds.ImageData == null)
                 {
-                    Log($"⚠ Warning: Could not load image data for {ds.Name}. Skipping.");
+                Log($"⚠ Warning: Could not load image data for {ds.Name}. Skipping.");
                     continue;
                 }
 
@@ -467,7 +467,7 @@ namespace GeoscientistToolkit
                 ExtractMetadata(pgImage);
                 Images.Add(pgImage);
                 
-                Log($"  ✓ Loaded {ds.Name} - Size: {ds.Width}x{ds.Height}");
+                Log($"  Loaded {ds.Name} - Size: {ds.Width}x{ds.Height}");
             }
 
             Log($"Successfully loaded {Images.Count} of {_datasets.Count} images.");
@@ -555,7 +555,7 @@ namespace GeoscientistToolkit
                 
                 if (imagesWithNoFeatures.Any())
                 {
-                    Log($"⚠ {imagesWithNoFeatures.Count} images have insufficient features (<20 keypoints):");
+                Log($"⚠ Warning: {imagesWithNoFeatures.Count} images have insufficient features (<20 keypoints):");
                     foreach (var img in imagesWithNoFeatures)
                     {
                         Log($"    - {img.Dataset.Name}: {img.SiftFeatures?.KeyPoints.Count ?? 0} keypoints");
@@ -564,7 +564,7 @@ namespace GeoscientistToolkit
                 
                 if (imageGroups.Count > 1)
                 {
-                    Log($"⚠ Images are in {imageGroups.Count} disconnected groups.");
+                Log($"⚠ Warning: Images are in {imageGroups.Count} disconnected groups.");
                     Log("  Manual linking required to connect groups or discard isolated images.");
                 }
                 
@@ -572,7 +572,7 @@ namespace GeoscientistToolkit
             }
             else
             {
-                Log("✓ All images successfully matched into a single group.");
+                Log("All images successfully matched into a single group.");
                 Log($"  Group contains {imageGroups.First().Images.Count} images");
                 Log("Computing global camera poses...");
                 

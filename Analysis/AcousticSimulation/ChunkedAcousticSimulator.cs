@@ -280,7 +280,7 @@ public class ChunkedAcousticSimulator : IDisposable
         if (coverageRatio < 1.5f)
         {
             var recommendedSteps = (int)(expectedTravelTime * 2.5f / dtMax);
-            Logger.LogWarning("[Simulator] ⚠  LOW COVERAGE - waves may not reach receiver!");
+            Logger.LogWarning("[Simulator] Warning: LOW COVERAGE - waves may not reach receiver!");
             Logger.LogWarning($"[Simulator] Recommended: {recommendedSteps:N0} steps");
         }
         else if (coverageRatio > 10f)
@@ -290,7 +290,7 @@ public class ChunkedAcousticSimulator : IDisposable
         }
         else
         {
-            Logger.Log("[Simulator] ✓ Coverage appears adequate");
+            Logger.Log("[Simulator] Coverage appears adequate");
         }
 
         Logger.Log("[Simulator] ═══════════════════════════════════════");
@@ -1747,9 +1747,9 @@ public class ChunkedAcousticSimulator : IDisposable
         Logger.Log($"  Energy Ratio: {totalEnergy / sourceEnergy:F3}");
 
         if (totalEnergy > sourceEnergy * 10)
-            Logger.LogWarning("  ⚠ ENERGY GROWING - Possible numerical instability!");
+            Logger.LogWarning("  Warning: ENERGY GROWING - Possible numerical instability!");
         else if (totalEnergy < sourceEnergy * 0.01f && timeStep > 100)
-            Logger.LogWarning("  ⚠ ENERGY TOO LOW - Wave may be over-damped");
+            Logger.LogWarning("  Warning: ENERGY TOO LOW - Wave may be over-damped");
     }
 
     public void RunDiagnostics(int timeStep)

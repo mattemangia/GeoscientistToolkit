@@ -15,7 +15,7 @@ public class MagicWandTool : ISegmentationTool
     public bool SelectOnlyFromCurrentMaterial { get; set; } = false;
 
     public string Name => "Magic Wand";
-    public string Icon => "✨";
+    public string Icon => "Wand";
     public bool HasActiveSelection { get; private set; }
 
     // --- ADDED: Public properties for the interface ---

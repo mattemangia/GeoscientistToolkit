@@ -16,7 +16,7 @@ public class LassoTool : ISegmentationTool
     public float MinPointDistance { get; set; } = 2.0f;
 
     public virtual string Name => "Lasso";
-    public virtual string Icon => "✂";
+    public virtual string Icon => "Lasso";
 
     public bool HasActiveSelection => _isActive;
 

@@ -618,7 +618,7 @@ public class PhotogrammetryWizardPanel : BasePanel
         
         if (currentGroups.Count > 1)
         {
-            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), $"⚠ {currentGroups.Count} disconnected groups detected. Link them or discard isolated images.");
+            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), $"⚠ Warning: {currentGroups.Count} disconnected groups detected. Link them or discard isolated images.");
         }
         
         if (!canProceed)
@@ -660,7 +660,7 @@ public class PhotogrammetryWizardPanel : BasePanel
 
         bool hasSparse = service.SparseCloud != null;
         if (hasSparse)
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"✓ Sparse Cloud: {service.SparseCloud.Points.Count} points");
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"Sparse Cloud: {service.SparseCloud.Points.Count} points");
         else
         {
             if (ImGui.Button("Build Sparse Cloud", new Vector2(-1, 30)))
@@ -671,7 +671,7 @@ public class PhotogrammetryWizardPanel : BasePanel
 
         bool hasDense = service.DenseCloud != null;
         if (hasDense)
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"✓ Dense Cloud: {service.DenseCloud.Points.Count} points");
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"Dense Cloud: {service.DenseCloud.Points.Count} points");
         else
         {
             if (!hasSparse) ImGui.BeginDisabled();
@@ -684,7 +684,7 @@ public class PhotogrammetryWizardPanel : BasePanel
 
         bool hasMesh = service.GeneratedMesh != null;
         if (hasMesh)
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"✓ Mesh: {service.GeneratedMesh.VertexCount} vertices");
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"Mesh: {service.GeneratedMesh.VertexCount} vertices");
         else
         {
             bool canBuild = hasSparse || hasDense;
@@ -698,7 +698,7 @@ public class PhotogrammetryWizardPanel : BasePanel
 
         bool hasTexture = hasMesh && !string.IsNullOrEmpty(service.GeneratedMesh?.TexturePath);
         if (hasTexture)
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"✓ Texture: {Path.GetFileName(service.GeneratedMesh.TexturePath)}");
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"Texture: {Path.GetFileName(service.GeneratedMesh.TexturePath)}");
         else
         {
             bool canBuildTexture = hasMesh && service.Images?.Count > 0;
@@ -1041,12 +1041,12 @@ public class PhotogrammetryWizardPanel : BasePanel
         if (groups.Count > 1)
         {
             ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), 
-                "⚠ Multiple disconnected groups detected. Use Manual Input tab to link groups.");
+                "⚠ Warning: Multiple disconnected groups detected. Use Manual Input tab to link groups.");
         }
         else if (groups.Count == 1)
         {
             ImGui.TextColored(new Vector4(0, 1, 0, 1), 
-                "✓ All images connected in a single group.");
+                "All images connected in a single group.");
         }
     }
     

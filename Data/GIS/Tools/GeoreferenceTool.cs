@@ -226,7 +226,7 @@ public class GeoreferenceTool : IDatasetTools
         else
         {
             ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), "✓");
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), "OK");
         }
 
         ImGui.Spacing();

@@ -855,8 +855,8 @@ public class TableViewer : IDatasetViewer, IDisposable
             ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
             ImGui.Dummy(new Vector2(0, 20));
-            ImGui.SetCursorPosX((io.DisplaySize.X - ImGui.CalcTextSize("⚠  The last row cannot be deleted.").X) * 0.5f);
-            ImGui.Text("⚠  The last row cannot be deleted.");
+            ImGui.SetCursorPosX((io.DisplaySize.X - ImGui.CalcTextSize("⚠ Warning: The last row cannot be deleted.").X) * 0.5f);
+            ImGui.Text("⚠ Warning: The last row cannot be deleted.");
 
             ImGui.Dummy(new Vector2(0, 10));
             ImGui.SetCursorPosX((io.DisplaySize.X - ImGui.CalcTextSize("A table must contain at least one row.").X) * 0.5f);

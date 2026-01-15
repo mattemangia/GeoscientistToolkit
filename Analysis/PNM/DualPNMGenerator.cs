@@ -447,12 +447,12 @@ public class DualPNMGeneratorTool
                 if (pore != null)
                 {
                     ImGui.SameLine();
-                    ImGui.TextColored(new Vector4(0.2f, 0.8f, 0.2f, 1.0f), "✓ Valid");
+                    ImGui.TextColored(new Vector4(0.2f, 0.8f, 0.2f, 1.0f), "Valid");
                 }
                 else
                 {
                     ImGui.SameLine();
-                    ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1.0f), "✗ Pore not found");
+                    ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1.0f), "Pore not found");
                 }
             }
 

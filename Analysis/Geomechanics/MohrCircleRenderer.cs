@@ -45,7 +45,7 @@ public class MohrCircleRenderer : IDisposable
         ImGui.Separator();
 
         var circleNames = results.MohrCircles.Select((c, i) =>
-            $"{i}: {c.Location} {(c.HasFailed ? "⚠" : "")}").ToArray();
+            $"{i}: {c.Location}{(c.HasFailed ? " (Failed)" : "")}").ToArray();
 
         ImGui.ListBox("##Circles", ref _selectedCircleIndex, circleNames, circleNames.Length, 10);
 
@@ -76,14 +76,14 @@ public class MohrCircleRenderer : IDisposable
         if (circle.HasFailed)
         {
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0, 0, 1));
-            ImGui.Text("⚠ FAILED");
+            ImGui.Text("FAILED");
             ImGui.PopStyleColor();
             ImGui.Text($"Failure Angle: {circle.FailureAngle:F1}°");
         }
         else
         {
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0, 1, 0, 1));
-            ImGui.Text("✓ Stable");
+            ImGui.Text("Stable");
             ImGui.PopStyleColor();
         }
 

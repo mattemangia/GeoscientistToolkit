@@ -366,7 +366,7 @@ namespace GeoscientistToolkit
                 }
                 else
                 {
-                    _service.Log($"    > ⚠ No valid 3D points found! (Failed: Triangulation={failedTriangulation}, Cheirality={failedCheirality}, Reprojection={failedReprojection}, Parallax={failedParallax}, Total={matches.Count})");
+                    _service.Log($"    > ⚠ Warning: No valid 3D points found! (Failed: Triangulation={failedTriangulation}, Cheirality={failedCheirality}, Reprojection={failedReprojection}, Parallax={failedParallax}, Total={matches.Count})");
                     
                     // Provide diagnostic information
                     if (failedTriangulation == matches.Count)
@@ -390,7 +390,7 @@ namespace GeoscientistToolkit
                     float successRate = (float)successfulTriangulations / matches.Count;
                     if (successRate < 0.3f)
                     {
-                        _service.Log($"    ⚠ Low success rate ({successRate * 100:F1}%) - consider checking camera calibration");
+                        _service.Log($"    ⚠ Warning: Low success rate ({successRate * 100:F1}%) - consider checking camera calibration");
                     }
                 }
             }
@@ -457,7 +457,7 @@ namespace GeoscientistToolkit
 
                 if (finalRatio < 1.5f)
                 {
-                    _service.Log($"⚠ Warning: Dense cloud is not much denser than sparse ({finalRatio:F1}×).");
+                    _service.Log($"⚠ Warning: Dense cloud is not much denser than sparse ({finalRatio:F1}x).");
                     _service.Log($"  This may indicate: confidence threshold too high, or poor multi-view consistency.");
                 }
 
@@ -465,7 +465,7 @@ namespace GeoscientistToolkit
 
                 if (finalRatio < 1.5f)
                 {
-                    _service.Log($"⚠ Warning: Dense cloud is not much denser than sparse ({finalRatio:F1}×).");
+                    _service.Log($"⚠ Warning: Dense cloud is not much denser than sparse ({finalRatio:F1}x).");
                     _service.Log($"  This may indicate: confidence threshold too high, or poor multi-view consistency.");
                 }
 
@@ -670,7 +670,7 @@ namespace GeoscientistToolkit
                 // CRITICAL DIAGNOSTIC
                 if (successfulPoints == 0)
                 {
-                    _service.Log($"      ⚠️ CRITICAL: ZERO DENSE POINTS GENERATED!");
+                    _service.Log("      CRITICAL: ZERO DENSE POINTS GENERATED!");
                     _service.Log($"         Most likely cause:");
                     if (failedTriangulation > attemptedPixels * 0.5)
                         _service.Log($"         - Triangulation failing (epipolar matching not finding correspondences)");

@@ -285,7 +285,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         if (_results != null)
         {
             ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.2f, 0.7f, 0.4f, 1.0f));
-            if (ImGui.CollapsingHeader("📊 Quick Results Summary", ImGuiTreeNodeFlags.DefaultOpen))
+            if (ImGui.CollapsingHeader("Quick Results Summary", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 ImGui.PopStyleColor();
                 ImGui.Indent();
@@ -306,7 +306,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
                 ImGui.Spacing();
                 ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f),
-                    "👉 Click 'Show Results' for detailed analysis");
+                    "Tip: Click 'Show Results' for detailed analysis");
 
                 ImGui.Unindent();
             }
@@ -360,12 +360,12 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             {
                 var preset = (GeothermalSimulationPreset)_selectedPreset;
                 var description = GeothermalSimulationOptions.GetPresetDescription(preset);
-                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), $"📋 {description}");
+                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), $"Preset: {description}");
             }
             else
             {
                 ImGui.TextColored(new Vector4(0.9f, 0.9f, 0.5f, 1.0f),
-                    "💡 Using custom parameters. Any changes will switch to Custom mode.");
+                    "Note: Using custom parameters. Any changes will switch to Custom mode.");
             }
 
             ImGui.Spacing();
@@ -380,7 +380,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         if (_options.EnableBTESMode)
         {
             ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.8f, 0.3f, 0.2f, 1.0f));
-            if (ImGui.CollapsingHeader("🔋 BTES Thermal Battery Configuration", ImGuiTreeNodeFlags.DefaultOpen))
+            if (ImGui.CollapsingHeader("BTES Thermal Battery Configuration", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 ImGui.PopStyleColor();
 
@@ -488,7 +488,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     }
 
                     ImGui.SameLine();
-                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "✏ Interactive curve editor");
+                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Interactive curve editor");
 
                     // Save all frames checkbox
                     var saveAllFrames = _options.SaveAllTimeFrames;
@@ -501,7 +501,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     if (_options.SaveAllTimeFrames)
                     {
                         ImGui.SameLine();
-                        ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "⚠ May require significant memory");
+                        ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "Warning: May require significant memory");
                     }
 
                     ImGui.Unindent();
@@ -1136,7 +1136,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
                 ImGui.Separator();
                 ImGui.Spacing();
-                ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.3f, 1.0f), "⚠️ Performance Warning:");
+                ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.3f, 1.0f), "Performance Warning:");
                 ImGui.TextWrapped("Geomechanics is computationally expensive and may significantly increase simulation time.");
                 ImGui.Spacing();
 
@@ -1271,7 +1271,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
             // Thermodynamics and Geochemistry Section
             ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.7f, 0.4f, 0.9f, 1.0f));
-            if (ImGui.CollapsingHeader("⚗️ Thermodynamics & Geochemistry"))
+            if (ImGui.CollapsingHeader("Thermodynamics & Geochemistry"))
             {
                 ImGui.PopStyleColor();
 
@@ -1429,7 +1429,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
             // ORC Power Generation Section
             ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.2f, 0.7f, 0.3f, 1.0f));
-            if (ImGui.CollapsingHeader("⚡ ORC Power Generation & Economics"))
+            if (ImGui.CollapsingHeader("ORC Power Generation & Economics"))
             {
                 ImGui.PopStyleColor();
 
@@ -1603,13 +1603,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         if (_showMeshPreviewInPanel && _meshPreview != null && _options.BoreholeDataset != null)
         {
             ImGui.Separator();
-            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "🔍 Mesh Preview (In-Panel Mode)");
+            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "Mesh Preview (In-Panel Mode)");
             ImGui.Separator();
 
             // Show error if present
             if (!string.IsNullOrEmpty(_meshPreviewInitError))
             {
-                ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1), $"❌ Error: {_meshPreviewInitError}");
+                ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1), $"Error: {_meshPreviewInitError}");
                 if (ImGui.Button("Retry")) InitializeMeshPreview(_options.BoreholeDataset);
             }
             else
@@ -1869,14 +1869,14 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 }
 
                 // Thermodynamics & Precipitation Tab
-                if (_options.EnableThermodynamics && ImGui.BeginTabItem("⚗️ Geochemistry & Precipitation"))
+                if (_options.EnableThermodynamics && ImGui.BeginTabItem("Geochemistry & Precipitation"))
                 {
                     RenderThermodynamicsTab();
                     ImGui.EndTabItem();
                 }
 
                 // ORC Power Generation & Economics Tab
-                if (_options.EnableORCSimulation && ImGui.BeginTabItem("⚡ ORC Power & Economics"))
+                if (_options.EnableORCSimulation && ImGui.BeginTabItem("ORC Power & Economics"))
                 {
                     RenderORCTab();
                     ImGui.EndTabItem();
@@ -2029,13 +2029,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         // Pore Network Model Status
         if (_results.PoreNetworkModel != null)
         {
-            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.5f, 1.0f), "✓ Pore Network Model Generated");
+            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.5f, 1.0f), "Pore Network Model Generated");
             ImGui.Text($"  Pores: {_results.PoreNetworkModel.Pores.Count}");
             ImGui.Text($"  Throats: {_results.PoreNetworkModel.Throats.Count}");
         }
         else
         {
-            ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.2f, 1.0f), "⚠ No pore network model available");
+            ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.2f, 1.0f), "Warning: No pore network model available");
             ImGui.TextWrapped("Enable thermodynamics and generate PNM to see precipitation data.");
             return;
         }
@@ -2274,7 +2274,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         // Check if ORC results are available
         if (_orcResults == null || _orcResults.Length == 0)
         {
-            ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.2f, 1.0f), "⚠ No ORC simulation results available");
+            ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.2f, 1.0f), "Warning: No ORC simulation results available");
             ImGui.TextWrapped("ORC analysis is performed after geothermal simulation completes.");
             ImGui.TextWrapped("The simulation must complete successfully to generate ORC power data.");
             return;
@@ -2327,7 +2327,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         else
         {
             // Fallback: display simple text summary
-            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.5f, 1.0f), "✓ ORC Simulation Complete");
+            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.5f, 1.0f), "ORC Simulation Complete");
             ImGui.Spacing();
 
             // Find optimal operating point
@@ -2369,15 +2369,15 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 ImGui.Spacing();
                 if (_economicResults.NPV_MUSD > 0 && _economicResults.IRR > 8.0f)
                 {
-                    ImGui.TextColored(new Vector4(0.2f, 1f, 0.2f, 1), "✓ Project appears economically viable");
+                    ImGui.TextColored(new Vector4(0.2f, 1f, 0.2f, 1), "Project appears economically viable");
                 }
                 else if (_economicResults.NPV_MUSD > 0)
                 {
-                    ImGui.TextColored(new Vector4(1f, 1f, 0.2f, 1), "⚠ Marginal project viability");
+                    ImGui.TextColored(new Vector4(1f, 1f, 0.2f, 1), "Marginal project viability");
                 }
                 else
                 {
-                    ImGui.TextColored(new Vector4(1f, 0.2f, 0.2f, 1), "✗ Project not economically viable");
+                    ImGui.TextColored(new Vector4(1f, 0.2f, 0.2f, 1), "Project not economically viable");
                 }
             }
         }
@@ -2391,7 +2391,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         // Show generation status
         if (!_results.TemperatureIsosurfaces.Any() && !_results.TemperatureSlices.Any())
         {
-            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.2f, 1.0f), "⚠ No visualization data generated yet.");
+            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.2f, 1.0f), "Warning: No visualization data generated yet.");
             ImGui.TextWrapped(
                 "Isosurfaces and slices are generated during simulation. You can also manually generate them below:");
             ImGui.Spacing();
@@ -2561,7 +2561,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             {
                 // Header with info
                 ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f),
-                    "🔍 Mesh Configuration Preview - Pre-Simulation");
+                    "Mesh Configuration Preview - Pre-Simulation");
                 ImGui.Separator();
                 ImGui.Spacing();
 
@@ -2574,7 +2574,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 // Show initialization error if present
                 if (!string.IsNullOrEmpty(_meshPreviewInitError))
                 {
-                    ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1), "❌ Initialization Error:");
+                    ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1), "Initialization Error:");
                     ImGui.Spacing();
                     ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(0.3f, 0.1f, 0.1f, 0.5f));
                     if (ImGui.BeginChild("ErrorBox", new Vector2(0, 150), ImGuiChildFlags.Border))
@@ -2604,7 +2604,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 }
                 else
                 {
-                    ImGui.TextColored(new Vector4(1, 1, 0, 1), "⚠️ Mesh preview not ready");
+                    ImGui.TextColored(new Vector4(1, 1, 0, 1), "Warning: Mesh preview not ready");
                     if (_meshPreview == null)
                     {
                         ImGui.Text("  • Preview object not initialized (_meshPreview is NULL)");
@@ -2651,7 +2651,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             }
             catch (Exception ex)
             {
-                ImGui.TextColored(new Vector4(1, 0, 0, 1), $"❌ Render Error: {ex.Message}");
+                ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Render Error: {ex.Message}");
                 Logger.LogError($"Mesh preview render error: {ex.Message}\n{ex.StackTrace}");
             }
 

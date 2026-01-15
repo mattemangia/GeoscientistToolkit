@@ -131,7 +131,7 @@ public class TwoDGeologyEditorTools : IDatasetTools
             if (hasOverlap)
             {
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.3f, 0.3f, 1f));
-                ImGui.TextWrapped("⚠ WARNING: Formation currently overlaps with another!");
+                ImGui.TextWrapped("Warning: Formation currently overlaps with another!");
                 ImGui.PopStyleColor();
                 ImGui.Separator();
             };

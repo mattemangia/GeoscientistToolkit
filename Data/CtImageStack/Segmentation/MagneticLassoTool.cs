@@ -15,7 +15,7 @@ public class MagneticLassoTool : LassoTool, ISegmentationTool
     public float AnchorThreshold { get; set; } = 20.0f;
 
     public override string Name => "Magnetic Lasso";
-    public override string Icon => "🧲";
+    public override string Icon => "Lasso";
 
     public override void Initialize(SegmentationManager manager)
     {

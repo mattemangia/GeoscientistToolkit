@@ -202,7 +202,7 @@ public class AcousticExportManager : IDisposable
             ExportWaveField(_results.WaveFieldVx, pWavePath, false, out _pWaveFieldMaxVelocity);
             acousticDataset.PWaveFieldMaxVelocity = _pWaveFieldMaxVelocity;
 
-            Logger.Log($"[Export] ✓ PWaveField.bin (max: {_pWaveFieldMaxVelocity:F2} m/s)");
+            Logger.Log($"[Export] PWaveField.bin (max: {_pWaveFieldMaxVelocity:F2} m/s)");
             progressBase += progressPerField;
         }
 
@@ -216,7 +216,7 @@ public class AcousticExportManager : IDisposable
             ExportWaveField(_results.WaveFieldVy, sWavePath, false, out _sWaveFieldMaxVelocity);
             acousticDataset.SWaveFieldMaxVelocity = _sWaveFieldMaxVelocity;
 
-            Logger.Log($"[Export] ✓ SWaveField.bin (max: {_sWaveFieldMaxVelocity:F2} m/s)");
+            Logger.Log($"[Export] SWaveField.bin (max: {_sWaveFieldMaxVelocity:F2} m/s)");
             progressBase += progressPerField;
         }
 
@@ -230,7 +230,7 @@ public class AcousticExportManager : IDisposable
             ExportWaveField(_results.WaveFieldVz, combinedPath, false, out _combinedFieldMaxVelocity);
             acousticDataset.CombinedFieldMaxVelocity = _combinedFieldMaxVelocity;
 
-            Logger.Log($"[Export] ✓ CombinedField.bin (max: {_combinedFieldMaxVelocity:F2} m/s)");
+            Logger.Log($"[Export] CombinedField.bin (max: {_combinedFieldMaxVelocity:F2} m/s)");
             progressBase += progressPerField;
         }
 
@@ -244,7 +244,7 @@ public class AcousticExportManager : IDisposable
             ExportWaveField(_damageField, damagePath, false, out _damageFieldMaxValue);
             acousticDataset.DamageFieldMaxValue = _damageFieldMaxValue;
 
-            Logger.Log($"[Export] ✓ DamageField.bin (max: {_damageFieldMaxValue:F3})");
+            Logger.Log($"[Export] DamageField.bin (max: {_damageFieldMaxValue:F3})");
             progressBase += progressPerField;
         }
 
@@ -299,7 +299,7 @@ public class AcousticExportManager : IDisposable
         UpdateProgress(1.0f, "Export complete!");
 
         Logger.Log("[Export] ═══════════════════════════════════════");
-        Logger.Log("[Export] ✓ Acoustic volume exported successfully");
+        Logger.Log("[Export] Acoustic volume exported successfully");
         Logger.Log($"[Export] P-Wave max: {_pWaveFieldMaxVelocity:F2} m/s");
         Logger.Log($"[Export] S-Wave max: {_sWaveFieldMaxVelocity:F2} m/s");
         Logger.Log($"[Export] Combined max: {_combinedFieldMaxVelocity:F2} m/s");

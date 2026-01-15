@@ -188,11 +188,11 @@ public class FilterTool : AddInTool, IDisposable
                 case FilterType.Median:
                 case FilterType.EdgeSobel:
                     isGpuAccelerated = !_process3D;
-                    gpuStatus = _process3D ? " (2D only on GPU)" : " ✓";
+                    gpuStatus = _process3D ? " (2D only on GPU)" : " (GPU)";
                     break;
                 case FilterType.NonLocalMeans:
                     isGpuAccelerated = true;
-                    gpuStatus = " ✓ (2D & 3D)";
+                    gpuStatus = " (GPU 2D & 3D)";
                     break;
                 default:
                     gpuStatus = " (CPU only)";

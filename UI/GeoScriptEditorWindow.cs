@@ -210,7 +210,7 @@ public class GeoScriptEditorWindow
 
         ImGui.BeginChild("##Warning", new Vector2(400, 150), ImGuiChildFlags.Border);
         ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.8f, 0.0f, 1.0f));
-        ImGui.TextWrapped("⚠ No Dataset Selected");
+        ImGui.TextWrapped("No Dataset Selected");
         ImGui.PopStyleColor();
         ImGui.Spacing();
         ImGui.TextWrapped("Please load a dataset and select it from the dropdown above to begin scripting.");
@@ -228,7 +228,7 @@ public class GeoScriptEditorWindow
         }
         else
         {
-            if (ImGui.Button("▶ Run Script", new Vector2(100, 0)))
+            if (ImGui.Button("Run Script", new Vector2(100, 0)))
             {
                 ExecuteScript();
             }
@@ -468,16 +468,16 @@ public class GeoScriptEditorWindow
                         // New dataset was created, add it to the project
                         ProjectManager.Instance.AddDataset(result);
                         currentDataset = result;
-                        _output.AppendLine($"  ✓ Created: {result.Name}");
+                        _output.AppendLine($"  Created: {result.Name}");
                     }
                     else if (result != null)
                     {
-                        _output.AppendLine($"  ✓ Success");
+                        _output.AppendLine("  Success");
                     }
                 }
                 catch (Exception ex)
                 {
-                    _output.AppendLine($"  ✗ Error: {ex.Message}");
+                    _output.AppendLine($"  Error: {ex.Message}");
                     Logger.LogError($"GeoScript error on line {lineNumber}: {ex.Message}");
                 }
 

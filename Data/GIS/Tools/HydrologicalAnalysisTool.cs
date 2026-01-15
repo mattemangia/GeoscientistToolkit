@@ -261,7 +261,7 @@ public class HydrologicalAnalysisTool : IDatasetTools
         }
         else
         {
-            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.3f, 1.0f), "✓ Flow analysis complete");
+            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.3f, 1.0f), "Flow analysis complete");
 
             if (ImGui.Button("Recalculate"))
             {
@@ -399,12 +399,12 @@ public class HydrologicalAnalysisTool : IDatasetTools
             if (finalStep.TotalWaterVolume < 0.01f)
             {
                 ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f),
-                    $"✓ Area fully drained after {completedSteps} steps");
+                    $"Area fully drained after {completedSteps} steps");
             }
             else
             {
                 ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.3f, 1.0f),
-                    "⚠ Area not fully drained (increase simulation steps)");
+                    "⚠ Warning: Area not fully drained (increase simulation steps)");
             }
 
             // Timeline scrubber

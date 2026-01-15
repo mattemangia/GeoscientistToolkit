@@ -151,7 +151,7 @@ namespace GeoscientistToolkit.Data.Image
                 if (isActive)
                     ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.3f, 0.5f, 0.8f, 1));
 
-                if (ImGui.Button($"{(layer.Visible ? "👁" : "  ")} {layer.Name}##layer{i}", new Vector2(-1, 0)))
+                if (ImGui.Button($"{(layer.Visible ? "Visible" : "Hidden")} {layer.Name}##layer{i}", new Vector2(-1, 0)))
                 {
                     _layerManager.ActiveLayerIndex = i;
                 }

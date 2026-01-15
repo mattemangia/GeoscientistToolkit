@@ -63,7 +63,7 @@ public class SubsurfaceGISTools : IDatasetTools
 
     private void DrawSaveExportSection(SubsurfaceGISDataset dataset)
     {
-        ImGui.Text("💾 Save & Export");
+        ImGui.Text("Save & Export");
         ImGui.Spacing();
 
         // Save full model button
@@ -125,7 +125,7 @@ public class SubsurfaceGISTools : IDatasetTools
 
     private void DrawStatisticsSection(SubsurfaceGISDataset dataset)
     {
-        if (ImGui.CollapsingHeader("📊 Model Statistics", ImGuiTreeNodeFlags.None))
+        if (ImGui.CollapsingHeader("Model Statistics", ImGuiTreeNodeFlags.None))
         {
             ImGui.Indent();
             

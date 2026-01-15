@@ -597,12 +597,12 @@ public class PNMViewer : IDatasetViewer
 
         if (_lastScreenshotPath.StartsWith("Error"))
         {
-            ImGui.TextColored(new Vector4(1.0f, 0.2f, 0.2f, 1.0f), "✗ Screenshot failed!");
+            ImGui.TextColored(new Vector4(1.0f, 0.2f, 0.2f, 1.0f), "Screenshot failed!");
             ImGui.Text(_lastScreenshotPath);
         }
         else
         {
-            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "✓ Screenshot saved!");
+            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Screenshot saved!");
             ImGui.Text(Path.GetFileName(_lastScreenshotPath));
         }
 
