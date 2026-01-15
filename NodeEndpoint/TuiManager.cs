@@ -2899,19 +2899,19 @@ public class TuiManager
 
         // Overall Status
         var healthStatus = "HEALTHY";
-        var healthIndicator = "✓";
+        var healthIndicator = "OK";
 
         if (_currentCpuUsage > 90 || _currentMemoryUsage > 90)
         {
             healthStatus = "WARNING - High Resource Usage";
-            healthIndicator = "⚠";
+            healthIndicator = "Warning";
         }
 
         var failedJobs = jobs.Count(j => j.Status == JobTracker.JobStatus.Failed);
         if (failedJobs > 0)
         {
             healthStatus = "WARNING - Failed Jobs Detected";
-            healthIndicator = "⚠";
+            healthIndicator = "Warning";
         }
 
         sb.AppendLine("═══ OVERALL STATUS ═══");
@@ -2922,14 +2922,14 @@ public class TuiManager
         // Resource Health
         sb.AppendLine("═══ RESOURCE HEALTH ═══");
         sb.AppendLine();
-        sb.AppendLine($"CPU Usage:        {_currentCpuUsage:F1}% {(_currentCpuUsage < 70 ? "✓ Normal" : _currentCpuUsage < 90 ? "⚠ High" : "✗ Critical")}");
-        sb.AppendLine($"Memory Usage:     {_currentMemoryUsage:F1}% {(_currentMemoryUsage < 70 ? "✓ Normal" : _currentMemoryUsage < 90 ? "⚠ High" : "✗ Critical")}");
+        sb.AppendLine($"CPU Usage:        {_currentCpuUsage:F1}% {(_currentCpuUsage < 70 ? "Normal" : _currentCpuUsage < 90 ? "High" : "Critical")}");
+        sb.AppendLine($"Memory Usage:     {_currentMemoryUsage:F1}% {(_currentMemoryUsage < 70 ? "Normal" : _currentMemoryUsage < 90 ? "High" : "Critical")}");
 
         try
         {
             var driveInfo = new DriveInfo(Path.GetPathRoot(Environment.CurrentDirectory) ?? "/");
             var diskUsedPercent = 100.0 - (driveInfo.AvailableFreeSpace * 100.0 / driveInfo.TotalSize);
-            sb.AppendLine($"Disk Usage:       {diskUsedPercent:F1}% {(diskUsedPercent < 80 ? "✓ Normal" : diskUsedPercent < 95 ? "⚠ High" : "✗ Critical")}");
+            sb.AppendLine($"Disk Usage:       {diskUsedPercent:F1}% {(diskUsedPercent < 80 ? "Normal" : diskUsedPercent < 95 ? "High" : "Critical")}");
         }
         catch
         {
@@ -2951,8 +2951,8 @@ public class TuiManager
         sb.AppendLine($"Total Jobs:       {jobs.Count}");
         sb.AppendLine($"  Pending:        {pendingJobs}");
         sb.AppendLine($"  Running:        {runningJobs}");
-        sb.AppendLine($"  Completed:      {completedJobs} ✓");
-        sb.AppendLine($"  Failed:         {failedJobs} {(failedJobs > 0 ? "⚠" : "")}");
+        sb.AppendLine($"  Completed:      {completedJobs}");
+        sb.AppendLine($"  Failed:         {failedJobs}");
         sb.AppendLine($"  Cancelled:      {cancelledJobs}");
         sb.AppendLine();
 
@@ -3012,33 +3012,33 @@ public class TuiManager
 
         if (_currentCpuUsage > 80)
         {
-            recommendations.Add("⚠ CPU usage is high - consider distributing load to more nodes");
+            recommendations.Add("Warning: CPU usage is high - consider distributing load to more nodes");
         }
 
         if (_currentMemoryUsage > 80)
         {
-            recommendations.Add("⚠ Memory usage is high - run garbage collection or restart service");
+            recommendations.Add("Warning: Memory usage is high - run garbage collection or restart service");
         }
 
         if (failedJobs > 0)
         {
-            recommendations.Add($"⚠ {failedJobs} job(s) failed - review logs for details");
+            recommendations.Add($"Warning: {failedJobs} job(s) failed - review logs for details");
         }
 
         if (pendingJobs > 10)
         {
-            recommendations.Add($"⚠ {pendingJobs} job(s) pending - consider adding worker nodes");
+            recommendations.Add($"Warning: {pendingJobs} job(s) pending - consider adding worker nodes");
         }
 
         if (nodes.Count == 0 && discoveredNodes.Count > 0)
         {
-            recommendations.Add($"ℹ {discoveredNodes.Count} node(s) discovered but not connected");
+            recommendations.Add($"Info: {discoveredNodes.Count} node(s) discovered but not connected");
         }
 
         if (!recommendations.Any())
         {
-            recommendations.Add("✓ System is operating normally");
-            recommendations.Add("✓ No issues detected");
+            recommendations.Add("System is operating normally");
+            recommendations.Add("No issues detected");
         }
 
         foreach (var rec in recommendations)
@@ -3099,43 +3099,43 @@ public class TuiManager
         sb.AppendLine();
         sb.AppendLine("═══ KEY FEATURES ═══");
         sb.AppendLine();
-        sb.AppendLine("  ✓ Real-time Monitoring Dashboard");
+        sb.AppendLine("  Real-time Monitoring Dashboard");
         sb.AppendLine("      - CPU, Memory, Disk, Network statistics");
         sb.AppendLine("      - Live connection and node discovery");
         sb.AppendLine("      - Performance graphs and metrics");
         sb.AppendLine();
-        sb.AppendLine("  ✓ Job Queue Management");
+        sb.AppendLine("  Job Queue Management");
         sb.AppendLine("      - Visual job tracking with status icons");
         sb.AppendLine("      - Detailed job information and results");
         sb.AppendLine("      - JSON-formatted output viewer");
         sb.AppendLine();
-        sb.AppendLine("  ✓ Live Logs Viewer");
+        sb.AppendLine("  Live Logs Viewer");
         sb.AppendLine("      - 10,000 entry capacity with filtering");
         sb.AppendLine("      - Real-time log streaming");
         sb.AppendLine("      - Export to text file");
         sb.AppendLine();
-        sb.AppendLine("  ✓ Performance Statistics");
+        sb.AppendLine("  Performance Statistics");
         sb.AppendLine("      - Historical metrics (1 hour retention)");
         sb.AppendLine("      - CPU/Memory trends and averages");
         sb.AppendLine("      - Network bandwidth tracking");
         sb.AppendLine("      - Export to JSON");
         sb.AppendLine();
-        sb.AppendLine("  ✓ Configuration Management");
+        sb.AppendLine("  Configuration Management");
         sb.AppendLine("      - Live JSON editor with validation");
         sb.AppendLine("      - Automatic backup creation");
         sb.AppendLine("      - Hot-reload capability");
         sb.AppendLine();
-        sb.AppendLine("  ✓ Network Discovery");
+        sb.AppendLine("  Network Discovery");
         sb.AppendLine("      - Automatic node discovery via UDP broadcast");
         sb.AppendLine("      - Manual node connection");
         sb.AppendLine("      - Service start/stop controls");
         sb.AppendLine();
-        sb.AppendLine("  ✓ Export Capabilities");
+        sb.AppendLine("  Export Capabilities");
         sb.AppendLine("      - Logs, statistics, configuration");
         sb.AppendLine("      - Timestamped file naming");
         sb.AppendLine("      - Multiple format support");
         sb.AppendLine();
-        sb.AppendLine("  ✓ CPU Benchmark Tool");
+        sb.AppendLine("  CPU Benchmark Tool");
         sb.AppendLine("      - Matrix multiplication benchmark");
         sb.AppendLine("      - GFLOPS performance rating");
         sb.AppendLine("      - Progress visualization");

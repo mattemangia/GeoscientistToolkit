@@ -367,7 +367,7 @@ public class GeomechanicalSimulationUI : IDisposable
 
         if (!string.IsNullOrEmpty(_pnmDatasetPath))
         {
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"✓ {Path.GetFileName(_pnmDatasetPath)}");
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"{Path.GetFileName(_pnmDatasetPath)}");
             ImGui.Indent();
             ImGui.TextWrapped("Will use: Porosity, permeability, pore size distribution");
             ImGui.Unindent();
@@ -386,7 +386,7 @@ public class GeomechanicalSimulationUI : IDisposable
 
         if (!string.IsNullOrEmpty(_permeabilityCsvPath))
         {
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"✓ {Path.GetFileName(_permeabilityCsvPath)}");
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"{Path.GetFileName(_permeabilityCsvPath)}");
             ImGui.Indent();
             ImGui.TextWrapped("Expected columns: MaterialID, Permeability_mD, Porosity");
             ImGui.Unindent();
@@ -405,7 +405,7 @@ public class GeomechanicalSimulationUI : IDisposable
 
         if (!string.IsNullOrEmpty(_acousticDatasetPath))
         {
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"✓ {Path.GetFileName(_acousticDatasetPath)}");
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"{Path.GetFileName(_acousticDatasetPath)}");
             ImGui.Indent();
             ImGui.TextWrapped("Will use: Vp, Vs, elastic moduli");
             ImGui.Unindent();

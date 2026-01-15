@@ -415,7 +415,7 @@ public class ImportDataModal
             var info = new FileInfo(_boreholeBinaryLoader.FilePath);
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import borehole dataset");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import borehole dataset");
         }
     }
 
@@ -530,7 +530,7 @@ public class ImportDataModal
             var info = new FileInfo(_twoDGeologyLoader.FilePath);
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import 2D geology profile");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import 2D geology profile");
         }
     }
 
@@ -586,7 +586,7 @@ public class ImportDataModal
                 }
             }
             
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import subsurface GIS model");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import subsurface GIS model");
         }
     }
 
@@ -628,7 +628,7 @@ public class ImportDataModal
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / (1024 * 1024)} MB");
 
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import SEG-Y dataset");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import SEG-Y dataset");
         }
     }
 
@@ -671,7 +671,7 @@ public class ImportDataModal
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
 
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import PhysicoChem dataset");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import PhysicoChem dataset");
         }
     }
 
@@ -717,7 +717,7 @@ public class ImportDataModal
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
 
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import TOUGH2 dataset");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import TOUGH2 dataset");
         }
     }
 
@@ -763,7 +763,7 @@ public class ImportDataModal
                 ImGui.BulletText($"Format: {videoInfo.Format}");
                 ImGui.BulletText($"Audio: {(videoInfo.HasAudio ? "Yes" : "No")}");
                 ImGui.BulletText($"File Size: {videoInfo.FileSize / 1024.0 / 1024.0:F2} MB");
-                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import video");
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import video");
             }
         }
     }
@@ -810,7 +810,7 @@ public class ImportDataModal
                 ImGui.BulletText($"Encoding: {audioInfo.Encoding}");
                 ImGui.BulletText($"Format: {audioInfo.Format}");
                 ImGui.BulletText($"File Size: {audioInfo.FileSize / 1024.0 / 1024.0:F2} MB");
-                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import audio");
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import audio");
             }
         }
     }
@@ -843,7 +843,7 @@ public class ImportDataModal
             ImGui.BulletText($"File: {fileInfo.Name}");
             ImGui.BulletText($"Format: {Path.GetExtension(_textLoader.TextPath).TrimStart('.').ToUpperInvariant()}");
             ImGui.BulletText($"File Size: {fileInfo.Length / 1024.0:F2} KB");
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import text document");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import text document");
         }
     }
 
@@ -875,7 +875,7 @@ public class ImportDataModal
             ImGui.Text("File Information:");
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import slope stability results");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import slope stability results");
         }
     }
 
@@ -908,11 +908,11 @@ public class ImportDataModal
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import DICOM series");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import DICOM series");
         }
         else if (!string.IsNullOrEmpty(_dicomLoader.ValidationMessage))
         {
-             ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), $"⚠ {_dicomLoader.ValidationMessage}");
+             ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), $"⚠ Warning: {_dicomLoader.ValidationMessage}");
         }
     }
 
@@ -939,7 +939,7 @@ public class ImportDataModal
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import .ctstack");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import .ctstack");
         }
     }
 
@@ -971,7 +971,7 @@ public class ImportDataModal
             var info = new FileInfo(_pnmLoader.FilePath);
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import PNM dataset");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import PNM dataset");
         }
     }
 
@@ -1011,7 +1011,7 @@ public class ImportDataModal
             var info = new FileInfo(_dualPnmLoader.FilePath);
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import Dual PNM dataset");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import Dual PNM dataset");
         }
     }
 
@@ -1055,14 +1055,14 @@ public class ImportDataModal
 
             if (info.HasMaterialsFile)
                 ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                    "✓ Material definitions found (.materials.json)");
+                    "Material definitions found (.materials.json)");
             else
                 ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f),
-                    "⚠ No material definitions found - colors will be used to generate materials");
+                    "⚠ Warning: No material definitions found - colors will be used to generate materials");
 
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                "✓ Ready to import segmentation");
+                "Ready to import segmentation");
         }
     }
 
@@ -1111,12 +1111,12 @@ public class ImportDataModal
 
                 ImGui.Spacing();
                 ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                    "✓ Ready to import acoustic volume");
+                    "Ready to import acoustic volume");
             }
             else
             {
                 ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f),
-                    "⚠ Invalid acoustic volume directory");
+                    "⚠ Warning: Invalid acoustic volume directory");
 
                 if (!string.IsNullOrEmpty(info.ErrorMessage)) ImGui.TextWrapped($"Error: {info.ErrorMessage}");
 
@@ -1311,7 +1311,7 @@ public class ImportDataModal
             ImGui.BulletText($"Format: {info.Format}");
             ImGui.BulletText($"Size: {info.FileSize / 1024} KB");
 
-            if (info.IsSupported) ImGui.TextColored(new Vector4(0, 1, 0, 1), "✓ Ready to import");
+            if (info.IsSupported) ImGui.TextColored(new Vector4(0, 1, 0, 1), "Ready to import");
         }
     }
 
@@ -1393,7 +1393,7 @@ public class ImportDataModal
 
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                "✓ Ready to import. Unique colors will be identified as materials.");
+                "Ready to import. Unique colors will be identified as materials.");
         }
     }
 
@@ -1495,7 +1495,7 @@ public class ImportDataModal
 
                 ImGui.Text(
                     $"Preview showing {Math.Min(5, preview.Rows.Count)} of {preview.Rows.Count} rows, {preview.Columns.Count} columns");
-                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import");
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import");
             }
         }
     }
@@ -1530,7 +1530,7 @@ public class ImportDataModal
 
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                "✓ Ready to create empty map");
+                "Ready to create empty map");
         }
         else
         {
@@ -1566,7 +1566,7 @@ public class ImportDataModal
 
                 if (info.IsValid)
                     ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                        "✓ Ready to import");
+                        "Ready to import");
             }
         }
     }
@@ -1574,9 +1574,9 @@ public class ImportDataModal
     private void DrawCheckmark(bool hasComponent, string label)
     {
         if (hasComponent)
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.0f, 1.0f), "✓");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.0f, 1.0f), "OK");
         else
-            ImGui.TextColored(new Vector4(1.0f, 0.0f, 0.0f, 1.0f), "✗");
+            ImGui.TextColored(new Vector4(1.0f, 0.0f, 0.0f, 1.0f), "Error");
         ImGui.SameLine();
         ImGui.Text(label);
     }

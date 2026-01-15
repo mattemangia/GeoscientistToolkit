@@ -200,7 +200,7 @@ public class TwoDGeologyTools
         ImGui.Text("Modification Tools:");
 
         // Interactive Drawing Tool button
-        if (ImGui.Button("🎨 Interactive Drawing Tool", buttonSize))
+        if (ImGui.Button("Interactive Drawing Tool", buttonSize))
         {
             _showDrawingTool = !_showDrawingTool;
         }

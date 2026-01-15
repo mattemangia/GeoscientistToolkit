@@ -16,7 +16,7 @@ public class BrushTool : ISegmentationTool
     public float Hardness { get; set; } = 1.0f;
 
     public string Name => "Brush";
-    public string Icon => "🖌";
+    public string Icon => "Brush";
 
     public bool HasActiveSelection { get; private set; }
 

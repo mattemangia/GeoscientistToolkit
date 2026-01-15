@@ -73,9 +73,9 @@ public class CalibrationManagerUI
             // Status
             if (HasCalibration)
                 ImGui.TextColored(new Vector4(0, 1, 0, 1),
-                    $"✓ {CalibrationData.Points.Count} calibration points loaded");
+                    $"{CalibrationData.Points.Count} calibration points loaded");
             else
-                ImGui.TextColored(new Vector4(1, 1, 0, 1), "⚠ No calibration data");
+                ImGui.TextColored(new Vector4(1, 1, 0, 1), "No calibration data");
 
             // Buttons
             if (ImGui.Button("Manage Calibration"))

@@ -111,7 +111,7 @@ public class AcousticReportGeneratorTool : IDatasetTools
         // Velocity Profile Line Selection
         if (_includeVelocityProfile && canDoVelocity)
         {
-            var status = _isVelocityLineSet ? "✓ Line Set" : "✗ Line Not Set";
+            var status = _isVelocityLineSet ? "Line Set" : "Line Not Set";
             var color = _isVelocityLineSet ? new Vector4(0, 1, 0, 1) : new Vector4(1, 1, 0, 1);
             ImGui.Text("Velocity Profile Line:");
             ImGui.SameLine();
@@ -123,7 +123,7 @@ public class AcousticReportGeneratorTool : IDatasetTools
         // Waveform Point Selection
         if (_includeWaveform && canDoWaveform)
         {
-            var status = _isWaveformPointSet ? "✓ Point Set" : "✗ Point Not Set";
+            var status = _isWaveformPointSet ? "Point Set" : "Point Not Set";
             var color = _isWaveformPointSet ? new Vector4(0, 1, 0, 1) : new Vector4(1, 1, 0, 1);
             ImGui.Text("Waveform Point:");
             ImGui.SameLine();

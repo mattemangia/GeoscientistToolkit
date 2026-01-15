@@ -248,13 +248,13 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
             if (isValid)
             {
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.2f, 1.0f, 0.2f, 1.0f));
-                ImGui.Text("✓ Ready");
+                ImGui.Text("Ready");
                 ImGui.PopStyleColor();
             }
             else
             {
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.3f, 0.3f, 1.0f));
-                ImGui.Text("✗ Models not found");
+                ImGui.Text("Models not found");
                 ImGui.PopStyleColor();
             }
         }

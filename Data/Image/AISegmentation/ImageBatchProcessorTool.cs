@@ -250,11 +250,11 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
                         _currentProcessing = image.Name;
                         ProcessSingleImage(image);
                         _processedCount++;
-                        _processingLog.Add($"✓ {image.Name} - Success");
+                        _processingLog.Add($"{image.Name} - Success");
                     }
                     catch (Exception ex)
                     {
-                        _processingLog.Add($"✗ {image.Name} - Error: {ex.Message}");
+                        _processingLog.Add($"{image.Name} - Error: {ex.Message}");
                     }
                 }
             });

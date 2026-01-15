@@ -220,7 +220,7 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
                 var libMat = MaterialLibrary.Instance.Find(selectedMat.PhysicalMaterialName);
                 if (libMat != null)
                 {
-                    ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), $"✓ Linked: {libMat.Name}");
+                    ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), $"Linked: {libMat.Name}");
 
                     if (ImGui.BeginTable("LibProps", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
                     {
@@ -286,7 +286,7 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
                 else
                 {
                     ImGui.TextColored(new Vector4(1, 0.8f, 0, 1),
-                        $"⚠ Library material '{selectedMat.PhysicalMaterialName}' not found");
+                        $"Warning: Library material '{selectedMat.PhysicalMaterialName}' not found");
                     if (ImGui.Button("Clear Invalid Link", new Vector2(150, 0)))
                     {
                         selectedMat.PhysicalMaterialName = null;

@@ -385,7 +385,7 @@ public class GISViewer : IDatasetViewer
             // Warning icon and title
             ImGui.PushFont(ImGui.GetIO().Fonts.Fonts[0]); // Default font
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.6f, 0.0f, 1.0f));
-            ImGui.Text("⚠");
+            ImGui.Text("Warning");
             ImGui.PopStyleColor();
             ImGui.PopFont();
 
@@ -578,7 +578,7 @@ public class GISViewer : IDatasetViewer
             if (_basemapManager == null)
             {
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.6f, 0.0f, 1.0f));
-                ImGui.Text("⚠");
+                ImGui.Text("Warning");
                 ImGui.PopStyleColor();
                 ImGui.SameLine();
                 ImGui.TextColored(new Vector4(1, 0.7f, 0.3f, 1),

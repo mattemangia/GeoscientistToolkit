@@ -906,17 +906,17 @@ public static class MultiBoreholeCoupledSimulation
 
             if (optimalSpacing > currentSpacing * 1.2)
             {
-                Logger.Log("    ⚠️ WARNING: Current spacing may result in premature breakthrough!");
+                Logger.Log("    Warning: Current spacing may result in premature breakthrough!");
                 Logger.Log(
-                    $"    ⚠️ Recommend increasing well spacing by {(optimalSpacing / currentSpacing - 1) * 100:F0}%");
+                    $"    Recommend increasing well spacing by {(optimalSpacing / currentSpacing - 1) * 100:F0}%");
             }
             else if (optimalSpacing < currentSpacing * 0.8)
             {
-                Logger.Log("    ✓ Current spacing is conservative and will extend system lifetime");
+                Logger.Log("    Current spacing is conservative and will extend system lifetime");
             }
             else
             {
-                Logger.Log("    ✓ Current spacing is near-optimal");
+                Logger.Log("    Current spacing is near-optimal");
             }
         }
     }

@@ -241,7 +241,7 @@ internal sealed class PackagerTui
                     await installerService.PublishInstallerAsync(package.RuntimeIdentifier, settings, publisher, LogMessage)
                         .ConfigureAwait(false);
                 }
-                LogMessage($"✓ {package.PackageId} ({package.RuntimeIdentifier}) completed\n");
+                LogMessage($"{package.PackageId} ({package.RuntimeIdentifier}) completed\n");
             }
 
             await ManifestPersistence.SaveAsync(settings.ManifestPath, manifest).ConfigureAwait(false);

@@ -92,7 +92,7 @@ public class ParticleSeparatorTool : AddInTool, IDisposable
     }
 
     public override string Name => "Particle Separator";
-    public override string Icon => "🔬";
+    public override string Icon => "Lab";
     public override string Tooltip => "Separate and analyze particles in CT data";
 
     public void Dispose()
@@ -552,10 +552,10 @@ public unsafe class AcceleratedProcessor : IDisposable
         var simdAvailable = Vector.IsHardwareAccelerated;
 
         if (_gpuAvailable)
-            return ("✓ GPU Available (ILGPU)", new Vector4(0, 1, 0, 1));
+            return ("GPU Available (ILGPU)", new Vector4(0, 1, 0, 1));
         if (simdAvailable)
-            return ("✓ SIMD Available", new Vector4(0.5f, 1, 0, 1));
-        return ("✓ Multi-threaded CPU", new Vector4(1, 1, 0, 1));
+            return ("SIMD Available", new Vector4(0.5f, 1, 0, 1));
+        return ("Multi-threaded CPU", new Vector4(1, 1, 0, 1));
     }
 
     // --- FIX: Added zSlice parameter for 2D processing ---

@@ -78,7 +78,7 @@ internal class RemoveSmallIslandsTool : AddInTool, IDisposable
     }
 
     public override string Name => "Remove Small Islands";
-    public override string Icon => "🧹";
+    public override string Icon => "Clean";
     public override string Tooltip => "Clean a material by removing small, disconnected particles.";
 
     public void Dispose()

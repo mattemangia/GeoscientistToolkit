@@ -1040,7 +1040,7 @@ public class MainWindow
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
         if (ImGui.BeginPopupModal("Close Application?###WindowCloseDialog", ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.Text("⚠ Your project has unsaved changes.");
+            ImGui.Text("⚠ Warning: Your project has unsaved changes.");
             ImGui.Text("Do you want to save before closing?");
             ImGui.Spacing();
             ImGui.Separator();

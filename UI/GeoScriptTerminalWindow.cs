@@ -118,7 +118,7 @@ public class GeoScriptTerminalWindow
             style.ChildRounding
         );
 
-        var title = "⚠ No Dataset Selected";
+        var title = "No Dataset Selected";
         var titleSize = ImGui.CalcTextSize(title);
         ImGui.SetCursorPos(new Vector2(
             (windowSize.X - titleSize.X) * 0.5f,

@@ -363,15 +363,15 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             ImGui.Separator();
             if (_economics.NPV_MUSD > 0 && _economics.IRR > 8.0f)
             {
-                ImGui.TextColored(new Vector4(0.2f, 1f, 0.2f, 1), "✓ Project appears economically viable");
+                ImGui.TextColored(new Vector4(0.2f, 1f, 0.2f, 1), "Project appears economically viable");
             }
             else if (_economics.NPV_MUSD > 0)
             {
-                ImGui.TextColored(new Vector4(1f, 1f, 0.2f, 1), "⚠ Marginal project viability");
+                ImGui.TextColored(new Vector4(1f, 1f, 0.2f, 1), "Marginal project viability");
             }
             else
             {
-                ImGui.TextColored(new Vector4(1f, 0.2f, 0.2f, 1), "✗ Project not economically viable");
+                ImGui.TextColored(new Vector4(1f, 0.2f, 0.2f, 1), "Project not economically viable");
             }
         }
 

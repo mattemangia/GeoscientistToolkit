@@ -1350,7 +1350,7 @@ public class AcousticSimulationUI : IDisposable
         if (!_useGPU && estimatedSeconds > 300)
         {
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 1, 0, 1));
-            ImGui.TextWrapped("⚠️ Consider enabling GPU acceleration for faster results!");
+            ImGui.TextWrapped("⚠ Warning: Consider enabling GPU acceleration for faster results!");
             ImGui.PopStyleColor();
         }
 

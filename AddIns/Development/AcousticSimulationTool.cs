@@ -83,7 +83,7 @@ internal class AcousticSimulationTool : AddInTool, IDisposable
     }
 
     public override string Name => "Acoustic Simulation";
-    public override string Icon => "🔊";
+    public override string Icon => "Audio";
     public override string Tooltip => "Simulate acoustic wave propagation through materials";
 
     public void Dispose()
@@ -128,7 +128,7 @@ internal class AcousticSimulationTool : AddInTool, IDisposable
         ImGui.Text($"Estimated Memory: {volumeMemory / (1024 * 1024)} MB");
 
         if (volumeMemory > 4L * 1024 * 1024 * 1024) // > 4GB
-            ImGui.TextColored(new Vector4(1, 1, 0, 1), "⚠ Large dataset - chunked processing recommended");
+            ImGui.TextColored(new Vector4(1, 1, 0, 1), "⚠ Warning: Large dataset - chunked processing recommended");
 
         ImGui.Separator();
 
@@ -148,7 +148,7 @@ internal class AcousticSimulationTool : AddInTool, IDisposable
             ImGui.SameLine();
             var hasDensityCalib = _calibratedDensity != null;
             ImGui.TextColored(hasDensityCalib ? new Vector4(0, 1, 0, 1) : new Vector4(1, 1, 0, 1),
-                hasDensityCalib ? "✓ Per-voxel density calibrated" : "⚠ Using default density mapping");
+                hasDensityCalib ? "Per-voxel density calibrated" : "Using default density mapping");
 
             if (_densityTool != null)
             {

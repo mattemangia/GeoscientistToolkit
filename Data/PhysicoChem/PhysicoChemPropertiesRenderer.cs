@@ -278,29 +278,29 @@ public class PhysicoChemPropertiesRenderer : IDatasetPropertiesRenderer
         ImGui.Indent();
 
         if (simParams.EnableReactiveTransport)
-            ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "✓ Reactive Transport");
+            ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "Reactive Transport");
         else
-            ImGui.TextDisabled("✗ Reactive Transport");
+            ImGui.TextDisabled("Reactive Transport");
 
         if (simParams.EnableHeatTransfer)
-            ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "✓ Heat Transfer");
+            ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "Heat Transfer");
         else
-            ImGui.TextDisabled("✗ Heat Transfer");
+            ImGui.TextDisabled("Heat Transfer");
 
         if (simParams.EnableFlow)
-            ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "✓ Flow");
+            ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "Flow");
         else
-            ImGui.TextDisabled("✗ Flow");
+            ImGui.TextDisabled("Flow");
 
         if (simParams.EnableForces)
-            ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "✓ Forces");
+            ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "Forces");
         else
-            ImGui.TextDisabled("✗ Forces");
+            ImGui.TextDisabled("Forces");
 
         if (simParams.EnableNucleation)
-            ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "✓ Nucleation");
+            ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "Nucleation");
         else
-            ImGui.TextDisabled("✗ Nucleation");
+            ImGui.TextDisabled("Nucleation");
 
         ImGui.Unindent();
 

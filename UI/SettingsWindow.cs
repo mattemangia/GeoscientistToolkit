@@ -289,7 +289,7 @@ public class SettingsWindow
         {
             if (FileAssociation.IsAssociated())
             {
-                ImGui.Text("✅ .gtp files are associated with this application.");
+                ImGui.Text(".gtp files are associated with this application.");
                 if (ImGui.Button("Unregister File Type"))
                     try
                     {
@@ -302,7 +302,7 @@ public class SettingsWindow
             }
             else
             {
-                ImGui.Text("❌ .gtp files are not associated.");
+                ImGui.Text(".gtp files are not associated.");
                 if (ImGui.Button("Register File Type"))
                     try
                     {

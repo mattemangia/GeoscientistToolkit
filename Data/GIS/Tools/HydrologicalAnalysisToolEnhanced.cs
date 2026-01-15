@@ -295,7 +295,7 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
         }
         else
         {
-            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.3f, 1.0f), "✓ Flow analysis complete");
+            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.3f, 1.0f), "Flow analysis complete");
             if (ImGui.Button("Recalculate")) CalculateFlow();
         }
 
@@ -569,7 +569,7 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
         {
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.3f, 1.0f),
-                $"✓ Exported {_exportableLayers.Count} layers");
+                $"Exported {_exportableLayers.Count} layers");
         }
     }
 

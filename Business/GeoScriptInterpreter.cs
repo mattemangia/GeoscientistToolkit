@@ -201,18 +201,18 @@ public class GeoScriptInterpreter
                 {
                     ProjectManager.Instance.AddDataset(resultDataset);
                     LogToOutput(
-                        $"✔ Success: New dataset '{resultDataset.Name}' created and added to the project.");
+                        $"Success: New dataset '{resultDataset.Name}' created and added to the project.");
                 }
                 else
                 {
                     LogToOutput(
-                        $"✔ Success: In-place operation completed on '{_associatedDataset.Name}'.");
+                        $"Success: In-place operation completed on '{_associatedDataset.Name}'.");
                 }
             }
         }
         catch (Exception ex)
         {
-            LogToOutput($"✖ Error: {ex.Message}");
+            LogToOutput($"Error: {ex.Message}");
         }
         finally
         {

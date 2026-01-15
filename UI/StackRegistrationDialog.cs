@@ -325,7 +325,7 @@ public class StackRegistrationDialog
         // Validate configuration
         var (isValid, errorMessage) = ValidateConfiguration();
 
-        if (!isValid) ImGui.TextColored(new Vector4(1, 0.3f, 0.3f, 1), $"⚠ {errorMessage}");
+        if (!isValid) ImGui.TextColored(new Vector4(1, 0.3f, 0.3f, 1), $"⚠ Warning: {errorMessage}");
 
         // Action buttons
         var buttonWidth = 120f;
