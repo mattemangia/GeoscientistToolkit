@@ -508,7 +508,7 @@ void main()
         }
 
         var backend = GetPlatformDefaultBackend();
-        VeldridStartup.CreateWindowAndGraphicsDevice(windowInfo, options, backend, out _window, out _graphicsDevice);
+        TryCreateWindowWithFallback(windowInfo, ref options, backend);
     }
 
     private GraphicsBackend GetPlatformDefaultBackend()
@@ -516,6 +516,66 @@ void main()
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return GraphicsBackend.Direct3D11;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return GraphicsBackend.Metal;
         return GraphicsBackend.Vulkan;
+    }
+
+    private void TryCreateWindowWithFallback(
+        WindowCreateInfo windowInfo,
+        ref GraphicsDeviceOptions options,
+        GraphicsBackend backend)
+    {
+        try
+        {
+            VeldridStartup.CreateWindowAndGraphicsDevice(windowInfo, options, backend, out _window, out _graphicsDevice);
+        }
+        catch (Exception ex)
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                LogError($"Failed to create D3D11 device: {ex.Message}. Trying Vulkan...");
+                TryCreateVulkanThenOpenGl(windowInfo, ref options);
+            }
+            else
+            {
+                LogError($"Failed to create Vulkan device: {ex.Message}. Trying OpenGL...");
+                TryCreateOpenGl(windowInfo, ref options);
+            }
+        }
+    }
+
+    private void TryCreateVulkanThenOpenGl(WindowCreateInfo windowInfo, ref GraphicsDeviceOptions options)
+    {
+        try
+        {
+            VeldridStartup.CreateWindowAndGraphicsDevice(
+                windowInfo,
+                options,
+                GraphicsBackend.Vulkan,
+                out _window,
+                out _graphicsDevice);
+        }
+        catch (Exception vkEx)
+        {
+            LogError($"Failed to create Vulkan device: {vkEx.Message}. Trying OpenGL...");
+            TryCreateOpenGl(windowInfo, ref options);
+        }
+    }
+
+    private void TryCreateOpenGl(WindowCreateInfo windowInfo, ref GraphicsDeviceOptions options)
+    {
+        options = new GraphicsDeviceOptions(
+            true,
+            null,
+            true,
+            ResourceBindingModel.Improved,
+            preferStandardClipSpaceYDirection: true,
+            preferDepthRangeZeroToOne: true);
+
+        VeldridStartup.CreateWindowAndGraphicsDevice(
+            windowInfo,
+            options,
+            GraphicsBackend.OpenGL,
+            out _window,
+            out _graphicsDevice);
     }
 
     private void LogInfo(string message) => Log(message, false);

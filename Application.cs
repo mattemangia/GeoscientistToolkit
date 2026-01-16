@@ -78,59 +78,13 @@ public class Application
 
             // On Windows, try multiple backends if D3D11 fails
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                try
-                {
-                    VeldridStartup.CreateWindowAndGraphicsDevice(
-                        windowCI,
-                        basicGraphicsOptions,
-                        backend,
-                        out _window,
-                        out _graphicsDevice);
-                }
-                catch (Exception d3dEx)
-                {
-                    Logger.LogError($"Failed to create D3D11 device: {d3dEx.Message}. Trying Vulkan...");
-
-                    // Try Vulkan as fallback
-                    try
-                    {
-                        backend = GraphicsBackend.Vulkan;
-                        VeldridStartup.CreateWindowAndGraphicsDevice(
-                            windowCI,
-                            basicGraphicsOptions,
-                            backend,
-                            out _window,
-                            out _graphicsDevice);
-                    }
-                    catch (Exception vkEx)
-                    {
-                        Logger.LogError($"Failed to create Vulkan device: {vkEx.Message}. Trying OpenGL...");
-
-                        // Last resort: OpenGL
-                        backend = GraphicsBackend.OpenGL;
-                        basicGraphicsOptions = new GraphicsDeviceOptions(
-                            false,
-                            PixelFormat.D24_UNorm_S8_UInt,
-                            true,
-                            ResourceBindingModel.Default,
-                            preferStandardClipSpaceYDirection: false,
-                            preferDepthRangeZeroToOne: false);
-
-                        VeldridStartup.CreateWindowAndGraphicsDevice(
-                            windowCI,
-                            basicGraphicsOptions,
-                            backend,
-                            out _window,
-                            out _graphicsDevice);
-                    }
-                }
+            {
+                TryCreateWithWindowsFallbacks(windowCI, ref basicGraphicsOptions, backend);
+            }
             else
-                VeldridStartup.CreateWindowAndGraphicsDevice(
-                    windowCI,
-                    basicGraphicsOptions,
-                    backend,
-                    out _window,
-                    out _graphicsDevice);
+            {
+                TryCreateWithUnixFallbacks(windowCI, ref basicGraphicsOptions, backend);
+            }
 
             VeldridManager.MainWindow = _window;
             _commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
@@ -158,13 +112,20 @@ public class Application
         {
             // If we can't even create a basic window, show error and exit
             Logger.LogError($"Failed to create window: {ex.Message}");
+            var troubleshooting = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? "Possible solutions:\n" +
+                  "1. Update your graphics drivers\n" +
+                  "2. Install Visual C++ Redistributables\n" +
+                  "3. Try running in compatibility mode\n" +
+                  "4. Ensure DirectX is up to date"
+                : "Possible solutions:\n" +
+                  "1. Update your graphics drivers\n" +
+                  "2. Install Vulkan/OpenGL drivers for your GPU\n" +
+                  "3. Ensure libvulkan and SDL2 dependencies are installed\n" +
+                  "4. Try forcing the OpenGL backend in Settings";
+
             CrossPlatformMessageBox.Show(
-                $"Failed to create application window.\n\nError: {ex.Message}\n\n" +
-                "Possible solutions:\n" +
-                "1. Update your graphics drivers\n" +
-                "2. Install Visual C++ Redistributables\n" +
-                "3. Try running in compatibility mode\n" +
-                "4. Ensure DirectX is up to date",
+                $"Failed to create application window.\n\nError: {ex.Message}\n\n{troubleshooting}",
                 "Startup Error",
                 MessageBoxType.Error);
             Environment.Exit(1);
@@ -449,6 +410,95 @@ public class Application
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return GraphicsBackend.Direct3D11;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return GraphicsBackend.Metal;
         return GraphicsBackend.Vulkan;
+    }
+
+    private void TryCreateWithWindowsFallbacks(
+        WindowCreateInfo windowCI,
+        ref GraphicsDeviceOptions basicGraphicsOptions,
+        GraphicsBackend backend)
+    {
+        try
+        {
+            VeldridStartup.CreateWindowAndGraphicsDevice(
+                windowCI,
+                basicGraphicsOptions,
+                backend,
+                out _window,
+                out _graphicsDevice);
+        }
+        catch (Exception d3dEx)
+        {
+            Logger.LogError($"Failed to create D3D11 device: {d3dEx.Message}. Trying Vulkan...");
+
+            // Try Vulkan as fallback
+            try
+            {
+                backend = GraphicsBackend.Vulkan;
+                VeldridStartup.CreateWindowAndGraphicsDevice(
+                    windowCI,
+                    basicGraphicsOptions,
+                    backend,
+                    out _window,
+                    out _graphicsDevice);
+            }
+            catch (Exception vkEx)
+            {
+                Logger.LogError($"Failed to create Vulkan device: {vkEx.Message}. Trying OpenGL...");
+
+                // Last resort: OpenGL
+                backend = GraphicsBackend.OpenGL;
+                basicGraphicsOptions = new GraphicsDeviceOptions(
+                    false,
+                    PixelFormat.D24_UNorm_S8_UInt,
+                    true,
+                    ResourceBindingModel.Default,
+                    preferStandardClipSpaceYDirection: false,
+                    preferDepthRangeZeroToOne: false);
+
+                VeldridStartup.CreateWindowAndGraphicsDevice(
+                    windowCI,
+                    basicGraphicsOptions,
+                    backend,
+                    out _window,
+                    out _graphicsDevice);
+            }
+        }
+    }
+
+    private void TryCreateWithUnixFallbacks(
+        WindowCreateInfo windowCI,
+        ref GraphicsDeviceOptions basicGraphicsOptions,
+        GraphicsBackend backend)
+    {
+        try
+        {
+            VeldridStartup.CreateWindowAndGraphicsDevice(
+                windowCI,
+                basicGraphicsOptions,
+                backend,
+                out _window,
+                out _graphicsDevice);
+        }
+        catch (Exception vkEx)
+        {
+            Logger.LogError($"Failed to create Vulkan device: {vkEx.Message}. Trying OpenGL...");
+
+            backend = GraphicsBackend.OpenGL;
+            basicGraphicsOptions = new GraphicsDeviceOptions(
+                true,
+                null,
+                true,
+                ResourceBindingModel.Improved,
+                preferStandardClipSpaceYDirection: true,
+                preferDepthRangeZeroToOne: true);
+
+            VeldridStartup.CreateWindowAndGraphicsDevice(
+                windowCI,
+                basicGraphicsOptions,
+                backend,
+                out _window,
+                out _graphicsDevice);
+        }
     }
 
     private void OnSettingsChanged(AppSettings settings)
