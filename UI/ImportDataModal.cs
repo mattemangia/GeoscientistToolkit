@@ -42,7 +42,8 @@ public class ImportDataModal
         "Text Document (TXT/RTF)",
         "Slope Stability Results (Binary)",
         "DICOM Series (CT/MRI)",
-        "CT Stack File (.ctstack)"
+        "CT Stack File (.ctstack)",
+        "Point Cloud (XYZ/PTS/ASC)"
     };
 
     private readonly ImGuiFileDialog _fileDialog;
@@ -97,6 +98,8 @@ public class ImportDataModal
     private readonly ImGuiFileDialog _dicomDialog;
     private readonly CtStackFileLoader _ctStackFileLoader;
     private readonly ImGuiFileDialog _ctStackFileDialog;
+    private readonly PointCloudLoader _pointCloudLoader;
+    private readonly ImGuiFileDialog _pointCloudDialog;
 
     private ImportState _currentState = ImportState.Idle;
     private Task<Dataset> _importTask;
@@ -138,6 +141,7 @@ public class ImportDataModal
             "Select Slope Stability Results");
         _dicomDialog = new ImGuiFileDialog("ImportDicomDialog", FileDialogType.OpenDirectory, "Select DICOM Directory");
         _ctStackFileDialog = new ImGuiFileDialog("ImportCtStackFileDialog", FileDialogType.OpenFile, "Select .ctstack File");
+        _pointCloudDialog = new ImGuiFileDialog("ImportPointCloudDialog", FileDialogType.OpenFile, "Select Point Cloud File");
         _organizerDialog = new ImageStackOrganizerDialog();
 
         // Initialize loaders
@@ -165,6 +169,7 @@ public class ImportDataModal
         _slopeResultsLoader = new SlopeStabilityResultsBinaryLoader();
         _dicomLoader = new DicomLoader();
         _ctStackFileLoader = new CtStackFileLoader();
+        _pointCloudLoader = new PointCloudLoader();
     }
 
     public void Open()
@@ -291,6 +296,7 @@ public class ImportDataModal
         if (_slopeResultsDialog.Submit()) _slopeResultsLoader.FilePath = _slopeResultsDialog.SelectedPath;
         if (_dicomDialog.Submit()) _dicomLoader.SourcePath = _dicomDialog.SelectedPath;
         if (_ctStackFileDialog.Submit()) _ctStackFileLoader.SourcePath = _ctStackFileDialog.SelectedPath;
+        if (_pointCloudDialog.Submit()) _pointCloudLoader.FilePath = _pointCloudDialog.SelectedPath;
     }
 
     private void DrawOptions()
@@ -379,6 +385,9 @@ public class ImportDataModal
                 break;
             case 24: // .ctstack
                 DrawCtStackFileOptions();
+                break;
+            case 25: // Point Cloud
+                DrawPointCloudOptions();
                 break;
         }
 
@@ -940,6 +949,111 @@ public class ImportDataModal
             ImGui.Separator();
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import .ctstack");
+        }
+    }
+
+    private void DrawPointCloudOptions()
+    {
+        ImGui.TextWrapped("Import point cloud data from LIDAR scans or other 3D scanning sources. " +
+                          "The point cloud can be visualized in 3D and converted to a mesh using the Tools panel. " +
+                          "Use the Slope Stability Model Wizard (Tools menu) for direct mesh generation.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("Point Cloud File (XYZ/TXT/CSV/PTS/ASC):");
+        var path = _pointCloudLoader.FilePath ?? "";
+        ImGui.InputText("##PointCloudPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##PointCloudFile"))
+        {
+            string[] extensions = { ".xyz", ".txt", ".csv", ".pts", ".asc" };
+            _pointCloudDialog.Open(null, extensions);
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("Mesh Generation Parameters:");
+        ImGui.Spacing();
+
+        // Grid step for downsampling
+        var gridStep = _pointCloudLoader.GridStep;
+        ImGui.SetNextItemWidth(150);
+        if (ImGui.InputFloat("Grid Step", ref gridStep, 0.1f, 1.0f, "%.2f"))
+            _pointCloudLoader.GridStep = MathF.Max(0.1f, gridStep);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Grid cell size for downsampling (larger = fewer points, faster processing)");
+
+        // Max edge length
+        var maxEdge = _pointCloudLoader.MaxEdgeLength;
+        ImGui.SetNextItemWidth(150);
+        if (ImGui.InputFloat("Max Edge Length", ref maxEdge, 0.5f, 2.0f, "%.2f"))
+            _pointCloudLoader.MaxEdgeLength = MathF.Max(0.5f, maxEdge);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Maximum triangle edge length (filters out large triangles at boundaries)");
+
+        // Z depth
+        var zDeep = _pointCloudLoader.ZDeep;
+        ImGui.SetNextItemWidth(150);
+        if (ImGui.InputFloat("Base Depth", ref zDeep, 1.0f, 10.0f, "%.1f"))
+            _pointCloudLoader.ZDeep = MathF.Max(0.0f, zDeep);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Depth of the solid mesh base below the minimum surface elevation");
+
+        ImGui.Spacing();
+
+        // Checkboxes
+        var enableDownsampling = _pointCloudLoader.EnableDownsampling;
+        if (ImGui.Checkbox("Enable Downsampling", ref enableDownsampling))
+            _pointCloudLoader.EnableDownsampling = enableDownsampling;
+
+        var createSolid = _pointCloudLoader.CreateSolidMesh;
+        if (ImGui.Checkbox("Create Solid Mesh", ref createSolid))
+            _pointCloudLoader.CreateSolidMesh = createSolid;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Creates a watertight mesh with bottom and sides (required for slope stability analysis)");
+
+        var translateToOrigin = _pointCloudLoader.TranslateToOrigin;
+        if (ImGui.Checkbox("Translate to Origin", ref translateToOrigin))
+            _pointCloudLoader.TranslateToOrigin = translateToOrigin;
+
+        // Rotation
+        ImGui.Spacing();
+        var rotation = _pointCloudLoader.RotationAngle;
+        ImGui.SetNextItemWidth(150);
+        if (ImGui.InputFloat("Rotation (degrees)", ref rotation, 1.0f, 15.0f, "%.1f"))
+            _pointCloudLoader.RotationAngle = rotation;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Rotation around the Z-axis in degrees");
+
+        // File info
+        var info = _pointCloudLoader.GetFileInfo();
+        if (info != null)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.Text("File Information:");
+            ImGui.BulletText($"File: {info.FileName}");
+            ImGui.BulletText($"Format: {info.Format}");
+            ImGui.BulletText($"Size: {info.FileSize / 1024} KB");
+
+            if (info.HasValidFormat)
+            {
+                ImGui.BulletText($"Estimated Points: ~{info.EstimatedPointCount:N0}");
+                if (info.HasColors)
+                    ImGui.BulletText("RGB Colors: Yes");
+            }
+
+            if (_pointCloudLoader.CanImport)
+            {
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
+                    "Ready to import and generate mesh");
+            }
         }
     }
 
@@ -1624,6 +1738,7 @@ public class ImportDataModal
             22 => _slopeResultsLoader,
             23 => _dicomLoader,
             24 => _ctStackFileLoader,
+            25 => _pointCloudLoader,
             _ => null
         };
     }
@@ -1704,6 +1819,7 @@ public class ImportDataModal
         _slopeResultsLoader.Reset();
         _dicomLoader.Reset();
         _ctStackFileLoader.Reset();
+        _pointCloudLoader.Reset();
 
         // Reset state
         _importTask = null;

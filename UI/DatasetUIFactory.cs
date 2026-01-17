@@ -16,6 +16,7 @@ using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Data.Seismic;
 using GeoscientistToolkit.Data.Media;
 using GeoscientistToolkit.Data.Text;
+using GeoscientistToolkit.Data.PointCloud;
 using GeoscientistToolkit.UI.Borehole;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Seismic;
@@ -48,6 +49,9 @@ CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
 
         // 3D Mesh datasets
         Mesh3DDataset mesh3DDataset => new Mesh3DViewer(mesh3DDataset),
+
+        // Point Cloud datasets
+        PointCloudDataset pointCloudDataset => new PointCloudViewer(pointCloudDataset),
 
         // Table datasets
         TableDataset tableDataset => new TableViewer(tableDataset),
@@ -147,6 +151,7 @@ public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset datase
         ImageDataset => new ImagePropertiesRenderer(),
         CtImageStackDataset or StreamingCtVolumeDataset => new CtImageStackPropertiesRenderer(),
         Mesh3DDataset => new Mesh3DProperties(),
+        PointCloudDataset => new PointCloudProperties(),
         TableDataset => new TableProperties(),
         SubsurfaceGISDataset => new GISProperties(),
         GISDataset => new GISProperties(),
@@ -180,6 +185,7 @@ public static IDatasetTools CreateTools(Dataset dataset)
         // --- END MODIFICATION ---
 
         Mesh3DDataset => new Mesh3DTools(),
+        PointCloudDataset => new PointCloudTools(),
         TableDataset => new TableTools(),
         SubsurfaceGISDataset => new SubsurfaceGISTools(),
         GISDataset => new GISTools(),

@@ -65,6 +65,9 @@ public class MainWindow
     // Node Manager window
     private readonly Windows.NodeManagerWindow _nodeManagerWindow = new();
 
+    // Slope Stability Mesh Wizard
+    private readonly Windows.SlopeStabilityMeshWizard _slopeStabilityMeshWizard = new();
+
     // File Dialogs
     private readonly ImGuiFileDialog
         _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
@@ -323,6 +326,7 @@ public class MainWindow
         _stratigraphyViewer.Draw();
         _realtimePhotogrammetryWindow.Draw();
         _triaxialSimulationTool?.Draw();
+        _slopeStabilityMeshWizard.Draw();
         _nodeManagerWindow.Submit(ImGui.GetIO().DeltaTime);
         // Handle create mesh dialog
         HandleCreateMeshDialog();
@@ -599,6 +603,7 @@ public class MainWindow
             if (ImGui.MenuItem("Stratigraphy Correlation Viewer")) _stratigraphyViewer.Show();
             ImGui.Separator();
             if (ImGui.MenuItem("Triaxial Simulation")) _triaxialSimulationTool.Show();
+            if (ImGui.MenuItem("Slope Stability Model Wizard")) _slopeStabilityMeshWizard.Show();
             ImGui.Separator();
             if (ImGui.MenuItem("Real-time Photogrammetry")) _realtimePhotogrammetryWindow.Show();
             ImGui.Separator();
@@ -1211,8 +1216,22 @@ public class MainWindow
             ImGui.Text("Author Information");
             ImGui.Spacing();
             ImGui.BulletText("Matteo Mangiagalli - 2026");
-            ImGui.BulletText("Università degli Studi di Urbino Carlo Bo");
+            ImGui.BulletText("Universita degli Studi di Urbino Carlo Bo");
             ImGui.BulletText("m.mangiagalli@campus.uniurb.it");
+            ImGui.Spacing();
+
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Contributors
+            ImGui.Text("Contributors");
+            ImGui.Spacing();
+            ImGui.BulletText("Francesco Ottaviani");
+            ImGui.Indent();
+            ImGui.TextDisabled("Slope Stability Mesh Generation from Point Clouds");
+            ImGui.TextDisabled("f.ottaviani5@campus.uniurb.it");
+            ImGui.TextDisabled("Universita degli Studi di Urbino Carlo Bo");
+            ImGui.Unindent();
             ImGui.Spacing();
 
             ImGui.Separator();

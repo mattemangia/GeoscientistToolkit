@@ -7,6 +7,7 @@ Guide for slope stability analysis and landslide simulation in Geoscientist's To
 ## Overview
 
 The Slope Stability module provides:
+- **Point Cloud to Mesh Generation** - Convert LIDAR scans to analysis-ready meshes
 - DEM-based 3D block simulation
 - 2D cross-section stability analysis
 - Multiple failure criteria
@@ -16,12 +17,97 @@ The Slope Stability module provides:
 
 ---
 
+## Point Cloud Mesh Generation (Slope Stability Model Wizard)
+
+> **Contributed by:** Francesco Ottaviani - f.ottaviani5@campus.uniurb.it - Universita degli Studi di Urbino Carlo Bo
+> **Based on:** [point_cloud_elaboration](https://github.com/ottaviani2/point_cloud_elaboration) MATLAB implementation
+
+Generate 3D surface meshes from point cloud data (LIDAR scans) for slope stability analysis.
+
+### Accessing the Wizard
+
+**Menu:** Tools > Slope Stability Model Wizard
+
+### Supported Input Formats
+
+| Format | Extension | Description |
+|--------|-----------|-------------|
+| XYZ | .xyz | Standard point cloud format |
+| Text | .txt | Space/tab delimited X Y Z |
+| CSV | .csv | Comma-separated values |
+| PTS | .pts | Point cloud with intensity |
+| ASC | .asc | ASCII grid format |
+
+The wizard supports both standard (X Y Z) and RGB-colored (X Y Z R G B) point clouds.
+
+### Workflow Steps
+
+#### Step 1: Select Input
+1. Click "Browse..." to select your point cloud file
+2. Enter a name for the output dataset
+3. Preview shows point count and bounding box
+
+#### Step 2: Configure Parameters
+
+**Grid & Sampling:**
+- **Enable Downsampling**: Reduce point density for faster processing
+- **Grid Step**: Cell size for downsampling (meters)
+- **Nodata Value**: Z values to treat as invalid (default: -9999)
+
+**Triangulation:**
+- **Max Edge Length**: Maximum allowed triangle edge length (filters stretched triangles)
+
+**Solid Mesh:**
+- **Create Solid Mesh**: Generate closed volume with bottom and sides
+- **Base Depth (Z Deep)**: Depth below minimum Z for solid bottom
+
+**Interpolation:**
+- **Enable Interpolation**: Fill gaps in sparse data
+- **Method**: Linear, Nearest, or Natural interpolation
+
+**Transformation:**
+- **Rotation (Z axis)**: Rotate point cloud around vertical axis
+- **Translate to Origin**: Move centroid to (0, 0, 0)
+
+**Output:**
+- Save as OBJ (Wavefront) or STL format
+
+#### Step 3: Processing
+
+The wizard performs:
+1. Point cloud loading and filtering
+2. Nodata removal
+3. Optional downsampling
+4. Delaunay triangulation
+5. Edge length filtering
+6. Solid mesh generation
+7. File export
+
+#### Step 4: Results
+
+View statistics:
+- Original vs. filtered point count
+- Vertex and face count
+- Bounding box dimensions
+
+The generated mesh is automatically added to your project as a Mesh3D dataset.
+
+### Example Parameters
+
+| Scenario | Grid Step | Max Edge | Z Deep | Notes |
+|----------|-----------|----------|--------|-------|
+| Fine detail | 0.5 m | 2 m | 10 m | High resolution |
+| Standard | 2.0 m | 4 m | 20 m | Good balance |
+| Large area | 5.0 m | 10 m | 50 m | Fast processing |
+
+---
+
 ## Getting Started
 
 ### Input Data
 
 Required:
-- Digital Elevation Model (DEM)
+- Point cloud data (LIDAR scan) or Digital Elevation Model (DEM)
 - Material properties (rock/soil)
 
 Optional:

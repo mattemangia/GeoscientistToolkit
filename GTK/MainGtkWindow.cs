@@ -1340,13 +1340,25 @@ public class MainGtkWindow : Gtk.Window
         var infoBox = new VBox(false, 2);
         infoBox.PackStart(new Label("Geoscientist's Toolkit - Reactor (GTK)") { Xalign = 0 }, false, false, 0);
         infoBox.PackStart(new Label("The Geoscientist's Toolkit Dev Team") { Xalign = 0 }, false, false, 0);
-        infoBox.PackStart(new Label("Contact: Matteo Mangiagalli - Università degli Studi di Urbino Carlo Bo\nm.mangiagalli@campus.uniurb.it")
+        infoBox.PackStart(new Label("Contact: Matteo Mangiagalli - Universita degli Studi di Urbino Carlo Bo\nm.mangiagalli@campus.uniurb.it")
         {
             Xalign = 0,
             Justify = Justification.Left,
             LineWrap = true
         }, false, false, 0);
         infoBox.PackStart(new LinkButton("https://github.com/mattemangia/geoscientisttoolkit", "Project Page") { Xalign = 0 }, false, false, 0);
+
+        // Contributors section
+        var contributorsBox = new VBox(false, 2);
+        contributorsBox.PackStart(new HSeparator(), false, false, 4);
+        contributorsBox.PackStart(new Label("<b>Contributors:</b>") { Xalign = 0, UseMarkup = true }, false, false, 0);
+        contributorsBox.PackStart(new Label("Francesco Ottaviani - Slope Stability Mesh Generation") { Xalign = 0 }, false, false, 0);
+        contributorsBox.PackStart(new Label("f.ottaviani5@campus.uniurb.it - Universita degli Studi di Urbino Carlo Bo")
+        {
+            Xalign = 0,
+            Justify = Justification.Left
+        }, false, false, 0);
+        infoBox.PackStart(contributorsBox, false, false, 4);
 
         headerBox.PackStart(logo, false, false, 0);
         headerBox.PackStart(infoBox, true, true, 0);
