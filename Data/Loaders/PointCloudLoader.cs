@@ -1,22 +1,21 @@
 // GeoscientistToolkit/Data/Loaders/PointCloudLoader.cs
 
-using GeoscientistToolkit.Analysis.SlopeStability;
-using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Data.PointCloud;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Data.Loaders;
 
 /// <summary>
 /// Loader for point cloud files (XYZ, TXT, CSV, PTS, ASC formats).
-/// Generates a Mesh3D dataset from point cloud data using Delaunay triangulation.
+/// Creates a PointCloudDataset that can be visualized and processed.
 /// </summary>
 public class PointCloudLoader : IDataLoader
 {
     public string FilePath { get; set; } = "";
     public string Name => "Point Cloud (XYZ/PTS/ASC)";
-    public string Description => "Import point cloud files and convert to 3D mesh using Delaunay triangulation";
+    public string Description => "Import point cloud files for 3D visualization and mesh generation";
 
-    // Mesh generation parameters
+    // Point cloud settings (kept for backwards compatibility with UI)
     public float GridStep { get; set; } = 2.0f;
     public float MaxEdgeLength { get; set; } = 4.0f;
     public float ZDeep { get; set; } = 20.0f;
@@ -49,55 +48,46 @@ public class PointCloudLoader : IDataLoader
         {
             try
             {
-                progressReporter?.Report((0.05f, "Initializing point cloud processor..."));
+                progressReporter?.Report((0.1f, "Loading point cloud file..."));
 
-                var parameters = new PointCloudMeshGenerator.MeshGenerationParameters
-                {
-                    GridStep = GridStep,
-                    MaxEdgeLength = MaxEdgeLength,
-                    ZDeep = ZDeep,
-                    CreateSolidMesh = CreateSolidMesh,
-                    EnableDownsampling = EnableDownsampling,
-                    TranslateToOrigin = TranslateToOrigin,
-                    RotationAngleDegrees = RotationAngle
-                };
-
-                var generator = new PointCloudMeshGenerator(parameters);
-                generator.SetProgressCallback((message, progress) =>
-                {
-                    progressReporter?.Report((progress * 0.8f + 0.1f, message));
-                });
-
-                progressReporter?.Report((0.1f, "Processing point cloud..."));
-                var result = generator.GenerateFromFile(FilePath);
-
-                if (!result.Success)
-                {
-                    throw new Exception(result.StatusMessage);
-                }
-
-                progressReporter?.Report((0.9f, "Creating Mesh3D dataset..."));
-
-                // Create OBJ content in memory
-                var objContent = GenerateObjContent(result);
-
-                // Create temporary OBJ file
-                var tempPath = Path.Combine(Path.GetTempPath(), $"pointcloud_{Guid.NewGuid()}.obj");
-                File.WriteAllText(tempPath, objContent);
-
-                // Create Mesh3DDataset
+                // Create PointCloudDataset
                 var fileName = Path.GetFileNameWithoutExtension(FilePath);
-                var dataset = new Mesh3DDataset(fileName, tempPath);
+                var dataset = new PointCloudDataset(fileName, FilePath);
+
+                // Configure settings
+                dataset.NodataValue = -9999.0f;
+
+                progressReporter?.Report((0.3f, "Reading point data..."));
+
+                // Load the point cloud
                 dataset.Load();
 
-                // Store original source info
-                dataset.Metadata["SourceFile"] = FilePath;
-                dataset.Metadata["OriginalPointCount"] = result.OriginalPointCount.ToString();
-                dataset.Metadata["FilteredPointCount"] = result.FilteredPointCount.ToString();
-                dataset.Metadata["GeneratedFrom"] = "PointCloudLoader";
+                progressReporter?.Report((0.7f, "Processing point cloud..."));
+
+                // Apply translation to origin if requested
+                if (TranslateToOrigin)
+                {
+                    dataset.CenterAtOrigin();
+                }
+
+                // Apply downsampling if requested and many points
+                if (EnableDownsampling && dataset.PointCount > 500000)
+                {
+                    progressReporter?.Report((0.8f, "Downsampling large point cloud..."));
+                    dataset.Downsample(GridStep);
+                }
+
+                // Store import settings in metadata
+                dataset.Metadata["ImportGridStep"] = GridStep.ToString();
+                dataset.Metadata["ImportMaxEdgeLength"] = MaxEdgeLength.ToString();
+                dataset.Metadata["ImportZDeep"] = ZDeep.ToString();
+                dataset.Metadata["ImportCreateSolidMesh"] = CreateSolidMesh.ToString();
 
                 progressReporter?.Report((1.0f,
-                    $"Point cloud imported successfully! ({result.Vertices.Count} vertices, {result.Faces.Count} faces)"));
+                    $"Point cloud imported: {dataset.PointCount:N0} points" +
+                    (dataset.HasColors ? " with colors" : "")));
+
+                Logger.Log($"[PointCloudLoader] Loaded {dataset.PointCount:N0} points from {FilePath}");
 
                 return dataset;
             }
@@ -107,31 +97,6 @@ public class PointCloudLoader : IDataLoader
                 throw new Exception($"Failed to import point cloud: {ex.Message}", ex);
             }
         });
-    }
-
-    private string GenerateObjContent(PointCloudMeshGenerator.MeshGenerationResult result)
-    {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine("# Generated from point cloud by GeoscientistToolkit");
-        sb.AppendLine($"# Vertices: {result.Vertices.Count}");
-        sb.AppendLine($"# Faces: {result.Faces.Count}");
-        sb.AppendLine();
-
-        // Write vertices
-        foreach (var v in result.Vertices)
-        {
-            sb.AppendLine($"v {v.X:F6} {v.Y:F6} {v.Z:F6}");
-        }
-
-        sb.AppendLine();
-
-        // Write faces (OBJ uses 1-based indexing)
-        foreach (var face in result.Faces)
-        {
-            sb.AppendLine($"f {face[0] + 1} {face[1] + 1} {face[2] + 1}");
-        }
-
-        return sb.ToString();
     }
 
     public void Reset()
@@ -177,6 +142,7 @@ public class PointCloudLoader : IDataLoader
                 using var reader = new StreamReader(FilePath);
                 int lineCount = 0;
                 int pointCount = 0;
+                string lastLine = null;
                 string line;
                 while ((line = reader.ReadLine()) != null && lineCount < 100)
                 {
@@ -187,7 +153,10 @@ public class PointCloudLoader : IDataLoader
                         if (parts.Length >= 3)
                         {
                             if (float.TryParse(parts[0], out _) && float.TryParse(parts[1], out _) && float.TryParse(parts[2], out _))
+                            {
                                 pointCount++;
+                                lastLine = line;
+                            }
                         }
                     }
                 }
@@ -198,7 +167,7 @@ public class PointCloudLoader : IDataLoader
                     var bytesPerLine = fileInfo.Length / Math.Max(1, lineCount);
                     info.EstimatedPointCount = (int)(fileInfo.Length / bytesPerLine);
                     info.HasValidFormat = true;
-                    info.HasColors = CheckForColors(line);
+                    info.HasColors = CheckForColors(lastLine);
                 }
             }
             catch

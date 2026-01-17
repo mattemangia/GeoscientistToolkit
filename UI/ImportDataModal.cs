@@ -955,8 +955,8 @@ public class ImportDataModal
     private void DrawPointCloudOptions()
     {
         ImGui.TextWrapped("Import point cloud data from LIDAR scans or other 3D scanning sources. " +
-                          "The data will be processed using Delaunay triangulation to create a 3D mesh " +
-                          "suitable for slope stability analysis.");
+                          "The point cloud can be visualized in 3D and converted to a mesh using the Tools panel. " +
+                          "Use the Slope Stability Model Wizard (Tools menu) for direct mesh generation.");
 
         ImGui.Spacing();
         ImGui.Separator();
