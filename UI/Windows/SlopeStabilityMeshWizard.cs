@@ -588,14 +588,14 @@ public class SlopeStabilityMeshWizard
     {
         if (_result == null || !_result.Success) return;
 
-        VeldridManager.RunOnMainThread(() =>
+        VeldridManager.ExecuteOnMainThread(() =>
         {
             try
             {
                 var dataset = new Mesh3DDataset(_datasetName, _outputFilePath);
                 dataset.Load();
 
-                ProjectManager.Instance.CurrentProject.AddDataset(dataset);
+                ProjectManager.Instance.AddDataset(dataset);
                 Logger.Log($"[SlopeStabilityMeshWizard] Created dataset: {_datasetName}");
             }
             catch (Exception ex)
