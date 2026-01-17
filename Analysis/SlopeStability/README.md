@@ -6,6 +6,42 @@ Complete 3D slope stability analysis system based on the Discrete Element Method
 
 ## Features
 
+### Point Cloud to Mesh Generation (Slope Stability Model Wizard)
+
+**Contributed by:** Francesco Ottaviani - f.ottaviani5@campus.uniurb.it - Universita degli Studi di Urbino Carlo Bo
+
+Generate 3D surface meshes from point cloud data (LIDAR scans) for slope stability analysis. This wizard provides a complete pipeline from raw point cloud data to analysis-ready 3D meshes.
+
+**Features:**
+- Load point cloud files (XYZ, TXT, CSV, PTS, ASC formats)
+- Support for RGB-colored point clouds
+- Automatic nodata value filtering
+- Grid-based downsampling for large datasets
+- Delaunay triangulation for surface generation
+- Triangle filtering by edge length
+- Solid mesh generation with bottom surface and sides
+- Coordinate transformation (rotation, translation to origin)
+- Export to OBJ and STL formats
+- Direct integration with Mesh3D dataset for further analysis
+
+**Usage:**
+1. Open from menu: Tools > Slope Stability Model Wizard
+2. Select input point cloud file
+3. Configure mesh generation parameters:
+   - Grid step for downsampling
+   - Maximum edge length for triangulation
+   - Base depth for solid mesh
+   - Optional rotation and translation
+4. Choose output file location
+5. Run processing to generate mesh
+6. Mesh is automatically added to project as Mesh3D dataset
+
+**GeoScript Integration:**
+```geoscript
+# Future: Generate mesh from point cloud
+point_cloud.xyz |> POINTCLOUD_TO_MESH grid_step=2.0 max_edge=4.0 z_deep=20.0 solid=true
+```
+
 ### Core Capabilities
 
 - **Block Generation**: Automatic generation of discrete blocks from 3D meshes using Discrete Fracture Network (DFN) methodology
@@ -328,6 +364,17 @@ Complete dataset serialization including blocks, materials, parameters, and resu
 ### Related Software
 
 - Commercial and academic DEM/rock mechanics tools
+
+### Point Cloud Processing
+
+- Ottaviani, F. (2026). "Point Cloud Elaboration for Slope Stability Analysis". MATLAB implementation for LiDAR point cloud processing and mesh generation. GitHub: https://github.com/ottaviani2/point_cloud_elaboration
+
+## Contributors
+
+- **Francesco Ottaviani** - Universita degli Studi di Urbino Carlo Bo
+  - Point Cloud to Mesh Generation algorithm (Slope Stability Model Wizard)
+  - Email: f.ottaviani5@campus.uniurb.it
+  - Original MATLAB implementation: https://github.com/ottaviani2/point_cloud_elaboration
 
 ## License
 
