@@ -256,8 +256,11 @@ public class PointCloudTools : IDatasetTools
         if (ImGui.Button("Select Export File", new Vector2(-1, 0)))
         {
             var defaultName = Path.GetFileNameWithoutExtension(pc.FilePath) + "_export";
-            string[] extensions = { ".xyz", ".txt", ".csv" };
-            _exportDialog.Open(defaultName, extensions);
+            _exportDialog.SetExtensions(
+                (".xyz", "XYZ Point Cloud"),
+                (".txt", "Text File"),
+                (".csv", "CSV File"));
+            _exportDialog.Open(defaultName);
         }
 
         ImGui.Spacing();

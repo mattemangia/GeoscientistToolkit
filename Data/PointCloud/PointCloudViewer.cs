@@ -456,11 +456,11 @@ public class PointCloudViewer : IDatasetViewer, IDisposable
         UpdateCameraMatrices();
 
         if (_d3dRenderer != null)
-            _d3dRenderer.Render(_viewMatrix, _projMatrix, Mesh3DTools.GetRotation(_renderMesh), _showGrid);
+            _d3dRenderer.Render(_renderMesh, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
         else if (_metalRenderer != null)
-            _metalRenderer.Render(_viewMatrix, _projMatrix, Mesh3DTools.GetRotation(_renderMesh), _showGrid);
+            _metalRenderer.Render(_renderMesh, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
         else if (_vulkanRenderer != null)
-            _vulkanRenderer.Render(_viewMatrix, _projMatrix, Mesh3DTools.GetRotation(_renderMesh), _showGrid);
+            _vulkanRenderer.Render(_renderMesh, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
     }
 
     private void HandleMouseInput()
