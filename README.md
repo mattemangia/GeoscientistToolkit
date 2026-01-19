@@ -474,6 +474,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Matteo Mangiagalli**
 - Email: m.mangiagalli@campus.uniurb.it
 
+**Francesco Ottaviani**
+- Email: f.ottaviani5@campus.uniurb.it
+
 ### Citation
 
 If you use Geoscientist's Toolkit in your research, please cite:
@@ -481,7 +484,7 @@ If you use Geoscientist's Toolkit in your research, please cite:
 ```bibtex
 @software{geoscientist_toolkit,
   title = {Geoscientist's Toolkit: Integrated Geoscientific Analysis Platform},
-  author = {Mangiagalli, Matteo},
+  author = {Mangiagalli, Matteo and Ottaviani, Francesco},
   year = {2026},
   url = {https://github.com/mattemangia/GeoscientistToolkit}
 }
