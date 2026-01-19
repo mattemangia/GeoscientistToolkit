@@ -7,9 +7,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Analysis.Thermodynamic;
+using GeoscientistToolkit.Business.Thermodynamics;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Util;
+using ChemicalCompound = GeoscientistToolkit.Data.Materials.ChemicalCompound;
+using CompoundLibrary = GeoscientistToolkit.Data.Materials.CompoundLibrary;
+using CompoundPhase = GeoscientistToolkit.Data.Materials.CompoundPhase;
 
 namespace GeoscientistToolkit.Analysis.Pnm;
 
@@ -591,82 +594,90 @@ public static class PNMReactiveTransport
 
     private static void SolveReactions(PNMDataset pnm, PNMReactiveTransportState state, PNMReactiveTransportOptions options)
     {
-        // Simplified reaction model: mineral precipitation/dissolution
-        // In practice, this would use the ReactiveTransportSolver from PhysicoChem
-
-        var dt = (float)options.TimeStep;
+        var compoundLibrary = CompoundLibrary.Instance;
+        var reactionGenerator = new ReactionGenerator(compoundLibrary);
+        var kineticsSolver = new KineticsSolver();
+        var reactionMinerals = new HashSet<string>(options.ReactionMinerals, StringComparer.OrdinalIgnoreCase);
 
         foreach (var pore in pnm.Pores)
         {
-            var T = state.PoreTemperatures[pore.ID];
-            var P = state.PorePressures[pore.ID];
+            var volume_um3 = state.PoreVolumes.GetValueOrDefault(pore.ID, pore.VolumePhysical);
+            var volume_L = ConvertPoreVolumeToLiters(volume_um3);
+            if (volume_L <= 0) continue;
 
-            // Example: Calcite precipitation from Ca2+ and CO3^2-
-            // CaCO3(s) <=> Ca2+ + CO3^2-
-
-            var hasCa = state.PoreConcentrations[pore.ID].ContainsKey("Ca2+");
-            var hasCO3 = state.PoreConcentrations[pore.ID].ContainsKey("CO3^2-");
-
-            if (hasCa && hasCO3)
+            var thermoState = new ThermodynamicState
             {
-                var C_Ca = state.PoreConcentrations[pore.ID]["Ca2+"];
-                var C_CO3 = state.PoreConcentrations[pore.ID]["CO3^2-"];
+                Temperature_K = state.PoreTemperatures[pore.ID],
+                Pressure_bar = state.PorePressures[pore.ID] / 1e5,
+                Volume_L = volume_L
+            };
 
-                // Solubility product (simplified, should use thermodynamic database)
-                var Ksp = CalculateKsp_Calcite(T, P);
+            var concentrationMap = state.PoreConcentrations[pore.ID];
+            var inputSpeciesMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-                // Ion activity product
-                var IAP = C_Ca * C_CO3;
-
-                // Supersaturation ratio
-                var omega = IAP / Ksp;
-
-                // Reaction rate (mol/m³/s) - simplified kinetic model
-                float rate = 0;
-
-                if (omega > 1) // Supersaturated - precipitation
+            foreach (var (speciesKey, concentration) in concentrationMap)
+            {
+                if (concentration <= 0) continue;
+                var compound = compoundLibrary.FindFlexible(speciesKey);
+                if (compound == null)
                 {
-                    var k_precip = 1e-6f; // Rate constant (should be from database)
-                    rate = -k_precip * (omega - 1);
-                }
-                else if (omega < 1) // Undersaturated - dissolution
-                {
-                    var k_diss = 1e-7f;
-                    rate = k_diss * (1 - omega);
-
-                    // Can only dissolve if mineral is present
-                    if (!state.PoreMinerals[pore.ID].ContainsKey("Calcite") ||
-                        state.PoreMinerals[pore.ID]["Calcite"] <= 0)
-                    {
-                        rate = 0;
-                    }
+                    Logger.LogWarning($"[PNMReactiveTransport] Unknown species '{speciesKey}' in pore {pore.ID}");
+                    continue;
                 }
 
-                if (rate != 0)
-                {
-                    // Update concentrations
-                    var dmol = rate * dt;
-
-                    state.PoreConcentrations[pore.ID]["Ca2+"] -= dmol;
-                    state.PoreConcentrations[pore.ID]["CO3^2-"] -= dmol;
-
-                    // Ensure non-negative
-                    state.PoreConcentrations[pore.ID]["Ca2+"] = Math.Max(0, state.PoreConcentrations[pore.ID]["Ca2+"]);
-                    state.PoreConcentrations[pore.ID]["CO3^2-"] = Math.Max(0, state.PoreConcentrations[pore.ID]["CO3^2-"]);
-
-                    // Update mineral volume
-                    var molarVolume_Calcite = 36.9e-6f; // m³/mol
-                    var dV = -dmol * molarVolume_Calcite * 1e18f; // Convert to μm³
-
-                    if (!state.PoreMinerals[pore.ID].ContainsKey("Calcite"))
-                        state.PoreMinerals[pore.ID]["Calcite"] = 0;
-
-                    state.PoreMinerals[pore.ID]["Calcite"] += dV;
-                    state.PoreMinerals[pore.ID]["Calcite"] = Math.Max(0, state.PoreMinerals[pore.ID]["Calcite"]);
-
-                    state.ReactionRates[pore.ID] = rate;
-                }
+                var moles = concentration * volume_L;
+                AddCompoundToState(thermoState, reactionGenerator, compound, moles);
+                inputSpeciesMap[compound.Name] = speciesKey;
             }
+
+            var water = compoundLibrary.FindFlexible("H2O") ?? compoundLibrary.FindFlexible("Water");
+            if (water != null && !thermoState.SpeciesMoles.ContainsKey(water.Name))
+            {
+                AddCompoundToState(thermoState, reactionGenerator, water, 55.508 * volume_L);
+            }
+
+            var mineralVolumes = state.PoreMinerals[pore.ID];
+            foreach (var (mineralKey, mineralVolume_um3) in mineralVolumes)
+            {
+                if (mineralVolume_um3 <= 0) continue;
+                if (reactionMinerals.Count > 0 && !reactionMinerals.Contains(mineralKey)) continue;
+
+                var mineral = compoundLibrary.FindFlexible(mineralKey);
+                if (mineral == null)
+                {
+                    Logger.LogWarning($"[PNMReactiveTransport] Unknown mineral '{mineralKey}' in pore {pore.ID}");
+                    continue;
+                }
+
+                var molarVolume_m3 = ResolveMolarVolume_m3(mineral);
+                if (molarVolume_m3 <= 0)
+                {
+                    Logger.LogError($"[PNMReactiveTransport] Missing molar volume for mineral '{mineral.Name}'");
+                    continue;
+                }
+
+                var moles = mineralVolume_um3 * 1e-18 / molarVolume_m3;
+                AddCompoundToState(thermoState, reactionGenerator, mineral, moles);
+            }
+
+            var reactions = reactionGenerator.GenerateReactions(thermoState);
+            if (reactionMinerals.Count > 0)
+            {
+                reactions = reactions
+                    .Where(r => r.Stoichiometry.Keys.Any(k => reactionMinerals.Contains(k)))
+                    .ToList();
+            }
+
+            if (reactions.Count == 0) continue;
+
+            var initialMineralMoles = CaptureMineralMoles(thermoState, compoundLibrary, reactionMinerals);
+            var finalState = kineticsSolver.SolveKinetics(thermoState, options.TimeStep, options.TimeStep, reactions);
+            var finalMineralMoles = CaptureMineralMoles(finalState, compoundLibrary, reactionMinerals);
+
+            ApplyThermodynamicState(pore.ID, finalState, compoundLibrary, inputSpeciesMap, state);
+
+            var deltaMoles = finalMineralMoles - initialMineralMoles;
+            state.ReactionRates[pore.ID] = (float)(deltaMoles / options.TimeStep);
         }
     }
 
@@ -729,61 +740,170 @@ public static class PNMReactiveTransport
 
     private static float CalculatePermeability(PNMDataset pnm, PNMReactiveTransportState state, PNMReactiveTransportOptions options)
     {
-        // Quick permeability estimate using current geometry
-        // Uses simple Kozeny-Carman-like approach
+        // Kozeny-Carman permeability estimate derived from porosity and specific surface area:
+        // k = (1 / C) * (phi^3 / (Sv^2 * (1 - phi)^2)), with Kozeny constant C ≈ 5.
 
-        var totalThroatConductance = 0.0;
-        var throatCount = 0;
+        if (pnm.Pores.Count == 0) return 0;
+
         var voxelSize_m = pnm.VoxelSize * 1e-6f;
-        var viscosity_PaS = options.FluidViscosity * 0.001f;
+        var poreVolume_m3 = 0.0;
+        var poreSurfaceArea_m2 = 0.0;
 
-        var poreMap = pnm.Pores.ToDictionary(p => p.ID);
-
-        foreach (var throat in pnm.Throats)
+        foreach (var pore in pnm.Pores)
         {
-            if (!poreMap.ContainsKey(throat.Pore1ID) || !poreMap.ContainsKey(throat.Pore2ID))
-                continue;
+            var volumeVoxels = pore.VolumePhysical > 0
+                ? pore.VolumePhysical / Math.Pow(pnm.VoxelSize, 3)
+                : pore.VolumeVoxels;
 
-            var p1 = poreMap[throat.Pore1ID];
-            var p2 = poreMap[throat.Pore2ID];
+            if (volumeVoxels > 0)
+                poreVolume_m3 += volumeVoxels * voxelSize_m * voxelSize_m * voxelSize_m;
 
-            var r_t = state.ThroatRadii[throat.ID] * voxelSize_m;
-            if (r_t <= 0) continue;
-
-            var length = Vector3.Distance(p1.Position, p2.Position) * voxelSize_m;
-            if (length < 1e-12f) length = voxelSize_m;
-
-            var conductance = Math.PI * Math.Pow(r_t, 4) / (8 * viscosity_PaS * length);
-            totalThroatConductance += conductance;
-            throatCount++;
+            var areaVoxels = pore.Area;
+            if (areaVoxels <= 0 && pore.Radius > 0)
+            {
+                var radius_m = pore.Radius * voxelSize_m;
+                poreSurfaceArea_m2 += 4.0 * Math.PI * radius_m * radius_m;
+            }
+            else if (areaVoxels > 0)
+            {
+                poreSurfaceArea_m2 += areaVoxels * voxelSize_m * voxelSize_m;
+            }
         }
 
-        if (throatCount == 0) return 0;
+        var materialVolume_m3 = CalculateMaterialBoundingBoxVolume(pnm, voxelSize_m);
+        if (materialVolume_m3 <= 0 || poreVolume_m3 <= 0 || poreSurfaceArea_m2 <= 0) return 0;
 
-        var avgConductance = totalThroatConductance / throatCount;
+        var porosity = poreVolume_m3 / materialVolume_m3;
+        porosity = Math.Clamp(porosity, 0.001, 0.99);
 
-        // Convert to permeability (rough estimate)
-        var k_m2 = avgConductance * viscosity_PaS * voxelSize_m;
-        var k_mD = (float)(k_m2 * 1.01325e15);
+        var specificSurfaceArea = poreSurfaceArea_m2 / materialVolume_m3;
+        if (specificSurfaceArea <= 0) return 0;
 
-        return k_mD;
+        const double kozenyConstant = 5.0;
+        var k_m2 = (1.0 / kozenyConstant) *
+                   (Math.Pow(porosity, 3) /
+                    (specificSurfaceArea * specificSurfaceArea * Math.Pow(1.0 - porosity, 2)));
+
+        return (float)(k_m2 / 9.869233e-16);
     }
 
-    private static float CalculateKsp_Calcite(float T, float P)
+    private static double CalculateMaterialBoundingBoxVolume(PNMDataset pnm, float voxelSize_m)
     {
-        // Calcite solubility product as function of T and P
-        // Simplified model - in practice use thermodynamic database
+        var minBounds = new Vector3(
+            pnm.Pores.Min(p => p.Position.X),
+            pnm.Pores.Min(p => p.Position.Y),
+            pnm.Pores.Min(p => p.Position.Z));
+        var maxBounds = new Vector3(
+            pnm.Pores.Max(p => p.Position.X),
+            pnm.Pores.Max(p => p.Position.Y),
+            pnm.Pores.Max(p => p.Position.Z));
 
-        var T_ref = 298.15f; // K
-        var Ksp_ref = 3.3e-9f; // mol²/L² at 25°C
+        var margin = pnm.MaxPoreRadius;
+        var widthVoxels = maxBounds.X - minBounds.X + 2 * margin;
+        var heightVoxels = maxBounds.Y - minBounds.Y + 2 * margin;
+        var depthVoxels = maxBounds.Z - minBounds.Z + 2 * margin;
 
-        // Van't Hoff equation (simplified)
-        var deltaH = -12000f; // J/mol (dissolution enthalpy)
-        var R = 8.314f;
+        return widthVoxels * heightVoxels * depthVoxels *
+               voxelSize_m * voxelSize_m * voxelSize_m;
+    }
 
-        var Ksp = Ksp_ref * (float)Math.Exp(-deltaH / R * (1 / T - 1 / T_ref));
+    private static void ApplyThermodynamicState(int poreId, ThermodynamicState thermoState, CompoundLibrary library,
+        Dictionary<string, string> inputSpeciesMap, PNMReactiveTransportState state)
+    {
+        var volume_L = thermoState.Volume_L;
+        if (volume_L <= 0) return;
 
-        return Ksp;
+        if (!state.PoreConcentrations.ContainsKey(poreId))
+            state.PoreConcentrations[poreId] = new Dictionary<string, float>();
+
+        foreach (var (speciesName, moles) in thermoState.SpeciesMoles)
+        {
+            var compound = library.Find(speciesName);
+            if (compound == null || compound.Phase != CompoundPhase.Aqueous) continue;
+
+            var concentration = Math.Max(0.0, moles / volume_L);
+            var key = inputSpeciesMap.GetValueOrDefault(speciesName, compound.ChemicalFormula);
+            state.PoreConcentrations[poreId][key] = (float)concentration;
+        }
+
+        if (!state.PoreMinerals.ContainsKey(poreId))
+            state.PoreMinerals[poreId] = new Dictionary<string, float>();
+
+        var updatedMinerals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (speciesName, moles) in thermoState.SpeciesMoles)
+        {
+            var compound = library.Find(speciesName);
+            if (compound == null || compound.Phase != CompoundPhase.Solid) continue;
+
+            var molarVolume_m3 = ResolveMolarVolume_m3(compound);
+            if (molarVolume_m3 <= 0)
+            {
+                Logger.LogError($"[PNMReactiveTransport] Missing molar volume for mineral '{compound.Name}'");
+                continue;
+            }
+
+            var volume_um3 = Math.Max(0.0, moles * molarVolume_m3 * 1e18);
+            state.PoreMinerals[poreId][compound.Name] = (float)volume_um3;
+            updatedMinerals.Add(compound.Name);
+        }
+
+        var keys = state.PoreMinerals[poreId].Keys.ToList();
+        foreach (var key in keys)
+        {
+            if (!updatedMinerals.Contains(key))
+                state.PoreMinerals[poreId][key] = 0f;
+        }
+    }
+
+    private static double CaptureMineralMoles(ThermodynamicState state, CompoundLibrary library,
+        HashSet<string> reactionMinerals)
+    {
+        var total = 0.0;
+        foreach (var (speciesName, moles) in state.SpeciesMoles)
+        {
+            var compound = library.Find(speciesName);
+            if (compound == null || compound.Phase != CompoundPhase.Solid) continue;
+            if (reactionMinerals.Count > 0 && !reactionMinerals.Contains(compound.Name)) continue;
+            total += moles;
+        }
+
+        return total;
+    }
+
+    private static void AddCompoundToState(ThermodynamicState state, ReactionGenerator reactionGenerator,
+        ChemicalCompound compound, double moles)
+    {
+        if (moles <= 0) return;
+
+        state.SpeciesMoles[compound.Name] = state.SpeciesMoles.GetValueOrDefault(compound.Name, 0.0) + moles;
+
+        var composition = reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+        foreach (var (element, stoichiometry) in composition)
+        {
+            var addition = moles * stoichiometry;
+            state.ElementalComposition[element] = state.ElementalComposition.GetValueOrDefault(element, 0.0) + addition;
+        }
+    }
+
+    private static double ResolveMolarVolume_m3(ChemicalCompound compound)
+    {
+        if (compound.MolarVolume_cm3_mol.HasValue)
+            return compound.MolarVolume_cm3_mol.Value * 1e-6;
+
+        if (compound.Density_g_cm3.HasValue && compound.MolecularWeight_g_mol.HasValue &&
+            compound.Density_g_cm3.Value > 0)
+        {
+            var molarVolume_cm3 = compound.MolecularWeight_g_mol.Value / compound.Density_g_cm3.Value;
+            return molarVolume_cm3 * 1e-6;
+        }
+
+        return 0.0;
+    }
+
+    private static double ConvertPoreVolumeToLiters(float volume_um3)
+    {
+        return volume_um3 * 1e-18 * 1000.0;
     }
 
     private static (HashSet<int> inlets, HashSet<int> outlets) GetBoundaryPores(

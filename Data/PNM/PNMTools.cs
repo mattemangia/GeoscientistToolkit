@@ -1,5 +1,6 @@
 // GeoscientistToolkit/UI/PNMTools.cs - Production Version with Confining Pressure
 
+using System.Globalization;
 using System.Numerics;
 using System.Text;
 using GeoscientistToolkit.Analysis.Pnm;
@@ -121,6 +122,32 @@ public class PNMTools : IDatasetTools
     private int _rockTypeIndex; // For preset compressibility values
     private float _throatCompressibility = 0.025f; // 1/MPa (throats more compressible)
 
+    // --- PNM Reactive Transport State ---
+    private bool _isReactiveTransportRunning;
+    private string _reactiveTransportStatus = "";
+    private float _rtTotalTime = 3600f;
+    private float _rtTimeStep = 1f;
+    private float _rtOutputInterval = 60f;
+    private int _rtFlowAxisIndex = 2;
+    private float _rtInletPressure = 1.0f;
+    private float _rtOutletPressure;
+    private float _rtFluidViscosity = 1.0f;
+    private float _rtFluidDensity = 1000f;
+    private float _rtInletTemperature = 298.15f;
+    private float _rtOutletTemperature = 298.15f;
+    private float _rtThermalConductivity = 0.6f;
+    private float _rtSpecificHeat = 4184f;
+    private float _rtMolecularDiffusivity = 2.299e-9f;
+    private float _rtDispersivity = 0.1f;
+    private bool _rtEnableReactions = true;
+    private bool _rtUpdateGeometry = true;
+    private float _rtMinPoreRadius = 0.1f;
+    private float _rtMinThroatRadius = 0.05f;
+    private string _rtInitialConcentrations = "Ca2+=0.01; CO32-=0.01";
+    private string _rtInletConcentrations = "";
+    private string _rtInitialMinerals = "Calcite=0.0";
+    private string _rtReactionMinerals = "Calcite";
+
     // Confining pressure parameters
     private bool _useConfiningPressure;
     private bool _useGpu;
@@ -159,6 +186,10 @@ public class PNMTools : IDatasetTools
         if (ImGui.CollapsingHeader("Molecular Diffusivity Calculator", ImGuiTreeNodeFlags.DefaultOpen))
             DrawDiffusivityCalculator(pnm);
 
+        ImGui.Spacing();
+
+        if (ImGui.CollapsingHeader("Reactive Transport", ImGuiTreeNodeFlags.DefaultOpen))
+            DrawReactiveTransport(pnm);
 
         ImGui.Spacing();
 
@@ -449,6 +480,184 @@ public class PNMTools : IDatasetTools
         }
 
         ImGui.Unindent();
+    }
+
+    private void DrawReactiveTransport(PNMDataset pnm)
+    {
+        ImGui.Indent();
+
+        ImGui.Text("Simulation Controls:");
+        ImGui.InputFloat("Total Time (s)", ref _rtTotalTime, 1, 10, "%.1f");
+        _rtTotalTime = Math.Max(1f, _rtTotalTime);
+
+        ImGui.InputFloat("Time Step (s)", ref _rtTimeStep, 0.1f, 1, "%.2f");
+        _rtTimeStep = Math.Clamp(_rtTimeStep, 0.01f, _rtTotalTime);
+
+        ImGui.InputFloat("Output Interval (s)", ref _rtOutputInterval, 1, 10, "%.1f");
+        _rtOutputInterval = Math.Max(_rtTimeStep, _rtOutputInterval);
+
+        ImGui.Separator();
+        ImGui.Text("Flow & Thermal:");
+        ImGui.SetNextItemWidth(150);
+        ImGui.Combo("Flow Axis", ref _rtFlowAxisIndex, new[] { "X", "Y", "Z" }, 3);
+        ImGui.InputFloat("Inlet Pressure (Pa)", ref _rtInletPressure, 1, 10, "%.2f");
+        ImGui.InputFloat("Outlet Pressure (Pa)", ref _rtOutletPressure, 1, 10, "%.2f");
+        ImGui.InputFloat("Fluid Viscosity (cP)", ref _rtFluidViscosity, 0.1f, 1, "%.3f");
+        ImGui.InputFloat("Fluid Density (kg/m³)", ref _rtFluidDensity, 1, 10, "%.1f");
+        ImGui.InputFloat("Inlet Temperature (K)", ref _rtInletTemperature, 1, 10, "%.2f");
+        ImGui.InputFloat("Outlet Temperature (K)", ref _rtOutletTemperature, 1, 10, "%.2f");
+        ImGui.InputFloat("Thermal Conductivity (W/m·K)", ref _rtThermalConductivity, 0.01f, 0.1f, "%.3f");
+        ImGui.InputFloat("Specific Heat (J/kg·K)", ref _rtSpecificHeat, 1, 10, "%.1f");
+
+        ImGui.Separator();
+        ImGui.Text("Transport:");
+        ImGui.InputFloat("Molecular Diffusivity (m²/s)", ref _rtMolecularDiffusivity, 1e-10f, 1e-9f, "%.2e");
+        ImGui.InputFloat("Dispersivity (m)", ref _rtDispersivity, 0.01f, 0.1f, "%.3f");
+
+        ImGui.Separator();
+        ImGui.Text("Reactions & Geometry:");
+        ImGui.Checkbox("Enable Reactions", ref _rtEnableReactions);
+        ImGui.Checkbox("Update Geometry", ref _rtUpdateGeometry);
+        ImGui.InputFloat("Min Pore Radius (vox)", ref _rtMinPoreRadius, 0.01f, 0.1f, "%.3f");
+        ImGui.InputFloat("Min Throat Radius (vox)", ref _rtMinThroatRadius, 0.01f, 0.1f, "%.3f");
+
+        ImGui.Separator();
+        ImGui.Text("Initial Concentrations (mol/L): name=value");
+        ImGui.InputTextMultiline("##PNMInitialConc", ref _rtInitialConcentrations, 2048,
+            new Vector2(-1, 60));
+
+        ImGui.Text("Inlet Concentrations (mol/L): name=value");
+        ImGui.InputTextMultiline("##PNMInletConc", ref _rtInletConcentrations, 2048,
+            new Vector2(-1, 60));
+
+        ImGui.Text("Initial Minerals (μm³): name=value");
+        ImGui.InputTextMultiline("##PNMInitialMinerals", ref _rtInitialMinerals, 2048,
+            new Vector2(-1, 60));
+
+        ImGui.Text("Reaction Minerals (comma-separated names)");
+        ImGui.InputText("##PNMReactionMinerals", ref _rtReactionMinerals, 1024);
+
+        ImGui.Spacing();
+
+        if (_isReactiveTransportRunning)
+        {
+            ImGui.BeginDisabled();
+            ImGui.Button("Running...", new Vector2(-1, 30));
+            ImGui.EndDisabled();
+            ImGui.TextColored(new Vector4(1, 1, 0, 1), _reactiveTransportStatus);
+        }
+        else
+        {
+            if (ImGui.Button("Run Reactive Transport", new Vector2(-1, 30)))
+            {
+                var options = new PNMReactiveTransportOptions
+                {
+                    TotalTime = _rtTotalTime,
+                    TimeStep = _rtTimeStep,
+                    OutputInterval = _rtOutputInterval,
+                    FlowAxis = (FlowAxis)_rtFlowAxisIndex,
+                    InletPressure = _rtInletPressure,
+                    OutletPressure = _rtOutletPressure,
+                    FluidViscosity = _rtFluidViscosity,
+                    FluidDensity = _rtFluidDensity,
+                    InletTemperature = _rtInletTemperature,
+                    OutletTemperature = _rtOutletTemperature,
+                    ThermalConductivity = _rtThermalConductivity,
+                    SpecificHeat = _rtSpecificHeat,
+                    MolecularDiffusivity = _rtMolecularDiffusivity,
+                    Dispersivity = _rtDispersivity,
+                    EnableReactions = _rtEnableReactions,
+                    UpdateGeometry = _rtUpdateGeometry,
+                    MinPoreRadius = _rtMinPoreRadius,
+                    MinThroatRadius = _rtMinThroatRadius,
+                    InitialConcentrations = ParseKeyValuePairs(_rtInitialConcentrations),
+                    InletConcentrations = ParseKeyValuePairs(_rtInletConcentrations),
+                    InitialMinerals = ParseKeyValuePairs(_rtInitialMinerals),
+                    ReactionMinerals = ParseList(_rtReactionMinerals)
+                };
+
+                StartReactiveTransport(pnm, options);
+            }
+        }
+
+        if (pnm.ReactiveTransportResults != null)
+        {
+            ImGui.Spacing();
+            ImGui.SeparatorText("Reactive Transport Results");
+            ImGui.Text($"Initial permeability: {pnm.ReactiveTransportResults.InitialPermeability:E3} mD");
+            ImGui.Text($"Final permeability: {pnm.ReactiveTransportResults.FinalPermeability:E3} mD");
+            ImGui.Text($"Permeability change: {pnm.ReactiveTransportResults.PermeabilityChange:P2}");
+            ImGui.Text($"Time steps stored: {pnm.ReactiveTransportResults.TimeSteps.Count}");
+        }
+
+        ImGui.Unindent();
+    }
+
+    private void StartReactiveTransport(PNMDataset pnm, PNMReactiveTransportOptions options)
+    {
+        _isReactiveTransportRunning = true;
+        _reactiveTransportStatus = "Initializing reactive transport...";
+
+        Task.Run(() =>
+        {
+            try
+            {
+                var progress = new Progress<(float progress, string message)>(p =>
+                {
+                    _reactiveTransportStatus = $"{p.message} ({p.progress:P0})";
+                });
+
+                var results = PNMReactiveTransport.Solve(pnm, options, progress);
+                pnm.ReactiveTransportResults = results;
+                pnm.ReactiveTransportState = results.TimeSteps.LastOrDefault();
+
+                _reactiveTransportStatus = "Reactive transport complete.";
+                ProjectManager.Instance.NotifyDatasetDataChanged(pnm);
+            }
+            catch (Exception ex)
+            {
+                _reactiveTransportStatus = $"Error: {ex.Message}";
+                Logger.LogError($"[PNMReactiveTransport] Simulation failed: {ex}");
+            }
+            finally
+            {
+                Thread.Sleep(1000);
+                _isReactiveTransportRunning = false;
+            }
+        });
+    }
+
+    private static Dictionary<string, float> ParseKeyValuePairs(string input)
+    {
+        var result = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(input)) return result;
+
+        var entries = input.Split(new[] { ',', ';', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var entry in entries)
+        {
+            var parts = entry.Split('=', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2) continue;
+
+            var key = parts[0].Trim();
+            if (string.IsNullOrWhiteSpace(key)) continue;
+
+            if (float.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+                result[key] = value;
+        }
+
+        return result;
+    }
+
+    private static List<string> ParseList(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return new List<string>();
+
+        return input
+            .Split(new[] { ',', ';', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(item => item.Trim())
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private void DrawPermeabilityCalculator(PNMDataset pnm)

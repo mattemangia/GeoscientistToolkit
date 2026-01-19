@@ -472,6 +472,80 @@ public class SimulationVerificationTests
         Assert.InRange(permeability, 10.0f, 40.0f);
     }
 
+    [Fact]
+    public void PnmReactiveTransport_ThermodynamicCoupling_KeepsPermeabilityStable()
+    {
+        var dataset = new PNMDataset("ReactivePNM", string.Empty)
+        {
+            VoxelSize = 1.0f,
+            ImageWidth = 2,
+            ImageHeight = 1,
+            ImageDepth = 2
+        };
+
+        const float poreRadius = 0.5f;
+        var poreVolume = (float)(4.0 / 3.0 * Math.PI * Math.Pow(poreRadius, 3));
+        var poreArea = (float)(4.0 * Math.PI * Math.Pow(poreRadius, 2));
+
+        dataset.Pores.AddRange(new List<Pore>
+        {
+            new()
+            {
+                ID = 1,
+                Position = new Vector3(0, 0, 0),
+                Radius = poreRadius,
+                Area = poreArea,
+                VolumeVoxels = poreVolume,
+                VolumePhysical = poreVolume
+            },
+            new()
+            {
+                ID = 2,
+                Position = new Vector3(0, 0, 10),
+                Radius = poreRadius,
+                Area = poreArea,
+                VolumeVoxels = poreVolume,
+                VolumePhysical = poreVolume
+            }
+        });
+
+        dataset.Throats.AddRange(new List<Throat>
+        {
+            new() { ID = 1, Pore1ID = 1, Pore2ID = 2, Radius = poreRadius }
+        });
+
+        dataset.InitializeFromCurrentLists();
+
+        var options = new PNMReactiveTransportOptions
+        {
+            TotalTime = 10.0,
+            TimeStep = 1.0,
+            OutputInterval = 5.0,
+            EnableReactions = true,
+            UpdateGeometry = false,
+            InletPressure = 100.0f,
+            OutletPressure = 0.0f,
+            InitialConcentrations = new Dictionary<string, float>
+            {
+                ["Ca2+"] = 0.01f,
+                ["CO32-"] = 0.01f
+            },
+            InitialMinerals = new Dictionary<string, float>
+            {
+                ["Calcite"] = 1.0f
+            },
+            ReactionMinerals = new List<string> { "Calcite" }
+        };
+
+        var results = PNMReactiveTransport.Solve(dataset, options);
+
+        Assert.True(results.Converged);
+        Assert.True(results.TimeSteps.Count > 1);
+
+        var error = Math.Abs(results.FinalPermeability - results.InitialPermeability) / results.InitialPermeability;
+        Assert.True(error < 0.05, $"Permeability drift exceeded 5%: {error:P2}");
+    }
+
     /// <summary>
     /// Deep Geothermal Reservoir test with PhysicoChem dataset.
     /// Tests: 16x16x16 cube with heterogeneous thermal conductivity, coaxial heat exchanger,
