@@ -6,7 +6,87 @@ This report documents the rigorous verification of the **Geoscientist Toolkit** 
 ## Methodology
 A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has been integrated into the solution. This suite executes simulations with parameters from specific papers and compares the output against the expected values derived from equations or reported data.
 
+## Per-Test Verification Statistics (Summary)
+
+Each verification item below lists the **input values**, **expected results** (per cited literature), **observed results**, and the **error/variance** recorded by the tests.
+
+| # | Test | Key Inputs | Expected (Literature/Equation) | Observed (Test Output) | Error / Variance |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Geomechanics: Triaxial Compression | c=26.84 MPa, φ=51°, σ₃=10 MPa | Peak strength 231.33 MPa | 231.55 MPa | 0.10% |
+| 2 | Seismology: Elastic P-Wave | Vp=5.8 km/s, dist=10 km | Arrival time 1.724 s | 1.599 s | 7.26% |
+| 3a | Slope Stability: Gravity Drop | g=9.81 m/s², t=2 s | Drop 19.62 m | 19.60 m | 0.10% |
+| 3b | Slope Stability: Sliding Block | slope=45°, φ=30°, t=1 s | Distance 1.47 m | 1.47 m | 0.0% |
+| 4 | Thermodynamics: Water Psat | T=373.15 K | 101,325 Pa | 101,417.98 Pa | 0.09% |
+| 5 | PNM: Permeability | r=1 μm, L=20 μm | ~2–4 mD | 6.96 mD | Within order of magnitude |
+| 6 | Acoustic: Speed of Sound | K=2.2 GPa, ρ=1000 kg/m³ | 1483.2 m/s | 1543.2 m/s | 4.0% |
+| 7 | PhysicoChem: Heat Conduction | α=8×10⁻⁷ m²/s, t=2000 s, x=0.01 m | ~86°C | 85.75°C | < 1.0% |
+| 8 | Hydrology: D8 Accumulation | 5×5 DEM w/ center sink | Center accumulation ≈25 cells | 20/25 cells | ~20% low (coarse DEM) |
+| 9 | Geothermal: BHE | depth=100 m, inlet=20°C | Cooling toward ground temp | Outlet 19.54°C | Trend-consistent |
+| 10 | Geothermal: Deep Coaxial | depth=3000 m, inlet=40°C | Significant heating | Outlet 64.48°C | Trend-consistent |
+| 11 | Petrology: Fractional Crystallization | F=0.5, Dₙᵢ=10, Dᵣᵦ=0.001 | Ni 0.39 ppm / Rb 9.98 ppm | Ni 0.39 ppm / Rb 9.98 ppm | < 2% |
+| 12 | Carbonate System: ACD/CCD | [Ca²⁺]=0.01028, γCa=0.2, γCO₃=0.04 | ACD ~900 m / CCD ~4200 m | ACD 970 m / CCD 4130 m | 7.6% / 1.6% |
+| 13 | PhysicoChem: Multiphase Reservoir | 16³ grid, CH₄ intrusion, 30°C/km | Buoyancy, gradients, saturation unity | All 6 assertions satisfied + PNGs | Assertion-based |
+| 14 | Geothermal: ORC Power | 12³ grid, 35°C/km, R600a | Net power >0; efficiency 1–20% | Net power >0; efficiency 3.7% | In-range |
+| 15 | Nuclear: Point Kinetics | β=0.0065, Λ=100 μs, ρ=100 pcm | Period in seconds | Period within 0.3–3× expectation | In-range |
+| 16 | Nuclear: D₂O Moderation | σa(D₂O)=0.0013 barn | Moderation ratio ≫ H₂O | Ratios in expected ranges | In-range |
+| 17 | Nuclear: Xe-135 Poisoning | σa=2.65×10⁶ barn, flux=3×10¹³ | Peak at 10–12 hr, peak > eq | Peak in 8–14 hr; peak > eq | In-range |
+| 18 | Nuclear: Thermal Efficiency | PWR 3411/1150 MW; CANDU 2064/700 MW | PWR 32–34%, CANDU 30–32% | Efficiencies in 30–38% / 28–35% | In-range |
+
 ---
+
+## Sensitivity Analysis (Qualitative, Per Test)
+
+The following sensitivity notes summarize how **outputs change with key inputs** based on the governing equations used by the tests and the cited literature. This provides directional validation (monotonicity and proportionality) without altering the benchmark inputs.
+
+| # | Test | Sensitive Inputs | Expected Sensitivity (from equations) |
+| --- | --- | --- | --- |
+| 1 | Triaxial Compression | Cohesion c, friction angle φ, confining pressure σ₃ | Peak strength increases with c and φ; increases linearly with σ₃ through Mohr–Coulomb term. |
+| 2 | Elastic P-Wave | Vp, distance | Arrival time decreases with higher Vp; increases linearly with distance (t = d/Vp). |
+| 3a | Gravity Drop | g, time t | Drop distance increases linearly with g and quadratically with t (d ∝ t²). |
+| 3b | Sliding Block | slope θ, friction φ, time t | Acceleration increases with θ and decreases with φ; distance increases with t². |
+| 4 | Water Psat | Temperature T | Saturation pressure increases strongly with T per IAPWS EOS. |
+| 5 | PNM Permeability | radius r, porosity φ | Permeability increases with r² and φ (bundle-of-tubes model). |
+| 6 | Sound Speed | bulk modulus K, density ρ | Velocity increases with K and decreases with ρ (V = √(K/ρ)). |
+| 7 | Heat Conduction | diffusivity α, time t, position x | Temperature increases with α and t; decreases with depth x via erfc. |
+| 8 | D8 Accumulation | DEM gradients | Accumulation increases with convergent gradients; sensitive to grid resolution and sink depth. |
+| 9 | BHE Cooling | inlet temperature, ground temperature, time | Outlet trends toward ground temperature; greater ΔT yields larger cooling. |
+| 10 | Deep Coaxial | gradient, depth, flow rate | Outlet temperature increases with depth and gradient; higher flow reduces ΔT. |
+| 11 | Fractional Crystallization | melt fraction F, partition D | Compatible element decreases with lower F; incompatible increases as F decreases. |
+| 12 | ACD/CCD Horizons | carbonate activity, depth profile | Saturation horizons deepen with lower carbonate activity; sensitive to ionic activity coefficients. |
+| 13 | Multiphase Reservoir | density contrast, thermal gradient | Buoyancy increases with density contrast; temperature gradient controls thermal field. |
+| 14 | ORC Power | ΔT, efficiency, flow rate | Net power rises with higher ΔT and efficiency; higher flow increases heat input. |
+| 15 | Point Kinetics | β, ρ, Λ | Period decreases with higher ρ and lower β; increases with larger Λ. |
+| 16 | D₂O Moderation | σa, Σs | Moderation ratio decreases with higher absorption cross section. |
+| 17 | Xe-135 Poisoning | σa, flux, decay constants | Peak worth increases with σa and flux; peak timing depends on decay constants. |
+| 18 | Thermal Efficiency | electrical/thermal power | Efficiency increases with electrical power for fixed thermal input. |
+
+---
+
+## Residual Analysis (Observed − Expected)
+
+Residuals are reported where the tests compare numeric expected values to observed outputs. For range-based or assertion-only tests, residuals are **not applicable** (N/A).
+
+| # | Test | Residual |
+| --- | --- | --- |
+| 1 | Triaxial Compression | +0.22 MPa |
+| 2 | Elastic P-Wave | −0.125 s |
+| 3a | Gravity Drop | −0.02 m |
+| 3b | Sliding Block | 0.00 m |
+| 4 | Water Psat | +92.98 Pa |
+| 5 | PNM Permeability | N/A (order-of-magnitude target) |
+| 6 | Sound Speed | +60.0 m/s |
+| 7 | Heat Conduction | −0.25 °C |
+| 8 | D8 Accumulation | −5 cells (20 vs 25) |
+| 9 | BHE Cooling | N/A (trend-based) |
+| 10 | Deep Coaxial | N/A (trend-based) |
+| 11 | Fractional Crystallization | 0.00 ppm (Ni), 0.00 ppm (Rb) |
+| 12 | ACD/CCD Horizons | +70 m (ACD), −70 m (CCD) |
+| 13 | Multiphase Reservoir | N/A (assertion-based) |
+| 14 | ORC Power | N/A (range-based) |
+| 15 | Point Kinetics | N/A (range-based) |
+| 16 | D₂O Moderation | N/A (range-based) |
+| 17 | Xe-135 Poisoning | N/A (range-based) |
+| 18 | Thermal Efficiency | N/A (range-based) |
 
 ## 1. Geomechanics: Triaxial Compression
 **Test Description:** Verification of the Mohr-Coulomb failure criterion for real rock under triaxial loading.
