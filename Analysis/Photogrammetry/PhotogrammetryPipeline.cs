@@ -29,6 +29,7 @@ public class PhotogrammetryPipeline : IDisposable
     private List<KeypointDetector.DetectedKeypoint> _previousKeypoints;
     private Matrix4x4 _currentPose = Matrix4x4.Identity;
     private Mat _cameraMatrix;
+    private Mat _distCoeffs;
     private bool _isInitialized;
 
     // Statistics
@@ -45,6 +46,9 @@ public class PhotogrammetryPipeline : IDisposable
         public int KeyframeInterval { get; set; } = 10;
         public int TargetWidth { get; set; } = 640;
         public int TargetHeight { get; set; } = 480;
+
+        // Distortion coefficients (k1, k2, p1, p2, k3, etc.)
+        public double[] DistortionCoefficients { get; set; }
 
         // Camera intrinsics (will be estimated if not provided)
         public double FocalLengthX { get; set; } = 500;
@@ -76,6 +80,16 @@ public class PhotogrammetryPipeline : IDisposable
         _cameraMatrix.Set(0, 2, config.PrincipalPointX);
         _cameraMatrix.Set(1, 2, config.PrincipalPointY);
         _cameraMatrix.Set(2, 2, 1.0);
+
+        // Initialize distortion coefficients if provided
+        if (config.DistortionCoefficients != null && config.DistortionCoefficients.Length > 0)
+        {
+            _distCoeffs = new Mat(1, config.DistortionCoefficients.Length, MatType.CV_64FC1);
+            for (int i = 0; i < config.DistortionCoefficients.Length; i++)
+            {
+                _distCoeffs.Set(0, i, config.DistortionCoefficients[i]);
+            }
+        }
 
         // Pass intrinsics to KeyframeManager
         _keyframeManager.SetCameraIntrinsics(_cameraMatrix);
@@ -235,8 +249,14 @@ public class PhotogrammetryPipeline : IDisposable
         // Resize if needed
         Cv2.Resize(input, processed, new Size(_cameraMatrix.At<double>(0, 2) * 2, _cameraMatrix.At<double>(1, 2) * 2));
 
-        // Could add undistortion here if distortion coefficients are known
-        // Cv2.Undistort(processed, processed, _cameraMatrix, distCoeffs);
+        // Undistort if coefficients are known
+        if (_distCoeffs != null)
+        {
+            Mat undistorted = new Mat();
+            Cv2.Undistort(processed, undistorted, _cameraMatrix, _distCoeffs);
+            processed.Dispose();
+            processed = undistorted;
+        }
 
         return processed;
     }
@@ -320,6 +340,7 @@ public class PhotogrammetryPipeline : IDisposable
         _previousFrame?.Dispose();
         _previousDepth?.Dispose();
         _cameraMatrix?.Dispose();
+        _distCoeffs?.Dispose();
     }
 
     public class ProcessingResult
