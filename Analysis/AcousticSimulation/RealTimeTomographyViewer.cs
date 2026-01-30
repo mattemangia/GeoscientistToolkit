@@ -22,8 +22,7 @@ public class RealTimeTomographyViewer : IDisposable
 
     private DateTime _lastLiveUpdateTime = DateTime.MinValue;
 
-    // FIX: Track when data actually changes
-    private int _lastUpdateHash;
+    private int _lastUpdateHash = -1;
     private int _liveUpdateCounter;
 
     private (byte[] pixelData, int w, int h, float minVel, float maxVel)? _pendingTextureUpdate;
@@ -58,12 +57,31 @@ public class RealTimeTomographyViewer : IDisposable
         _isLive = false;
         _statusMessage = "Final Results";
         _liveUpdateCounter = 0; // Reset counter
+        _lastUpdateHash = -1;
         RequestUpdate();
     }
 
     public void UpdateLiveData(SimulationResults liveResults, Vector3 dimensions, byte[,,] labels,
-        ISet<byte> selectedMaterialIDs)
+        ISet<byte> selectedMaterialIDs, int stepIndex = -1)
     {
+        // Check if visualization parameters have changed
+        var paramsChanged = _dimensions != dimensions || _labels != labels;
+
+        if (!paramsChanged)
+        {
+            if (_selectedMaterialIDs == null && selectedMaterialIDs != null) paramsChanged = true;
+            else if (_selectedMaterialIDs != null && selectedMaterialIDs == null) paramsChanged = true;
+            else if (_selectedMaterialIDs != null && !_selectedMaterialIDs.SetEquals(selectedMaterialIDs))
+                paramsChanged = true;
+        }
+
+        if (stepIndex != -1 && !paramsChanged)
+        {
+            if (stepIndex == _lastUpdateHash) return;
+        }
+
+        if (stepIndex != -1) _lastUpdateHash = stepIndex;
+
         // FIX: Update data even if window is closed (it might be reopened)
         // But don't trigger regeneration if not visible
 

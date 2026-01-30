@@ -1031,7 +1031,7 @@ public class AcousticSimulationUI : IDisposable
 
         var volumeLabels = (byte[,,])_liveResultsForTomography.Context;
 
-        _tomographyViewer.UpdateLiveData(_liveResultsForTomography, dimensions, volumeLabels, _selectedMaterialIDs);
+        _tomographyViewer.UpdateLiveData(_liveResultsForTomography, dimensions, volumeLabels, _selectedMaterialIDs, _simulator?.CurrentStep ?? -1);
     }
 
     private void ApplyAxisPreset(int axis)
