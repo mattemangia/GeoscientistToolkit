@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
+using Xunit;
 using Xunit.Abstractions;
-using Xunit.Runner.Common;
-using Xunit.Runner.Utility;
 
 namespace VerificationTestsRunner;
 
@@ -16,7 +15,7 @@ public static class Program
         Console.WriteLine($"Verification test runner: {Path.GetFileName(assemblyPath)}");
 
         using var controller = new XunitFrontController(AppDomainSupport.Denied, assemblyPath);
-        using var discoverySink = new DiscoverySink();
+        using var discoverySink = new TestDiscoverySink();
 
         controller.Find(includeSourceInformation: false, discoverySink, TestFrameworkOptions.ForDiscovery());
         discoverySink.Finished.WaitOne();
