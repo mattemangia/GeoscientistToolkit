@@ -77,6 +77,9 @@ public class PhotogrammetryPipeline : IDisposable
         _cameraMatrix.Set(1, 2, config.PrincipalPointY);
         _cameraMatrix.Set(2, 2, 1.0);
 
+        // Pass intrinsics to KeyframeManager
+        _keyframeManager.SetCameraIntrinsics(_cameraMatrix);
+
         // Initialize models
         InitializeModels(config);
     }
@@ -190,7 +193,7 @@ public class PhotogrammetryPipeline : IDisposable
                             result.NewKeyframe = keyframe;
 
                             // Optionally perform bundle adjustment in background
-                            // _keyframeManager.PerformBundleAdjustment();
+                            _keyframeManager.PerformBundleAdjustment();
                         }
                     }
                 }
