@@ -368,9 +368,71 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
 
         private void ApplyGaussianFilter(byte[] imageData, int width, int height, int kernelSize)
         {
-            // Simple box blur approximation for now
-            // In a real implementation, you'd use proper Gaussian kernel
-            ApplyMeanFilter(imageData, width, height, kernelSize);
+            if (kernelSize % 2 == 0) kernelSize++; // Ensure odd kernel size
+
+            // Calculate sigma based on kernel size
+            // sigma = kernelSize / 6 is a common heuristic to cover +/- 3 sigma within the kernel
+            double sigma = Math.Max(kernelSize / 6.0, 0.5);
+
+            // Generate Gaussian kernel
+            double[] kernel = new double[kernelSize * kernelSize];
+            double sum = 0;
+            int radius = kernelSize / 2;
+            double sigmaSq2 = 2 * sigma * sigma;
+            double piSigmaSq2 = Math.PI * sigmaSq2;
+
+            for (int y = -radius; y <= radius; y++)
+            {
+                for (int x = -radius; x <= radius; x++)
+                {
+                    double distanceSq = x * x + y * y;
+                    double value = Math.Exp(-distanceSq / sigmaSq2) / piSigmaSq2;
+                    kernel[(y + radius) * kernelSize + (x + radius)] = value;
+                    sum += value;
+                }
+            }
+
+            // Normalize kernel
+            for (int i = 0; i < kernel.Length; i++)
+            {
+                kernel[i] /= sum;
+            }
+
+            // Apply convolution
+            byte[] temp = CloneImageData(imageData);
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    double sumR = 0, sumG = 0, sumB = 0;
+
+                    for (int ky = -radius; ky <= radius; ky++)
+                    {
+                        for (int kx = -radius; kx <= radius; kx++)
+                        {
+                            // Clamp coordinates to handle borders
+                            int px = Math.Min(Math.Max(x + kx, 0), width - 1);
+                            int py = Math.Min(Math.Max(y + ky, 0), height - 1);
+
+                            int idx = (py * width + px) * 4;
+                            double weight = kernel[(ky + radius) * kernelSize + (kx + radius)];
+
+                            sumR += temp[idx] * weight;
+                            sumG += temp[idx + 1] * weight;
+                            sumB += temp[idx + 2] * weight;
+                        }
+                    }
+
+                    int outputIdx = (y * width + x) * 4;
+                    imageData[outputIdx] = (byte)Math.Min(255, Math.Max(0, sumR));
+                    imageData[outputIdx + 1] = (byte)Math.Min(255, Math.Max(0, sumG));
+                    imageData[outputIdx + 2] = (byte)Math.Min(255, Math.Max(0, sumB));
+
+                    // Preserve Alpha
+                    imageData[outputIdx + 3] = temp[outputIdx + 3];
+                }
+            }
         }
 
         private void ApplyMedianFilter(byte[] imageData, int width, int height, int kernelSize)
