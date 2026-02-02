@@ -28,6 +28,7 @@ public class ChunkedAcousticSimulator : IDisposable
 
     // Progress tracking
     private float[,,] _damageField;
+    private float[,,] _plasticStrainField;
     private bool _enableRealTimeVisualization;
 
     // Adaptive memory management
@@ -444,6 +445,12 @@ public class ChunkedAcousticSimulator : IDisposable
         {
             _damageField = new float[_params.Width, _params.Height, _params.Depth];
             Logger.Log($"[Simulator] Damage field initialized: {_params.Width}x{_params.Height}x{_params.Depth}");
+        }
+
+        if (_params.UsePlasticModel)
+        {
+            _plasticStrainField = new float[_params.Width, _params.Height, _params.Depth];
+            Logger.Log($"[Simulator] Plastic strain field initialized: {_params.Width}x{_params.Height}x{_params.Depth}");
         }
 
         if (_params.SaveTimeSeries)
@@ -880,19 +887,37 @@ public class ChunkedAcousticSimulator : IDisposable
 
     private void ApplyPlasticity(WaveFieldChunk chunk, float[,,] E, float[,,] nu, float[,,] rho)
     {
+        if (_plasticStrainField == null)
+            return;
+
         var confiningStress = _params.ConfiningPressureMPa * 1e6f;
         var cohesion = _params.CohesionMPa * 1e6f;
         var frictionAngle = _params.FailureAngleDeg * MathF.PI / 180f;
         var sinPhi = MathF.Sin(frictionAngle);
+        var hardeningModulus = Math.Max(0f, _params.PlasticHardeningModulusMPa) * 1e6f;
+
+        var simWidth = _plasticStrainField.GetLength(0);
+        var simHeight = _plasticStrainField.GetLength(1);
+        var simDepth = _plasticStrainField.GetLength(2);
 
         Parallel.For(0, chunk.Depth, z =>
         {
+            var localZ = chunk.StartZ + z;
+            if (localZ < 0 || localZ >= simDepth)
+                return;
+
             for (var y = 0; y < _params.Height; y++)
             for (var x = 0; x < _params.Width; x++)
             {
+                if (x < 0 || x >= simWidth || y < 0 || y >= simHeight)
+                    continue;
+
                 var sxx = chunk.Sxx[x, y, z];
                 var syy = chunk.Syy[x, y, z];
                 var szz = chunk.Szz[x, y, z];
+                var sxy = chunk.Sxy[x, y, z];
+                var sxz = chunk.Sxz[x, y, z];
+                var syz = chunk.Syz[x, y, z];
 
                 // Mean stress
                 var p = -(sxx + syy + szz) / 3f + confiningStress;
@@ -902,18 +927,40 @@ public class ChunkedAcousticSimulator : IDisposable
                 var syy_dev = syy + p;
                 var szz_dev = szz + p;
 
-                var q = MathF.Sqrt(1.5f * (sxx_dev * sxx_dev + syy_dev * syy_dev + szz_dev * szz_dev));
+                var j2 = 0.5f * (sxx_dev * sxx_dev + syy_dev * syy_dev + szz_dev * szz_dev +
+                                 2f * (sxy * sxy + sxz * sxz + syz * syz));
+                var q = MathF.Sqrt(3f * j2);
 
                 // Mohr-Coulomb yield function
-                var F = q - (cohesion + p * sinPhi);
+                var plasticStrain = _plasticStrainField[x, y, localZ];
+                var F = q - (cohesion + p * sinPhi + hardeningModulus * plasticStrain);
 
                 if (F > 0)
                 {
-                    // Plastic correction
-                    var factor = (cohesion + p * sinPhi) / (q + 1e-10f);
+                    var localE = E[x, y, z];
+                    var localNu = nu[x, y, z];
+                    var mu = localE > 0f ? localE / (2f * (1f + localNu)) : 0f;
+
+                    if (mu <= 0f)
+                        continue;
+
+                    var denom = 3f * mu + hardeningModulus;
+                    var deltaGamma = F / MathF.Max(denom, 1e-10f);
+                    if (deltaGamma > 0f)
+                    {
+                        plasticStrain += deltaGamma;
+                        _plasticStrainField[x, y, localZ] = plasticStrain;
+                    }
+
+                    var qCorrected = MathF.Max(0f, q - 3f * mu * deltaGamma);
+                    var factor = qCorrected / (q + 1e-10f);
+
                     chunk.Sxx[x, y, z] = sxx_dev * factor - p;
                     chunk.Syy[x, y, z] = syy_dev * factor - p;
                     chunk.Szz[x, y, z] = szz_dev * factor - p;
+                    chunk.Sxy[x, y, z] = sxy * factor;
+                    chunk.Sxz[x, y, z] = sxz * factor;
+                    chunk.Syz[x, y, z] = syz * factor;
                 }
             }
         });
@@ -921,7 +968,9 @@ public class ChunkedAcousticSimulator : IDisposable
 
     private void ApplyDamageFixed(WaveFieldChunk chunk, float[,,] E, float[,,] nu)
     {
-        var tensileStrength = 2e6f; // 2 MPa
+        var defaultTensileStrength = 2e6f; // 2 MPa fallback
+        var minTensileStrength = _params.MinTensileStrengthMPa * 1e6f;
+        var maxTensileStrength = _params.MaxTensileStrengthMPa * 1e6f;
 
         // CRITICAL: When using simulation extent, all tracking arrays (_damageField, _persistentYoungsModulus)
         // are sized to the SIMULATION dimensions, not the full dataset dimensions!
@@ -955,6 +1004,17 @@ public class ChunkedAcousticSimulator : IDisposable
                     var szz = chunk.Szz[x, y, z];
 
                     var maxStress = Math.Max(sxx, Math.Max(syy, szz));
+
+                    var tensileStrength = defaultTensileStrength;
+                    if (_params.UseDynamicTensileStrength)
+                    {
+                        var localE = E[x, y, z];
+                        if (localE > 0f)
+                        {
+                            tensileStrength = localE * _params.TensileStrengthFactor;
+                            tensileStrength = Math.Clamp(tensileStrength, minTensileStrength, maxTensileStrength);
+                        }
+                    }
 
                     if (maxStress > tensileStrength && _damageField != null)
                     {

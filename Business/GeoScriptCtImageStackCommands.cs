@@ -437,6 +437,8 @@ public class SimulateAcousticCommand : IGeoScriptCommand
             ConfiningPressureMPa = GeoScriptArgumentParser.GetFloat(args, "confining_pressure_mpa", 1.0f, context),
             FailureAngleDeg = GeoScriptArgumentParser.GetFloat(args, "failure_angle_deg", 30.0f, context),
             CohesionMPa = GeoScriptArgumentParser.GetFloat(args, "cohesion_mpa", 5.0f, context),
+            PlasticHardeningModulusMPa =
+                GeoScriptArgumentParser.GetFloat(args, "plastic_hardening_modulus_mpa", 0.0f, context),
             SourceEnergyJ = GeoScriptArgumentParser.GetFloat(args, "source_energy_j", 1.0f, context),
             SourceFrequencyKHz = GeoScriptArgumentParser.GetFloat(args, "source_frequency_khz", 500.0f, context),
             SourceAmplitude = GeoScriptArgumentParser.GetInt(args, "source_amplitude", 100, context),

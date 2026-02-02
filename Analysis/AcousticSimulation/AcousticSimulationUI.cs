@@ -168,6 +168,7 @@ public class AcousticSimulationUI : IDisposable
     private bool _enableRealTimeVisualization;
     private int _estimatedTimeSteps;
     private float _failureAngle = 30.0f;
+    private float _plasticHardeningModulus = 0.0f;
     private bool _isCalculatingExtent;
     private bool _isSimulating;
     private SimulationResults _lastResults;
@@ -642,6 +643,12 @@ public class AcousticSimulationUI : IDisposable
             ImGui.DragFloat("Cohesion (MPa)", ref _cohesion, 0.5f, 0.0f, 50.0f);
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Material cohesion for Mohr-Coulomb plasticity model");
+            if (_usePlastic)
+            {
+                ImGui.DragFloat("Plastic Hardening (MPa)", ref _plasticHardeningModulus, 10.0f, 0.0f, 20000.0f);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Isotropic hardening modulus applied to the Mohr-Coulomb yield surface.");
+            }
             ImGui.Unindent();
         }
 
@@ -1423,6 +1430,7 @@ public class AcousticSimulationUI : IDisposable
                 ConfiningPressureMPa = _confiningPressure,
                 FailureAngleDeg = _failureAngle,
                 CohesionMPa = _cohesion,
+                PlasticHardeningModulusMPa = _plasticHardeningModulus,
                 SourceEnergyJ = _sourceEnergy,
                 SourceFrequencyKHz = _sourceFrequency,
                 SourceAmplitude = _sourceAmplitude,
