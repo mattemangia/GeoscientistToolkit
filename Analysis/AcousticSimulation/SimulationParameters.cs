@@ -56,6 +56,11 @@ public class SimulationParameters
     public bool UseElasticModel { get; set; }
     public bool UsePlasticModel { get; set; }
     public bool UseBrittleModel { get; set; }
+    public float PlasticHardeningModulusMPa { get; set; } = 0f;
+    public bool UseDynamicTensileStrength { get; set; } = true;
+    public float TensileStrengthFactor { get; set; } = 1e-4f;
+    public float MinTensileStrengthMPa { get; set; } = 0.5f;
+    public float MaxTensileStrengthMPa { get; set; } = 20f;
     public bool UseGPU { get; set; }
     public bool UseRickerWavelet { get; set; }
     public Vector3 TxPosition { get; set; }
