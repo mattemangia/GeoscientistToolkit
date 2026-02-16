@@ -246,6 +246,15 @@ public class BoreholeCrossSectionViewer
 
         ImGui.Separator();
 
+        if (ImGui.Button("Refresh Data", new Vector2(-1, 30)))
+        {
+            if (_results != null && _mesh != null)
+            {
+                LoadResults(_results, _mesh, _options);
+                Logger.Log("2D cross-section viewer data refreshed from internal state.");
+            }
+        }
+
         if (ImGui.Button("Debug Data Structure", new Vector2(-1, 30)))
             DebugDataStructure();
     }

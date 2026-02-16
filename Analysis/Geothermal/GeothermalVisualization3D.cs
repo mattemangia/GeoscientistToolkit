@@ -2247,7 +2247,7 @@ layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Norma
 layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
-    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
+    mat4 ViewMatrix; mat4 ProjectionMatrix; mat4 ModelMatrix; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo; vec4 ClipPlane;
     vec4 BoreholeClipBox; vec4 BoreholeClipCenter;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
@@ -2291,7 +2291,7 @@ layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Norma
 layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
-    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
+    mat4 ViewMatrix; mat4 ProjectionMatrix; mat4 ModelMatrix; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo; vec4 ClipPlane;
     vec4 BoreholeClipBox; vec4 BoreholeClipCenter;
 } ubo;
 void main() {
@@ -2306,7 +2306,7 @@ void main() {
         int axis = int(ubo.ClipPlane.x);
         float position = ubo.ClipPlane.y;
         float side = ubo.ClipPlane.z;
-        vec3 normalizedDomainPos = (frag_WorldPos - vec3(0, 0, ubo.di.y)) / vec3(ubo.di.x, ubo.di.x, ubo.di.z);
+        vec3 normalizedDomainPos = (frag_WorldPos - vec3(0, 0, ubo.DomainInfo.y)) / vec3(ubo.DomainInfo.x, ubo.DomainInfo.x, ubo.DomainInfo.z);
         float coord = (axis == 0) ? normalizedDomainPos.x : ((axis == 1) ? normalizedDomainPos.y : normalizedDomainPos.z);
         if (side > 0.5) { if (coord < position) discard; }
         else { if (coord > position) discard; }
@@ -2329,7 +2329,7 @@ layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Norma
 layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
-    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
+    mat4 ViewMatrix; mat4 ProjectionMatrix; mat4 ModelMatrix; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo; vec4 ClipPlane;
     vec4 BoreholeClipBox; vec4 BoreholeClipCenter;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
@@ -2359,7 +2359,7 @@ layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Norma
 layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
-    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo; vec4 ClipPlane;
+    mat4 ViewMatrix; mat4 ProjectionMatrix; mat4 ModelMatrix; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo; vec4 ClipPlane;
     vec4 BoreholeClipBox; vec4 BoreholeClipCenter;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
@@ -2394,7 +2394,7 @@ layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Norma
 layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
-    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
+    mat4 ViewMatrix; mat4 ProjectionMatrix; mat4 ModelMatrix; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo; vec4 ClipPlane;
     vec4 BoreholeClipBox; vec4 BoreholeClipCenter;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;

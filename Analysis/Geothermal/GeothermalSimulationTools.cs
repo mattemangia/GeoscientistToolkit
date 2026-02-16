@@ -1639,12 +1639,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         ImGui.ProgressBar(_simulationProgress, new Vector2(-1, 0), _simulationMessage);
 
         // Display convergence status with color coding
-        if (_currentSolver != null)
+        var solver = _currentSolver;
+        if (solver != null)
         {
             ImGui.Separator();
 
             // Color-code status based on convergence
-            var status = _currentSolver.ConvergenceStatus;
+            var status = solver.ConvergenceStatus;
             var statusColor = new Vector4(0.7f, 0.7f, 0.7f, 1.0f); // Default gray
 
             if (status.Contains("converged"))
@@ -1655,16 +1656,16 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 statusColor = new Vector4(1.0f, 0.7f, 0.2f, 1.0f); // Orange
 
             ImGui.TextColored(statusColor, $"Status: {status}");
-            ImGui.Text($"Time Step: {_currentSolver.CurrentTimeStep}");
-            ImGui.Text($"Simulation Time: {_currentSolver.CurrentSimulationTime / 86400.0:F2} days");
+            ImGui.Text($"Time Step: {solver.CurrentTimeStep}");
+            ImGui.Text($"Simulation Time: {solver.CurrentSimulationTime / 86400.0:F2} days");
 
             // Convergence history graph
-            if (_currentSolver.ConvergenceHistory.Count > 0)
+            if (solver.ConvergenceHistory.Count > 0)
             {
                 ImGui.Separator();
                 ImGui.Text("Overall Convergence (per time step):");
 
-                var values = _currentSolver.ConvergenceHistory.Select(v => (float)Math.Log10(Math.Max(v, 1e-10)))
+                var values = solver.ConvergenceHistory.Select(v => (float)Math.Log10(Math.Max(v, 1e-10)))
                     .ToArray();
                 if (values.Length > 0)
                 {
@@ -1674,7 +1675,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                         0, $"Log10(Error) [{minVal:F1} to {maxVal:F1}]",
                         minVal - 0.5f, maxVal + 0.5f, new Vector2(0, 100));
 
-                    var lastError = _currentSolver.ConvergenceHistory.LastOrDefault();
+                    var lastError = solver.ConvergenceHistory.LastOrDefault();
                     var errorColor = lastError < 1e-6 ? new Vector4(0.3f, 1.0f, 0.3f, 1.0f) :
                         lastError < 1e-4 ? new Vector4(1.0f, 0.7f, 0.2f, 1.0f) :
                         new Vector4(0.7f, 0.7f, 0.7f, 1.0f);
@@ -1685,13 +1686,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             }
 
             // Heat transfer convergence (last time step)
-            if (_currentSolver.HeatConvergenceHistory.Count > 0)
+            if (solver.HeatConvergenceHistory.Count > 0)
             {
                 ImGui.Separator();
                 ImGui.Text("Heat Transfer Convergence (current step):");
 
                 // Show last 100 iterations
-                var heatVals = _currentSolver.HeatConvergenceHistory.TakeLast(100)
+                var heatVals = solver.HeatConvergenceHistory.TakeLast(100)
                     .Select(v => (float)Math.Log10(Math.Max(v, 1e-10))).ToArray();
                 if (heatVals.Length > 0)
                 {
@@ -1701,19 +1702,19 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                         0, $"Log10(Heat Error) [{minVal:F1} to {maxVal:F1}]",
                         minVal - 0.5f, maxVal + 0.5f, new Vector2(0, 80));
 
-                    var lastHeat = _currentSolver.HeatConvergenceHistory.LastOrDefault();
-                    ImGui.Text($"Heat Iterations: {_currentSolver.HeatConvergenceHistory.Count}, Error: {lastHeat:E3}");
+                    var lastHeat = solver.HeatConvergenceHistory.LastOrDefault();
+                    ImGui.Text($"Heat Iterations: {solver.HeatConvergenceHistory.Count}, Error: {lastHeat:E3}");
                 }
             }
 
             // Flow convergence (last time step)
-            if (_currentSolver.FlowConvergenceHistory.Count > 0 && _options.SimulateGroundwaterFlow)
+            if (solver.FlowConvergenceHistory.Count > 0 && _options.SimulateGroundwaterFlow)
             {
                 ImGui.Separator();
                 ImGui.Text("Groundwater Flow Convergence (current step):");
 
                 // Show last 100 iterations
-                var flowVals = _currentSolver.FlowConvergenceHistory.TakeLast(100)
+                var flowVals = solver.FlowConvergenceHistory.TakeLast(100)
                     .Select(v => (float)Math.Log10(Math.Max(v, 1e-10))).ToArray();
                 if (flowVals.Length > 0)
                 {
@@ -1723,27 +1724,27 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                         0, $"Log10(Flow Error) [{minVal:F1} to {maxVal:F1}]",
                         minVal - 0.5f, maxVal + 0.5f, new Vector2(0, 80));
 
-                    var lastFlow = _currentSolver.FlowConvergenceHistory.LastOrDefault();
-                    ImGui.Text($"Flow Iterations: {_currentSolver.FlowConvergenceHistory.Count}, Error: {lastFlow:E3}");
+                    var lastFlow = solver.FlowConvergenceHistory.LastOrDefault();
+                    ImGui.Text($"Flow Iterations: {solver.FlowConvergenceHistory.Count}, Error: {lastFlow:E3}");
                 }
             }
 
             // Adaptive time step info
-            if (_currentSolver.TimeStepHistory.Count > 0)
+            if (solver.TimeStepHistory.Count > 0)
             {
                 ImGui.Separator();
-                var currentDt = _currentSolver.TimeStepHistory.LastOrDefault();
-                var avgDt = _currentSolver.TimeStepHistory.Average();
+                var currentDt = solver.TimeStepHistory.LastOrDefault();
+                var avgDt = solver.TimeStepHistory.Average();
                 ImGui.Text($"Adaptive Time Step: {currentDt:F2} s (avg: {avgDt:F2} s)");
                 ImGui.TextDisabled($"User specified: {_options.TimeStep:F0} s");
             }
 
             // Adaptive time step history
-            if (_currentSolver.TimeStepHistory.Count > 0)
+            if (solver.TimeStepHistory.Count > 0)
             {
                 ImGui.Separator();
                 ImGui.Text("Adaptive Time Step:");
-                var dtVals = _currentSolver.TimeStepHistory.Select(v => (float)v).ToArray();
+                var dtVals = solver.TimeStepHistory.Select(v => (float)v).ToArray();
                 if (dtVals.Length > 0)
                 {
                     ImGui.PlotLines("##dt_hist", ref dtVals[0], dtVals.Length,
@@ -2833,6 +2834,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     Logger.Log("BoreholeCrossSectionViewer updated with new simulation results.");
                 }
 
+                // NEW: Refresh 3D visualization if it's already active
+                if (_show3DVisualization && _visualization3D != null)
+                {
+                    _visualization3D.LoadResults(_results, _mesh, _options);
+                    Logger.Log("3D visualization refreshed with new simulation results.");
+                }
+
                 // Run ORC power generation analysis if enabled
                 if (_options.EnableORCSimulation)
                 {
@@ -3052,6 +3060,19 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
         // Left side panel for controls
         ImGui.BeginChild("CrossSectionControls", new Vector2(300, 0), ImGuiChildFlags.Border);
+
+        if (ImGui.Button("Refresh Data", new Vector2(-1, 30)))
+        {
+            if (_results != null && _mesh != null)
+            {
+                _crossSectionViewer.LoadResults(_results, _mesh, _options);
+                Logger.Log("2D cross-section viewer data refreshed.");
+            }
+        }
+
+        ImGui.SetItemTooltip("Reload the viewer with the latest simulation results.");
+        ImGui.Spacing();
+
         _crossSectionViewer.RenderControls();
         ImGui.EndChild();
 

@@ -43,11 +43,11 @@ public class LoadingScreen
 
     public void Render()
     {
-        // Pump events to keep window responsive
-        _window.PumpEvents();
+        // Pump events to keep window responsive and get input snapshot
+        var snapshot = _window.PumpEvents();
 
-        // Update ImGui
-        _imGuiController.Update(1f / 60f, _window.PumpEvents());
+        // Update ImGui with the single captured snapshot
+        _imGuiController.Update(1f / 60f, snapshot);
 
         // Set up loading screen UI
         var io = ImGui.GetIO();
