@@ -62,14 +62,23 @@ public class Application
                 ResourceBindingModel.Default, // Use Default instead of Improved
                 preferStandardClipSpaceYDirection: false, // Don't force clip space changes
                 preferDepthRangeZeroToOne: false); // Use platform defaults
-        else
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             basicGraphicsOptions = new GraphicsDeviceOptions(
-                true,
+                false,
                 null,
                 true,
                 ResourceBindingModel.Improved,
                 preferStandardClipSpaceYDirection: true,
                 preferDepthRangeZeroToOne: true);
+        else
+            // Linux: Use Default binding model and disable clip-space hacks for OpenGL compatibility
+            basicGraphicsOptions = new GraphicsDeviceOptions(
+                false,
+                null,
+                true,
+                ResourceBindingModel.Default,
+                preferStandardClipSpaceYDirection: false,
+                preferDepthRangeZeroToOne: false);
 
         try
         {
@@ -186,12 +195,12 @@ public class Application
                     preferDepthRangeZeroToOne: false);
             else
                 graphicsDeviceOptions = new GraphicsDeviceOptions(
-                    true,
+                    false,
                     null,
                     hardwareSettings.EnableVSync,
-                    ResourceBindingModel.Improved,
-                    preferStandardClipSpaceYDirection: true,
-                    preferDepthRangeZeroToOne: true);
+                    preferredBackend == GraphicsBackend.OpenGL ? ResourceBindingModel.Default : ResourceBindingModel.Improved,
+                    preferStandardClipSpaceYDirection: preferredBackend != GraphicsBackend.OpenGL,
+                    preferDepthRangeZeroToOne: preferredBackend != GraphicsBackend.OpenGL);
 
             try
             {
@@ -199,6 +208,12 @@ public class Application
                 _imGuiController.Dispose();
                 _commandList.Dispose();
                 _graphicsDevice.Dispose();
+                
+                // LINUX FIX: Close the old window before creating a new one to prevent window leak
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                {
+                    _window?.Close();
+                }
 
                 Logger.Log($"Attempting to initialize graphics with backend: {preferredBackend}");
 
@@ -255,7 +270,11 @@ public class Application
         _mainWindow.OnExitConfirmed += () => _confirmedExit = true;
 
         var io = ImGui.GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags.ViewportsEnable | ImGuiConfigFlags.DockingEnable;
+        io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
+        
+        // Linux Fix: Viewports can cause 'empty window' on some Ubuntu/Wayland setups
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            io.ConfigFlags |= ImGuiConfigFlags.ViewportsEnable;
 
         _loadingScreen.UpdateStatus("Applying theme...", 0.7f);
         ThemeManager.ApplyTheme(appSettings.Appearance);
@@ -409,7 +428,8 @@ public class Application
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return GraphicsBackend.Direct3D11;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return GraphicsBackend.Metal;
-        return GraphicsBackend.Vulkan;
+        // Linux: OpenGL is more compatible than Vulkan on many Ubuntu/distro setups
+        return GraphicsBackend.OpenGL;
     }
 
     private void TryCreateWithWindowsFallbacks(
@@ -483,14 +503,20 @@ public class Application
         {
             Logger.LogError($"Failed to create Vulkan device: {vkEx.Message}. Trying OpenGL...");
 
+            // LINUX FIX: If _window was created but _graphicsDevice failed, we MUST close _window 
+            // before trying again with another backend to prevent multiple windows opening.
+            _window?.Close();
+
             backend = GraphicsBackend.OpenGL;
+            // Linux/Ubuntu: Use ResourceBindingModel.Default and disable clip-space hacks for OpenGL
+            // to fix 'empty blue/purple window' issues.
             basicGraphicsOptions = new GraphicsDeviceOptions(
-                true,
+                false,
                 null,
                 true,
-                ResourceBindingModel.Improved,
-                preferStandardClipSpaceYDirection: true,
-                preferDepthRangeZeroToOne: true);
+                ResourceBindingModel.Default,
+                preferStandardClipSpaceYDirection: false,
+                preferDepthRangeZeroToOne: false);
 
             VeldridStartup.CreateWindowAndGraphicsDevice(
                 windowCI,

@@ -13,29 +13,76 @@ namespace GeoscientistToolkit;
 
 public sealed class ImGuiController : IDisposable
 {
-    // GLSL 330 for better OpenGL compatibility
+    // GLSL 330 for OpenGL compatibility (Windows/generic)
     private const string VsGlsl330 = @"#version 330 core
-layout(location=0) in vec2 in_position;
-layout(location=1) in vec2 in_texCoord;
-layout(location=2) in vec4 in_color;
-uniform mat4 Projection;
+layout (location = 0) in vec2 in_position;
+layout (location = 1) in vec2 in_texCoord;
+layout (location = 2) in vec4 in_color;
+
+layout (std140) uniform ProjectionBuffer
+{
+    mat4 Projection;
+};
+
 out vec2 fs_Tex;
 out vec4 fs_Col;
+
 void main()
 {
     fs_Tex = in_texCoord;
     fs_Col = in_color;
-    gl_Position = Projection * vec4(in_position,0,1);
+    gl_Position = Projection * vec4(in_position, 0.0, 1.0);
 }";
 
     private const string FsGlsl330 = @"#version 330 core
+
 in vec2 fs_Tex;
 in vec4 fs_Col;
-out vec4 out_Color;
+
 uniform sampler2D MainTexture;
+
+out vec4 out_Color;
+
 void main()
 {
     out_Color = fs_Col * texture(MainTexture, fs_Tex);
+}";
+
+    // Linux-specific GLSL 330 shaders - simpler format for better Mesa/AMD/Intel driver compatibility
+    // Note: UBO block name must match ResourceLayout name ("Projection"), vertex attribs must match VertexLayout
+    private const string VsGlsl330Linux = @"#version 330
+
+layout(std140) uniform Projection
+{
+    mat4 projection_matrix;
+};
+
+in vec2 in_position;
+in vec2 in_texCoord;
+in vec4 in_color;
+
+out vec2 frag_uv;
+out vec4 frag_color;
+
+void main()
+{
+    frag_uv = in_texCoord;
+    frag_color = in_color;
+    gl_Position = projection_matrix * vec4(in_position, 0.0, 1.0);
+}";
+
+    private const string FsGlsl330Linux = @"#version 330
+
+in vec2 frag_uv;
+in vec4 frag_color;
+
+out vec4 out_color;
+
+uniform sampler2D MainTexture;
+
+void main()
+{
+    out_color = frag_color * texture(MainTexture, frag_uv);
 }";
 
     // SPIR-V 450 for Vulkan
@@ -332,7 +379,9 @@ fragment float4 main0(VertexOut in [[stage_in]],
 
         // Only try SPIR-V cross-compilation if not on Windows D3D11 
         // (it has known issues with SPIR-V tools on some systems)
-        if (!(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && gd.BackendType == GraphicsBackend.Direct3D11))
+        // Also skip for OpenGL on Linux to ensure our fixed GLSL 330 shaders are used.
+        if (!(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && _gd.BackendType == GraphicsBackend.Direct3D11) &&
+            !(RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && (_gd.BackendType == GraphicsBackend.OpenGL || _gd.BackendType == GraphicsBackend.OpenGLES)))
             try
             {
                 CreateShadersWithSpirvCrossCompilation(factory);
@@ -371,7 +420,7 @@ fragment float4 main0(VertexOut in [[stage_in]],
             new ShaderSetDescription(new[] { vLayout }, new[] { _vs, _fs }),
             new[] { _layout },
             fbDesc,
-            gd.BackendType == GraphicsBackend.Direct3D11
+            (gd.BackendType == GraphicsBackend.Direct3D11 || gd.BackendType == GraphicsBackend.OpenGL || gd.BackendType == GraphicsBackend.OpenGLES)
                 ? ResourceBindingModel.Default
                 : ResourceBindingModel.Improved));
 
@@ -772,7 +821,10 @@ void main()
             case GraphicsBackend.OpenGL:
             case GraphicsBackend.OpenGLES:
             default:
-                // For OpenGL, use GLSL 330 which is more compatible
+                // Linux: Use simplified shaders for better Mesa/Intel/AMD driver compatibility
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                    return (VsGlsl330Linux, FsGlsl330Linux, "main", "main");
+                // For other OpenGL platforms, use standard GLSL 330
                 return (VsGlsl330, FsGlsl330, "main", "main");
         }
     }
