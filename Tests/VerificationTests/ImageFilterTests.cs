@@ -58,4 +58,43 @@ public class ImageFilterTests
         // Additional check: The center value should be non-zero
         Assert.True(centerVal > 0, "Center value should be non-zero.");
     }
+
+    [Fact]
+    public void GaussianFilter_BlursAlphaChannel()
+    {
+        // Arrange
+        int size = 11;
+        var dataset = new ImageDataset("TestImageAlpha", "")
+        {
+            Width = size,
+            Height = size,
+            BitDepth = 8,
+            PixelSize = 1.0f,
+            ImageData = new byte[size * size * 4]
+        };
+
+        // Create an impulse in alpha channel at center
+        int cx = size / 2;
+        int cy = size / 2;
+        int centerIdx = (cy * size + cx) * 4;
+
+        dataset.ImageData[centerIdx + 3] = 255; // Alpha = 255 at center, 0 elsewhere
+
+        // Act
+        var filterOp = new FilterOperation();
+        var parameters = new List<object> { "gaussian", 5 };
+        var result = (ImageDataset)filterOp.Execute(dataset, parameters);
+
+        // Assert
+        // Center alpha should be < 255 (blurred)
+        byte centerAlpha = result.ImageData[centerIdx + 3];
+
+        // Neighbor alpha should be > 0 (received some blur)
+        int neighborIdx = (cy * size + (cx + 1)) * 4;
+        byte neighborAlpha = result.ImageData[neighborIdx + 3];
+
+        Assert.True(centerAlpha < 255, $"Center Alpha should be blurred (less than 255). Got {centerAlpha}");
+        Assert.True(neighborAlpha > 0, $"Neighbor Alpha should be non-zero. Got {neighborAlpha}");
+        Assert.True(centerAlpha > neighborAlpha, "Center Alpha should be peak.");
+    }
 }
