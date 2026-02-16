@@ -331,7 +331,7 @@ public class BoreholeDataset : Dataset, ISerializableDataset
             ["Thermal Conductivity"] = new()
             {
                 Name = "Thermal Conductivity",
-                Unit = "W/mÂ·K",
+                Unit = "W/m·K",
                 MinValue = 0.1f,
                 MaxValue = 5,
                 Color = new Vector4(1.0f, 0.6f, 0.2f, 1.0f),
@@ -340,7 +340,7 @@ public class BoreholeDataset : Dataset, ISerializableDataset
             ["Thermal Diffusivity"] = new() // ADDED
             {
                 Name = "Thermal Diffusivity",
-                Unit = "mÂ²/s",
+                Unit = "m²/s",
                 MinValue = 1e-7f,
                 MaxValue = 5e-6f,
                 Color = new Vector4(0.0f, 0.8f, 0.8f, 1.0f), // Cyan

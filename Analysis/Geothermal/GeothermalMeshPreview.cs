@@ -465,7 +465,7 @@ public class GeothermalMeshPreview : IDisposable
             if (ImGui.CollapsingHeader("Operating Conditions", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 ImGui.Indent();
-                // FluidMassFlowRate is in kg/s, convert to L/min (assuming water density ~1000 kg/mÃ‚Â³
+                // FluidMassFlowRate is in kg/s, convert to L/min (assuming water density ~1000 kg/m³
                 var flowRateLmin = options.FluidMassFlowRate * 60.0; // kg/s to L/min (for water)
                 RenderInfoRow("Flow Rate:", $"{flowRateLmin:F2} L/min");
                 RenderInfoRow("Inlet Temp:", $"{options.FluidInletTemperature - 273.15:F1} °C");

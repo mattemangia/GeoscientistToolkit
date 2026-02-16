@@ -1005,7 +1005,7 @@ public static class BoreholeDebugTools
     private static List<ParameterPoint> GenerateTemperatureProfile(BoreholeDataset borehole)
     {
         var points = new List<ParameterPoint>();
-        var gradient = 0.03f; // 30Â°C/km
+        var gradient = 0.03f; // 30°C/km
         var surfaceTemp = 15.0f;
 
         for (float depth = 0; depth <= borehole.TotalDepth; depth += 5.0f)
@@ -1038,7 +1038,7 @@ public static class BoreholeDebugTools
                 // Add points at unit boundaries with some variation
                 for (var depth = unit.DepthFrom; depth <= unit.DepthTo; depth += 2.0f)
                 {
-                    var variation = (float)(Random.Shared.NextDouble() * 0.1 - 0.05); // Â±5%
+                    var variation = (float)(Random.Shared.NextDouble() * 0.1 - 0.05); // ±5%
                     var value = Math.Max(0, Math.Min(0.5f, porosity + variation)) * 100f; // Convert to percentage
 
                     points.Add(new ParameterPoint
@@ -1059,7 +1059,7 @@ public static class BoreholeDebugTools
         foreach (var unit in borehole.LithologyUnits)
             if (unit.Parameters.TryGetValue("Permeability", out var perm))
             {
-                // Convert from mÂ² to millidarcies (1 mÂ² = 1.013e15 mD)
+                // Convert from m² to millidarcies (1 m² = 1.013e15 mD)
                 var permMD = perm * 1.013e15f;
 
                 for (var depth = unit.DepthFrom; depth <= unit.DepthTo; depth += 2.0f)

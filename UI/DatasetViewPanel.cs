@@ -126,9 +126,9 @@ public class DatasetViewPanel : BasePanel
         ImGui.Separator();
 
         // Prepare text content
-        var statusBarText = $"Dataset: {Dataset.Name} | Type: {Dataset.Type} | Zoom: {_zoom:F1}Ãƒâ€”";
+        var statusBarText = $"Dataset: {Dataset.Name} | Type: {Dataset.Type} | Zoom: {_zoom:F1}×";
         if (Dataset is CtImageStackDataset ct && ct.Width > 0)
-            statusBarText += $" | Size: {ct.Width}Ãƒâ€”{ct.Height}Ãƒâ€”{ct.Depth}";
+            statusBarText += $" | Size: {ct.Width}×{ct.Height}×{ct.Depth}";
 
         // --- Draw a background for the status bar text ---
         var padding = 4f;
