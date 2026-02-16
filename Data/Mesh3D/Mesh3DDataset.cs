@@ -122,7 +122,7 @@ public partial class Mesh3DDataset : Dataset, ISerializableDataset
             FileFormat = "OBJ"
         };
 
-        float scaleFactor = unit.Equals("Âµm", StringComparison.OrdinalIgnoreCase) ? voxelSize / 1000.0f : voxelSize;
+        float scaleFactor = unit.Equals("µm", StringComparison.OrdinalIgnoreCase) ? voxelSize / 1000.0f : voxelSize;
 
         if (Math.Abs(scaleFactor - 1.0f) > 1e-6f)
             for (var i = 0; i < dataset.Vertices.Count; i++)
