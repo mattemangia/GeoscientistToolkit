@@ -336,8 +336,14 @@ public class BoreholeCrossSectionViewer
         drawList.AddRectFilled(plot_p0, plot_p1, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1f)));
 
         var zIndex = FindVerticalIndex(_selectedDepthMeters);
-        var fluidTemps = GetFluidTemperaturesAtDepth(_selectedDepthMeters);
         var maxRadius = _autoScale ? 1.0f : _viewScale;
+
+        // Below the heat exchanger depth there are no pipes
+        var heDepthXY = _options.HeatExchangerDepth > 0
+            ? _options.HeatExchangerDepth
+            : _options.BoreholeDataset.TotalDepth;
+        var belowHEXY = _selectedDepthMeters > heDepthXY;
+        var fluidTemps = belowHEXY ? (down: 0f, up: 0f) : GetFluidTemperaturesAtDepth(_selectedDepthMeters);
 
         var groundTempList = new List<double>();
         var pipeOuterRadius = _options.PipeOuterDiameter / 2.0;
@@ -350,7 +356,11 @@ public class BoreholeCrossSectionViewer
             var x = -maxRadius + 2 * maxRadius * ix / (gridSize - 1);
             var y = -maxRadius + 2 * maxRadius * iy / (gridSize - 1);
 
-            var temp = GetTemperatureAtPoint(x, y, zIndex, fluidTemps);
+            double temp;
+            if (belowHEXY)
+                temp = InterpolateGroundTemperature(x, y, zIndex);
+            else
+                temp = GetTemperatureAtPoint(x, y, zIndex, fluidTemps);
             data[ix, iy] = temp - 273.15;
 
             var r = Math.Sqrt(x * x + y * y);
@@ -418,11 +428,18 @@ public class BoreholeCrossSectionViewer
         var centerScreen = WorldToScreen(Vector2.Zero);
         drawList.AddCircle(centerScreen, ScaleRadius(_options.BoreholeDataset.WellDiameter / 2), 0xFF000000, 0, 2f);
 
-        var title = $"Combined Temperature at {_selectedDepthMeters:F1} m depth";
+        var title = belowHEXY
+            ? $"Ground Temperature at {_selectedDepthMeters:F1} m depth (below HE)"
+            : $"Combined Temperature at {_selectedDepthMeters:F1} m depth";
         var titleSize = ImGui.CalcTextSize(title);
         drawList.AddText(new Vector2(plot_p0.X + plot_sz.X / 2 - titleSize.X / 2, plot_p0.Y - 30), 0xFFFFFFFF, title);
 
-        if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
+        // Don't draw pipe geometry below HE depth
+        if (belowHEXY)
+        {
+            // No pipes here — skip pipe rendering
+        }
+        else if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
         {
             drawList.AddCircle(centerScreen, ScaleRadius((float)_options.PipeOuterDiameter / 2), 0xFF808080, 0, 1.5f);
             drawList.AddCircle(centerScreen, ScaleRadius((float)_options.PipeSpacing / 2), 0xFF505050, 0, 1.5f);
@@ -565,20 +582,33 @@ public class BoreholeCrossSectionViewer
         var data = new double[gridX, gridZ];
         var allTemps = new List<double>();
 
+        var heDepthLateral = _options.HeatExchangerDepth > 0
+            ? _options.HeatExchangerDepth
+            : _options.BoreholeDataset.TotalDepth;
+
         for (var iz = 0; iz < gridZ; iz++)
         {
             var depth = min_z + (float)iz / (gridZ - 1) * viewDepthRange;
             if (depth < 0 || depth > viewDepth) continue;
 
             var zIndex = FindVerticalIndex(depth);
-            var fluidTemps = GetFluidTemperaturesAtDepth(depth);
+
+            // Below the heat exchanger there are no pipes — use ground temperature only
+            var belowHE = depth > heDepthLateral;
+            var fluidTemps = belowHE
+                ? (down: 0f, up: 0f)
+                : GetFluidTemperaturesAtDepth(depth);
 
             for (var ix = 0; ix < gridX; ix++)
             {
                 var x = min_x + (max_x - min_x) * ix / (gridX - 1);
 
-                // For a XZ slice, we assume y=0
-                var temp = GetTemperatureAtPoint(x, 0, zIndex, fluidTemps);
+                double temp;
+                if (belowHE)
+                    temp = InterpolateGroundTemperature(x, 0, zIndex);
+                else
+                    temp = GetTemperatureAtPoint(x, 0, zIndex, fluidTemps);
+
                 data[ix, iz] = temp - 273.15;
                 allTemps.Add(data[ix, iz]);
             }
@@ -629,7 +659,10 @@ public class BoreholeCrossSectionViewer
         drawList.AddRect(WorldToScreen(borehole_p0_world), WorldToScreen(borehole_p1_world), 0x80000000, 0,
             ImDrawFlags.None, Math.Max(1f, _lateralViewZoom * 0.5f));
 
-        // --- MODIFICATION START: Draw U-Tube pipes ---
+        // Draw heat exchanger pipes (only to HeatExchangerDepth, not full borehole depth)
+        var heDepthVis = _options.HeatExchangerDepth > 0
+            ? _options.HeatExchangerDepth
+            : _options.BoreholeDataset.TotalDepth;
         if (_options.HeatExchangerType == HeatExchangerType.UTube)
         {
             var pipeRadius = (float)_options.PipeOuterDiameter / 2.0f;
@@ -637,15 +670,47 @@ public class BoreholeCrossSectionViewer
 
             // Downflow pipe
             var p1_start = new Vector2(-pipeSpacing - pipeRadius, 0);
-            var p1_end = new Vector2(-pipeSpacing + pipeRadius, viewDepth);
+            var p1_end = new Vector2(-pipeSpacing + pipeRadius, heDepthVis);
             drawList.AddRectFilled(WorldToScreen(p1_start), WorldToScreen(p1_end), 0x90303030);
 
             // Upflow pipe
             var p2_start = new Vector2(pipeSpacing - pipeRadius, 0);
-            var p2_end = new Vector2(pipeSpacing + pipeRadius, viewDepth);
+            var p2_end = new Vector2(pipeSpacing + pipeRadius, heDepthVis);
             drawList.AddRectFilled(WorldToScreen(p2_start), WorldToScreen(p2_end), 0x90303030);
+
+            // Draw U-bend at bottom of heat exchanger
+            var uBendY = WorldToScreen(new Vector2(0, heDepthVis)).Y;
+            var uBendLeft = WorldToScreen(new Vector2(-pipeSpacing, heDepthVis)).X;
+            var uBendRight = WorldToScreen(new Vector2(pipeSpacing, heDepthVis)).X;
+            drawList.AddLine(
+                new Vector2(uBendLeft, uBendY),
+                new Vector2(uBendRight, uBendY),
+                0x90303030, Math.Max(1f, _lateralViewZoom * 0.5f));
         }
-        // --- MODIFICATION END ---
+        else if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
+        {
+            var pipeRadius = (float)_options.PipeOuterDiameter / 2.0f;
+            var innerRadius = (float)_options.PipeSpacing / 2.0f;
+
+            // Outer pipe
+            var outerLeft = new Vector2(-pipeRadius, 0);
+            var outerRight = new Vector2(pipeRadius, heDepthVis);
+            drawList.AddRectFilled(WorldToScreen(outerLeft), WorldToScreen(outerRight), 0x60303030);
+
+            // Inner pipe
+            var innerLeft = new Vector2(-innerRadius, 0);
+            var innerRight = new Vector2(innerRadius, heDepthVis);
+            drawList.AddRectFilled(WorldToScreen(innerLeft), WorldToScreen(innerRight), 0x90505050);
+        }
+
+        // Draw HE depth marker line if different from total depth
+        if (heDepthVis < _options.BoreholeDataset.TotalDepth * 0.99f)
+        {
+            var markerLeft = WorldToScreen(new Vector2(min_x, heDepthVis));
+            var markerRight = WorldToScreen(new Vector2(max_x, heDepthVis));
+            drawList.AddLine(markerLeft, markerRight, 0x80FFFFFF, 1.0f);
+            drawList.AddText(markerRight + new Vector2(5, -8), 0x80FFFFFF, $"HE: {heDepthVis:F0}m");
+        }
 
         drawList.PopClipRect();
 
@@ -975,7 +1040,9 @@ public class BoreholeCrossSectionViewer
 
         var minTemp = profile.Min(p => Math.Min(p.temperatureDown, p.temperatureUp)) - 273.15;
         var maxTemp = profile.Max(p => Math.Max(p.temperatureDown, p.temperatureUp)) - 273.15;
-        var maxDepth = _options.BoreholeDataset.TotalDepth;
+        var maxDepth = _options.HeatExchangerDepth > 0
+            ? _options.HeatExchangerDepth
+            : _options.BoreholeDataset.TotalDepth;
         var minDepth = 0;
 
         var tempRange = maxTemp - minTemp;

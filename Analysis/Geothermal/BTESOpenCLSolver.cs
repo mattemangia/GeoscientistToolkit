@@ -400,7 +400,8 @@ public class BTESOpenCLSolver : IDisposable
         _nr = mesh.RadialPoints;
         _nth = mesh.AngularPoints;
         _nz = mesh.VerticalPoints;
-        _nzHE = Math.Max(20, (int)(options.BoreholeDataset.TotalDepth / 50));
+        var heDepthCL = options.HeatExchangerDepth > 0 ? options.HeatExchangerDepth : options.BoreholeDataset.TotalDepth;
+        _nzHE = Math.Max(20, (int)(heDepthCL / 50));
 
         try
         {
@@ -596,11 +597,11 @@ public class BTESOpenCLSolver : IDisposable
         var nz = Math.Max(2, options.VerticalGridPoints);
         var spanZ = (float)(totalDepth + 2.0 * options.DomainExtension);
         var dzMean = spanZ / (nz - 1);
-        var endTaperMeters = MathF.Max(2f * dzMean, 0.25f);
+        var endTaperMeters = MathF.Max(3f * dzMean, 0.5f);
 
         var heParams = new float[16];
         heParams[0] = (float)(options.PipeOuterDiameter * 0.5); // pipeRadius
-        heParams[1] = totalDepth; // totalBoreDepth
+        heParams[1] = options.HeatExchangerDepth > 0 ? options.HeatExchangerDepth : totalDepth; // active HE depth
         heParams[2] = (float)options.FluidInletTemperature;
         heParams[3] = (float)options.FluidMassFlowRate;
         heParams[4] = (float)options.FluidSpecificHeat;
@@ -1036,8 +1037,8 @@ __kernel void btes_heat_transfer_kernel(
         rTaper = sstep(u);
     }
 
-    // FIX: Heat coupling extends to full borehole depth (totalBoreDepth), not just activeHeDepth.
-    // The fluid physically circulates through the entire borehole, so heat transfer occurs along the whole pipe.
+    // Heat coupling extends only to the heat exchanger depth (where the pipe physically exists).
+    // totalBoreDepth here is actually HeatExchangerDepth passed from the host.
     float depthFactor = 0.0f;
     if      (depth <= totalBoreDepth)                depthFactor = 1.0f;
     else if (depth <= totalBoreDepth + zTaperMeters) depthFactor = sstep(1.0f - (depth - totalBoreDepth)/zTaperMeters);

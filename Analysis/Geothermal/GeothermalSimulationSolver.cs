@@ -797,10 +797,12 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
 
         _initialTemperature = (float[,,])_temperature.Clone();
 
-        // --- MODIFICATION START ---
-        // The fluid arrays MUST be sized for the entire borehole depth to correctly model the turnaround at the physical bottom.
-        var nzHE = Math.Max(20, (int)(_options.BoreholeDataset.TotalDepth / 50));
-        // --- MODIFICATION END ---
+        // The fluid arrays span only the heat exchanger depth (where the pipe physically exists).
+        // The turnaround happens at HeatExchangerDepth, not TotalDepth.
+        var heDepth = _options.HeatExchangerDepth > 0
+            ? _options.HeatExchangerDepth
+            : _options.BoreholeDataset.TotalDepth;
+        var nzHE = Math.Max(20, (int)(heDepth / 50));
         _fluidTempDown = new float[nzHE];
         _fluidTempUp = new float[nzHE];
         for (var i = 0; i < nzHE; i++)
@@ -1594,8 +1596,9 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         // --- Coupling HE con taper (agisce sul grout/roccia attorno, nessun cut-off) ---
         var depth = MathF.Max(0f, -_mesh.Z[k]);
         var pipeRadius = (float)(_options.PipeOuterDiameter * 0.5);
-        var totalBoreDepth = _options.BoreholeDataset.TotalDepth;
-        var activeHeDepth = _options.HeatExchangerDepth;
+        var activeHeDepth = _options.HeatExchangerDepth > 0
+            ? _options.HeatExchangerDepth
+            : _options.BoreholeDataset.TotalDepth;
         var rInfluence = MathF.Max(pipeRadius * 5f, 0.25f);
 
         static float Smooth(float x)
@@ -1610,20 +1613,18 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
             rTaper = Smooth(u);
         }
 
-        var zTaper = MathF.Max(2f * dz_c, 0.25f);
-        // FIX: Heat coupling extends to the full borehole depth (totalBoreDepth), not just HeatExchangerDepth.
-        // The fluid physically circulates through the entire borehole, so heat transfer occurs along the whole pipe.
-        // HeatExchangerDepth is used only for active/passive zone distinction in UpdateHeatExchanger().
+        var zTaper = MathF.Max(3f * dz_c, 0.5f);
+        // Heat coupling extends only to HeatExchangerDepth, with smooth taper below
         var depthFactor =
-            depth <= totalBoreDepth ? 1f :
-            depth <= totalBoreDepth + zTaper ? Smooth(1f - (depth - totalBoreDepth) / zTaper) : 0f;
+            depth <= activeHeDepth ? 1f :
+            depth <= activeHeDepth + zTaper ? Smooth(1f - (depth - activeHeDepth) / zTaper) : 0f;
 
         var taper = rTaper * depthFactor;
 
         if (taper > 0f)
         {
             var nzHE = Math.Max(1, _fluidTempDown?.Length ?? 1);
-            var hIdx = Math.Clamp((int)(depth / totalBoreDepth * nzHE), 0, nzHE - 1);
+            var hIdx = Math.Clamp((int)(depth / activeHeDepth * nzHE), 0, nzHE - 1);
             var uTube = _options.HeatExchangerType == HeatExchangerType.UTube;
             var Tfluid = _options.FlowConfiguration == FlowConfiguration.CounterFlowReversed
                 ? uTube ? 0.5f * (_fluidTempDown[hIdx] + _fluidTempUp[hIdx]) : _fluidTempDown[hIdx]
@@ -1722,7 +1723,11 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
 
         var mdot = (float)_options.FluidMassFlowRate;
         var cp = (float)_options.FluidSpecificHeat;
-        var dz = _options.BoreholeDataset.TotalDepth / nz;
+        // Fluid arrays span HeatExchangerDepth (where the pipe physically exists)
+        var heDepth = _options.HeatExchangerDepth > 0
+            ? _options.HeatExchangerDepth
+            : _options.BoreholeDataset.TotalDepth;
+        var dz = heDepth / nz;
 
         var U_ground = CalculateBoreholeWallHeatTransferCoefficient();
         var U_internal = CalculateInternalHeatTransferCoefficient();
@@ -1734,6 +1739,8 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         var NTU_ground_base = U_ground * P_outer * dz / (mdot * cp);
         var NTU_internal = U_internal * P_inner * dz / (mdot * cp);
 
+        var isUTube = _options.HeatExchangerType == HeatExchangerType.UTube;
+
         var oldFluidDown = (float[])_fluidTempDown.Clone();
         var oldFluidUp = (float[])_fluidTempUp.Clone();
 
@@ -1741,7 +1748,7 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         var nextTempUp = (float[])_fluidTempUp.Clone();
 
         // Iterative loop for the coupled fluid streams to reach equilibrium
-        for (var iter = 0; iter < 20; iter++) // Increased iterations for stability
+        for (var iter = 0; iter < 20; iter++)
         {
             var maxChange = 0f;
             var prevIterDown = (float[])nextTempDown.Clone();
@@ -1749,8 +1756,8 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
 
             if (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed)
             {
-                // REVERSED FLOW: Cold fluid down ANNULUS, Hot fluid up INNER pipe.
-                // Down-flow (Annulus)
+                // REVERSED FLOW (Coaxial): Cold fluid down ANNULUS, Hot fluid up INNER pipe.
+                // Down-flow (Annulus) - exchanges with ground AND inner pipe
                 nextTempDown[0] = (float)_options.FluidInletTemperature;
                 for (var i = 1; i < nz; i++)
                 {
@@ -1758,76 +1765,65 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
                     var T_inner_pipe = 0.5f * (prevIterUp[i] + prevIterUp[i - 1]);
                     var current_depth = (i - 0.5f) * dz;
 
-                    // --- DEFINITIVE FIX START ---
-                    if (current_depth <= _options.HeatExchangerDepth)
-                    {
-                        // ACTIVE ZONE: Exchange with ground AND inner pipe
-                        var T_ground = InterpolateGroundTemperatureAtDepth(current_depth);
-                        var numerator = T_in + NTU_ground_base * T_ground + NTU_internal * T_inner_pipe;
-                        var denominator = 1.0f + NTU_ground_base + NTU_internal;
-                        nextTempDown[i] = numerator / denominator;
-                    }
-                    else
-                    {
-                        // PASSIVE ZONE: Exchange ONLY with inner pipe (parasitic loss)
-                        var numerator = T_in + NTU_internal * T_inner_pipe;
-                        var denominator = 1.0f + NTU_internal;
-                        nextTempDown[i] = numerator / denominator;
-                    }
-                    // --- DEFINITIVE FIX END ---
+                    var T_ground = InterpolateGroundTemperatureAtDepth(current_depth);
+                    var numerator = T_in + NTU_ground_base * T_ground + NTU_internal * T_inner_pipe;
+                    var denominator = 1.0f + NTU_ground_base + NTU_internal;
+                    nextTempDown[i] = numerator / denominator;
                 }
 
-                // Up-flow (Inner Pipe - only ever interacts with annulus)
-                nextTempUp[nz - 1] = nextTempDown[nz - 1]; // Turnaround at bottom
+                // Up-flow (Inner Pipe)
+                nextTempUp[nz - 1] = nextTempDown[nz - 1]; // Turnaround at HeatExchangerDepth
                 for (var i = nz - 2; i >= 0; i--)
                 {
                     var T_in = prevIterUp[i + 1];
                     var T_annulus = 0.5f * (nextTempDown[i] + nextTempDown[i + 1]);
 
+                    // Inner pipe in Coaxial: only interacts with annulus (insulated from ground)
                     var numerator = T_in + NTU_internal * T_annulus;
                     var denominator = 1.0f + NTU_internal;
                     nextTempUp[i] = numerator / denominator;
                 }
             }
-            else // STANDARD FLOW: Cold fluid down INNER pipe, Hot fluid up ANNULUS.
+            else // STANDARD FLOW (CounterFlow)
             {
-                // Down-flow (Inner Pipe - only ever interacts with annulus)
+                // Down-flow
                 nextTempDown[0] = (float)_options.FluidInletTemperature;
                 for (var i = 1; i < nz; i++)
                 {
                     var T_in = prevIterDown[i - 1];
-                    var T_annulus = 0.5f * (prevIterUp[i] + prevIterUp[i - 1]);
+                    var T_other = 0.5f * (prevIterUp[i] + prevIterUp[i - 1]);
+                    var current_depth = (i - 0.5f) * dz;
 
-                    var numerator = T_in + NTU_internal * T_annulus;
-                    var denominator = 1.0f + NTU_internal;
-                    nextTempDown[i] = numerator / denominator;
+                    if (isUTube)
+                    {
+                        // U-Tube: BOTH legs exchange with ground
+                        var T_ground = InterpolateGroundTemperatureAtDepth(current_depth);
+                        var numerator = T_in + NTU_ground_base * T_ground + NTU_internal * T_other;
+                        var denominator = 1.0f + NTU_ground_base + NTU_internal;
+                        nextTempDown[i] = numerator / denominator;
+                    }
+                    else
+                    {
+                        // Coaxial: inner pipe only interacts with annulus
+                        var numerator = T_in + NTU_internal * T_other;
+                        var denominator = 1.0f + NTU_internal;
+                        nextTempDown[i] = numerator / denominator;
+                    }
                 }
 
-                // Up-flow (Annulus)
-                nextTempUp[nz - 1] = nextTempDown[nz - 1]; // Turnaround
+                // Up-flow
+                nextTempUp[nz - 1] = nextTempDown[nz - 1]; // Turnaround at HeatExchangerDepth
                 for (var i = nz - 2; i >= 0; i--)
                 {
                     var T_in = prevIterUp[i + 1];
                     var T_inner_pipe = 0.5f * (nextTempDown[i] + nextTempDown[i + 1]);
                     var current_depth = (i + 0.5f) * dz;
 
-                    // --- DEFINITIVE FIX START ---
-                    if (current_depth <= _options.HeatExchangerDepth)
-                    {
-                        // ACTIVE ZONE: Exchange with ground AND inner pipe
-                        var T_ground = InterpolateGroundTemperatureAtDepth(current_depth);
-                        var numerator = T_in + NTU_ground_base * T_ground + NTU_internal * T_inner_pipe;
-                        var denominator = 1.0f + NTU_ground_base + NTU_internal;
-                        nextTempUp[i] = numerator / denominator;
-                    }
-                    else
-                    {
-                        // PASSIVE ZONE: Exchange ONLY with inner pipe (parasitic gain/loss)
-                        var numerator = T_in + NTU_internal * T_inner_pipe;
-                        var denominator = 1.0f + NTU_internal;
-                        nextTempUp[i] = numerator / denominator;
-                    }
-                    // --- DEFINITIVE FIX END ---
+                    // Both U-Tube and Coaxial annulus exchange with ground
+                    var T_ground = InterpolateGroundTemperatureAtDepth(current_depth);
+                    var numerator = T_in + NTU_ground_base * T_ground + NTU_internal * T_inner_pipe;
+                    var denominator = 1.0f + NTU_ground_base + NTU_internal;
+                    nextTempUp[i] = numerator / denominator;
                 }
             }
 
@@ -2238,12 +2234,15 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
             var Tout = results.OutletTemperature.Last().temperature;
             var Q_avg = results.AverageHeatExtractionRate;
 
-            // Calculate average ground temperature along borehole
+            // Calculate average ground temperature along heat exchanger depth
+            var heDepthMetrics = _options.HeatExchangerDepth > 0
+                ? _options.HeatExchangerDepth
+                : _options.BoreholeDataset.TotalDepth;
             float Tground_avg = 0;
             var nSamples = 20;
             for (var i = 0; i < nSamples; i++)
             {
-                var depth = (i + 0.5f) * _options.BoreholeDataset.TotalDepth / nSamples;
+                var depth = (i + 0.5f) * heDepthMetrics / nSamples;
                 Tground_avg += InterpolateGroundTemperatureAtDepth(depth);
             }
 
@@ -2272,10 +2271,13 @@ public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
         // Layer contributions
         CalculateLayerContributions(results);
 
-        // Fluid temperature profile
+        // Fluid temperature profile (spans HeatExchangerDepth)
+        var heDepthProfile = _options.HeatExchangerDepth > 0
+            ? _options.HeatExchangerDepth
+            : _options.BoreholeDataset.TotalDepth;
         for (var i = 0; i < _fluidTempDown.Length; i++)
         {
-            var depth = i * _options.BoreholeDataset.TotalDepth / _fluidTempDown.Length;
+            var depth = i * heDepthProfile / _fluidTempDown.Length;
             results.FluidTemperatureProfile.Add((depth, _fluidTempDown[i], _fluidTempUp[i]));
         }
 
