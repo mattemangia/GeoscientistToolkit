@@ -658,6 +658,9 @@ public class DualPNMGeneratorTool
         float totalPoreRadiusSum = 0;
         int poreCount = 0;
 
+        // Compute full Euclidean Distance Transform for accurate pore size estimation
+        float[,] distMap = ComputeEuclideanDistanceMap(poreMap, width, height);
+
         for(int y=gridSize/2; y<height; y+=gridSize)
         {
             for(int x=gridSize/2; x<width; x+=gridSize)
@@ -665,8 +668,14 @@ public class DualPNMGeneratorTool
                 // Check if this block has enough pore pixels
                 if (poreMap[x, y])
                 {
-                    // Estimate radius based on local clearance using distance transform approximation
-                    float radius = CalculateLocalPoreRadius(poreMap, x, y, width, height, maxSearch: gridSize);
+                    // Get radius from distance map (distance to nearest solid)
+                    float radius = distMap[x, y];
+
+                    // Clamp radius to image boundaries
+                    radius = Math.Min(radius, x + 1);
+                    radius = Math.Min(radius, width - x);
+                    radius = Math.Min(radius, y + 1);
+                    radius = Math.Min(radius, height - y);
 
                     if (radius > 0.5f) // Minimum 0.5 pixel radius
                     {
@@ -901,19 +910,112 @@ public class DualPNMGeneratorTool
         }
     }
 
-    private float CalculateLocalPoreRadius(bool[,] poreMap, int x, int y, int width, int height, int maxSearch)
+    /// <summary>
+    /// Computes the exact Euclidean Distance Transform (EDT) for the pore map.
+    /// Returns a 2D array where each value is the distance to the nearest solid pixel.
+    /// </summary>
+    private float[,] ComputeEuclideanDistanceMap(bool[,] poreMap, int width, int height)
     {
-        // Simple implementation: check distance to nearest solid in 4 directions
-        int dist = 1;
-        while(dist < maxSearch)
+        float[,] distMap = new float[width, height];
+        // Use a large value to represent infinity
+        float inf = width * width + height * height;
+
+        // Phase 1: Row-wise squared distance transform
+        for (int y = 0; y < height; y++)
         {
-            if (x - dist < 0 || !poreMap[x - dist, y]) return dist;
-            if (x + dist >= width || !poreMap[x + dist, y]) return dist;
-            if (y - dist < 0 || !poreMap[x, y - dist]) return dist;
-            if (y + dist >= height || !poreMap[x, y + dist]) return dist;
-            dist++;
+            // Forward pass
+            float d = inf;
+            for (int x = 0; x < width; x++)
+            {
+                if (!poreMap[x, y]) // Solid
+                {
+                    d = 0;
+                    distMap[x, y] = 0;
+                }
+                else
+                {
+                    d += 1;
+                    distMap[x, y] = d * d;
+                }
+            }
+
+            // Backward pass
+            d = inf;
+            for (int x = width - 1; x >= 0; x--)
+            {
+                if (!poreMap[x, y])
+                {
+                    d = 0;
+                }
+                else
+                {
+                    d += 1;
+                    float d2 = d * d;
+                    if (d2 < distMap[x, y])
+                    {
+                        distMap[x, y] = d2;
+                    }
+                }
+            }
         }
-        return dist;
+
+        // Phase 2: Column-wise parabolic lower envelope
+        float[] f = new float[height];
+        float[] dCols = new float[height];
+        int[] v = new int[height];
+        float[] z = new float[height + 1];
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                f[y] = distMap[x, y];
+            }
+
+            DistanceTransform1D(f, dCols, v, z, height);
+
+            for (int y = 0; y < height; y++)
+            {
+                distMap[x, y] = MathF.Sqrt(dCols[y]);
+            }
+        }
+
+        return distMap;
+    }
+
+    private void DistanceTransform1D(float[] f, float[] d, int[] v, float[] z, int n)
+    {
+        int k = 0;
+        v[0] = 0;
+        z[0] = -float.MaxValue;
+        z[1] = float.MaxValue;
+
+        for (int q = 1; q < n; q++)
+        {
+            // Calculate intersection of parabolas
+            // s = ((f[q] + q^2) - (f[v[k]] + v[k]^2)) / (2q - 2v[k])
+            double s = ((double)f[q] + (double)q * q - ((double)f[v[k]] + (double)v[k] * v[k])) / (2.0 * q - 2.0 * v[k]);
+
+            while (s <= z[k])
+            {
+                k--;
+                s = ((double)f[q] + (double)q * q - ((double)f[v[k]] + (double)v[k] * v[k])) / (2.0 * q - 2.0 * v[k]);
+            }
+            k++;
+            v[k] = q;
+            z[k] = (float)s;
+            z[k + 1] = float.MaxValue;
+        }
+
+        k = 0;
+        for (int q = 0; q < n; q++)
+        {
+            while (z[k + 1] < q)
+                k++;
+
+            double distSq = (double)(q - v[k]) * (q - v[k]) + f[v[k]];
+            d[q] = (float)distSq;
+        }
     }
 
     private void Reset()
