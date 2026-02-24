@@ -43,12 +43,14 @@ public class ImportDataModal
         "Slope Stability Results (Binary)",
         "DICOM Series (CT/MRI)",
         "CT Stack File (.ctstack)",
-        "Point Cloud (XYZ/PTS/ASC)"
+        "Point Cloud (XYZ/PTS/ASC)",
+        "StratiFix Dataset Folder"
     };
 
     private readonly ImGuiFileDialog _fileDialog;
 
     private readonly ImGuiFileDialog _folderDialog;
+    private readonly ImGuiFileDialog _stratiFixFolderDialog;
     private readonly ImGuiFileDialog _gisDialog;
     private readonly GISLoader _gisLoader;
     private readonly ImageFolderLoader _imageFolderLoader;
@@ -100,6 +102,7 @@ public class ImportDataModal
     private readonly ImGuiFileDialog _ctStackFileDialog;
     private readonly PointCloudLoader _pointCloudLoader;
     private readonly ImGuiFileDialog _pointCloudDialog;
+    private readonly StratiFixDatasetFolderLoader _stratiFixDatasetFolderLoader;
 
     private ImportState _currentState = ImportState.Idle;
     private Task<Dataset> _importTask;
@@ -114,6 +117,8 @@ public class ImportDataModal
     {
         // Initialize dialogs
         _folderDialog = new ImGuiFileDialog("ImportFolderDialog", FileDialogType.OpenDirectory, "Select Folder");
+        _stratiFixFolderDialog = new ImGuiFileDialog("ImportStratiFixFolderDialog", FileDialogType.OpenDirectory,
+            "Select StratiFix Dataset Folder");
         _fileDialog = new ImGuiFileDialog("ImportFileDialog", FileDialogType.OpenFile, "Select File");
         _tiffDialog = new ImGuiFileDialog("ImportTiffDialog", FileDialogType.OpenFile, "Select TIFF File");
         _mesh3DDialog = new ImGuiFileDialog("Import3DDialog", FileDialogType.OpenFile, "Select 3D Model");
@@ -170,6 +175,7 @@ public class ImportDataModal
         _dicomLoader = new DicomLoader();
         _ctStackFileLoader = new CtStackFileLoader();
         _pointCloudLoader = new PointCloudLoader();
+        _stratiFixDatasetFolderLoader = new StratiFixDatasetFolderLoader();
     }
 
     public void Open()
@@ -234,7 +240,13 @@ public class ImportDataModal
                     if (!_labeledVolumeLoader.IsMultiPageTiff)
                         _labeledVolumeLoader.SourcePath = _folderDialog.SelectedPath;
                     break;
+                case 26: // StratiFix Dataset Folder
+                    _stratiFixDatasetFolderLoader.DatasetFolderPath = _folderDialog.SelectedPath;
+                    break;
             }
+
+        if (_stratiFixFolderDialog.Submit())
+            _stratiFixDatasetFolderLoader.DatasetFolderPath = _stratiFixFolderDialog.SelectedPath;
 
         if (_acousticDialog.Submit()) _acousticVolumeLoader.DirectoryPath = _acousticDialog.SelectedPath;
 
@@ -388,6 +400,9 @@ public class ImportDataModal
                 break;
             case 25: // Point Cloud
                 DrawPointCloudOptions();
+                break;
+            case 26: // StratiFix Dataset Folder
+                DrawStratiFixDatasetFolderOptions();
                 break;
         }
 
@@ -1685,6 +1700,55 @@ public class ImportDataModal
         }
     }
 
+    private void DrawStratiFixDatasetFolderOptions()
+    {
+        ImGui.TextWrapped(
+            "Import a StratiFix dataset folder exported by the Avalonia app. " +
+            "The importer creates Borehole datasets from stratigraphy-enabled investigations, " +
+            "a GIS dataset with points/faults/dips, and a DEM dataset from dem_cache.json when available.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("StratiFix Dataset Folder:");
+        var path = _stratiFixDatasetFolderLoader.DatasetFolderPath ?? "";
+        ImGui.InputText("##StratiFixDatasetFolderPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##StratiFixDatasetFolder"))
+            _stratiFixFolderDialog.Open();
+
+        ImGui.Spacing();
+        var importShapefiles = _stratiFixDatasetFolderLoader.ImportShapefiles;
+        if (ImGui.Checkbox("Import Shapefiles", ref importShapefiles))
+            _stratiFixDatasetFolderLoader.ImportShapefiles = importShapefiles;
+
+        var importDem = _stratiFixDatasetFolderLoader.ImportDemCache;
+        if (ImGui.Checkbox("Import DEM Cache (dem_cache.json)", ref importDem))
+            _stratiFixDatasetFolderLoader.ImportDemCache = importDem;
+
+        var info = _stratiFixDatasetFolderLoader.GetFolderInfo();
+        if (info.IsValid)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            ImGui.Text("Detected Content:");
+            ImGui.BulletText($"Dataset Root: {Path.GetFileName(info.DatasetRoot)}");
+            if (!string.IsNullOrWhiteSpace(info.ProcessedExcelPath))
+                ImGui.BulletText($"Processed_Excel: {Path.GetFileName(info.ProcessedExcelPath)}");
+            ImGui.BulletText($"Excel Files: {info.ExcelFiles}");
+            ImGui.BulletText($"Shapefiles: {info.Shapefiles}");
+            DrawCheckmark(info.HasStructuralData, "structural_data.json / faults.json");
+            DrawCheckmark(info.HasDemCache, "dem_cache.json");
+
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
+                "Ready to import StratiFix datasets");
+        }
+    }
+
     private void DrawCheckmark(bool hasComponent, string label)
     {
         if (hasComponent)
@@ -1739,6 +1803,7 @@ public class ImportDataModal
             23 => _dicomLoader,
             24 => _ctStackFileLoader,
             25 => _pointCloudLoader,
+            26 => _stratiFixDatasetFolderLoader,
             _ => null
         };
     }
@@ -1777,11 +1842,19 @@ public class ImportDataModal
         }
         else if (_importTask.IsCompletedSuccessfully)
         {
+            var currentLoader = GetCurrentLoader();
+
             // Handle special case for CT Stack Optimized mode
             if (_selectedDatasetTypeIndex == 2 && _ctStackLoader.StreamingDataset != null)
             {
                 ProjectManager.Instance.AddDataset(_ctStackLoader.LegacyDataset);
                 ProjectManager.Instance.AddDataset(_ctStackLoader.StreamingDataset);
+            }
+            else if (currentLoader is StratiFixDatasetFolderLoader stratiFixLoader &&
+                     stratiFixLoader.GeneratedDatasets.Count > 0)
+            {
+                foreach (var dataset in stratiFixLoader.GeneratedDatasets)
+                    ProjectManager.Instance.AddDataset(dataset);
             }
             else if (_importTask.Result != null)
             {
@@ -1820,6 +1893,7 @@ public class ImportDataModal
         _dicomLoader.Reset();
         _ctStackFileLoader.Reset();
         _pointCloudLoader.Reset();
+        _stratiFixDatasetFolderLoader.Reset();
 
         // Reset state
         _importTask = null;
