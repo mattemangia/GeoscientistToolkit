@@ -1,6 +1,7 @@
 // GeoscientistToolkit/Analysis/AcousticSimulation/RealTimeTomographyViewer.cs
 
 using System.Numerics;
+using System.Linq;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 
@@ -64,25 +65,17 @@ public class RealTimeTomographyViewer : IDisposable
     public void UpdateLiveData(SimulationResults liveResults, Vector3 dimensions, byte[,,] labels,
         ISet<byte> selectedMaterialIDs, int stepIndex = -1)
     {
-        // Check if visualization parameters have changed
-        var paramsChanged = _dimensions != dimensions || _labels != labels;
+        // FIX: Track when data actually changes using a comprehensive hash
+        // This covers dimensions, labels reference, material selection content, AND step index
+        var currentHash = ComputeStateHash(stepIndex, dimensions, labels, selectedMaterialIDs);
 
-        if (!paramsChanged)
+        if (stepIndex != -1)
         {
-            if (_selectedMaterialIDs == null && selectedMaterialIDs != null) paramsChanged = true;
-            else if (_selectedMaterialIDs != null && selectedMaterialIDs == null) paramsChanged = true;
-            else if (_selectedMaterialIDs != null && !_selectedMaterialIDs.SetEquals(selectedMaterialIDs))
-                paramsChanged = true;
+            if (currentHash == _lastUpdateHash) return;
+            _lastUpdateHash = currentHash;
         }
 
-        if (stepIndex != -1 && !paramsChanged)
-        {
-            if (stepIndex == _lastUpdateHash) return;
-        }
-
-        if (stepIndex != -1) _lastUpdateHash = stepIndex;
-
-        // FIX: Update data even if window is closed (it might be reopened)
+        // Update data even if window is closed (it might be reopened)
         // But don't trigger regeneration if not visible
 
         // Throttle updates to prevent overwhelming the GPU
@@ -375,6 +368,29 @@ public class RealTimeTomographyViewer : IDisposable
         _updateCts = new CancellationTokenSource();
 
         _generationTask = GenerateSliceAsync(_updateCts.Token);
+    }
+
+    private int ComputeStateHash(int stepIndex, Vector3 dimensions, byte[,,] labels, ISet<byte> selectedMaterials)
+    {
+        var hash = new HashCode();
+        hash.Add(stepIndex);
+        hash.Add(dimensions);
+        hash.Add(labels); // Reference equality is sufficient as per current logic
+
+        if (selectedMaterials != null)
+        {
+            hash.Add(selectedMaterials.Count);
+            foreach (var id in selectedMaterials.OrderBy(b => b))
+            {
+                hash.Add(id);
+            }
+        }
+        else
+        {
+            hash.Add(-1); // Distinguish null from empty set (count 0)
+        }
+
+        return hash.ToHashCode();
     }
 
     private async Task GenerateSliceAsync(CancellationToken token)
