@@ -1857,6 +1857,13 @@ __kernel void apply_damage_to_stress(
         for (var i = 0; i < _numDOFs; i++)
             if (!_isDirichlet[i])
             {
+                // Check for breakdown
+                if (float.IsNaN(r[i]) || float.IsInfinity(r[i]))
+                {
+                    Logger.LogError($"[GeomechGPU] Solver breakdown detected at DOF {i}: residual is {r[i]}");
+                    throw new ArithmeticException("Solver breakdown: residual is NaN or Infinity");
+                }
+
                 rNorm0 += r[i] * r[i];
                 if (MathF.Abs(r[i]) > 1e-12f)
                     nonZeroRes++;
