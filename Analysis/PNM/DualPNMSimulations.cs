@@ -1,5 +1,9 @@
 // GeoscientistToolkit/Analysis/PNM/DualPNMSimulations.cs
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Util;
 
@@ -64,8 +68,7 @@ public static class DualPNMSimulations
 
             foreach (var microNet in dataset.MicroNetworks)
             {
-                // Simplified micro-permeability calculation based on pore structure
-                // In full implementation, would run full flow simulation on micro-network
+                // Full flow simulation on micro-network structure
                 microNet.MicroPermeability = EstimateMicroPermeability(microNet);
             }
 
@@ -83,38 +86,102 @@ public static class DualPNMSimulations
     }
 
     /// <summary>
-    /// Estimate micro-scale permeability from micro-pore network structure.
-    /// Uses simplified Kozeny-Carman approach.
+    /// Calculate micro-scale permeability by running full flow simulation on the micro-network.
+    /// Simulates flow in X and Y directions (assuming 2D SEM source) and averages the result.
     /// </summary>
     private static float EstimateMicroPermeability(MicroPoreNetwork microNet)
     {
         if (microNet.MicroPores.Count == 0)
             return 0.0f;
 
-        // Calculate average pore radius
-        float avgPoreRadius = microNet.MicroPores.Average(p => p.Radius);
+        // If no throats, permeability is zero (disconnected pores)
+        if (microNet.MicroThroats.Count == 0)
+            return 0.0f;
 
-        // Kozeny-Carman estimate: k ≈ φ³ * r² / (5 * (1-φ)²)
-        // where φ is porosity and r is characteristic pore size
-        float porosity = microNet.MicroPorosity;
-
-        if (porosity <= 0 || porosity >= 1)
+        try
         {
-            // Estimate porosity from pore volumes if not set
-            float totalVol = microNet.MicroVolume;
-            float poreVol = microNet.MicroPores.Sum(p => p.VolumePhysical);
-            porosity = totalVol > 0 ? poreVol / totalVol : 0.1f;
-            microNet.MicroPorosity = porosity;
+            // Create a temporary PNMDataset wrapper for the micro-network
+            // We use a dummy name since this is transient
+            var tempDataset = new PNMDataset($"MicroNet_{microNet.MacroPoreID}", "")
+            {
+                VoxelSize = microNet.SEMPixelSize,
+                // Tortuosity default
+                Tortuosity = 1.0f
+            };
+
+            // Calculate bounding box to set image dimensions
+            float minX = float.MaxValue, maxX = float.MinValue;
+            float minY = float.MaxValue, maxY = float.MinValue;
+            float minZ = float.MaxValue, maxZ = float.MinValue;
+
+            foreach (var p in microNet.MicroPores)
+            {
+                if (p.Position.X < minX) minX = p.Position.X;
+                if (p.Position.X > maxX) maxX = p.Position.X;
+                if (p.Position.Y < minY) minY = p.Position.Y;
+                if (p.Position.Y > maxY) maxY = p.Position.Y;
+                if (p.Position.Z < minZ) minZ = p.Position.Z;
+                if (p.Position.Z > maxZ) maxZ = p.Position.Z;
+            }
+
+            // Convert physical dimensions to approximate voxel dimensions
+            // Add margin
+            float margin = 2.0f;
+            tempDataset.ImageWidth = (int)((maxX - minX + 2 * margin) / microNet.SEMPixelSize);
+            tempDataset.ImageHeight = (int)((maxY - minY + 2 * margin) / microNet.SEMPixelSize);
+            tempDataset.ImageDepth = (int)((maxZ - minZ + 2 * margin) / microNet.SEMPixelSize);
+            if (tempDataset.ImageDepth < 1) tempDataset.ImageDepth = 1;
+
+            // Add pores and throats
+            tempDataset.Pores.AddRange(microNet.MicroPores);
+            tempDataset.Throats.AddRange(microNet.MicroThroats);
+
+            // Initialize dataset state
+            tempDataset.InitializeFromCurrentLists();
+
+            // Run simulation in X direction
+            var optionsX = new PermeabilityOptions
+            {
+                Dataset = tempDataset,
+                Axis = FlowAxis.X,
+                InletPressure = 1000.0f,
+                OutletPressure = 0.0f,
+                FluidViscosity = 0.001f, // 1 cP
+                CalculateDarcy = true,
+                UseGpu = false // Keep micro-simulations on CPU to avoid overhead/context issues
+            };
+
+            AbsolutePermeability.Calculate(optionsX);
+            float kX = tempDataset.DarcyPermeability;
+
+            // Run simulation in Y direction
+            var optionsY = new PermeabilityOptions
+            {
+                Dataset = tempDataset,
+                Axis = FlowAxis.Y,
+                InletPressure = 1000.0f,
+                OutletPressure = 0.0f,
+                FluidViscosity = 0.001f,
+                CalculateDarcy = true,
+                UseGpu = false
+            };
+
+            AbsolutePermeability.Calculate(optionsY);
+            float kY = tempDataset.DarcyPermeability;
+
+            // For micro-networks from 2D SEM, we typically average X and Y
+            // If it's a 3D micro-network (e.g. from FIB-SEM), we could also do Z
+            float kAvg = (kX + kY) / 2.0f;
+
+            Logger.Log($"  Micro-network {microNet.MacroPoreID}: kX={kX:F3} mD, kY={kY:F3} mD, Avg={kAvg:F3} mD");
+
+            return kAvg;
         }
-
-        // Kozeny-Carman formula in µm² then convert to mD
-        float k_um2 = (porosity * porosity * porosity * avgPoreRadius * avgPoreRadius) /
-                      (5.0f * (1 - porosity) * (1 - porosity));
-
-        // Convert µm² to mD: 1 mD = 0.9869233 µm²
-        float k_mD = k_um2 / 0.9869233f;
-
-        return k_mD;
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to simulate micro-permeability for macro-pore {microNet.MacroPoreID}: {ex.Message}");
+            return 0.0f;
+        }
     }
 
     /// <summary>
