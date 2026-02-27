@@ -38,14 +38,9 @@ public static class DualPNMSimulations
             OutletPressure = 0,
             FluidViscosity = viscosityPas,
             CalculateDarcy = method == PNMPermeabilityMethod.Darcy,
-            CalculateNavierStokes = method == PNMPermeabilityMethod.NavierStokes || method == PNMPermeabilityMethod.LatticeBoltzmann,
+            CalculateNavierStokes = method == PNMPermeabilityMethod.NavierStokes,
             CalculateLatticeBoltzmann = method == PNMPermeabilityMethod.LatticeBoltzmann
         };
-
-        if (method == PNMPermeabilityMethod.LatticeBoltzmann)
-        {
-            Logger.LogWarning("Lattice Boltzmann not yet implemented for dual PNM. Using Navier-Stokes instead.");
-        }
 
         AbsolutePermeability.Calculate(options);
         var results = AbsolutePermeability.GetLastResults();
@@ -54,7 +49,7 @@ public static class DualPNMSimulations
         {
             PNMPermeabilityMethod.Darcy => results.DarcyCorrected,
             PNMPermeabilityMethod.NavierStokes => results.NavierStokesCorrected,
-            PNMPermeabilityMethod.LatticeBoltzmann => results.NavierStokesCorrected,
+            PNMPermeabilityMethod.LatticeBoltzmann => results.LatticeBoltzmannCorrected,
             _ => 0
         };
 
