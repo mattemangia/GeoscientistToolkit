@@ -3,7 +3,6 @@
 using System.Numerics;
 using GAIA.Data.CtImageStack;
 using GAIA.Data.VolumeData;
-using Veldrid;
 
 namespace GAIA.AddIns.CtSimulation;
 
@@ -131,10 +130,7 @@ public abstract class SimulationResult
     /// <summary>
     ///     Gets a 3D texture for visualization (if applicable)
     /// </summary>
-    public virtual Texture Get3DTexture(ResourceFactory factory)
-    {
-        return null;
-    }
+    public virtual int GetOpenGlTexture3D() => 0;
 
     /// <summary>
     ///     Gets scalar field data

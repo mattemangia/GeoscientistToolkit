@@ -303,7 +303,7 @@ public class NerfViewer : IDatasetViewer
 
         try
         {
-            // Convert to RGBA if needed (Veldrid doesn't support RGB8)
+            // Convert to RGBA so all preview textures use one well-defined upload layout.
             byte[] pixelData = _renderedImage;
             if (pixelData.Length == _renderWidth * _renderHeight * 3)
             {

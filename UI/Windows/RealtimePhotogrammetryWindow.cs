@@ -9,7 +9,6 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.IO;
 using System.Text.Json;
-using Veldrid;
 using GAIA.UI.Utils;
 using GAIA.Util;
 namespace GAIA.UI.Windows;

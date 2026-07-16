@@ -13,7 +13,6 @@ using GAIA.Data.Mesh3D;
 using GAIA.UI.Utils;
 using GAIA.Util;
 using ImGuiNET;
-using Veldrid;
 
 namespace GAIA.UI.Photogrammetry;
 
@@ -22,40 +21,9 @@ namespace GAIA.UI.Photogrammetry;
 /// </summary>
 internal class GroundControlPointEditor : IDisposable
 {
-    private readonly GraphicsDevice _graphicsDevice;
-    private readonly ResourceFactory _resourceFactory;
-    private readonly ImGuiController _imGuiController;
-
-    private struct VeldridTextureBinding : IDisposable
-    {
-        public readonly IntPtr ImGuiBinding;
-        private readonly Texture _texture;
-        private readonly TextureView _textureView;
-        private readonly ImGuiController _renderer;
-        private bool _disposed;
-
-        public VeldridTextureBinding(Texture texture, TextureView view, IntPtr binding, ImGuiController renderer)
-        {
-            _texture = texture;
-            _textureView = view;
-            ImGuiBinding = binding;
-            _renderer = renderer;
-            _disposed = false;
-        }
-
-        public void Dispose()
-        {
-            if (_disposed) return;
-            _renderer.RemoveImGuiBinding(_textureView);
-            _textureView.Dispose();
-            _texture.Dispose();
-            _disposed = true;
-        }
-    }
-
     public bool IsOpen;
     private PhotogrammetryImage _currentImage;
-    private VeldridTextureBinding? _imageBinding;
+    private TextureManager _imageBinding;
 
     private Vector2 _pan = Vector2.Zero;
     private float _zoom = 1.0f;
@@ -69,12 +37,7 @@ internal class GroundControlPointEditor : IDisposable
     public Action<PhotogrammetryImage, GroundControlPoint> OnGCPUpdated;
     public Action<PhotogrammetryImage, GroundControlPoint> OnGCPRemoved;
 
-    public GroundControlPointEditor(GraphicsDevice graphicsDevice, ImGuiController imGuiController)
-    {
-        _graphicsDevice = graphicsDevice;
-        _resourceFactory = graphicsDevice.ResourceFactory;
-        _imGuiController = imGuiController;
-    }
+    public GroundControlPointEditor() { }
 
     public void Open(PhotogrammetryImage image)
     {
@@ -103,20 +66,11 @@ internal class GroundControlPointEditor : IDisposable
         IsOpen = true;
     }
 
-    private VeldridTextureBinding? CreateTextureBinding(Data.Image.ImageDataset dataset)
+    private TextureManager CreateTextureBinding(Data.Image.ImageDataset dataset)
     {
         if (dataset?.ImageData == null) return null;
 
-        var texture = _resourceFactory.CreateTexture(TextureDescription.Texture2D(
-            (uint)dataset.Width, (uint)dataset.Height, 1, 1,
-            PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
-
-        _graphicsDevice.UpdateTexture(texture, dataset.ImageData, 0, 0, 0, (uint)dataset.Width, (uint)dataset.Height, 1, 0, 0);
-
-        var textureView = _resourceFactory.CreateTextureView(texture);
-        var imGuiBinding = _imGuiController.GetOrCreateImGuiBinding(_resourceFactory, textureView);
-
-        return new VeldridTextureBinding(texture, textureView, imGuiBinding, _imGuiController);
+        return TextureManager.CreateFromPixelData(dataset.ImageData, (uint)dataset.Width, (uint)dataset.Height);
     }
 
     public void Draw()
@@ -189,7 +143,7 @@ internal class GroundControlPointEditor : IDisposable
 
         var imgTopLeft = panelTopLeft + _pan;
         var imgBottomRight = imgTopLeft + new Vector2(_currentImage.Dataset.Width, _currentImage.Dataset.Height) * _zoom;
-        drawList.AddImage(_imageBinding.Value.ImGuiBinding, imgTopLeft, imgBottomRight);
+        drawList.AddImage(_imageBinding.GetImGuiTextureId(), imgTopLeft, imgBottomRight);
 
         foreach (var gcp in _currentImage.GroundControlPoints)
         {
@@ -308,9 +262,6 @@ public class PhotogrammetryWizardPanel : BasePanel
 {
     private readonly PhotogrammetryJob _job;
     private readonly List<string> _logBuffer = new();
-    private readonly GraphicsDevice _graphicsDevice;
-    private readonly ImGuiController _imGuiController;
-
     private readonly GroundControlPointEditor _gcpEditor;
     private readonly ImGuiExportFileDialog _exportDialog;
 
@@ -338,19 +289,16 @@ public class PhotogrammetryWizardPanel : BasePanel
     public bool IsOpen { get; private set; }
     public string Title { get; }
 
-    public PhotogrammetryWizardPanel(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiController imGuiController)
+    public PhotogrammetryWizardPanel(DatasetGroup imageGroup)
         : base($"Photogrammetry: {imageGroup.Name}", new Vector2(900, 700))
     {
         Title = $"Photogrammetry: {imageGroup.Name}";
-        _graphicsDevice = graphicsDevice;
-        _imGuiController = imGuiController;
-
         _job = new PhotogrammetryJob(imageGroup);
         _job.Service.StartProcessingAsync();
 
         _exportDialog = new ImGuiExportFileDialog("photogrammetryExport", "Export");
 
-        _gcpEditor = new GroundControlPointEditor(graphicsDevice, imGuiController);
+        _gcpEditor = new GroundControlPointEditor();
         _gcpEditor.OnGCPUpdated = (img, gcp) => _job.Service.AddOrUpdateGroundControlPoint(img, gcp);
         _gcpEditor.OnGCPRemoved = (img, gcp) => _job.Service.RemoveGroundControlPoint(img, gcp);
     }

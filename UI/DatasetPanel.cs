@@ -19,7 +19,7 @@ using System.Collections.Generic;
 using System;
 using GAIA.UI.Panorama;
 using GAIA.UI.Photogrammetry;
-using GAIA.Util; // Needed for VeldridManager
+using GAIA.Util;
 
 namespace GAIA.UI;
 
@@ -366,10 +366,10 @@ public class DatasetPanel : BasePanel
 
             if (ImGui.MenuItem("Compose Panorama...", null, false, canProcessImages))
             {
-                // CORRECTED: Create the wizard on demand using the static VeldridManager
+                // Create the wizard on demand in the active OpenTK context.
                 if (_panoramaWizard == null)
                 {
-                    _panoramaWizard = new PanoramaWizardPanel(group, VeldridManager.GraphicsDevice, VeldridManager.ImGuiController);
+                    _panoramaWizard = new PanoramaWizardPanel(group);
                     _panoramaWizard.Open();
                 }
             }
@@ -380,10 +380,10 @@ public class DatasetPanel : BasePanel
 
             if (ImGui.MenuItem("Process Photogrammetry...", null, false, canProcessImages))
             {
-                // CORRECTED: Create the wizard on demand using the static VeldridManager
+                // Create the wizard on demand in the active OpenTK context.
                 if (_photogrammetryWizard == null)
                 {
-                    _photogrammetryWizard = new PhotogrammetryWizardPanel(group, VeldridManager.GraphicsDevice, VeldridManager.ImGuiController);
+                    _photogrammetryWizard = new PhotogrammetryWizardPanel(group);
                     _photogrammetryWizard.Open();
                 }
             }

@@ -440,7 +440,7 @@ public class PhysicoChemViewer : IDatasetViewer
     private void Render3DContent(ImDrawListPtr drawList, Vector2 screenPos, Vector2 size, RenderMode renderMode = RenderMode.Solid)
     {
         // For now, draw a simple 3D representation using ImGui primitives
-        // In a full implementation, this would use Veldrid rendering like Mesh3DViewer
+        // A future 3D mode can reuse the shared OpenTK mesh renderer.
 
         var center = screenPos + size * 0.5f;
 

@@ -1,7 +1,6 @@
 ﻿// GAIA/UI/Photogrammetry/PhotogrammetryManager.cs
 
 using GAIA.Data;
-using Veldrid;
 
 namespace GAIA.UI.Photogrammetry;
 
@@ -20,9 +19,7 @@ public class PhotogrammetryManager
     /// Starts a new photogrammetry job and opens the wizard UI.
     /// </summary>
     /// <param name="imageGroup">The group of images to process.</param>
-    /// <param name="graphicsDevice">The active Veldrid GraphicsDevice.</param>
-    /// <param name="imGuiController">The active GAIA ImGuiController.</param>
-    public void StartPhotogrammetry(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiController imGuiController)
+    public void StartPhotogrammetry(DatasetGroup imageGroup)
     {
         // If a wizard is already open, bring its window to the front.
         if (_wizardPanel != null && _wizardPanel.IsOpen)
@@ -31,7 +28,7 @@ public class PhotogrammetryManager
             return;
         }
         
-        _wizardPanel = new PhotogrammetryWizardPanel(imageGroup, graphicsDevice, imGuiController);
+        _wizardPanel = new PhotogrammetryWizardPanel(imageGroup);
         _wizardPanel.Open();
     }
 

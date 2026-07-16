@@ -187,9 +187,7 @@ public class GeoScriptTerminalWindow
         var width = (int)Math.Max(size.X, minWidth);
         var height = (int)Math.Max(size.Y, minHeight);
 
-        _popOutWindow = OpenTkManager.IsInitialized
-            ? new OpenTkPopOutWindow("GeoScript Terminal", (int)pos.X, (int)pos.Y, width, height)
-            : new PopOutWindow("GeoScript Terminal", (int)pos.X, (int)pos.Y, width, height);
+        _popOutWindow = new OpenTkPopOutWindow("GeoScript Terminal", (int)pos.X, (int)pos.Y, width, height);
         _popOutWindow.SetDrawCallback(DrawPoppedOutWindow);
         _isPoppedOut = true;
     }

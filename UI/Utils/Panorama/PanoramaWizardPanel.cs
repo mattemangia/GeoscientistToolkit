@@ -132,7 +132,7 @@ namespace GAIA
             }
             catch { /* ignore on close */ }
 
-            // 2) Dispose GPU textures (Veldrid/ImGui)
+            // 2) Dispose OpenGL/ImGui textures.
             try
             {
                 foreach (var tm in _textureManagers.Values)

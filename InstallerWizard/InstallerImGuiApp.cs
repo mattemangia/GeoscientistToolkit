@@ -10,9 +10,11 @@ using GAIA.Installer.Utilities;
 using GAIA.UI.Utils;
 using GAIA.Util;
 using ImGuiNET;
-using Veldrid;
-using Veldrid.Sdl2;
-using Veldrid.StartupUtilities;
+using GAIA.UI.OpenTk;
+using OpenTK.Graphics.OpenGL;
+using OpenTK.Windowing.Common;
+using OpenTK.Windowing.Desktop;
+using Vector2i = OpenTK.Mathematics.Vector2i;
 
 namespace GAIA.Installer;
 
@@ -68,100 +70,20 @@ internal sealed class InstallerImGuiApp
     public void Run()
     {
         LoadState();
+        using var window = new InstallerWindow(this, $"{_settings.ProductName} Installer");
+        window.Run();
+    }
 
-        var windowCreateInfo = new WindowCreateInfo
-        {
-            X = 100,
-            Y = 100,
-            WindowWidth = 1100,
-            WindowHeight = 720,
-            WindowTitle = $"{_settings.ProductName} Installer"
-        };
-
-        var graphicsDeviceOptions = new GraphicsDeviceOptions(
-            debug: false,
-            swapchainDepthFormat: null,
-            syncToVerticalBlank: true,
-            resourceBindingModel: ResourceBindingModel.Improved,
-            preferStandardClipSpaceYDirection: true,
-            preferDepthRangeZeroToOne: true);
-
-        var backend = OperatingSystem.IsWindows()
-            ? GraphicsBackend.Direct3D11
-            : OperatingSystem.IsMacOS()
-                ? GraphicsBackend.Metal
-                : GraphicsBackend.Vulkan;
-
-        Sdl2Window window;
-        GraphicsDevice graphicsDevice;
-
-        try
-        {
-            VeldridStartup.CreateWindowAndGraphicsDevice(
-                windowCreateInfo,
-                graphicsDeviceOptions,
-                backend,
-                out window,
-                out graphicsDevice);
-        }
-        catch
-        {
-            VeldridStartup.CreateWindowAndGraphicsDevice(
-                windowCreateInfo,
-                graphicsDeviceOptions,
-                GraphicsBackend.OpenGL,
-                out window,
-                out graphicsDevice);
-        }
-
-        VeldridManager.MainWindow = window;
-        VeldridManager.GraphicsDevice = graphicsDevice;
-
-        using var commandList = graphicsDevice.ResourceFactory.CreateCommandList();
-        using var imGuiController = new ImGuiController(
-            graphicsDevice,
-            graphicsDevice.MainSwapchain.Framebuffer.OutputDescription,
-            window.Width,
-            window.Height);
-
-        VeldridManager.ImGuiController = imGuiController;
-        VeldridManager.RegisterImGuiController(imGuiController);
-
-        window.Resized += () =>
-        {
-            graphicsDevice.MainSwapchain.Resize((uint)window.Width, (uint)window.Height);
-            imGuiController.WindowResized(window.Width, window.Height);
-        };
-
-        var stopwatch = Stopwatch.StartNew();
-
-        while (window.Exists && !_shouldClose)
-        {
-            var snapshot = window.PumpEvents();
-            if (!window.Exists)
-            {
-                break;
-            }
-
-            var deltaSeconds = (float)stopwatch.Elapsed.TotalSeconds;
-            stopwatch.Restart();
-
-            imGuiController.Update(deltaSeconds, snapshot);
-            DrawUi();
-
-            commandList.Begin();
-            commandList.SetFramebuffer(graphicsDevice.MainSwapchain.Framebuffer);
-            commandList.ClearColorTarget(0, RgbaFloat.Black);
-            imGuiController.Render(graphicsDevice, commandList);
-            commandList.End();
-            graphicsDevice.SubmitCommands(commandList);
-            graphicsDevice.SwapBuffers(graphicsDevice.MainSwapchain);
-        }
-
-        graphicsDevice.WaitForIdle();
-        VeldridManager.UnregisterImGuiController(imGuiController);
-        graphicsDevice.Dispose();
-        window.Close();
+    private sealed class InstallerWindow : GameWindow
+    {
+        private readonly InstallerImGuiApp _owner;
+        private ImGuiController _controller;
+        public InstallerWindow(InstallerImGuiApp owner,string title):base(GameWindowSettings.Default,new NativeWindowSettings
+        {ClientSize=new Vector2i(1100,720),Title=title,APIVersion=new Version(3,3),Profile=ContextProfile.Core,Flags=ContextFlags.ForwardCompatible})=>_owner=owner;
+        protected override void OnLoad(){base.OnLoad();_controller=new ImGuiController(ClientSize.X,ClientSize.Y,FramebufferSize.X,FramebufferSize.Y);TextInput+=OnTextInput;}
+        protected override void OnRenderFrame(FrameEventArgs e){base.OnRenderFrame(e);_controller.Update(this,(float)Math.Max(e.Time,1e-6));_owner.DrawUi();GL.BindFramebuffer(FramebufferTarget.Framebuffer,0);GL.Viewport(0,0,FramebufferSize.X,FramebufferSize.Y);GL.ClearColor(0,0,0,1);GL.Clear(ClearBufferMask.ColorBufferBit);_controller.Render();SwapBuffers();if(_owner._shouldClose)Close();}
+        private void OnTextInput(TextInputEventArgs e)=>_controller?.PressChar((char)e.Unicode);
+        protected override void OnUnload(){TextInput-=OnTextInput;_controller?.Dispose();base.OnUnload();}
     }
 
     private void DrawUi()

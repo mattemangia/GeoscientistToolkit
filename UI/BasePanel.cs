@@ -171,7 +171,7 @@ public abstract class BasePanel : IDisposable
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(3, 3));
         ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 3.0f);
 
-        var canPopOut = _isPoppedOut || OpenTkManager.IsInitialized || PopOutWindow.IsSupported;
+        var canPopOut = _isPoppedOut || OpenTkManager.IsInitialized;
         if (!canPopOut) ImGui.BeginDisabled();
 
         // Use a regular button instead of invisible button for better visibility
@@ -298,11 +298,8 @@ public abstract class BasePanel : IDisposable
 
         try
         {
-            _popOutWindow = OpenTkManager.IsInitialized
-                ? new OpenTkPopOutWindow(_title, newX, newY,
-                    (int)_lastMainWindowSize.X, (int)_lastMainWindowSize.Y)
-                : new PopOutWindow(_title, newX, newY,
-                    (int)_lastMainWindowSize.X, (int)_lastMainWindowSize.Y);
+            _popOutWindow = new OpenTkPopOutWindow(_title, newX, newY,
+                (int)_lastMainWindowSize.X, (int)_lastMainWindowSize.Y);
         }
         catch (Exception ex)
         {

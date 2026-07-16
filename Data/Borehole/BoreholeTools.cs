@@ -74,7 +74,7 @@ public class BoreholeTools : IDatasetTools
 
     public BoreholeTools()
     {
-        // GeothermalSimulationTools now uses VeldridManager.GraphicsDevice directly
+        // GeothermalSimulationTools uses the active shared OpenTK context.
         _geothermalTool = new GeothermalSimulationTools();
         _boreholeSeismicTools = new BoreholeSeismicToolsPanel();
 

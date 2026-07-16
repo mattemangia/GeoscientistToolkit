@@ -10,6 +10,6 @@ void main()
     // The fragment shader will use the vertex ID to calculate screen coordinates.
     out_TexCoord = in_Position;
     gl_Position = vec4(in_Position * 2.0 - 1.0, 1.0);
-    // Invert Y for Veldrid's coordinate system
+    // Convert the image-space Y axis to OpenGL clip space.
     gl_Position.y = -gl_Position.y;
 }

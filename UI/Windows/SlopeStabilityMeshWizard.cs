@@ -588,7 +588,7 @@ public class SlopeStabilityMeshWizard
     {
         if (_result == null || !_result.Success) return;
 
-        VeldridManager.ExecuteOnMainThread(() =>
+        OpenTkManager.ExecuteOnMainThread(() =>
         {
             try
             {

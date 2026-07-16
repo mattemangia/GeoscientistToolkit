@@ -1,7 +1,6 @@
 ﻿// GAIA/UI/Panorama/PanoramaManager.cs
 
 using GAIA.Data;
-using Veldrid;
 
 namespace GAIA.UI.Panorama;
 
@@ -20,9 +19,7 @@ public class PanoramaManager
     /// Starts a new panorama stitching job and opens the wizard UI.
     /// </summary>
     /// <param name="imageGroup">The group of images to stitch.</param>
-    /// <param name="graphicsDevice">The active Veldrid GraphicsDevice.</param>
-    /// <param name="imGuiController">The active GAIA ImGuiController.</param>
-    public void StartPanorama(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiController imGuiController)
+    public void StartPanorama(DatasetGroup imageGroup)
     {
         // If a wizard is already open, bring its window to the front.
         if (_wizardPanel != null && _wizardPanel.IsOpen)
@@ -32,7 +29,7 @@ public class PanoramaManager
         }
         
         // CORRECTED: The constructor now receives the correct ImGuiController type.
-        _wizardPanel = new PanoramaWizardPanel(imageGroup, graphicsDevice, imGuiController);
+        _wizardPanel = new PanoramaWizardPanel(imageGroup);
         _wizardPanel.Open();
     }
 

@@ -10,7 +10,7 @@ internal static class GtkResourceLoader
 
     public static Pixbuf LoadLogoPixbuf(int? width = null, int? height = null)
     {
-        var coreAssembly = typeof(global::GAIA.Application).Assembly;
+        var coreAssembly = typeof(global::GAIA.Program).Assembly;
         using var stream = coreAssembly.GetManifestResourceStream(LogoResourceName);
 
         if (stream != null)

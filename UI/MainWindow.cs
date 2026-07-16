@@ -21,7 +21,6 @@ using GAIA.Util;
 using GAIA.Analysis.Geothermal;
 using ImGuiNET;
 using StbImageSharp;
-using Veldrid;
 
 namespace GAIA.UI;
 
@@ -113,9 +112,7 @@ public class MainWindow : IDisposable
 
     public MainWindow()
     {
-        _icons = OpenTkManager.IsInitialized
-            ? new IconFactory()
-            : new IconFactory(VeldridManager.GraphicsDevice, VeldridManager.ImGuiController);
+        _icons = new IconFactory();
 
         // Subscribe to dataset removal events
         ProjectManager.Instance.DatasetRemoved += OnDatasetRemoved;
@@ -177,7 +174,7 @@ public class MainWindow : IDisposable
         try
         {
             _icons.Dispose();
-            if (GraphicsRuntime.IsOpenTk && _logoTextureId != IntPtr.Zero)
+            if (_logoTextureId != IntPtr.Zero)
             {
                 OpenTK.Graphics.OpenGL.GL.DeleteTexture((int)_logoTextureId);
                 _logoTextureId = IntPtr.Zero;
@@ -210,9 +207,7 @@ public class MainWindow : IDisposable
             // Load image using StbImageSharp
             var image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
 
-            if (GraphicsRuntime.IsOpenTk)
-            {
-                var logoTexture = OpenTK.Graphics.OpenGL.GL.GenTexture();
+            var logoTexture = OpenTK.Graphics.OpenGL.GL.GenTexture();
                 OpenTK.Graphics.OpenGL.GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, logoTexture);
                 OpenTK.Graphics.OpenGL.GL.TexImage2D(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, 0,
                     OpenTK.Graphics.OpenGL.PixelInternalFormat.Rgba8, image.Width, image.Height, 0,
@@ -227,44 +222,6 @@ public class MainWindow : IDisposable
                 OpenTK.Graphics.OpenGL.GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, 0);
                 _logoTextureId = (IntPtr)logoTexture;
                 _logoSize = new Vector2(image.Width, image.Height);
-                return;
-            }
-
-            // Get graphics device and ImGui controller from VeldridManager
-            var graphicsDevice = VeldridManager.GraphicsDevice;
-            var imGuiController = VeldridManager.ImGuiController;
-
-            if (graphicsDevice == null || imGuiController == null)
-            {
-                Logger.LogWarning("Graphics device or ImGui controller not available for logo loading");
-                return;
-            }
-
-            // Create texture
-            var texture = graphicsDevice.ResourceFactory.CreateTexture(TextureDescription.Texture2D(
-                (uint)image.Width,
-                (uint)image.Height,
-                1,
-                1,
-                PixelFormat.R8_G8_B8_A8_UNorm,
-                TextureUsage.Sampled));
-
-            graphicsDevice.UpdateTexture(
-                texture,
-                image.Data,
-                0, 0, 0,
-                (uint)image.Width,
-                (uint)image.Height,
-                1,
-                0,
-                0);
-
-            // Create texture view
-            var textureView = graphicsDevice.ResourceFactory.CreateTextureView(texture);
-
-            // Bind to ImGui
-            _logoTextureId = imGuiController.GetOrCreateImGuiBinding(graphicsDevice.ResourceFactory, textureView);
-            _logoSize = new Vector2(image.Width, image.Height);
         }
         catch (Exception ex)
         {
@@ -1451,7 +1408,7 @@ public class MainWindow : IDisposable
             ImGui.Separator();
 
             ImGui.TextWrapped(
-                "Open-source toolkit for geoscience data visualisation and analysis, built with Veldrid + ImGui.NET.");
+                "Open-source toolkit for geoscience data visualisation and analysis, built with OpenTK/OpenGL + ImGui.NET.");
             ImGui.Spacing();
 
             ImGui.Separator();

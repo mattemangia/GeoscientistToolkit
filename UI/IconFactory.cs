@@ -2,7 +2,6 @@
 
 using System.Numerics;
 using SkiaSharp;
-using Veldrid;
 using GL = OpenTK.Graphics.OpenGL.GL;
 using GLPixelFormat = OpenTK.Graphics.OpenGL.PixelFormat;
 using OpenTK.Graphics.OpenGL;
@@ -87,7 +86,7 @@ public enum GaiaIcon
 
 /// <summary>
 ///     Builds GAIA's toolbar/menu icons by drawing them with Skia at load time and uploading each
-///     one as a small Veldrid texture bound for ImGui.
+///     one as a small OpenGL texture usable by every shared ImGui context.
 ///     Drawing them in code rather than shipping image assets keeps them crisp at any UI scale and
 ///     avoids an icon-font dependency.
 ///     Icons are created on first use and cached, so unused ones cost nothing.
@@ -97,27 +96,14 @@ public sealed class IconFactory : IDisposable
     private const int IconSize = 32;
 
     private readonly Dictionary<GaiaIcon, IntPtr> _bindings = new();
-    private readonly GraphicsDevice _gd;
-    private readonly ImGuiController _controller;
-    private readonly List<Texture> _textures = new();
-    private readonly List<TextureView> _views = new();
     private readonly List<int> _openTkTextures = new();
-    private readonly bool _useOpenTk;
     private readonly Dictionary<GaiaIcon, (SKColor Background, Action<SKCanvas, float, float> Draw)> _recipes;
     private bool _disposed;
-
-    public IconFactory(GraphicsDevice gd, ImGuiController controller)
-    {
-        _gd = gd;
-        _controller = controller;
-        _recipes = BuildRecipes();
-    }
 
     public IconFactory()
     {
         if (!Util.OpenTkManager.IsInitialized)
             throw new InvalidOperationException("OpenTK is not initialized.");
-        _useOpenTk = true;
         _recipes = BuildRecipes();
     }
 
@@ -153,31 +139,14 @@ public sealed class IconFactory : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        if (_useOpenTk)
-        {
-            foreach (var texture in _openTkTextures) GL.DeleteTexture(texture);
-            _openTkTextures.Clear();
-            _bindings.Clear();
-            return;
-        }
-
-        // Drop each ImGui binding before its view: the controller's resource sets reference them.
-        foreach (var view in _views)
-        {
-            _controller.RemoveImGuiBinding(view);
-            view.Dispose();
-        }
-
-        foreach (var texture in _textures) texture.Dispose();
-
-        _views.Clear();
-        _textures.Clear();
+        foreach (var texture in _openTkTextures) GL.DeleteTexture(texture);
+        _openTkTextures.Clear();
         _bindings.Clear();
     }
 
     private IntPtr CreateTexture(SKColor background, Action<SKCanvas, float, float> draw)
     {
-        // Rgba8888 matches Veldrid's R8_G8_B8_A8_UNorm below; SKBitmap's platform default is BGRA,
+        // Request RGBA explicitly because SKBitmap's platform default is commonly BGRA.
         // so it is requested explicitly rather than relying on byte order.
         var info = new SKImageInfo(IconSize, IconSize, SKColorType.Rgba8888, SKAlphaType.Premul);
         using var bitmap = new SKBitmap(info);
@@ -191,31 +160,18 @@ public sealed class IconFactory : IDisposable
 
         var pixels = bitmap.Bytes;
 
-        if (_useOpenTk)
-        {
-            var textureId = GL.GenTexture();
-            GL.BindTexture(TextureTarget.Texture2D, textureId);
-            GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8,
-                IconSize, IconSize, 0, GLPixelFormat.Rgba, PixelType.UnsignedByte, pixels);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter,
-                (int)TextureMinFilter.Linear);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter,
-                (int)TextureMagFilter.Linear);
-            GL.BindTexture(TextureTarget.Texture2D, 0);
-            _openTkTextures.Add(textureId);
-            return (IntPtr)textureId;
-        }
-
-        var texture = _gd.ResourceFactory.CreateTexture(TextureDescription.Texture2D(
-            IconSize, IconSize, 1, 1, Veldrid.PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
-        _gd.UpdateTexture(texture, pixels, 0, 0, 0, IconSize, IconSize, 1, 0, 0);
-
-        var view = _gd.ResourceFactory.CreateTextureView(texture);
-        _textures.Add(texture);
-        _views.Add(view);
-
-        return _controller.GetOrCreateImGuiBinding(_gd.ResourceFactory, view);
+        var textureId = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, textureId);
+        GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8,
+            IconSize, IconSize, 0, GLPixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter,
+            (int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter,
+            (int)TextureMagFilter.Linear);
+        GL.BindTexture(TextureTarget.Texture2D, 0);
+        _openTkTextures.Add(textureId);
+        return (IntPtr)textureId;
     }
 
     /// <summary>

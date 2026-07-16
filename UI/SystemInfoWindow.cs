@@ -128,7 +128,7 @@ public class SystemInfoWindow
                 ImGui.TextWrapped(gpu);
             }
 
-            // Add Veldrid-specific info
+            // Add active OpenGL backend information.
             foreach (var (key, value) in veldridData)
             {
                 ImGui.TableNextRow();
