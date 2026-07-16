@@ -36,12 +36,12 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private readonly Dictionary<byte, float> _materialOpacity = new();
     private readonly Dictionary<byte, bool> _materialVisibility = new();
     private int _program, _vao, _vbo, _ebo, _fbo, _colorTexture, _depthBuffer;
-    private int _volumeTexture, _labelTexture, _previewTexture;
+    private int _volumeTexture, _labelTexture, _previewTexture, _materialTexture;
     private int _renderWidth = 1280, _renderHeight = 720;
     private Vector3 _cameraTarget;
     private float _cameraYaw = -MathF.PI / 4f, _cameraPitch = MathF.PI / 6f, _cameraDistance = 2f;
     private Vector2 _lastMouse;
-    private bool _dragging, _panning, _disposed, _previewDirty, _labelsDirty;
+    private bool _dragging, _panning, _disposed, _previewDirty, _labelsDirty, _materialsDirty;
     private Matrix4x4 _view, _projection;
     private byte[] _previewMask;
     internal Vector4 _previewColor = new(1, 0, 0, 0.5f);
@@ -121,8 +121,12 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         MinThreshold = Math.Max(MinThreshold, CalculateOtsuThreshold(density) / 255f * 0.8f);
         _volumeTexture = CreateTexture3D(lod.Width, lod.Height, lod.Depth, density);
         var aux = CreateDownsampledLabels(lod.Width, lod.Height, lod.Depth, 128L * 1024 * 1024);
-        _labelTexture = CreateTexture3D(aux.w, aux.h, aux.d, aux.data);
-        _previewTexture = CreateTexture3D(aux.w, aux.h, aux.d, new byte[aux.data.Length]);
+        // Label IDs are categorical: linear filtering would blend id 1 and id 2 into a
+        // non-existent id 2 at every boundary, so these two sample nearest.
+        _labelTexture = CreateTexture3D(aux.w, aux.h, aux.d, aux.data, false);
+        _previewTexture = CreateTexture3D(aux.w, aux.h, aux.d, new byte[aux.data.Length], false);
+        _materialTexture = CreateMaterialTexture();
+        UploadMaterials();
         ResizeTarget(_renderWidth, _renderHeight);
     }
 
@@ -130,6 +134,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     {
         if (_labelsDirty) { UploadLabels(); _labelsDirty = false; }
         if (_previewDirty) { UploadPreview(); _previewDirty = false; }
+        if (_materialsDirty) { UploadMaterials(); _materialsDirty = false; }
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
         GL.Viewport(0, 0, _renderWidth, _renderHeight);
         GL.Enable(EnableCap.DepthTest); GL.Enable(EnableCap.CullFace); GL.CullFace(CullFaceMode.Back);
@@ -151,6 +156,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         }
         Set1("uShowPreview", _showPreview ? 1 : 0); Set4("uPreviewColor", _previewColor);
         Bind3D(0, _volumeTexture, "uVolume"); Bind3D(1, _labelTexture, "uLabels"); Bind3D(2, _previewTexture, "uPreview");
+        GL.ActiveTexture(TextureUnit.Texture3); GL.BindTexture(TextureTarget.Texture2D, _materialTexture); Set1("uMaterials", 3);
         GL.BindVertexArray(_vao); GL.DrawElements(PrimitiveType.Triangles, 36, DrawElementsType.UnsignedInt, 0);
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
@@ -179,10 +185,10 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     public void MarkLabelsAsDirty() => _labelsDirty = true;
     public bool GetMaterialVisibility(byte id) => !_materialVisibility.TryGetValue(id, out var v) || v;
     public float GetMaterialOpacity(byte id) => _materialOpacity.GetValueOrDefault(id, 1f);
-    public void SetMaterialVisibility(byte id, bool value) => _materialVisibility[id] = value;
-    public void SetMaterialOpacity(byte id, float value) => _materialOpacity[id] = value;
-    public void SetAllMaterialsVisibility(bool value) { foreach (var m in _editableDataset.Materials) _materialVisibility[m.ID] = value; }
-    public void ResetAllMaterialOpacities() { foreach (var m in _editableDataset.Materials) _materialOpacity[m.ID] = 1; }
+    public void SetMaterialVisibility(byte id, bool value) { _materialVisibility[id] = value; _materialsDirty = true; }
+    public void SetMaterialOpacity(byte id, float value) { _materialOpacity[id] = value; _materialsDirty = true; }
+    public void SetAllMaterialsVisibility(bool value) { foreach (var m in _editableDataset.Materials) _materialVisibility[m.ID] = value; _materialsDirty = true; }
+    public void ResetAllMaterialOpacities() { foreach (var m in _editableDataset.Materials) _materialOpacity[m.ID] = 1; _materialsDirty = true; }
 
     public void SaveScreenshot(string path)
     {
@@ -203,13 +209,38 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo); GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, _colorTexture, 0); GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, RenderbufferTarget.Renderbuffer, _depthBuffer); GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); UpdateCamera();
     }
 
-    private static int CreateTexture3D(int w, int h, int d, byte[] data) { var t=GL.GenTexture(); GL.BindTexture(TextureTarget.Texture3D,t); GL.TexImage3D(TextureTarget.Texture3D,0,PixelInternalFormat.R8,w,h,d,0,PixelFormat.Red,PixelType.UnsignedByte,data); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMinFilter,(int)TextureMinFilter.Linear); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMagFilter,(int)TextureMagFilter.Linear); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapS,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapT,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapR,(int)TextureWrapMode.ClampToEdge); return t; }
+    private static int CreateTexture3D(int w, int h, int d, byte[] data, bool linear = true) { var t=GL.GenTexture(); var filter=linear?(int)TextureMinFilter.Linear:(int)TextureMinFilter.Nearest; GL.BindTexture(TextureTarget.Texture3D,t); GL.TexImage3D(TextureTarget.Texture3D,0,PixelInternalFormat.R8,w,h,d,0,PixelFormat.Red,PixelType.UnsignedByte,data); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMinFilter,filter); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMagFilter,filter); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapS,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapT,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapR,(int)TextureWrapMode.ClampToEdge); return t; }
+
+    /// <summary>256x1 RGBA lookup indexed by label id: rgb is the material colour, alpha its
+    /// effective opacity. A hidden material is stored as opacity 0, which the shader's mix()
+    /// and max() already collapse to a no-op, so visibility needs no separate channel.</summary>
+    private static int CreateMaterialTexture() { var t=GL.GenTexture(); GL.BindTexture(TextureTarget.Texture2D,t); GL.TexImage2D(TextureTarget.Texture2D,0,PixelInternalFormat.Rgba8,256,1,0,PixelFormat.Rgba,PixelType.UnsignedByte,IntPtr.Zero); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureMinFilter,(int)TextureMinFilter.Nearest); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureMagFilter,(int)TextureMagFilter.Nearest); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureWrapS,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureWrapT,(int)TextureWrapMode.ClampToEdge); return t; }
+
+    private void UploadMaterials()
+    {
+        var data = new byte[256 * 4];
+        foreach (var m in _editableDataset.Materials)
+        {
+            // Id 0 is unlabelled background and must stay untouched by the overlay.
+            if (m.ID == 0) continue;
+            var opacity = GetMaterialVisibility(m.ID) ? Math.Clamp(GetMaterialOpacity(m.ID), 0f, 1f) : 0f;
+            var o = m.ID * 4;
+            data[o] = (byte)(Math.Clamp(m.Color.X, 0f, 1f) * 255f);
+            data[o + 1] = (byte)(Math.Clamp(m.Color.Y, 0f, 1f) * 255f);
+            data[o + 2] = (byte)(Math.Clamp(m.Color.Z, 0f, 1f) * 255f);
+            data[o + 3] = (byte)(opacity * 255f);
+        }
+        GL.BindTexture(TextureTarget.Texture2D, _materialTexture);
+        GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, 256, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data);
+    }
     private static byte[] ReconstructVolume(GvtLodInfo l, byte[] b, int bs) { var r=new byte[l.Width*l.Height*l.Depth]; var bx=(l.Width+bs-1)/bs; var by=(l.Height+bs-1)/bs; for(int z=0;z<l.Depth;z++) for(int y=0;y<l.Height;y++) for(int x=0;x<l.Width;x++){var bi=((z/bs)*by*bx+(y/bs)*bx+x/bs)*bs*bs*bs+(z%bs)*bs*bs+(y%bs)*bs+x%bs; if(bi<b.Length)r[(z*l.Height+y)*l.Width+x]=b[bi];} return r; }
     private (int w,int h,int d,byte[] data) CreateDownsampledLabels(int w,int h,int d,long budget) { var n=(long)w*h*d; var s=n>budget?Math.Pow(budget/(double)n,1.0/3):1; var tw=Math.Max(1,(int)(w*s));var th=Math.Max(1,(int)(h*s));var td=Math.Max(1,(int)(d*s));var a=new byte[tw*th*td]; if(_editableDataset.LabelData!=null) Parallel.For(0,td,z=>{for(int y=0;y<th;y++)for(int x=0;x<tw;x++)a[(z*th+y)*tw+x]=_editableDataset.LabelData[Math.Min(_editableDataset.Width-1,x*_editableDataset.Width/tw),Math.Min(_editableDataset.Height-1,y*_editableDataset.Height/th),Math.Min(_editableDataset.Depth-1,z*_editableDataset.Depth/td)];}); return(tw,th,td,a); }
     private void UploadLabels() { var a=CreateDownsampledLabels((int)TextureWidth(_labelTexture), (int)TextureHeight(_labelTexture), (int)TextureDepth(_labelTexture), long.MaxValue); GL.BindTexture(TextureTarget.Texture3D,_labelTexture); GL.TexSubImage3D(TextureTarget.Texture3D,0,0,0,0,a.w,a.h,a.d,PixelFormat.Red,PixelType.UnsignedByte,a.data); }
     private void UploadPreview() { if(_previewMask==null)return; GL.BindTexture(TextureTarget.Texture3D,_previewTexture); var w=(int)TextureWidth(_previewTexture);var h=(int)TextureHeight(_previewTexture);var d=(int)TextureDepth(_previewTexture);var a=new byte[w*h*d];Parallel.For(0,d,z=>{for(int y=0;y<h;y++)for(int x=0;x<w;x++)a[(z*h+y)*w+x]=_previewMask[(Math.Min(_editableDataset.Depth-1,z*_editableDataset.Depth/d)*_editableDataset.Height+Math.Min(_editableDataset.Height-1,y*_editableDataset.Height/h))*_editableDataset.Width+Math.Min(_editableDataset.Width-1,x*_editableDataset.Width/w)];});GL.TexSubImage3D(TextureTarget.Texture3D,0,0,0,0,w,h,d,PixelFormat.Red,PixelType.UnsignedByte,a); }
     private static long TextureWidth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureWidth,out int v);return v;} private static long TextureHeight(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureHeight,out int v);return v;} private static long TextureDepth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureDepth,out int v);return v;}
-    private void OnDatasetDataChanged(Dataset d){if(d==_editableDataset)_labelsDirty=true;} private void OnPreviewChanged(CtImageStackDataset d,byte[] m,Vector4 c){if(d!=_editableDataset)return;_previewMask=m;_previewColor=c;_showPreview=m!=null;_previewDirty=true;}
+    // Material colours can be edited outside the 3D panel (segmentation, material editor),
+    // so refresh the lookup alongside the labels rather than only on visibility/opacity changes.
+    private void OnDatasetDataChanged(Dataset d){if(d==_editableDataset){_labelsDirty=true;_materialsDirty=true;}} private void OnPreviewChanged(CtImageStackDataset d,byte[] m,Vector4 c){if(d!=_editableDataset)return;_previewMask=m;_previewColor=c;_showPreview=m!=null;_previewDirty=true;}
     private void Bind3D(int unit,int tex,string name){GL.ActiveTexture(TextureUnit.Texture0+unit);GL.BindTexture(TextureTarget.Texture3D,tex);Set1(name,unit);} private void Set1(string n,int v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set1(string n,float v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set3(string n,Vector3 v)=>GL.Uniform3(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z);private void Set4(string n,Vector4 v)=>GL.Uniform4(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z,v.W);
     // System.Numerics is row-vector (v*M); GLSL is column-vector (M*v). Passing the row-major
     // array with transpose=false makes GL read it column-major, which is the transpose GLSL needs.
@@ -222,11 +253,17 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
 
     public static Vector3 CalculateNormalizedPhysicalScale(int w,int h,int d,float px,float st){var xy=px>0&&float.IsFinite(px)?px:1;var z=st>0&&float.IsFinite(st)?st:xy;var p=new Vector3(Math.Max(1,w)*xy,Math.Max(1,h)*xy,Math.Max(1,d)*z);return p/Math.Max(p.X,Math.Max(p.Y,p.Z));}
     public static byte CalculateOtsuThreshold(byte[] data){if(data==null||data.Length==0)return 0;var h=new long[256];foreach(var v in data)h[v]++;double sum=0,sb=0,best=-1;long wb=0;for(int i=0;i<256;i++)sum+=i*h[i];byte t=0;for(int i=0;i<255;i++){wb+=h[i];if(wb==0)continue;var wf=data.LongLength-wb;if(wf==0)break;sb+=i*h[i];var mb=sb/wb;var mf=(sum-sb)/wf;var v=wb*(double)wf*(mb-mf)*(mb-mf);if(v>best){best=v;t=(byte)i;}}return t;}
-    public void Dispose(){if(_disposed)return;_disposed=true;ProjectManager.Instance.DatasetDataChanged-=OnDatasetDataChanged;CtImageStackTools.Preview3DChanged-=OnPreviewChanged;_controlPanel?.Dispose();foreach(var t in new[]{_volumeTexture,_labelTexture,_previewTexture,_colorTexture})if(t!=0)GL.DeleteTexture(t);if(_depthBuffer!=0)GL.DeleteRenderbuffer(_depthBuffer);if(_fbo!=0)GL.DeleteFramebuffer(_fbo);if(_vbo!=0)GL.DeleteBuffer(_vbo);if(_ebo!=0)GL.DeleteBuffer(_ebo);if(_vao!=0)GL.DeleteVertexArray(_vao);if(_program!=0)GL.DeleteProgram(_program);}
+    public void Dispose(){if(_disposed)return;_disposed=true;ProjectManager.Instance.DatasetDataChanged-=OnDatasetDataChanged;CtImageStackTools.Preview3DChanged-=OnPreviewChanged;_controlPanel?.Dispose();foreach(var t in new[]{_volumeTexture,_labelTexture,_previewTexture,_materialTexture,_colorTexture})if(t!=0)GL.DeleteTexture(t);if(_depthBuffer!=0)GL.DeleteRenderbuffer(_depthBuffer);if(_fbo!=0)GL.DeleteFramebuffer(_fbo);if(_vbo!=0)GL.DeleteBuffer(_vbo);if(_ebo!=0)GL.DeleteBuffer(_ebo);if(_vao!=0)GL.DeleteVertexArray(_vao);if(_program!=0)GL.DeleteProgram(_program);}
 
     private const string VertexShader=@"#version 330 core
 layout(location=0) in vec3 p; uniform mat4 uView,uProjection; uniform vec3 uScale; out vec3 world; void main(){world=p*uScale;gl_Position=uProjection*uView*vec4(world,1);}";
     private const string FragmentShader=@"#version 330 core
-in vec3 world;out vec4 outColor;uniform sampler3D uVolume,uLabels,uPreview;uniform vec3 uScale,uCamera,uVolumeSize;uniform float uMin,uMax,uStep;uniform int uShowGray,uColorMap,uShowPreview,uPlaneCount;uniform vec4 uCutX,uCutY,uCutZ,uPlanes[8],uPreviewColor;
-bool boxHit(vec3 ro,vec3 rd,out float a,out float b){vec3 q0=(vec3(0)-ro)/rd,q1=(uScale-ro)/rd,mn=min(q0,q1),mx=max(q0,q1);a=max(max(mn.x,mn.y),mn.z);b=min(min(mx.x,mx.y),mx.z);return b>=max(a,0.0);}bool cut(vec3 p){if(uCutX.x>.5&&(p.x-uCutX.z)*uCutX.y>0)return true;if(uCutY.x>.5&&(p.y-uCutY.z)*uCutY.y>0)return true;if(uCutZ.x>.5&&(p.z-uCutZ.z)*uCutZ.y>0)return true;for(int i=0;i<uPlaneCount;i++){vec3 n=normalize(uPlanes[i].xyz);float d=abs(uPlanes[i].w);float s=dot(p-vec3(.5),n)-(d-.5);if(uPlanes[i].w<0?s<0:s>0)return true;}return false;}vec3 cmap(float x){if(uColorMap==0)return vec3(x);if(uColorMap==1)return clamp(vec3(3*x,3*x-1,3*x-2),0,1);if(uColorMap==2)return vec3(x,1-x,1);return clamp(abs(mod(x*6+vec3(0,4,2),6)-3)-1,0,1);}void main(){vec3 ro=uCamera,rd=normalize(world-ro);float a,b;if(!boxHit(ro,rd,a,b))discard;a=max(a,0);vec4 acc=vec4(0);float base=min(uScale.x/uVolumeSize.x,min(uScale.y/uVolumeSize.y,uScale.z/uVolumeSize.z));float ds=max(base*uStep,(b-a)/2048.0);for(int i=0;i<2048&&a<=b&&acc.a<.985;i++,a+=ds){vec3 p=(ro+rd*a)/uScale;if(cut(p))continue;float den=texture(uVolume,p).r;float n=clamp((den-uMin)/max(.001,uMax-uMin),0,1);float al=uShowGray!=0?smoothstep(0,1,n):0;vec3 col=cmap(n);if(al>.01){vec3 e=1/uVolumeSize;vec3 g=vec3(texture(uVolume,p+vec3(e.x,0,0)).r-texture(uVolume,p-vec3(e.x,0,0)).r,texture(uVolume,p+vec3(0,e.y,0)).r-texture(uVolume,p-vec3(0,e.y,0)).r,texture(uVolume,p+vec3(0,0,e.z)).r-texture(uVolume,p-vec3(0,0,e.z)).r);if(length(g)>.0001)col*=.3+.7*abs(dot(normalize(g),normalize(vec3(.4,.6,1))));}if(uShowPreview!=0&&texture(uPreview,p).r>.5){col=mix(col,uPreviewColor.rgb,uPreviewColor.a);al=max(al,uPreviewColor.a);}float ca=clamp(al*ds*80,0,1);acc+=(1-acc.a)*vec4(col*ca,ca);}outColor=acc;}";
+in vec3 world;out vec4 outColor;uniform sampler3D uVolume,uLabels,uPreview;uniform sampler2D uMaterials;uniform vec3 uScale,uCamera,uVolumeSize;uniform float uMin,uMax,uStep;uniform int uShowGray,uColorMap,uShowPreview,uPlaneCount;uniform vec4 uCutX,uCutY,uCutZ,uPlanes[8],uPreviewColor;
+bool boxHit(vec3 ro,vec3 rd,out float a,out float b){vec3 q0=(vec3(0)-ro)/rd,q1=(uScale-ro)/rd,mn=min(q0,q1),mx=max(q0,q1);a=max(max(mn.x,mn.y),mn.z);b=min(min(mx.x,mx.y),mx.z);return b>=max(a,0.0);}bool cut(vec3 p){if(uCutX.x>.5&&(p.x-uCutX.z)*uCutX.y>0)return true;if(uCutY.x>.5&&(p.y-uCutY.z)*uCutY.y>0)return true;if(uCutZ.x>.5&&(p.z-uCutZ.z)*uCutZ.y>0)return true;for(int i=0;i<uPlaneCount;i++){vec3 n=normalize(uPlanes[i].xyz);float d=abs(uPlanes[i].w);float s=dot(p-vec3(.5),n)-(d-.5);if(uPlanes[i].w<0?s<0:s>0)return true;}return false;}// Interleaved gradient noise (Jimenez). Every ray starts at the box entry and steps by a
+// fixed ds, and for a perspective camera that entry varies as d/cos(theta) around the face
+// normal, so the samples line up into concentric shells that read as rings while orbiting.
+// Offsetting each ray by a per-pixel fraction of ds turns that coherent banding into
+// high-frequency noise, which the eye tolerates far better.
+float ign(vec2 q){return fract(52.9829189*fract(dot(q,vec2(.06711056,.00583715))));}
+vec3 cmap(float x){if(uColorMap==0)return vec3(x);if(uColorMap==1)return clamp(vec3(3*x,3*x-1,3*x-2),0,1);if(uColorMap==2)return vec3(x,1-x,1);return clamp(abs(mod(x*6+vec3(0,4,2),6)-3)-1,0,1);}void main(){vec3 ro=uCamera,rd=normalize(world-ro);float a,b;if(!boxHit(ro,rd,a,b))discard;a=max(a,0);vec4 acc=vec4(0);float base=min(uScale.x/uVolumeSize.x,min(uScale.y/uVolumeSize.y,uScale.z/uVolumeSize.z));float ds=max(base*uStep,(b-a)/2048.0);a+=ds*ign(gl_FragCoord.xy);for(int i=0;i<2048&&a<=b&&acc.a<.985;i++,a+=ds){vec3 p=(ro+rd*a)/uScale;if(cut(p))continue;float den=texture(uVolume,p).r;float n=clamp((den-uMin)/max(.001,uMax-uMin),0,1);float al=uShowGray!=0?smoothstep(0,1,n):0;vec3 col=cmap(n);if(al>.01){vec3 e=1/uVolumeSize;vec3 g=vec3(texture(uVolume,p+vec3(e.x,0,0)).r-texture(uVolume,p-vec3(e.x,0,0)).r,texture(uVolume,p+vec3(0,e.y,0)).r-texture(uVolume,p-vec3(0,e.y,0)).r,texture(uVolume,p+vec3(0,0,e.z)).r-texture(uVolume,p-vec3(0,0,e.z)).r);if(length(g)>.0001)col*=.3+.7*abs(dot(normalize(g),normalize(vec3(.4,.6,1))));}int mid=int(texture(uLabels,p).r*255.0+0.5);if(mid>0){vec4 mat=texelFetch(uMaterials,ivec2(mid,0),0);if(mat.a>.002){col=mix(col,mat.rgb,mat.a);al=max(al,mat.a);}}if(uShowPreview!=0&&texture(uPreview,p).r>.5){col=mix(col,uPreviewColor.rgb,uPreviewColor.a);al=max(al,uPreviewColor.a);}float ca=clamp(al*ds*80,0,1);acc+=(1-acc.a)*vec4(col*ca,ca);}outColor=acc;}";
 }
