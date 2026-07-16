@@ -100,6 +100,7 @@ public class CtVolume3DViewer : IDatasetViewer, IDisposable
     private Matrix4x4 _viewMatrix;
     private Sampler _volumeSampler;
     private Texture _volumeTexture;
+    internal Vector3 VolumeScale { get; private set; } = Vector3.One;
     public int ColorMapIndex = 0;
 
     // Axis-aligned cutting planes
@@ -131,6 +132,9 @@ public class CtVolume3DViewer : IDatasetViewer, IDisposable
 
         _streamingDataset.Load();
         _editableDataset.Load();
+        VolumeScale = CalculateNormalizedPhysicalScale(_editableDataset.Width, _editableDataset.Height,
+            _editableDataset.Depth, _editableDataset.PixelSize, _editableDataset.SliceThickness);
+        ResetCamera();
 
         Logger.Log(
             $"[CtVolume3DViewer] Streaming dataset LOD dimensions: {_streamingDataset.BaseLod.Width}x{_streamingDataset.BaseLod.Height}x{_streamingDataset.BaseLod.Depth}");
@@ -243,6 +247,7 @@ public class CtVolume3DViewer : IDatasetViewer, IDisposable
         public Matrix4x4 InvView;
         public Vector4 CameraPosition;
         public Vector4 VolumeSize;
+        public Vector4 VolumeScale;
         public Vector4 ThresholdParams;
         public Vector4 SliceParams;
         public Vector4 RenderParams;
@@ -496,6 +501,7 @@ layout(set = 0, binding = 0) uniform Constants
     mat4 InvView;
     vec4 CameraPosition;
     vec4 VolumeSize;
+    vec4 VolumeScale;
     vec4 ThresholdParams;
     vec4 SliceParams;
     vec4 RenderParams;
@@ -512,8 +518,8 @@ layout(location = 0) out vec3 out_ModelPos;
 
 void main() 
 {
-    out_ModelPos = in_Position; 
-    gl_Position = ViewProj * vec4(in_Position, 1.0);
+    out_ModelPos = in_Position * VolumeScale.xyz;
+    gl_Position = ViewProj * vec4(out_ModelPos, 1.0);
 }";
 
         // FIXED: Corrected the colormap application logic
@@ -528,6 +534,7 @@ layout(set = 0, binding = 0) uniform Constants
     mat4 InvView;
     vec4 CameraPosition;
     vec4 VolumeSize;
+    vec4 VolumeScale;
     vec4 ThresholdParams;
     vec4 SliceParams;
     vec4 RenderParams;
@@ -599,7 +606,7 @@ void main()
     vec3 rayDir = normalize(in_ModelPos - rayOrigin);
 
     float tNear, tFar;
-    if (!IntersectBox(rayOrigin, rayDir, vec3(0.0), vec3(1.0), tNear, tFar))
+    if (!IntersectBox(rayOrigin, rayDir, vec3(0.0), VolumeScale.xyz, tNear, tFar))
     {
         discard;
     }
@@ -608,8 +615,10 @@ void main()
     vec4 accumulatedColor = vec4(0.0);
     
     float maxDim = max(VolumeSize.x, max(VolumeSize.y, VolumeSize.z));
-    float baseStepSize = 1.0 / maxDim;
+    float baseStepSize = min(VolumeScale.x / VolumeSize.x,
+        min(VolumeScale.y / VolumeSize.y, VolumeScale.z / VolumeSize.z));
     float step = baseStepSize * ThresholdParams.z;
+    step = max(step, (tFar - tNear) / 1536.0);
     
     int maxSteps = int((tFar - tNear) / step);
     float opacityScalar = 80.0;
@@ -618,11 +627,12 @@ void main()
     // Get colormap index from RenderParams.x
     int colorMapIndex = int(RenderParams.x);
 
-    for (int i = 0; i < 768; i++)
+    for (int i = 0; i < 1536; i++)
     {
         if (i >= maxSteps || t > tFar || accumulatedColor.a > 0.98) break;
 
-        vec3 currentPos = rayOrigin + t * rayDir;
+        vec3 currentWorld = rayOrigin + t * rayDir;
+        vec3 currentPos = currentWorld / VolumeScale.xyz;
         if (any(lessThan(currentPos, vec3(0.0))) || any(greaterThan(currentPos, vec3(1.0))) || IsCutByPlanes(currentPos))
         {
             t += step;
@@ -849,6 +859,16 @@ void main() { out_Color = PlaneColor; }";
         _projMatrix = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspectRatio, 0.1f, 1000f);
     }
 
+    public static Vector3 CalculateNormalizedPhysicalScale(int width, int height, int depth,
+        float pixelSize, float sliceThickness)
+    {
+        var xy = pixelSize > 0 && float.IsFinite(pixelSize) ? pixelSize : 1f;
+        var z = sliceThickness > 0 && float.IsFinite(sliceThickness) ? sliceThickness : xy;
+        var physical = new Vector3(Math.Max(1, width) * xy, Math.Max(1, height) * xy, Math.Max(1, depth) * z);
+        var longest = Math.Max(physical.X, Math.Max(physical.Y, physical.Z));
+        return longest > 0 && float.IsFinite(longest) ? physical / longest : Vector3.One;
+    }
+
     private unsafe void UpdateConstantBuffer()
     {
         Matrix4x4.Invert(_viewMatrix, out var invView);
@@ -858,6 +878,7 @@ void main() { out_Color = PlaneColor; }";
             InvView = invView,
             CameraPosition = new Vector4(_cameraPosition, 1),
             VolumeSize = new Vector4(_editableDataset.Width, _editableDataset.Height, _editableDataset.Depth, 0),
+            VolumeScale = new Vector4(VolumeScale, 0),
             ThresholdParams = new Vector4(MinThreshold, MaxThreshold, StepSize, ShowGrayscale ? 1 : 0),
             SliceParams = new Vector4(SlicePositions, ShowSlices ? 1 : 0),
             RenderParams = new Vector4(ColorMapIndex, 0, 0, 0),
@@ -1026,20 +1047,26 @@ void main() { out_Color = PlaneColor; }";
 
     private void RenderCuttingPlane(Matrix4x4 viewProj, Vector3 normal, float position, Vector4 color)
     {
-        var transform = Matrix4x4.CreateScale(1.5f);
+        Matrix4x4 transform;
         if (normal == Vector3.UnitX)
         {
-            transform *= Matrix4x4.CreateRotationY(MathF.PI / 2);
-            transform *= Matrix4x4.CreateTranslation(position, 0.5f, 0.5f);
+            transform = Matrix4x4.CreateScale(VolumeScale.Z * 1.1f, VolumeScale.Y * 1.1f, 1f) *
+                        Matrix4x4.CreateRotationY(MathF.PI / 2) *
+                        Matrix4x4.CreateTranslation(position * VolumeScale.X, VolumeScale.Y * 0.5f,
+                            VolumeScale.Z * 0.5f);
         }
         else if (normal == Vector3.UnitY)
         {
-            transform *= Matrix4x4.CreateRotationX(-MathF.PI / 2);
-            transform *= Matrix4x4.CreateTranslation(0.5f, position, 0.5f);
+            transform = Matrix4x4.CreateScale(VolumeScale.X * 1.1f, VolumeScale.Z * 1.1f, 1f) *
+                        Matrix4x4.CreateRotationX(-MathF.PI / 2) *
+                        Matrix4x4.CreateTranslation(VolumeScale.X * 0.5f, position * VolumeScale.Y,
+                            VolumeScale.Z * 0.5f);
         }
-        else if (normal == Vector3.UnitZ)
+        else
         {
-            transform *= Matrix4x4.CreateTranslation(0.5f, 0.5f, position);
+            transform = Matrix4x4.CreateScale(VolumeScale.X * 1.1f, VolumeScale.Y * 1.1f, 1f) *
+                        Matrix4x4.CreateTranslation(VolumeScale.X * 0.5f, VolumeScale.Y * 0.5f,
+                            position * VolumeScale.Z);
         }
 
         var constants = new PlaneVisualizationConstants { ViewProj = transform * viewProj, PlaneColor = color };
@@ -1057,8 +1084,10 @@ void main() { out_Color = PlaneColor; }";
         var up = Vector3.Cross(forward, right);
         var rotation = new Matrix4x4(right.X, right.Y, right.Z, 0, up.X, up.Y, up.Z, 0, forward.X, forward.Y, forward.Z,
             0, 0, 0, 0, 1);
-        var transform = Matrix4x4.CreateScale(1.5f) * rotation *
-                        Matrix4x4.CreateTranslation(Vector3.One * 0.5f + plane.Normal * (plane.Distance - 0.5f));
+        var planeSize = Math.Max(VolumeScale.X, Math.Max(VolumeScale.Y, VolumeScale.Z)) * 1.5f;
+        var normalizedCenter = Vector3.One * 0.5f + plane.Normal * (plane.Distance - 0.5f);
+        var worldCenter = normalizedCenter * VolumeScale;
+        var transform = Matrix4x4.CreateScale(planeSize) * rotation * Matrix4x4.CreateTranslation(worldCenter);
         var constants = new PlaneVisualizationConstants { ViewProj = transform * viewProj, PlaneColor = color };
         VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref constants);
         _commandList.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
@@ -1221,10 +1250,11 @@ void main() { out_Color = PlaneColor; }";
         var farPoint = new Vector3(farPointH.X, farPointH.Y, farPointH.Z) / farPointH.W;
         var rayDir = Vector3.Normalize(farPoint - rayOrigin);
 
-        // 2. Intersect ray with the unit cube bounding box
+        // 2. Intersect in physical display space, then return normalized texture
+        // coordinates because acoustic/segmentation integrations use [0,1]^3.
         float tNear, tFar;
         var boxMin = Vector3.Zero;
-        var boxMax = Vector3.One;
+        var boxMax = VolumeScale;
 
         var invRayDir = new Vector3(1.0f / rayDir.X, 1.0f / rayDir.Y, 1.0f / rayDir.Z);
         var t1 = (boxMin - rayOrigin) * invRayDir;
@@ -1237,7 +1267,7 @@ void main() { out_Color = PlaneColor; }";
 
         if (tFar < tNear || tFar < 0.0) return false;
 
-        intersection = rayOrigin + rayDir * tNear;
+        intersection = (rayOrigin + rayDir * tNear) / VolumeScale;
         intersection = Vector3.Clamp(intersection, Vector3.Zero, Vector3.One); // Clamp to be safe
         return true;
     }
@@ -1345,10 +1375,10 @@ void main() { out_Color = PlaneColor; }";
 
     public void ResetCamera()
     {
-        _cameraTarget = new Vector3(0.5f);
+        _cameraTarget = VolumeScale * 0.5f;
         _cameraYaw = -MathF.PI / 4f;
         _cameraPitch = MathF.PI / 6f;
-        _cameraDistance = 2.0f;
+        _cameraDistance = Math.Max(1.5f, VolumeScale.Length() * 1.25f);
         UpdateCameraMatrices();
     }
 

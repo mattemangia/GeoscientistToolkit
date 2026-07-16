@@ -61,7 +61,8 @@ public class TextureBrickCache : IDisposable
     public void Dispose()
     {
         _isRunning = false;
-        _loaderThread.Join();
+        if (!_loaderThread.Join(TimeSpan.FromSeconds(2)))
+            Logger.LogWarning("CT brick loader did not stop within the shutdown timeout.");
         _reader?.Dispose();
         _fileStream?.Dispose();
     }

@@ -178,6 +178,7 @@ struct Constants {
     float4x4 InvView;
     float4 CameraPosition;
     float4 VolumeSize;
+    float4 VolumeScale;
     float4 ThresholdParams;
     float4 SliceParams;
     float4 RenderParams;
@@ -208,8 +209,8 @@ struct VertexOut {
 vertex VertexOut vertex_main(VertexIn in [[stage_in]],
                             constant Constants& constants [[buffer(0)]]) {
     VertexOut out;
-    out.ModelPos = in.Position;
-    out.Position = constants.ViewProj * float4(in.Position, 1.0);
+    out.ModelPos = in.Position * constants.VolumeScale.xyz;
+    out.Position = constants.ViewProj * float4(out.ModelPos, 1.0);
     return out;
 }
 
@@ -230,7 +231,7 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
     // Ray-box intersection
     float3 invRayDir = 1.0 / (rayDir + 1e-8);
     float3 t1 = (float3(0.0) - rayOrigin) * invRayDir;
-    float3 t2 = (float3(1.0) - rayOrigin) * invRayDir;
+    float3 t2 = (constants.VolumeScale.xyz - rayOrigin) * invRayDir;
     float3 tMin = min(t1, t2);
     float3 tMax = max(t1, t2);
     float tNear = max(max(tMin.x, tMin.y), tMin.z);
@@ -244,8 +245,10 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
     
     // Volume rendering with colormap support
     float4 color = float4(0.0);
-    float stepSize = 0.01 * constants.ThresholdParams.z;
-    int maxSteps = 768;
+    float stepSize = constants.ThresholdParams.z * min(constants.VolumeScale.x / constants.VolumeSize.x,
+        min(constants.VolumeScale.y / constants.VolumeSize.y, constants.VolumeScale.z / constants.VolumeSize.z));
+    stepSize = max(stepSize, (tFar - tNear) / 1536.0);
+    int maxSteps = 1536;
     float opacityScale = 80.0;
     
     // Get colormap index from RenderParams.x
@@ -259,7 +262,7 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
         float t = tNear + float(i) * stepSize;
         if (t > tFar || color.a > 0.98) break;
         
-        float3 pos = rayOrigin + t * rayDir;
+        float3 pos = (rayOrigin + t * rayDir) / constants.VolumeScale.xyz;
         if (any(pos < 0.0) || any(pos > 1.0)) continue;
         
         // Check cutting planes
@@ -718,6 +721,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
                 CameraPosition = new Vector4(cameraPosition, 1),
                 VolumeSize = new Vector4(_viewer._editableDataset.Width, _viewer._editableDataset.Height,
                     _viewer._editableDataset.Depth, 0),
+                VolumeScale = new Vector4(_viewer.VolumeScale, 0),
                 ThresholdParams = new Vector4(_viewer.MinThreshold, _viewer.MaxThreshold, _viewer.StepSize,
                     _viewer.ShowGrayscale ? 1 : 0),
                 SliceParams = new Vector4(_viewer.SlicePositions, _viewer.ShowSlices ? 1 : 0),
@@ -874,21 +878,25 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
 
     private void RenderCuttingPlane(CommandList cl, Matrix4x4 viewProj, Vector3 normal, float position, Vector4 color)
     {
-        var transform = Matrix4x4.CreateScale(1.5f);
+        var scale = _viewer.VolumeScale;
+        Matrix4x4 transform;
 
         if (normal == Vector3.UnitX)
         {
-            transform *= Matrix4x4.CreateRotationY(MathF.PI / 2);
-            transform *= Matrix4x4.CreateTranslation(position, 0.5f, 0.5f);
+            transform = Matrix4x4.CreateScale(scale.Z * 1.1f, scale.Y * 1.1f, 1f) *
+                        Matrix4x4.CreateRotationY(MathF.PI / 2) *
+                        Matrix4x4.CreateTranslation(position * scale.X, scale.Y * 0.5f, scale.Z * 0.5f);
         }
         else if (normal == Vector3.UnitY)
         {
-            transform *= Matrix4x4.CreateRotationX(-MathF.PI / 2);
-            transform *= Matrix4x4.CreateTranslation(0.5f, position, 0.5f);
+            transform = Matrix4x4.CreateScale(scale.X * 1.1f, scale.Z * 1.1f, 1f) *
+                        Matrix4x4.CreateRotationX(-MathF.PI / 2) *
+                        Matrix4x4.CreateTranslation(scale.X * 0.5f, position * scale.Y, scale.Z * 0.5f);
         }
-        else if (normal == Vector3.UnitZ)
+        else
         {
-            transform *= Matrix4x4.CreateTranslation(0.5f, 0.5f, position);
+            transform = Matrix4x4.CreateScale(scale.X * 1.1f, scale.Y * 1.1f, 1f) *
+                        Matrix4x4.CreateTranslation(scale.X * 0.5f, scale.Y * 0.5f, position * scale.Z);
         }
 
         var constants = new CtVolume3DViewer.PlaneVisualizationConstants
@@ -912,8 +920,11 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
             forward.X, forward.Y, forward.Z, 0,
             0, 0, 0, 1);
 
-        var transform = Matrix4x4.CreateScale(1.5f) * rotation *
-                        Matrix4x4.CreateTranslation(Vector3.One * 0.5f + plane.Normal * (plane.Distance - 0.5f));
+        var scale = _viewer.VolumeScale;
+        var planeSize = Math.Max(scale.X, Math.Max(scale.Y, scale.Z)) * 1.5f;
+        var normalizedCenter = Vector3.One * 0.5f + plane.Normal * (plane.Distance - 0.5f);
+        var transform = Matrix4x4.CreateScale(planeSize) * rotation *
+                        Matrix4x4.CreateTranslation(normalizedCenter * scale);
 
         var constants = new CtVolume3DViewer.PlaneVisualizationConstants
             { ViewProj = transform * viewProj, PlaneColor = color };

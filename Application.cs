@@ -5,6 +5,7 @@ using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using GAIA.Business;
+using GAIA.Network;
 using GAIA.Settings;
 using GAIA.UI;
 using GAIA.Util;
@@ -407,17 +408,27 @@ public class Application
 
         if (SettingsManager.Instance.HasUnsavedChanges) SettingsManager.Instance.SaveSettings();
 
+        // Stop producers first, then release viewer/dataset GPU resources while the
+        // graphics device is alive. This prevents hidden background windows and the
+        // OpenGL execution thread from surviving the main UI.
+        NodeManager.Instance.Stop();
+        _mainWindow?.Dispose();
+        ProjectManager.Instance.Shutdown();
         GlobalPerformanceManager.Instance.Shutdown();
 
-        _graphicsDevice.WaitForIdle();
+        try
+        {
+            _graphicsDevice?.WaitForIdle();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"Graphics device did not become idle cleanly: {ex.Message}");
+        }
 
-        // SCREENSHOT FIX: Cleanup screenshot resources
         ScreenshotUtility.Cleanup();
-
-        _mainWindow?.Dispose();
-        _imGuiController.Dispose();
-        _commandList.Dispose();
-        _graphicsDevice.Dispose();
+        _imGuiController?.Dispose();
+        _commandList?.Dispose();
+        _graphicsDevice?.Dispose();
     }
 
     private void HandleDpiChange()

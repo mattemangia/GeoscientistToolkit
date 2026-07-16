@@ -295,6 +295,28 @@ public class ProjectManager
         _isDisposing = false;
     }
 
+    /// <summary>Stops background work and unloads all datasets during application shutdown.</summary>
+    public void Shutdown()
+    {
+        _isDisposing = true;
+        StopAutoBackup();
+        _isDisposing = true;
+
+        foreach (var dataset in LoadedDatasets.ToArray())
+            try
+            {
+                dataset.Unload();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Could not unload dataset {dataset.Name}: {ex.Message}");
+            }
+
+        LoadedDatasets.Clear();
+        DatasetRemoved = null;
+        DatasetDataChanged = null;
+    }
+
     public void LoadProject(string path)
     {
         if (!File.Exists(path))

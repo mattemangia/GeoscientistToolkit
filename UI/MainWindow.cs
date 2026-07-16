@@ -108,6 +108,7 @@ public class MainWindow : IDisposable
     private IntPtr _logoTextureId;
     private Vector2 _logoSize;
     private readonly IconFactory _icons;
+    private bool _disposed;
 
     public MainWindow()
     {
@@ -140,7 +141,44 @@ public class MainWindow : IDisposable
     /// </summary>
     public void Dispose()
     {
-        _icons.Dispose();
+        if (_disposed) return;
+        _disposed = true;
+
+        ProjectManager.Instance.DatasetRemoved -= OnDatasetRemoved;
+
+        // Dataset panels own their viewers and nested rendering panels, so release
+        // those first. Then close any remaining detached OS windows.
+        foreach (var panel in _viewers.Cast<BasePanel>().Concat(_thumbnailViewers).ToArray())
+            try
+            {
+                panel.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Could not dispose panel {panel.GetType().Name}: {ex.Message}");
+            }
+
+        _viewers.Clear();
+        _thumbnailViewers.Clear();
+
+        foreach (var panel in BasePanel.AllPanels.ToArray())
+            try
+            {
+                panel.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Could not dispose panel {panel.GetType().Name}: {ex.Message}");
+            }
+
+        try
+        {
+            _icons.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"Could not dispose application icons: {ex.Message}");
+        }
     }
 
     private void LoadLogoTexture()

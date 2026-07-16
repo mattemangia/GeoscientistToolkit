@@ -19,6 +19,7 @@ public abstract class BasePanel : IDisposable
     private Vector2 _lastMainWindowSize;
     protected PopOutWindow _popOutWindow;
     private bool _popOutWindowWantsClosed;
+    private bool _disposed;
     protected string _title;
     private bool _wantsToPopIn;
 
@@ -39,8 +40,11 @@ public abstract class BasePanel : IDisposable
 
     public virtual void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _allPanels.Remove(this);
         _popOutWindow?.Dispose();
+        _popOutWindow = null;
     }
 
     /// <summary>
