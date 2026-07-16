@@ -22,21 +22,28 @@ public class TextureManager : IDisposable
     private readonly Dictionary<IntPtr, IntPtr> _textureIdsByContext = new();
     private Texture _texture;
     private TextureView _textureView;
+    private OpenTkTextureManager _openTkTexture;
 
     /// <summary>
     ///     The actual width of the texture (may differ from original if downsampled)
     /// </summary>
-    public uint Width => _texture?.Width ?? 0;
+    public uint Width => _openTkTexture != null ? (uint)_openTkTexture.Width : _texture?.Width ?? 0;
 
     /// <summary>
     ///     The actual height of the texture (may differ from original if downsampled)
     /// </summary>
-    public uint Height => _texture?.Height ?? 0;
+    public uint Height => _openTkTexture != null ? (uint)_openTkTexture.Height : _texture?.Height ?? 0;
 
-    public bool IsValid => _texture != null && _textureView != null;
+    public bool IsValid => _openTkTexture?.IsValid == true || _texture != null && _textureView != null;
 
     public void Dispose()
     {
+        if (_openTkTexture != null)
+        {
+            _openTkTexture.Dispose();
+            _openTkTexture = null;
+            return;
+        }
         lock (_lock)
         {
             // Clean up all texture bindings
@@ -157,6 +164,19 @@ public class TextureManager : IDisposable
 
         try
         {
+            // Check if downsampling is needed before choosing the backend.
+            var (finalWidth, finalHeight) = GetConstrainedDimensions(width, height);
+            var finalPixelData = pixelData;
+            if (finalWidth != width || finalHeight != height)
+                finalPixelData = DownsamplePixelData(pixelData, width, height, finalWidth, finalHeight);
+
+            if (OpenTkManager.IsInitialized)
+            {
+                manager._openTkTexture = OpenTkTextureManager.CreateFromRgba(finalPixelData,
+                    checked((int)finalWidth), checked((int)finalHeight));
+                return manager;
+            }
+
             var factory = VeldridManager.Factory;
             if (factory == null)
             {
@@ -170,15 +190,6 @@ public class TextureManager : IDisposable
             }
 
             // Check if downsampling is needed
-            var (finalWidth, finalHeight) = GetConstrainedDimensions(width, height);
-            var finalPixelData = pixelData;
-
-            if (finalWidth != width || finalHeight != height)
-            {
-                Logger.LogWarning($"[TextureManager] Texture dimensions {width}x{height} exceed maximum {MAX_TEXTURE_SIZE}. Downsampling to {finalWidth}x{finalHeight}.");
-                finalPixelData = DownsamplePixelData(pixelData, width, height, finalWidth, finalHeight);
-            }
-
             manager._texture = factory.CreateTexture(TextureDescription.Texture2D(
                 finalWidth, finalHeight, 1, 1, format, TextureUsage.Sampled));
 
@@ -221,10 +232,6 @@ public class TextureManager : IDisposable
     /// </summary>
     public void UpdateFromPixelData(byte[] pixelData, uint width, uint height, PixelFormat format = PixelFormat.R8_G8_B8_A8_UNorm)
     {
-        var graphicsDevice = VeldridManager.GraphicsDevice;
-        if (graphicsDevice == null)
-            throw new InvalidOperationException("VeldridManager.GraphicsDevice is not initialized");
-
         // Check if downsampling is needed
         var (finalWidth, finalHeight) = GetConstrainedDimensions(width, height);
         var finalPixelData = pixelData;
@@ -234,6 +241,20 @@ public class TextureManager : IDisposable
             Logger.LogWarning($"[TextureManager] Texture dimensions {width}x{height} exceed maximum {MAX_TEXTURE_SIZE}. Downsampling to {finalWidth}x{finalHeight}.");
             finalPixelData = DownsamplePixelData(pixelData, width, height, finalWidth, finalHeight);
         }
+
+        if (OpenTkManager.IsInitialized)
+        {
+            if (_openTkTexture == null)
+                _openTkTexture = OpenTkTextureManager.CreateFromRgba(finalPixelData,
+                    checked((int)finalWidth), checked((int)finalHeight));
+            else
+                _openTkTexture.UpdateRgba(finalPixelData, checked((int)finalWidth), checked((int)finalHeight));
+            return;
+        }
+
+        var graphicsDevice = VeldridManager.GraphicsDevice;
+        if (graphicsDevice == null)
+            throw new InvalidOperationException("VeldridManager.GraphicsDevice is not initialized");
 
         // Check if we need to recreate the texture (size changed)
         if (_texture == null || _texture.Width != finalWidth || _texture.Height != finalHeight || _texture.Format != format)
@@ -287,6 +308,7 @@ public class TextureManager : IDisposable
     public IntPtr GetImGuiTextureId()
     {
         if (!IsValid) return IntPtr.Zero;
+        if (_openTkTexture != null) return _openTkTexture.ImGuiTextureId;
 
         var currentContext = ImGui.GetCurrentContext();
 

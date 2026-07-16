@@ -1,18 +1,11 @@
-﻿// GAIA/Data/CtImageStack/CtVolume3DViewer.cs
-
 using System.Numerics;
-using System.Runtime.InteropServices;
-using System.Text;
-using GAIA.Analysis.AcousticSimulation;
 using GAIA.Business;
-using GAIA.Data.VolumeData;
 using GAIA.UI.Interfaces;
 using GAIA.UI.Utils;
 using GAIA.Util;
 using ImGuiNET;
+using OpenTK.Graphics.OpenGL;
 using StbImageWriteSharp;
-using Veldrid;
-using Veldrid.SPIRV;
 
 namespace GAIA.Data.CtImageStack;
 
@@ -22,1535 +15,211 @@ public class ClippingPlane
     {
         Name = name;
         Normal = -Vector3.UnitZ;
-        Distance = 0.5f;
-        Enabled = true;
-        Mirror = false;
-        Rotation = Vector3.Zero;
     }
-
     public string Name { get; set; }
     public Vector3 Normal { get; set; }
-    public float Distance { get; set; }
-    public bool Enabled { get; set; }
+    public float Distance { get; set; } = 0.5f;
+    public bool Enabled { get; set; } = true;
     public bool Mirror { get; set; }
-    public Vector3 Rotation { get; set; } // Euler angles for UI
+    public Vector3 Rotation { get; set; }
     public bool IsVisualizationVisible { get; set; } = true;
 }
 
-public class CtVolume3DViewer : IDatasetViewer, IDisposable
+/// <summary>OpenTK/OpenGL high-resolution micro-CT volume renderer.</summary>
+public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
 {
-    private readonly long _auxiliaryTextureBudget;
     internal const int MAX_CLIPPING_PLANES = 8;
-    private readonly CtVolume3DControlPanel _controlPanel;
-    internal readonly CtImageStackDataset _editableDataset;
-
-    private readonly Dictionary<byte, float> _materialOpacity = new();
-
-    // --- Renderer specifico per piattaforma ---
-    private readonly MetalVolumeRenderer _metalRenderer;
-    private readonly ImGuiExportFileDialog _screenshotDialog;
-
-    // --- DATASET REFERENCES ---
     private readonly StreamingCtVolumeDataset _streamingDataset;
-    private float _cameraDistance = 2.0f;
-    private float _cameraPitch = MathF.PI / 6f;
-    private Vector3 _cameraPosition = new(0.5f, 0.5f, 2.5f);
-    private Vector3 _cameraTarget = new(0.5f);
-    private float _cameraYaw = -MathF.PI / 4f;
-    private Texture _colorMapTexture;
-    private CommandList _commandList;
-    private DeviceBuffer _constantBuffer;
-    private Texture _depthTexture;
-    private Framebuffer _framebuffer;
-    private DeviceBuffer _indexBuffer;
-    private bool _isDragging;
-    private bool _isPanning;
-    private bool _labelsDirty;
-    private Texture _labelTexture;
-    private Vector2 _lastMousePos;
-    private Texture _materialColorsTexture;
-
-    private bool _materialParamsDirty = true;
-    private Texture _materialParamsTexture;
-    private Pipeline _pipeline;
-    private DeviceBuffer _planeVisualizationConstantBuffer;
-    private DeviceBuffer _planeVisualizationIndexBuffer;
-    private Pipeline _planeVisualizationPipeline;
-    private ResourceLayout _planeVisualizationResourceLayout;
-    private ResourceSet _planeVisualizationResourceSet;
-    private Shader[] _planeVisualizationShaders;
-    private DeviceBuffer _planeVisualizationVertexBuffer;
+    internal readonly CtImageStackDataset _editableDataset;
+    private readonly CtVolume3DControlPanel _controlPanel;
+    private readonly ImGuiExportFileDialog _screenshotDialog;
+    private readonly Dictionary<byte, float> _materialOpacity = new();
+    private readonly Dictionary<byte, bool> _materialVisibility = new();
+    private int _program, _vao, _vbo, _ebo, _fbo, _colorTexture, _depthBuffer;
+    private int _volumeTexture, _labelTexture, _previewTexture;
+    private int _renderWidth = 1280, _renderHeight = 720;
+    private Vector3 _cameraTarget;
+    private float _cameraYaw = -MathF.PI / 4f, _cameraPitch = MathF.PI / 6f, _cameraDistance = 2f;
+    private Vector2 _lastMouse;
+    private bool _dragging, _panning, _disposed, _previewDirty, _labelsDirty;
+    private Matrix4x4 _view, _projection;
+    private byte[] _previewMask;
     internal Vector4 _previewColor = new(1, 0, 0, 0.5f);
-    private bool _previewDirty;
-    private Texture _previewTexture;
-    private Matrix4x4 _projMatrix;
-    private Texture _renderTexture;
-    private TextureManager _renderTextureManager;
-    private ResourceLayout _resourceLayout;
-    private ResourceSet _resourceSet;
-    private Shader[] _shaders;
-
-    // Preview state
     internal bool _showPreview;
 
-    // Veldrid resources (per renderer standard)
-    private DeviceBuffer _vertexBuffer;
-
-    // Camera and interaction
-    private Matrix4x4 _viewMatrix;
-    private Sampler _volumeSampler;
-    private Texture _volumeTexture;
-    internal Vector3 VolumeScale { get; private set; } = Vector3.One;
-    public int ColorMapIndex = 0;
-
-    // Axis-aligned cutting planes
-    public bool CutXEnabled;
-    public bool CutXForward = true;
-    public float CutXPosition = 0.5f;
-    public bool CutYEnabled;
-    public bool CutYForward = true;
-    public float CutYPosition = 0.5f;
-    public bool CutZEnabled;
-    public bool CutZForward = true;
-    public float CutZPosition = 0.5f;
-    public float MaxThreshold = 1.0f;
-    public float MinThreshold = 0.05f;
-    public bool ShowGrayscale = true;
-    public bool ShowSlices = false;
+    public Vector3 VolumeScale { get; private set; } = Vector3.One;
+    public int ColorMapIndex;
+    public bool CutXEnabled, CutYEnabled, CutZEnabled;
+    public bool CutXForward = true, CutYForward = true, CutZForward = true;
+    public float CutXPosition = 0.5f, CutYPosition = 0.5f, CutZPosition = 0.5f;
+    public float MinThreshold = 0.05f, MaxThreshold = 1f, StepSize = 2f;
+    public bool ShowGrayscale = true, ShowSlices;
     public Vector3 SlicePositions = new(0.5f);
-
-    // Rendering parameters
-    public float StepSize = 2.0f;
-
-    public CtVolume3DViewer(StreamingCtVolumeDataset dataset)
-    {
-        _streamingDataset = dataset;
-        var memoryLimitMb = GAIA.Settings.SettingsManager.Instance.Settings.Hardware.TextureMemoryLimit;
-        _auxiliaryTextureBudget = Math.Clamp(memoryLimitMb * 1024L * 1024L / 16,
-            48L * 1024 * 1024, 128L * 1024 * 1024);
-        _editableDataset = dataset.EditablePartner;
-        if (_editableDataset == null)
-            throw new InvalidOperationException(
-                "StreamingCtVolumeDataset must have a valid EditablePartner for 3D viewing.");
-
-        _streamingDataset.Load();
-        _editableDataset.Load();
-        VolumeScale = CalculateNormalizedPhysicalScale(_editableDataset.Width, _editableDataset.Height,
-            _editableDataset.Depth, _editableDataset.PixelSize, _editableDataset.SliceThickness);
-
-        Logger.Log(
-            $"[CtVolume3DViewer] Streaming render LOD dimensions: {_streamingDataset.RenderLod.Width}x{_streamingDataset.RenderLod.Height}x{_streamingDataset.RenderLod.Depth}");
-        Logger.Log(
-            $"[CtVolume3DViewer] Editable dataset dimensions: {_editableDataset.Width}x{_editableDataset.Height}x{_editableDataset.Depth}");
-
-        // Initialize material opacities
-        foreach (var material in _editableDataset.Materials) _materialOpacity[material.ID] = 1.0f;
-
-        _controlPanel = new CtVolume3DControlPanel(this, _editableDataset);
-        _screenshotDialog = new ImGuiExportFileDialog("ScreenshotDialog3D", "Save Screenshot");
-        _screenshotDialog.SetExtensions((".png", "PNG Image"));
-
-        if (VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal)
-            _metalRenderer = new MetalVolumeRenderer(this);
-
-        InitializeVeldridResources();
-        // Projection setup needs the render target dimensions created above.
-        ResetCamera();
-
-        ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
-        CtImageStackTools.Preview3DChanged += OnPreview3DChanged;
-    }
-
     public bool ShowCutXPlaneVisual { get; set; } = true;
     public bool ShowCutYPlaneVisual { get; set; } = true;
     public bool ShowCutZPlaneVisual { get; set; } = true;
-
-    // Multiple arbitrary clipping planes
-    public List<ClippingPlane> ClippingPlanes { get; } = new();
     public bool ShowPlaneVisualizations { get; set; } = true;
+    public List<ClippingPlane> ClippingPlanes { get; } = new();
 
-    public void Dispose()
+    public CtVolume3DViewer(StreamingCtVolumeDataset dataset)
     {
-        ProjectManager.Instance.DatasetDataChanged -= OnDatasetDataChanged;
-        CtImageStackTools.Preview3DChanged -= OnPreview3DChanged;
-
-        _metalRenderer?.Dispose();
-        _controlPanel?.Dispose();
-        _commandList?.Dispose();
-        _renderTextureManager?.Dispose();
-
-        _planeVisualizationResourceSet?.Dispose();
-        _planeVisualizationResourceLayout?.Dispose();
-        _planeVisualizationPipeline?.Dispose();
-        if (_planeVisualizationShaders != null)
-            foreach (var shader in _planeVisualizationShaders)
-                shader?.Dispose();
-        _planeVisualizationIndexBuffer?.Dispose();
-        _planeVisualizationVertexBuffer?.Dispose();
-        _planeVisualizationConstantBuffer?.Dispose();
-
-        _resourceSet?.Dispose();
-        _resourceLayout?.Dispose();
-        _volumeSampler?.Dispose();
-        _materialColorsTexture?.Dispose();
-        _materialParamsTexture?.Dispose();
-        _labelTexture?.Dispose();
-        _previewTexture?.Dispose();
-        _colorMapTexture?.Dispose();
-        _volumeTexture?.Dispose();
-        _depthTexture?.Dispose();
-        _framebuffer?.Dispose();
-        _renderTexture?.Dispose();
-
-        _pipeline?.Dispose();
-        if (_shaders != null)
-            foreach (var shader in _shaders)
-                shader?.Dispose();
-
-        _constantBuffer?.Dispose();
-        _indexBuffer?.Dispose();
-        _vertexBuffer?.Dispose();
-    }
-
-    private void OnDatasetDataChanged(Dataset dataset)
-    {
-        if (dataset == _editableDataset)
+        if (!OpenTkManager.IsInitialized)
+            throw new InvalidOperationException("The CT 3D viewer requires the OpenTK renderer.");
+        _streamingDataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
+        _editableDataset = dataset.EditablePartner ?? throw new InvalidOperationException("Missing editable CT partner.");
+        dataset.Load();
+        _editableDataset.Load();
+        VolumeScale = CalculateNormalizedPhysicalScale(_editableDataset.Width, _editableDataset.Height,
+            _editableDataset.Depth, _editableDataset.PixelSize, _editableDataset.SliceThickness);
+        foreach (var material in _editableDataset.Materials)
         {
-            Logger.Log("[CtVolume3DViewer] Dataset changed - updating materials and labels");
-
-            // Force reload of material parameters
-            _materialParamsDirty = true;
-
-            // Mark labels for re-upload
-            MarkLabelsAsDirty();
-
-            // Update material visibility from dataset
-            foreach (var material in _editableDataset.Materials)
-                if (material.ID != 0) // Skip exterior
-                    // Sync visibility state
-                    SetMaterialVisibility(material.ID, material.IsVisible);
+            _materialOpacity[material.ID] = 1f;
+            _materialVisibility[material.ID] = material.IsVisible;
         }
+        _controlPanel = new CtVolume3DControlPanel(this, _editableDataset);
+        _screenshotDialog = new ImGuiExportFileDialog("ScreenshotDialog3D", "Save Screenshot");
+        _screenshotDialog.SetExtensions((".png", "PNG Image"));
+        CreateResources();
+        ResetCamera();
+        ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
+        CtImageStackTools.Preview3DChanged += OnPreviewChanged;
     }
 
-    private void OnPreview3DChanged(CtImageStackDataset dataset, byte[] previewMask, Vector4 color)
+    public void DrawToolbarControls() { }
+
+    public void DrawContent(ref float zoom, ref Vector2 pan)
     {
-        if (dataset == _editableDataset)
+        var available = ImGui.GetContentRegionAvail();
+        if (available.X < 2 || available.Y < 2) return;
+        var desiredW = Math.Clamp((int)available.X, 320, 1920);
+        var desiredH = Math.Clamp((int)available.Y, 240, 1080);
+        if (desiredW != _renderWidth || desiredH != _renderHeight) ResizeTarget(desiredW, desiredH);
+        HandleInput();
+        Render();
+        ImGui.Image((IntPtr)_colorTexture, available, new Vector2(0, 1), new Vector2(1, 0));
+    }
+
+    private void CreateResources()
+    {
+        _program = CreateProgram(VertexShader, FragmentShader);
+        float[] vertices =
         {
-            _showPreview = previewMask != null;
-            _previewColor = color;
-            _previewDirty = true;
-
-            if (previewMask != null) UpdatePreviewTexture(previewMask);
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal unsafe struct VolumeConstants
-    {
-        public Matrix4x4 ViewProj;
-        public Matrix4x4 InvView;
-        public Vector4 CameraPosition;
-        public Vector4 VolumeSize;
-        public Vector4 VolumeScale;
-        public Vector4 ThresholdParams;
-        public Vector4 SliceParams;
-        public Vector4 RenderParams;
-        public Vector4 CutPlaneX;
-        public Vector4 CutPlaneY;
-        public Vector4 CutPlaneZ;
-        public fixed float ClippingPlanesData[32];
-        public Vector4 ClippingPlanesInfo;
-        public Vector4 PreviewParams;
-        public Vector4 PreviewAlpha;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct PlaneVisualizationConstants
-    {
-        public Matrix4x4 ViewProj;
-        public Vector4 PlaneColor;
-    }
-
-    #region Resource Creation and Management
-
-    private void InitializeVeldridResources()
-    {
-        var factory = VeldridManager.Factory;
-
-        // Shared resources
-        _renderTexture = factory.CreateTexture(TextureDescription.Texture2D(1280, 720, 1, 1,
-            PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.RenderTarget | TextureUsage.Sampled));
-        var depthDesc = TextureDescription.Texture2D(_renderTexture.Width, _renderTexture.Height, 1, 1,
-            PixelFormat.R32_Float, TextureUsage.DepthStencil);
-        _depthTexture = factory.CreateTexture(depthDesc);
-        _framebuffer = factory.CreateFramebuffer(new FramebufferDescription(_depthTexture, _renderTexture));
-        _renderTextureManager = TextureManager.CreateFromTexture(_renderTexture);
-
-        CreateCubeGeometry(factory);
-        CreatePlaneVisualizationGeometry(factory);
-        CreateVolumeTextures(factory);
-
-        _commandList = factory.CreateCommandList();
-
-        // Platform-specific renderer initialization
-        if (_metalRenderer != null)
-        {
-            _metalRenderer.InitializeResources(factory, _framebuffer, _volumeTexture, _labelTexture, _previewTexture,
-                _volumeSampler);
-        }
-        else
-        {
-            // Standard (Windows) renderer initialization
-            CreateStandardShaders(factory);
-            CreateStandardPipeline(factory);
-            CreateStandardMaterialTextures(factory);
-            _constantBuffer = factory.CreateBuffer(new BufferDescription((uint)Marshal.SizeOf<VolumeConstants>(),
-                BufferUsage.UniformBuffer | BufferUsage.Dynamic));
-            CreateStandardResourceSet(factory);
-        }
-
-        UpdateCameraMatrices();
-    }
-
-    private void CreateVolumeTextures(ResourceFactory factory)
-    {
-        var baseLodInfo = _streamingDataset.RenderLod;
-        var volumeData = ReconstructVolumeFromBricks(baseLodInfo, _streamingDataset.RenderLodVolumeData,
-            _streamingDataset.BrickSize);
-        // Separate the surrounding air from the specimen automatically. Without this,
-        // thousands of low-density samples accumulate into an opaque cuboid.
-        MinThreshold = Math.Max(MinThreshold, CalculateOtsuThreshold(volumeData) / 255f * 0.8f);
-        var desc = TextureDescription.Texture3D((uint)baseLodInfo.Width, (uint)baseLodInfo.Height,
-            (uint)baseLodInfo.Depth, 1, PixelFormat.R8_UNorm, TextureUsage.Sampled);
-        _volumeTexture = factory.CreateTexture(desc);
-        VeldridManager.GraphicsDevice.UpdateTexture(_volumeTexture, volumeData, 0, 0, 0, (uint)baseLodInfo.Width,
-            (uint)baseLodInfo.Height, (uint)baseLodInfo.Depth, 0, 0);
-
-        _labelTexture = CreateDownsampledTexture3D(factory, _editableDataset.LabelData, _auxiliaryTextureBudget);
-
-        var previewDesc = TextureDescription.Texture3D(_labelTexture.Width, _labelTexture.Height,
-            _labelTexture.Depth, 1, PixelFormat.R8_UNorm, TextureUsage.Sampled);
-        _previewTexture = factory.CreateTexture(previewDesc);
-        var emptyData = new byte[checked((int)(_previewTexture.Width * _previewTexture.Height * _previewTexture.Depth))];
-        VeldridManager.GraphicsDevice.UpdateTexture(_previewTexture, emptyData, 0, 0, 0, _previewTexture.Width,
-            _previewTexture.Height, _previewTexture.Depth, 0, 0);
-
-        _volumeSampler = factory.CreateSampler(new SamplerDescription(
-            SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp,
-            SamplerFilter.MinLinear_MagLinear_MipLinear, null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
-    }
-
-    private void UpdatePreviewTexture(byte[] previewMask)
-    {
-        if (previewMask == null || _previewTexture == null) return;
-        var baseLod = new GvtLodInfo
-        {
-            Width = (int)_previewTexture.Width,
-            Height = (int)_previewTexture.Height,
-            Depth = (int)_previewTexture.Depth
+            0,0,0, 1,0,0, 1,1,0, 0,1,0, 0,0,1, 1,0,1, 1,1,1, 0,1,1
         };
-        var downsampledPreview = DownsampleVolumeData(previewMask, _editableDataset.Width, _editableDataset.Height,
-            _editableDataset.Depth, baseLod.Width, baseLod.Height, baseLod.Depth);
-        VeldridManager.GraphicsDevice.UpdateTexture(_previewTexture, downsampledPreview, 0, 0, 0, (uint)baseLod.Width,
-            (uint)baseLod.Height, (uint)baseLod.Depth, 0, 0);
-        _previewDirty = false;
-    }
-
-    private byte[] DownsampleVolumeData(byte[] sourceData, int srcW, int srcH, int srcD, int dstW, int dstH, int dstD)
-    {
-        var result = new byte[dstW * dstH * dstD];
-        var scaleX = (float)srcW / dstW;
-        var scaleY = (float)srcH / dstH;
-        var scaleZ = (float)srcD / dstD;
-        Parallel.For(0, dstD, z =>
+        uint[] indices =
         {
-            for (var y = 0; y < dstH; y++)
-            for (var x = 0; x < dstW; x++)
-            {
-                var srcX = Math.Min((int)(x * scaleX), srcW - 1);
-                var srcY = Math.Min((int)(y * scaleY), srcH - 1);
-                var srcZ = Math.Min((int)(z * scaleZ), srcD - 1);
-                result[z * dstW * dstH + y * dstW + x] = sourceData[srcZ * srcW * srcH + srcY * srcW + srcX];
-            }
-        });
-        return result;
-    }
-
-    // In CtVolume3DViewer.cs
-
-    private byte[] ReconstructVolumeFromBricks(GvtLodInfo lodInfo, byte[] brickData, int brickSize)
-    {
-        var width = lodInfo.Width;
-        var height = lodInfo.Height;
-        var depth = lodInfo.Depth;
-        var bricksX = (width + brickSize - 1) / brickSize;
-        var bricksY = (height + brickSize - 1) / brickSize;
-        var bricksZ = (depth + brickSize - 1) / brickSize;
-        var brickVolumeSize = brickSize * brickSize * brickSize;
-
-        // --- SOLUTION: Parallel-Safe Reconstruction ---
-        // Instead of all threads writing to one large shared array (which causes race conditions),
-        // we parallelize the reconstruction of independent chunks (Z-slices of bricks).
-        // Each thread produces a result, and a final, fast copy assembles these results.
-        // This maintains performance while guaranteeing correctness on all platforms.
-
-        // Step 1: Create a container for the independent results from each parallel task.
-        var reconstructedSlices = new byte[bricksZ][];
-
-        // Step 2: Process each Z-slice of bricks in parallel.
-        Parallel.For(0, bricksZ, bz =>
-        {
-            // Calculate the dimensions and data for THIS slice only.
-            var sliceStartX = 0;
-            var sliceStartY = 0;
-            var sliceStartZ = bz * brickSize;
-
-            // This is the output buffer for the current thread ONLY. No other thread will touch this.
-            var sliceData = new byte[width * height * brickSize];
-
-            for (var by = 0; by < bricksY; by++)
-            for (var bx = 0; bx < bricksX; bx++)
-            {
-                var brickIndex = (bz * bricksY + by) * bricksX + bx;
-                var brickOffset = brickIndex * brickVolumeSize;
-
-                if (brickOffset >= brickData.Length) continue; // Safety check
-
-                // Reconstruct one brick into the thread-local sliceData buffer.
-                for (var z = 0; z < brickSize; z++)
-                {
-                    var gz = sliceStartZ + z;
-                    if (gz >= depth) continue;
-
-                    for (var y = 0; y < brickSize; y++)
-                    {
-                        var gy = by * brickSize + y;
-                        if (gy >= height) continue;
-
-                        for (var x = 0; x < brickSize; x++)
-                        {
-                            var gx = bx * brickSize + x;
-                            if (gx >= width) continue;
-
-                            var brickLocalIndex = z * brickSize * brickSize + y * brickSize + x;
-
-                            if (brickOffset + brickLocalIndex < brickData.Length)
-                            {
-                                // Calculate the destination index within the local slice buffer
-                                var sliceIndex = z * height * width + gy * width + gx;
-                                if (sliceIndex < sliceData.Length)
-                                    sliceData[sliceIndex] = brickData[brickOffset + brickLocalIndex];
-                            }
-                        }
-                    }
-                }
-            }
-
-            // The parallel task is done. Store its result in the shared container.
-            // This is a safe write, as each thread has a unique 'bz' index.
-            reconstructedSlices[bz] = sliceData;
-        });
-
-        // Step 3: All parallel work is finished. Now, assemble the final volume.
-        // This is a fast, single-threaded copy from the reconstructed slices into the final array.
-        var finalVolumeData = new byte[width * height * depth];
-        for (var bz = 0; bz < bricksZ; bz++)
-        {
-            var slice = reconstructedSlices[bz];
-            if (slice == null) continue;
-
-            var sliceDepth = Math.Min(brickSize, depth - bz * brickSize);
-            var bytesToCopy = (long)width * height * sliceDepth;
-            var destinationOffset = (long)bz * brickSize * width * height;
-
-            if (destinationOffset + bytesToCopy > finalVolumeData.Length)
-                bytesToCopy = finalVolumeData.Length - destinationOffset;
-
-            if (bytesToCopy > 0 && bytesToCopy <= slice.Length)
-                Buffer.BlockCopy(slice, 0, finalVolumeData, (int)destinationOffset, (int)bytesToCopy);
-        }
-
-        return finalVolumeData;
-    }
-
-    private void CreateCubeGeometry(ResourceFactory factory)
-    {
-        Vector3[] vertices =
-        {
-            new(0, 0, 0), new(1, 0, 0), new(1, 1, 0), new(0, 1, 0), new(0, 0, 1), new(1, 0, 1), new(1, 1, 1),
-            new(0, 1, 1)
+            0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,2,3,7,2,7,6,0,4,7,0,7,3,1,2,6,1,6,5
         };
-        _vertexBuffer =
-            factory.CreateBuffer(new BufferDescription((uint)(vertices.Length * 12), BufferUsage.VertexBuffer));
-        VeldridManager.GraphicsDevice.UpdateBuffer(_vertexBuffer, 0, vertices);
-        ushort[] indices =
-        {
-            0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 4, 5, 0, 5, 1, 3, 2, 6, 3, 6, 7, 0, 7, 4, 0, 3, 7, 1, 5, 6, 1, 6, 2
-        };
-        _indexBuffer = factory.CreateBuffer(new BufferDescription((uint)(indices.Length * 2), BufferUsage.IndexBuffer));
-        VeldridManager.GraphicsDevice.UpdateBuffer(_indexBuffer, 0, indices);
-    }
-
-    private void CreatePlaneVisualizationGeometry(ResourceFactory factory)
-    {
-        Vector3[] vertices = { new(-0.5f, -0.5f, 0), new(0.5f, -0.5f, 0), new(0.5f, 0.5f, 0), new(-0.5f, 0.5f, 0) };
-        _planeVisualizationVertexBuffer =
-            factory.CreateBuffer(new BufferDescription((uint)(vertices.Length * 12), BufferUsage.VertexBuffer));
-        VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationVertexBuffer, 0, vertices);
-        ushort[] indices = { 0, 1, 2, 0, 2, 3 };
-        _planeVisualizationIndexBuffer =
-            factory.CreateBuffer(new BufferDescription((uint)(indices.Length * 2), BufferUsage.IndexBuffer));
-        VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationIndexBuffer, 0, indices);
-    }
-
-    private void CreateStandardShaders(ResourceFactory factory)
-    {
-        var vertexShaderGlsl = @"
-#version 450
-layout(location = 0) in vec3 in_Position;
-
-layout(set = 0, binding = 0) uniform Constants
-{
-    mat4 ViewProj;
-    mat4 InvView;
-    vec4 CameraPosition;
-    vec4 VolumeSize;
-    vec4 VolumeScale;
-    vec4 ThresholdParams;
-    vec4 SliceParams;
-    vec4 RenderParams;
-    vec4 CutPlaneX;
-    vec4 CutPlaneY;
-    vec4 CutPlaneZ;
-    vec4 ClippingPlanesData[8];
-    vec4 ClippingPlanesInfo;
-    vec4 PreviewParams;
-    vec4 PreviewAlpha;
-};
-
-layout(location = 0) out vec3 out_ModelPos;
-
-void main() 
-{
-    out_ModelPos = in_Position * VolumeScale.xyz;
-    gl_Position = ViewProj * vec4(out_ModelPos, 1.0);
-}";
-
-        // FIXED: Corrected the colormap application logic
-        var fragmentShaderGlsl = @"
-#version 450
-layout(location = 0) in vec3 in_ModelPos;
-layout(location = 0) out vec4 out_Color;
-
-layout(set = 0, binding = 0) uniform Constants
-{
-    mat4 ViewProj;
-    mat4 InvView;
-    vec4 CameraPosition;
-    vec4 VolumeSize;
-    vec4 VolumeScale;
-    vec4 ThresholdParams;
-    vec4 SliceParams;
-    vec4 RenderParams;
-    vec4 CutPlaneX;
-    vec4 CutPlaneY;
-    vec4 CutPlaneZ;
-    vec4 ClippingPlanesData[8];
-    vec4 ClippingPlanesInfo;
-    vec4 PreviewParams;
-    vec4 PreviewAlpha;
-};
-
-layout(set = 0, binding = 1) uniform sampler VolumeSampler;
-layout(set = 0, binding = 2) uniform texture3D VolumeTexture;
-layout(set = 0, binding = 3) uniform texture3D LabelTexture;
-layout(set = 0, binding = 4) uniform texture1D ColorMapTexture;
-layout(set = 0, binding = 5) uniform texture1D MaterialParamsTexture;
-layout(set = 0, binding = 6) uniform texture1D MaterialColorsTexture;
-layout(set = 0, binding = 7) uniform texture3D PreviewTexture;
-
-bool IntersectBox(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax, out float tNear, out float tFar)
-{
-    vec3 invRayDir = 1.0 / (rayDir + 1e-8);
-    vec3 t1 = (boxMin - rayOrigin) * invRayDir;
-    vec3 t2 = (boxMax - rayOrigin) * invRayDir;
-    vec3 tMin = min(t1, t2);
-    vec3 tMax = max(t1, t2);
-    tNear = max(max(tMin.x, tMin.y), tMin.z);
-    tFar = min(min(tMax.x, tMax.y), tMax.z);
-    return tFar >= tNear && tFar > 0.0;
-}
-
-bool IsCutByPlanes(vec3 pos)
-{
-    if (CutPlaneX.x > 0.5 && (pos.x - CutPlaneX.z) * CutPlaneX.y > 0.0) return true;
-    if (CutPlaneY.x > 0.5 && (pos.y - CutPlaneY.z) * CutPlaneY.y > 0.0) return true;
-    if (CutPlaneZ.x > 0.5 && (pos.z - CutPlaneZ.z) * CutPlaneZ.y > 0.0) return true;
-    int numPlanes = int(ClippingPlanesInfo.x);
-    for (int i = 0; i < numPlanes; i++)
-    {
-        vec4 planeData = ClippingPlanesData[i];
-        if (planeData.w > 0.5)
-        {
-            vec3 normal = planeData.xyz; float dist = length(normal);
-            if (dist > 0.001)
-            {
-                normal /= dist; float mirror = step(1.5, dist);
-                float planeDist = dot(pos - vec3(0.5), normal) - (dist - 0.5 - mirror);
-                if (mirror > 0.5 ? planeDist < 0.0 : planeDist > 0.0) return true;
-            }
-        }
-    }
-    return false;
-}
-
-// FIXED: Always apply colormap based on index
-vec4 ApplyColorMap(float intensity, int colorMapIndex)
-{
-    // colorMapIndex: 0=Grayscale, 1=Hot, 2=Cool, 3=Rainbow
-    // Each colormap occupies 256 texels in the 1024-texel texture
-    float mapOffset = float(colorMapIndex) * 256.0;
-    float samplePos = clamp((mapOffset + intensity * 255.0) / 1024.0, 0.0, 1.0);
-    return textureLod(sampler1D(ColorMapTexture, VolumeSampler), samplePos, 0.0);
-}
-
-void main()
-{
-    vec3 rayOrigin = CameraPosition.xyz;
-    vec3 rayDir = normalize(in_ModelPos - rayOrigin);
-
-    float tNear, tFar;
-    if (!IntersectBox(rayOrigin, rayDir, vec3(0.0), VolumeScale.xyz, tNear, tFar))
-    {
-        discard;
-    }
-    
-    tNear = max(tNear, 0.0);
-    vec4 accumulatedColor = vec4(0.0);
-    
-    float maxDim = max(VolumeSize.x, max(VolumeSize.y, VolumeSize.z));
-    float baseStepSize = min(VolumeScale.x / VolumeSize.x,
-        min(VolumeScale.y / VolumeSize.y, VolumeScale.z / VolumeSize.z));
-    float step = baseStepSize * ThresholdParams.z;
-    step = max(step, (tFar - tNear) / 1536.0);
-    
-    int maxSteps = int((tFar - tNear) / step);
-    float opacityScalar = 80.0;
-    float t = tNear;
-
-    // Get colormap index from RenderParams.x
-    int colorMapIndex = int(RenderParams.x);
-
-    for (int i = 0; i < 1536; i++)
-    {
-        if (i >= maxSteps || t > tFar || accumulatedColor.a > 0.98) break;
-
-        vec3 currentWorld = rayOrigin + t * rayDir;
-        vec3 currentPos = currentWorld / VolumeScale.xyz;
-        if (any(lessThan(currentPos, vec3(0.0))) || any(greaterThan(currentPos, vec3(1.0))) || IsCutByPlanes(currentPos))
-        {
-            t += step;
-            continue;
-        }
-
-        vec4 sampledColor = vec4(0.0);
-
-        // 1. Base Grayscale Rendering with Colormap
-        if (ThresholdParams.w > 0.5) // Show Grayscale
-        {
-            float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos, 0.0).r;
-            if (intensity >= ThresholdParams.x && intensity <= ThresholdParams.y)
-            {
-                float normIntensity = (intensity - ThresholdParams.x) / (ThresholdParams.y - ThresholdParams.x + 0.001);
-                
-                // FIXED: Always apply colormap, colormap index 0 is grayscale
-                sampledColor = ApplyColorMap(normIntensity, colorMapIndex);
-                sampledColor.a = smoothstep(0.0, 1.0, normIntensity);
-
-                // Gradient lighting exposes cylindrical surfaces and fine density
-                // changes without allocating an additional gradient volume.
-                if (sampledColor.a > 0.01)
-                {
-                    vec3 texel = 1.0 / VolumeSize.xyz;
-                    vec3 gradient = vec3(
-                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos + vec3(texel.x,0,0), 0.0).r -
-                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos - vec3(texel.x,0,0), 0.0).r,
-                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos + vec3(0,texel.y,0), 0.0).r -
-                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos - vec3(0,texel.y,0), 0.0).r,
-                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos + vec3(0,0,texel.z), 0.0).r -
-                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos - vec3(0,0,texel.z), 0.0).r);
-                    float gradientLength = length(gradient);
-                    if (gradientLength > 0.0001)
-                    {
-                        vec3 normal = gradient / gradientLength;
-                        vec3 lightDir = normalize(vec3(0.4, 0.6, 1.0));
-                        float lighting = 0.3 + 0.7 * abs(dot(normal, lightDir));
-                        sampledColor.rgb *= lighting;
-                    }
-                }
-            }
-        }
-
-        // 2. Material Overlay
-        int materialId = int(textureLod(sampler3D(LabelTexture, VolumeSampler), currentPos, 0.0).r * 255.0 + 0.5);
-        if (materialId > 0)
-        {
-            vec2 materialParams = texelFetch(sampler1D(MaterialParamsTexture, VolumeSampler), materialId, 0).xy;
-            bool isVisible = materialParams.x > 0.5;
-            if (isVisible)
-            {
-                vec4 materialColor = texelFetch(sampler1D(MaterialColorsTexture, VolumeSampler), materialId, 0);
-                float opacity = materialParams.y;
-                
-                // Blend over grayscale
-                sampledColor.rgb = mix(sampledColor.rgb, materialColor.rgb, opacity);
-                sampledColor.a = max(sampledColor.a, opacity);
-            }
-        }
-
-        // 3. Preview Overlay (highest priority)
-        if (PreviewParams.x > 0.5 && textureLod(sampler3D(PreviewTexture, VolumeSampler), currentPos, 0.0).r > 0.5)
-        {
-            vec4 previewRgba = vec4(PreviewParams.yzw, PreviewAlpha.x);
-            // Blend over material/grayscale
-            sampledColor.rgb = mix(sampledColor.rgb, previewRgba.rgb, previewRgba.a);
-            sampledColor.a = max(sampledColor.a, previewRgba.a);
-        }
-        
-        if (sampledColor.a > 0.0)
-        {
-            float correctedAlpha = clamp(sampledColor.a * step * opacityScalar, 0.0, 1.0);
-            accumulatedColor += (1.0 - accumulatedColor.a) * vec4(sampledColor.rgb * correctedAlpha, correctedAlpha);
-        }
-        t += step;
-    }
-    out_Color = accumulatedColor;
-}";
-
-        var planeVertexShaderGlsl = @"
-#version 450
-layout(location = 0) in vec3 in_Position;
-layout(set = 0, binding = 0) uniform Constants { mat4 ViewProj; vec4 PlaneColor; };
-void main() { gl_Position = ViewProj * vec4(in_Position, 1.0); }";
-
-        var planeFragmentShaderGlsl = @"
-#version 450
-layout(location = 0) out vec4 out_Color;
-layout(set = 0, binding = 0) uniform Constants { mat4 ViewProj; vec4 PlaneColor; };
-void main() { out_Color = PlaneColor; }";
-
-        try
-        {
-            var options = new CrossCompileOptions(true, !VeldridManager.GraphicsDevice.IsClipSpaceYInverted);
-
-            var mainVertexDesc =
-                new ShaderDescription(ShaderStages.Vertex, Encoding.UTF8.GetBytes(vertexShaderGlsl), "main");
-            var mainFragmentDesc =
-                new ShaderDescription(ShaderStages.Fragment, Encoding.UTF8.GetBytes(fragmentShaderGlsl), "main");
-            _shaders = factory.CreateFromSpirv(mainVertexDesc, mainFragmentDesc, options);
-
-            var planeVertexDesc = new ShaderDescription(ShaderStages.Vertex,
-                Encoding.UTF8.GetBytes(planeVertexShaderGlsl), "main");
-            var planeFragmentDesc = new ShaderDescription(ShaderStages.Fragment,
-                Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main");
-            _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, options);
-
-            Logger.Log(
-                $"[CtVolume3DViewer] Standard shaders compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}.");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError($"[CtVolume3DViewer] Failed to create standard shaders: {ex.Message}");
-            throw new InvalidOperationException("Failed to create shaders for 3D volume rendering", ex);
-        }
-    }
-
-    private void CreateStandardPipeline(ResourceFactory factory)
-    {
-        _resourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
-            new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer,
-                ShaderStages.Vertex | ShaderStages.Fragment),
-            new ResourceLayoutElementDescription("VolumeSampler", ResourceKind.Sampler, ShaderStages.Fragment),
-            new ResourceLayoutElementDescription("VolumeTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
-            new ResourceLayoutElementDescription("LabelTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
-            new ResourceLayoutElementDescription("ColorMapTexture", ResourceKind.TextureReadOnly,
-                ShaderStages.Fragment),
-            new ResourceLayoutElementDescription("MaterialParamsTexture", ResourceKind.TextureReadOnly,
-                ShaderStages.Fragment),
-            new ResourceLayoutElementDescription("MaterialColorsTexture", ResourceKind.TextureReadOnly,
-                ShaderStages.Fragment),
-            new ResourceLayoutElementDescription("PreviewTexture", ResourceKind.TextureReadOnly,
-                ShaderStages.Fragment)));
-
-        _pipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
-            BlendStateDescription.SingleAlphaBlend,
-            new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
-            new RasterizerStateDescription(FaceCullMode.Back, PolygonFillMode.Solid, FrontFace.CounterClockwise, true,
-                false),
-            PrimitiveTopology.TriangleList,
-            new ShaderSetDescription(
-                new[]
-                {
-                    new VertexLayoutDescription(new VertexElementDescription("Position",
-                        VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3))
-                }, _shaders),
-            new[] { _resourceLayout }, _framebuffer.OutputDescription));
-
-        _planeVisualizationResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
-            new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer,
-                ShaderStages.Vertex | ShaderStages.Fragment)));
-
-        _planeVisualizationPipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
-            new BlendStateDescription(RgbaFloat.Black, BlendAttachmentDescription.AlphaBlend),
-            new DepthStencilStateDescription(true, false, ComparisonKind.Less),
-            new RasterizerStateDescription(FaceCullMode.None, PolygonFillMode.Solid, FrontFace.CounterClockwise, true,
-                false),
-            PrimitiveTopology.TriangleList,
-            new ShaderSetDescription(
-                new[]
-                {
-                    new VertexLayoutDescription(new VertexElementDescription("Position",
-                        VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3))
-                }, _planeVisualizationShaders),
-            new[] { _planeVisualizationResourceLayout }, _framebuffer.OutputDescription));
-
-        _planeVisualizationConstantBuffer = factory.CreateBuffer(new BufferDescription(
-            (uint)Marshal.SizeOf<PlaneVisualizationConstants>(), BufferUsage.UniformBuffer | BufferUsage.Dynamic));
-        _planeVisualizationResourceSet = factory.CreateResourceSet(
-            new ResourceSetDescription(_planeVisualizationResourceLayout, _planeVisualizationConstantBuffer));
-
-        // This texture is created here because it's only needed for the standard pipeline
-        CreateStandardColorMapTexture(factory);
-    }
-
-    private void CreateStandardColorMapTexture(ResourceFactory factory)
-    {
-        const int mapSize = 256;
-        const int numMaps = 4;
-        var colorMapData = new RgbaFloat[mapSize * numMaps];
-
-        for (var i = 0; i < mapSize; i++)
-        {
-            var v = i / (float)(mapSize - 1);
-            colorMapData[i] = new RgbaFloat(v, v, v, 1);
-        }
-
-        for (var i = 0; i < mapSize; i++)
-        {
-            var t = i / (float)(mapSize - 1);
-            var r = Math.Min(1.0f, 3.0f * t);
-            var g = Math.Clamp(3.0f * t - 1.0f, 0.0f, 1.0f);
-            var b = Math.Clamp(3.0f * t - 2.0f, 0.0f, 1.0f);
-            colorMapData[mapSize * 1 + i] = new RgbaFloat(r, g, b, 1);
-        }
-
-        for (var i = 0; i < mapSize; i++)
-        {
-            var t = i / (float)(mapSize - 1);
-            colorMapData[mapSize * 2 + i] = new RgbaFloat(t, 1 - t, 1, 1);
-        }
-
-        for (var i = 0; i < mapSize; i++)
-        {
-            var h = i / (float)(mapSize - 1) * 0.7f;
-            colorMapData[mapSize * 3 + i] = HsvToRgb(h, 1.0f, 1.0f);
-        }
-
-        // Use 1D texture for standard backends
-        _colorMapTexture = factory.CreateTexture(TextureDescription.Texture1D(mapSize * numMaps, 1, 1,
-            PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
-        VeldridManager.GraphicsDevice.UpdateTexture(_colorMapTexture, colorMapData, 0, 0, 0, mapSize * numMaps, 1, 1, 0,
-            0);
-    }
-
-    private void CreateStandardMaterialTextures(ResourceFactory factory)
-    {
-        // Use 1D textures for standard backends
-        _materialParamsTexture =
-            factory.CreateTexture(TextureDescription.Texture1D(256, 1, 1, PixelFormat.R32_G32_Float,
-                TextureUsage.Sampled));
-        _materialColorsTexture =
-            factory.CreateTexture(TextureDescription.Texture1D(256, 1, 1, PixelFormat.R32_G32_B32_A32_Float,
-                TextureUsage.Sampled));
-        UpdateMaterialTextures();
-    }
-
-    private void CreateStandardResourceSet(ResourceFactory factory)
-    {
-        _resourceSet = factory.CreateResourceSet(new ResourceSetDescription(_resourceLayout, _constantBuffer,
-            _volumeSampler, _volumeTexture, _labelTexture, _colorMapTexture, _materialParamsTexture,
-            _materialColorsTexture, _previewTexture));
-    }
-
-    #endregion
-
-    #region Drawing and Interaction
-
-    private void UpdateCameraMatrices()
-    {
-        _cameraPosition = _cameraTarget + new Vector3(MathF.Cos(_cameraYaw) * MathF.Cos(_cameraPitch),
-            MathF.Sin(_cameraPitch), MathF.Sin(_cameraYaw) * MathF.Cos(_cameraPitch)) * _cameraDistance;
-        _viewMatrix = Matrix4x4.CreateLookAt(_cameraPosition, _cameraTarget, Vector3.UnitY);
-        var aspectRatio = _renderTexture.Width / (float)Math.Max(1, _renderTexture.Height);
-        _projMatrix = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspectRatio, 0.1f, 1000f);
-    }
-
-    public static Vector3 CalculateNormalizedPhysicalScale(int width, int height, int depth,
-        float pixelSize, float sliceThickness)
-    {
-        var xy = pixelSize > 0 && float.IsFinite(pixelSize) ? pixelSize : 1f;
-        var z = sliceThickness > 0 && float.IsFinite(sliceThickness) ? sliceThickness : xy;
-        var physical = new Vector3(Math.Max(1, width) * xy, Math.Max(1, height) * xy, Math.Max(1, depth) * z);
-        var longest = Math.Max(physical.X, Math.Max(physical.Y, physical.Z));
-        return longest > 0 && float.IsFinite(longest) ? physical / longest : Vector3.One;
-    }
-
-    public static byte CalculateOtsuThreshold(byte[] data)
-    {
-        if (data == null || data.Length == 0) return 0;
-        var histogram = new long[256];
-        foreach (var value in data) histogram[value]++;
-        long total = data.LongLength, backgroundWeight = 0;
-        double totalSum = 0, backgroundSum = 0, bestVariance = -1;
-        for (var i = 0; i < 256; i++) totalSum += i * histogram[i];
-        byte threshold = 0;
-        for (var i = 0; i < 255; i++)
-        {
-            backgroundWeight += histogram[i];
-            if (backgroundWeight == 0) continue;
-            var foregroundWeight = total - backgroundWeight;
-            if (foregroundWeight == 0) break;
-            backgroundSum += i * histogram[i];
-            var backgroundMean = backgroundSum / backgroundWeight;
-            var foregroundMean = (totalSum - backgroundSum) / foregroundWeight;
-            var variance = backgroundWeight * (double)foregroundWeight *
-                           (backgroundMean - foregroundMean) * (backgroundMean - foregroundMean);
-            if (variance > bestVariance)
-            {
-                bestVariance = variance;
-                threshold = (byte)i;
-            }
-        }
-        return threshold;
-    }
-
-    private unsafe void UpdateConstantBuffer()
-    {
-        Matrix4x4.Invert(_viewMatrix, out var invView);
-        var constants = new VolumeConstants
-        {
-            ViewProj = _viewMatrix * _projMatrix,
-            InvView = invView,
-            CameraPosition = new Vector4(_cameraPosition, 1),
-            VolumeSize = new Vector4(_editableDataset.Width, _editableDataset.Height, _editableDataset.Depth, 0),
-            VolumeScale = new Vector4(VolumeScale, 0),
-            ThresholdParams = new Vector4(MinThreshold, MaxThreshold, StepSize, ShowGrayscale ? 1 : 0),
-            SliceParams = new Vector4(SlicePositions, ShowSlices ? 1 : 0),
-            RenderParams = new Vector4(ColorMapIndex, 0, 0, 0),
-            CutPlaneX = new Vector4(CutXEnabled ? 1 : 0, CutXForward ? 1 : -1, CutXPosition, 0),
-            CutPlaneY = new Vector4(CutYEnabled ? 1 : 0, CutYForward ? 1 : -1, CutYPosition, 0),
-            CutPlaneZ = new Vector4(CutZEnabled ? 1 : 0, CutZForward ? 1 : -1, CutZPosition, 0),
-            ClippingPlanesInfo = new Vector4(0, ShowPlaneVisualizations ? 1 : 0, 0, 0),
-            PreviewParams = new Vector4(_showPreview ? 1 : 0, _previewColor.X, _previewColor.Y, _previewColor.Z),
-            PreviewAlpha = new Vector4(_previewColor.W, 0, 0, 0)
-        };
-
-        var enabledPlanes = 0;
-        for (var i = 0; i < Math.Min(ClippingPlanes.Count, MAX_CLIPPING_PLANES); i++)
-        {
-            var plane = ClippingPlanes[i];
-            if (plane.Enabled)
-            {
-                var dist = plane.Distance + (plane.Mirror ? 1.0f : 0.0f);
-                var normal = plane.Normal * dist;
-                constants.ClippingPlanesData[enabledPlanes * 4] = normal.X;
-                constants.ClippingPlanesData[enabledPlanes * 4 + 1] = normal.Y;
-                constants.ClippingPlanesData[enabledPlanes * 4 + 2] = normal.Z;
-                constants.ClippingPlanesData[enabledPlanes * 4 + 3] = 1;
-                enabledPlanes++;
-            }
-        }
-
-        constants.ClippingPlanesInfo.X = enabledPlanes;
-
-        VeldridManager.GraphicsDevice.UpdateBuffer(_constantBuffer, 0, ref constants);
-    }
-
-    internal void UpdateMaterialTextures()
-    {
-        if (!_materialParamsDirty) return;
-        if (_metalRenderer != null)
-        {
-            _metalRenderer.UpdateMaterialTextures();
-        }
-        else
-        {
-            var paramData = new Vector2[256];
-            var colorData = new RgbaFloat[256];
-            for (var i = 0; i < 256; i++)
-            {
-                var material = _editableDataset.Materials.FirstOrDefault(m => m.ID == i);
-                if (material != null)
-                {
-                    // Get the opacity value from our dictionary, default to 1.0f if not set
-                    var opacity = GetMaterialOpacity((byte)i);
-                    paramData[i] = new Vector2(material.IsVisible ? 1.0f : 0.0f, opacity);
-                    colorData[i] = new RgbaFloat(material.Color);
-                }
-                else
-                {
-                    paramData[i] = new Vector2(0, 1);
-                    colorData[i] = RgbaFloat.Black;
-                }
-            }
-
-            VeldridManager.GraphicsDevice.UpdateTexture(_materialParamsTexture, paramData, 0, 0, 0, 256, 1, 1, 0, 0);
-            VeldridManager.GraphicsDevice.UpdateTexture(_materialColorsTexture, colorData, 0, 0, 0, 256, 1, 1, 0, 0);
-        }
-
-        _materialParamsDirty = false;
-    }
-
-    private void ReuploadLabelData()
-    {
-        _labelTexture?.Dispose();
-        _labelTexture =
-            CreateDownsampledTexture3D(VeldridManager.Factory, _editableDataset.LabelData, _auxiliaryTextureBudget);
-
-        if (_metalRenderer != null)
-        {
-            _metalRenderer.UpdateLabelTexture(_labelTexture);
-        }
-        else
-        {
-            _resourceSet?.Dispose();
-            CreateStandardResourceSet(VeldridManager.Factory);
-        }
-
-        _labelsDirty = false;
+        _vao = GL.GenVertexArray(); _vbo = GL.GenBuffer(); _ebo = GL.GenBuffer();
+        GL.BindVertexArray(_vao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo); GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * 4, vertices, BufferUsageHint.StaticDraw);
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo); GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * 4, indices, BufferUsageHint.StaticDraw);
+        GL.EnableVertexAttribArray(0); GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 12, 0);
+        var lod = _streamingDataset.RenderLod ?? _streamingDataset.BaseLod;
+        var bricks = _streamingDataset.RenderLodVolumeData ?? _streamingDataset.BaseLodVolumeData;
+        var density = ReconstructVolume(lod, bricks, _streamingDataset.BrickSize);
+        MinThreshold = Math.Max(MinThreshold, CalculateOtsuThreshold(density) / 255f * 0.8f);
+        _volumeTexture = CreateTexture3D(lod.Width, lod.Height, lod.Depth, density);
+        var aux = CreateDownsampledLabels(lod.Width, lod.Height, lod.Depth, 128L * 1024 * 1024);
+        _labelTexture = CreateTexture3D(aux.w, aux.h, aux.d, aux.data);
+        _previewTexture = CreateTexture3D(aux.w, aux.h, aux.d, new byte[aux.data.Length]);
+        ResizeTarget(_renderWidth, _renderHeight);
     }
 
     private void Render()
     {
-        if (_labelsDirty) ReuploadLabelData();
-
-        if (_metalRenderer != null)
+        if (_labelsDirty) { UploadLabels(); _labelsDirty = false; }
+        if (_previewDirty) { UploadPreview(); _previewDirty = false; }
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+        GL.Viewport(0, 0, _renderWidth, _renderHeight);
+        GL.Enable(EnableCap.DepthTest); GL.Enable(EnableCap.CullFace); GL.CullFace(CullFaceMode.Back);
+        GL.ClearColor(0.015f, 0.018f, 0.025f, 1); GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        GL.UseProgram(_program);
+        SetMatrix("uView", _view); SetMatrix("uProjection", _projection);
+        Set3("uScale", VolumeScale); Set3("uCamera", CameraPosition);
+        Set3("uVolumeSize", new Vector3(_streamingDataset.RenderLod.Width, _streamingDataset.RenderLod.Height, _streamingDataset.RenderLod.Depth));
+        Set1("uMin", MinThreshold); Set1("uMax", MaxThreshold); Set1("uStep", StepSize);
+        Set1("uShowGray", ShowGrayscale ? 1 : 0); Set1("uColorMap", ColorMapIndex);
+        Set4("uCutX", new Vector4(CutXEnabled ? 1 : 0, CutXForward ? 1 : -1, CutXPosition, 0));
+        Set4("uCutY", new Vector4(CutYEnabled ? 1 : 0, CutYForward ? 1 : -1, CutYPosition, 0));
+        Set4("uCutZ", new Vector4(CutZEnabled ? 1 : 0, CutZForward ? 1 : -1, CutZPosition, 0));
+        Set1("uPlaneCount", Math.Min(MAX_CLIPPING_PLANES, ClippingPlanes.Count(p => p.Enabled)));
+        var pi = 0;
+        foreach (var p in ClippingPlanes.Where(p => p.Enabled).Take(MAX_CLIPPING_PLANES))
         {
-            if (_materialParamsDirty) UpdateMaterialTextures();
-            _metalRenderer.Render(_commandList, _framebuffer, _viewMatrix, _projMatrix, _cameraPosition,
-                _planeVisualizationVertexBuffer, _planeVisualizationIndexBuffer);
+            Set4($"uPlanes[{pi++}]", new Vector4(p.Normal, p.Mirror ? -p.Distance : p.Distance));
         }
-        else
-        {
-            // Standard Render Path
-            _commandList.Begin();
-            _commandList.SetFramebuffer(_framebuffer);
-            _commandList.ClearColorTarget(0, RgbaFloat.Black);
-            _commandList.ClearDepthStencil(1f);
-
-            UpdateConstantBuffer();
-            if (_materialParamsDirty) UpdateMaterialTextures();
-
-            _commandList.SetPipeline(_pipeline);
-            _commandList.SetVertexBuffer(0, _vertexBuffer);
-            _commandList.SetIndexBuffer(_indexBuffer, IndexFormat.UInt16);
-            _commandList.SetGraphicsResourceSet(0, _resourceSet);
-            _commandList.DrawIndexed(36, 1, 0, 0, 0);
-
-            if (ShowPlaneVisualizations) RenderPlaneVisualizations();
-
-            if (AcousticIntegration.IsActiveFor(_editableDataset)) RenderTransducerMarkers();
-
-
-            _commandList.End();
-            VeldridManager.GraphicsDevice.SubmitCommands(_commandList);
-            VeldridManager.GraphicsDevice.WaitForIdle();
-        }
+        Set1("uShowPreview", _showPreview ? 1 : 0); Set4("uPreviewColor", _previewColor);
+        Bind3D(0, _volumeTexture, "uVolume"); Bind3D(1, _labelTexture, "uLabels"); Bind3D(2, _previewTexture, "uPreview");
+        GL.BindVertexArray(_vao); GL.DrawElements(PrimitiveType.Triangles, 36, DrawElementsType.UnsignedInt, 0);
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 
-    private void RenderTransducerMarkers()
+    private Vector3 CameraPosition => _cameraTarget + new Vector3(MathF.Cos(_cameraYaw) * MathF.Cos(_cameraPitch), MathF.Sin(_cameraPitch), MathF.Sin(_cameraYaw) * MathF.Cos(_cameraPitch)) * _cameraDistance;
+
+    private void HandleInput()
     {
-        // Use the plane visualization pipeline to draw simple cubes for TX/RX
-        _commandList.SetPipeline(_planeVisualizationPipeline);
-        _commandList.SetVertexBuffer(0, _vertexBuffer); // Use the cube vertex buffer
-        _commandList.SetIndexBuffer(_indexBuffer, IndexFormat.UInt16); // Use the cube index buffer
-
-        var viewProj = _viewMatrix * _projMatrix;
-
-        // Draw TX Marker
-        var txTransform = Matrix4x4.CreateScale(0.02f) * Matrix4x4.CreateTranslation(AcousticIntegration.TxPosition);
-        var txConstants = new PlaneVisualizationConstants
-            { ViewProj = txTransform * viewProj, PlaneColor = new Vector4(0, 1, 1, 1) };
-        VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref txConstants);
-        _commandList.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
-        _commandList.DrawIndexed(36, 1, 0, 0, 0); // 36 indices for a cube
-
-        // Draw RX Marker
-        var rxTransform = Matrix4x4.CreateScale(0.02f) * Matrix4x4.CreateTranslation(AcousticIntegration.RxPosition);
-        var rxConstants = new PlaneVisualizationConstants
-            { ViewProj = rxTransform * viewProj, PlaneColor = new Vector4(0, 1, 0, 1) };
-        VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref rxConstants);
-        _commandList.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
-        _commandList.DrawIndexed(36, 1, 0, 0, 0);
+        if (!ImGui.IsWindowHovered()) { _dragging = _panning = false; return; }
+        var io = ImGui.GetIO(); var mouse = io.MousePos;
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) { _dragging = true; _lastMouse = mouse; }
+        if (ImGui.IsMouseReleased(ImGuiMouseButton.Left)) _dragging = false;
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Middle)) { _panning = true; _lastMouse = mouse; }
+        if (ImGui.IsMouseReleased(ImGuiMouseButton.Middle)) _panning = false;
+        var delta = mouse - _lastMouse; _lastMouse = mouse;
+        if (_dragging) { _cameraYaw += delta.X * 0.008f; _cameraPitch = Math.Clamp(_cameraPitch - delta.Y * 0.008f, -1.5f, 1.5f); }
+        if (_panning) _cameraTarget += new Vector3(-delta.X, delta.Y, 0) * (_cameraDistance * 0.001f);
+        if (Math.Abs(io.MouseWheel) > 0) _cameraDistance = Math.Clamp(_cameraDistance * MathF.Pow(0.88f, io.MouseWheel), 0.15f, 20f);
+        UpdateCamera();
     }
 
-    private void RenderPlaneVisualizations()
+    public void ResetCamera() { _cameraTarget = VolumeScale * 0.5f; _cameraYaw = -MathF.PI / 4; _cameraPitch = MathF.PI / 6; _cameraDistance = Math.Max(1.5f, VolumeScale.Length() * 1.25f); UpdateCamera(); }
+    public void ResetView() { ResetCamera(); CutXEnabled = CutYEnabled = CutZEnabled = false; ClippingPlanes.Clear(); }
+    private void UpdateCamera() { _view = Matrix4x4.CreateLookAt(CameraPosition, _cameraTarget, Vector3.UnitY); _projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4, _renderWidth / (float)_renderHeight, 0.01f, 100f); }
+    public void UpdateClippingPlaneNormal(ClippingPlane p) { var q = Quaternion.CreateFromYawPitchRoll(p.Rotation.Y, p.Rotation.X, p.Rotation.Z); p.Normal = Vector3.Normalize(Vector3.Transform(-Vector3.UnitZ, q)); }
+    public void MarkLabelsAsDirty() => _labelsDirty = true;
+    public bool GetMaterialVisibility(byte id) => !_materialVisibility.TryGetValue(id, out var v) || v;
+    public float GetMaterialOpacity(byte id) => _materialOpacity.GetValueOrDefault(id, 1f);
+    public void SetMaterialVisibility(byte id, bool value) => _materialVisibility[id] = value;
+    public void SetMaterialOpacity(byte id, float value) => _materialOpacity[id] = value;
+    public void SetAllMaterialsVisibility(bool value) { foreach (var m in _editableDataset.Materials) _materialVisibility[m.ID] = value; }
+    public void ResetAllMaterialOpacities() { foreach (var m in _editableDataset.Materials) _materialOpacity[m.ID] = 1; }
+
+    public void SaveScreenshot(string path)
     {
-        _commandList.SetPipeline(_planeVisualizationPipeline);
-        _commandList.SetVertexBuffer(0, _planeVisualizationVertexBuffer);
-        _commandList.SetIndexBuffer(_planeVisualizationIndexBuffer, IndexFormat.UInt16);
-        var viewProj = _viewMatrix * _projMatrix;
-        if (CutXEnabled && ShowCutXPlaneVisual)
-            RenderCuttingPlane(viewProj, Vector3.UnitX, CutXPosition, new Vector4(1, 0.2f, 0.2f, 0.3f));
-        if (CutYEnabled && ShowCutYPlaneVisual)
-            RenderCuttingPlane(viewProj, Vector3.UnitY, CutYPosition, new Vector4(0.2f, 1, 0.2f, 0.3f));
-        if (CutZEnabled && ShowCutZPlaneVisual)
-            RenderCuttingPlane(viewProj, Vector3.UnitZ, CutZPosition, new Vector4(0.2f, 0.2f, 1, 0.3f));
-        foreach (var plane in ClippingPlanes.Where(p => p.Enabled && p.IsVisualizationVisible))
-            RenderClippingPlane(viewProj, plane, new Vector4(1, 1, 0.2f, 0.3f));
+        var pixels = new byte[_renderWidth * _renderHeight * 4];
+        GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _fbo); GL.ReadPixels(0, 0, _renderWidth, _renderHeight, PixelFormat.Rgba, PixelType.UnsignedByte, pixels); GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, 0);
+        var flipped = new byte[pixels.Length]; var stride = _renderWidth * 4;
+        for (var y = 0; y < _renderHeight; y++) System.Buffer.BlockCopy(pixels, y * stride, flipped, (_renderHeight - 1 - y) * stride, stride);
+        using var fs = File.Create(path); new ImageWriter().WritePng(flipped, _renderWidth, _renderHeight, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, fs);
     }
 
-    private void RenderCuttingPlane(Matrix4x4 viewProj, Vector3 normal, float position, Vector4 color)
+    private void ResizeTarget(int w, int h)
     {
-        Matrix4x4 transform;
-        if (normal == Vector3.UnitX)
-        {
-            transform = Matrix4x4.CreateScale(VolumeScale.Z * 1.1f, VolumeScale.Y * 1.1f, 1f) *
-                        Matrix4x4.CreateRotationY(MathF.PI / 2) *
-                        Matrix4x4.CreateTranslation(position * VolumeScale.X, VolumeScale.Y * 0.5f,
-                            VolumeScale.Z * 0.5f);
-        }
-        else if (normal == Vector3.UnitY)
-        {
-            transform = Matrix4x4.CreateScale(VolumeScale.X * 1.1f, VolumeScale.Z * 1.1f, 1f) *
-                        Matrix4x4.CreateRotationX(-MathF.PI / 2) *
-                        Matrix4x4.CreateTranslation(VolumeScale.X * 0.5f, position * VolumeScale.Y,
-                            VolumeScale.Z * 0.5f);
-        }
-        else
-        {
-            transform = Matrix4x4.CreateScale(VolumeScale.X * 1.1f, VolumeScale.Y * 1.1f, 1f) *
-                        Matrix4x4.CreateTranslation(VolumeScale.X * 0.5f, VolumeScale.Y * 0.5f,
-                            position * VolumeScale.Z);
-        }
-
-        var constants = new PlaneVisualizationConstants { ViewProj = transform * viewProj, PlaneColor = color };
-        VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref constants);
-        _commandList.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
-        _commandList.DrawIndexed(6, 1, 0, 0, 0);
+        _renderWidth = w; _renderHeight = h;
+        if (_fbo == 0) _fbo = GL.GenFramebuffer();
+        if (_colorTexture != 0) GL.DeleteTexture(_colorTexture); if (_depthBuffer != 0) GL.DeleteRenderbuffer(_depthBuffer);
+        _colorTexture = GL.GenTexture(); GL.BindTexture(TextureTarget.Texture2D, _colorTexture); GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, w, h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero); GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear); GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        _depthBuffer = GL.GenRenderbuffer(); GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _depthBuffer); GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.DepthComponent24, w, h);
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo); GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, _colorTexture, 0); GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, RenderbufferTarget.Renderbuffer, _depthBuffer); GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); UpdateCamera();
     }
 
-    private void RenderClippingPlane(Matrix4x4 viewProj, ClippingPlane plane, Vector4 color)
-    {
-        var forward = plane.Normal;
-        var right = Vector3.Cross(Vector3.UnitY, forward);
-        if (right.LengthSquared() < 0.001f) right = Vector3.Cross(Vector3.UnitX, forward);
-        right = Vector3.Normalize(right);
-        var up = Vector3.Cross(forward, right);
-        var rotation = new Matrix4x4(right.X, right.Y, right.Z, 0, up.X, up.Y, up.Z, 0, forward.X, forward.Y, forward.Z,
-            0, 0, 0, 0, 1);
-        var planeSize = Math.Max(VolumeScale.X, Math.Max(VolumeScale.Y, VolumeScale.Z)) * 1.5f;
-        var normalizedCenter = Vector3.One * 0.5f + plane.Normal * (plane.Distance - 0.5f);
-        var worldCenter = normalizedCenter * VolumeScale;
-        var transform = Matrix4x4.CreateScale(planeSize) * rotation * Matrix4x4.CreateTranslation(worldCenter);
-        var constants = new PlaneVisualizationConstants { ViewProj = transform * viewProj, PlaneColor = color };
-        VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref constants);
-        _commandList.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
-        _commandList.DrawIndexed(6, 1, 0, 0, 0);
-    }
+    private static int CreateTexture3D(int w, int h, int d, byte[] data) { var t=GL.GenTexture(); GL.BindTexture(TextureTarget.Texture3D,t); GL.TexImage3D(TextureTarget.Texture3D,0,PixelInternalFormat.R8,w,h,d,0,PixelFormat.Red,PixelType.UnsignedByte,data); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMinFilter,(int)TextureMinFilter.Linear); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMagFilter,(int)TextureMagFilter.Linear); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapS,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapT,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapR,(int)TextureWrapMode.ClampToEdge); return t; }
+    private static byte[] ReconstructVolume(GvtLodInfo l, byte[] b, int bs) { var r=new byte[l.Width*l.Height*l.Depth]; var bx=(l.Width+bs-1)/bs; var by=(l.Height+bs-1)/bs; for(int z=0;z<l.Depth;z++) for(int y=0;y<l.Height;y++) for(int x=0;x<l.Width;x++){var bi=((z/bs)*by*bx+(y/bs)*bx+x/bs)*bs*bs*bs+(z%bs)*bs*bs+(y%bs)*bs+x%bs; if(bi<b.Length)r[(z*l.Height+y)*l.Width+x]=b[bi];} return r; }
+    private (int w,int h,int d,byte[] data) CreateDownsampledLabels(int w,int h,int d,long budget) { var n=(long)w*h*d; var s=n>budget?Math.Pow(budget/(double)n,1.0/3):1; var tw=Math.Max(1,(int)(w*s));var th=Math.Max(1,(int)(h*s));var td=Math.Max(1,(int)(d*s));var a=new byte[tw*th*td]; if(_editableDataset.LabelData!=null) Parallel.For(0,td,z=>{for(int y=0;y<th;y++)for(int x=0;x<tw;x++)a[(z*th+y)*tw+x]=_editableDataset.LabelData[Math.Min(_editableDataset.Width-1,x*_editableDataset.Width/tw),Math.Min(_editableDataset.Height-1,y*_editableDataset.Height/th),Math.Min(_editableDataset.Depth-1,z*_editableDataset.Depth/td)];}); return(tw,th,td,a); }
+    private void UploadLabels() { var a=CreateDownsampledLabels((int)TextureWidth(_labelTexture), (int)TextureHeight(_labelTexture), (int)TextureDepth(_labelTexture), long.MaxValue); GL.BindTexture(TextureTarget.Texture3D,_labelTexture); GL.TexSubImage3D(TextureTarget.Texture3D,0,0,0,0,a.w,a.h,a.d,PixelFormat.Red,PixelType.UnsignedByte,a.data); }
+    private void UploadPreview() { if(_previewMask==null)return; GL.BindTexture(TextureTarget.Texture3D,_previewTexture); var w=(int)TextureWidth(_previewTexture);var h=(int)TextureHeight(_previewTexture);var d=(int)TextureDepth(_previewTexture);var a=new byte[w*h*d];Parallel.For(0,d,z=>{for(int y=0;y<h;y++)for(int x=0;x<w;x++)a[(z*h+y)*w+x]=_previewMask[(Math.Min(_editableDataset.Depth-1,z*_editableDataset.Depth/d)*_editableDataset.Height+Math.Min(_editableDataset.Height-1,y*_editableDataset.Height/h))*_editableDataset.Width+Math.Min(_editableDataset.Width-1,x*_editableDataset.Width/w)];});GL.TexSubImage3D(TextureTarget.Texture3D,0,0,0,0,w,h,d,PixelFormat.Red,PixelType.UnsignedByte,a); }
+    private static long TextureWidth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureWidth,out int v);return v;} private static long TextureHeight(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureHeight,out int v);return v;} private static long TextureDepth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureDepth,out int v);return v;}
+    private void OnDatasetDataChanged(Dataset d){if(d==_editableDataset)_labelsDirty=true;} private void OnPreviewChanged(CtImageStackDataset d,byte[] m,Vector4 c){if(d!=_editableDataset)return;_previewMask=m;_previewColor=c;_showPreview=m!=null;_previewDirty=true;}
+    private void Bind3D(int unit,int tex,string name){GL.ActiveTexture(TextureUnit.Texture0+unit);GL.BindTexture(TextureTarget.Texture3D,tex);Set1(name,unit);} private void Set1(string n,int v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set1(string n,float v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set3(string n,Vector3 v)=>GL.Uniform3(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z);private void Set4(string n,Vector4 v)=>GL.Uniform4(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z,v.W);private void SetMatrix(string n,Matrix4x4 m){var a=new[]{m.M11,m.M12,m.M13,m.M14,m.M21,m.M22,m.M23,m.M24,m.M31,m.M32,m.M33,m.M34,m.M41,m.M42,m.M43,m.M44};GL.UniformMatrix4(GL.GetUniformLocation(_program,n),1,true,a);}
+    private static int CreateProgram(string vs,string fs){int Compile(ShaderType t,string s){var x=GL.CreateShader(t);GL.ShaderSource(x,s);GL.CompileShader(x);GL.GetShader(x,ShaderParameter.CompileStatus,out var ok);if(ok==0)throw new InvalidOperationException(GL.GetShaderInfoLog(x));return x;}var v=Compile(ShaderType.VertexShader,vs);var f=Compile(ShaderType.FragmentShader,fs);var p=GL.CreateProgram();GL.AttachShader(p,v);GL.AttachShader(p,f);GL.LinkProgram(p);GL.GetProgram(p,GetProgramParameterName.LinkStatus,out var ok);GL.DeleteShader(v);GL.DeleteShader(f);if(ok==0)throw new InvalidOperationException(GL.GetProgramInfoLog(p));return p;}
 
-    public void DrawToolbarControls()
-    {
-        if (ImGui.Button("Reset Camera")) ResetCamera();
-        ImGui.SameLine();
+    public static Vector3 CalculateNormalizedPhysicalScale(int w,int h,int d,float px,float st){var xy=px>0&&float.IsFinite(px)?px:1;var z=st>0&&float.IsFinite(st)?st:xy;var p=new Vector3(Math.Max(1,w)*xy,Math.Max(1,h)*xy,Math.Max(1,d)*z);return p/Math.Max(p.X,Math.Max(p.Y,p.Z));}
+    public static byte CalculateOtsuThreshold(byte[] data){if(data==null||data.Length==0)return 0;var h=new long[256];foreach(var v in data)h[v]++;double sum=0,sb=0,best=-1;long wb=0;for(int i=0;i<256;i++)sum+=i*h[i];byte t=0;for(int i=0;i<255;i++){wb+=h[i];if(wb==0)continue;var wf=data.LongLength-wb;if(wf==0)break;sb+=i*h[i];var mb=sb/wb;var mf=(sum-sb)/wf;var v=wb*(double)wf*(mb-mf)*(mb-mf);if(v>best){best=v;t=(byte)i;}}return t;}
+    public void Dispose(){if(_disposed)return;_disposed=true;ProjectManager.Instance.DatasetDataChanged-=OnDatasetDataChanged;CtImageStackTools.Preview3DChanged-=OnPreviewChanged;_controlPanel?.Dispose();foreach(var t in new[]{_volumeTexture,_labelTexture,_previewTexture,_colorTexture})if(t!=0)GL.DeleteTexture(t);if(_depthBuffer!=0)GL.DeleteRenderbuffer(_depthBuffer);if(_fbo!=0)GL.DeleteFramebuffer(_fbo);if(_vbo!=0)GL.DeleteBuffer(_vbo);if(_ebo!=0)GL.DeleteBuffer(_ebo);if(_vao!=0)GL.DeleteVertexArray(_vao);if(_program!=0)GL.DeleteProgram(_program);}
 
-        var showPlanes = ShowPlaneVisualizations;
-        if (ImGui.Checkbox("Show Planes", ref showPlanes)) ShowPlaneVisualizations = showPlanes;
-
-        ImGui.SameLine();
-        ImGui.Text($"Step: {StepSize:F1}");
-        ImGui.SameLine();
-        ImGui.Text($"Threshold: {MinThreshold:F2}-{MaxThreshold:F2}");
-        if (_showPreview)
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "Preview Active");
-        }
-    }
-
-    public void DrawContent(ref float zoom, ref Vector2 pan)
-    {
-        Render();
-        var textureId = _renderTextureManager.GetImGuiTextureId();
-        if (textureId != IntPtr.Zero)
-        {
-            var availableSize = ImGui.GetContentRegionAvail();
-
-            if (availableSize.X > 0 && availableSize.Y > 0 &&
-                ImGui.BeginChild("Volume3DView", availableSize, ImGuiChildFlags.Border,
-                    ImGuiWindowFlags.NoScrollbar))
-            {
-                var imagePos = ImGui.GetCursorScreenPos();
-                ImGui.Image(textureId, availableSize, new Vector2(0, 1), new Vector2(1, 0));
-
-                var hoverFlags = ImGuiHoveredFlags.ChildWindows | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem;
-                if (ImGui.IsWindowHovered(hoverFlags))
-                    HandleMouseInput(imagePos, availableSize);
-
-                if (ImGui.BeginPopupContextWindow("3DViewerContextMenu", ImGuiPopupFlags.MouseButtonRight))
-                {
-                    if (ImGui.MenuItem("Reset Camera")) ResetCamera();
-                    if (ImGui.MenuItem("Reset View")) ResetView();
-                    ImGui.Separator();
-                    if (ImGui.MenuItem("Toggle Plane Visualizations", null, ShowPlaneVisualizations))
-                        ShowPlaneVisualizations = !ShowPlaneVisualizations;
-                    if (ImGui.MenuItem("Clear All Clipping Planes"))
-                        ClippingPlanes.Clear();
-                    ImGui.Separator();
-                    if (ImGui.MenuItem("Save Screenshot..."))
-                        _screenshotDialog.Open("screenshot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
-                    ImGui.EndPopup();
-                }
-
-                ImGui.EndChild();
-            }
-        }
-
-        if (_screenshotDialog.Submit())
-            SaveScreenshot(_screenshotDialog.SelectedPath);
-    }
-
-    private void HandleMouseInput(Vector2 viewPos, Vector2 viewSize)
-    {
-        var io = ImGui.GetIO();
-
-        // Handle Acoustic Transducer Placement (only on left click, not drag)
-        if (AcousticIntegration.IsPlacingFor(_editableDataset) && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-        {
-            var mousePos = io.MousePos - viewPos;
-            if (Raycast(mousePos, viewSize, out var intersectionPoint))
-                AcousticIntegration.UpdatePosition(intersectionPoint);
-            return; // Prevent camera movement on the click that places the transducer
-        }
-
-        // Allow zooming even when placing transducers
-        if (io.MouseWheel != 0)
-            _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * 0.1f), 0.5f, 20.0f);
-
-        // Handle camera rotation and panning
-        if (ImGui.IsMouseDown(ImGuiMouseButton.Left) || ImGui.IsMouseDown(ImGuiMouseButton.Right) ||
-            ImGui.IsMouseDown(ImGuiMouseButton.Middle))
-        {
-            // Allow rotation with right-click even when placing transducers
-            var allowRotation = ImGui.IsMouseDown(ImGuiMouseButton.Right) ||
-                                (ImGui.IsMouseDown(ImGuiMouseButton.Left) &&
-                                 !AcousticIntegration.IsPlacingFor(_editableDataset));
-            var allowPanning = ImGui.IsMouseDown(ImGuiMouseButton.Middle);
-
-            if (!_isDragging && !_isPanning)
-            {
-                if (allowRotation)
-                {
-                    _isDragging = true;
-                    _lastMousePos = io.MousePos;
-                }
-                else if (allowPanning)
-                {
-                    _isPanning = true;
-                    _lastMousePos = io.MousePos;
-                }
-            }
-
-            if (_isDragging || _isPanning)
-            {
-                var delta = io.MousePos - _lastMousePos;
-
-                if (_isDragging)
-                {
-                    _cameraYaw -= delta.X * 0.01f;
-                    _cameraPitch = Math.Clamp(_cameraPitch - delta.Y * 0.01f, -MathF.PI / 2.01f, MathF.PI / 2.01f);
-                }
-
-                if (_isPanning)
-                {
-                    Matrix4x4.Invert(_viewMatrix, out var invView);
-                    var right = Vector3.Normalize(new Vector3(invView.M11, invView.M12, invView.M13));
-                    var up = Vector3.Normalize(new Vector3(invView.M21, invView.M22, invView.M23));
-                    var panSpeed = _cameraDistance * 0.001f;
-                    _cameraTarget -= right * delta.X * panSpeed;
-                    _cameraTarget += up * delta.Y * panSpeed;
-                }
-
-                _lastMousePos = io.MousePos;
-            }
-        }
-        else
-        {
-            _isDragging = false;
-            _isPanning = false;
-        }
-
-        UpdateCameraMatrices();
-    }
-
-    private bool Raycast(Vector2 mousePos, Vector2 viewSize, out Vector3 intersection)
-    {
-        intersection = Vector3.Zero;
-
-        // 1. Unproject mouse coordinates to a 3D ray
-        var viewProj = _viewMatrix * _projMatrix;
-        if (!Matrix4x4.Invert(viewProj, out var invViewProj)) return false;
-
-        var ndc = new Vector2(
-            mousePos.X / viewSize.X * 2.0f - 1.0f,
-            1.0f - mousePos.Y / viewSize.Y * 2.0f
-        );
-
-        var nearPointH = Vector4.Transform(new Vector4(ndc.X, ndc.Y, 0.0f, 1.0f), invViewProj);
-        var farPointH = Vector4.Transform(new Vector4(ndc.X, ndc.Y, 1.0f, 1.0f), invViewProj);
-
-        if (nearPointH.W == 0 || farPointH.W == 0) return false;
-
-        var rayOrigin = new Vector3(nearPointH.X, nearPointH.Y, nearPointH.Z) / nearPointH.W;
-        var farPoint = new Vector3(farPointH.X, farPointH.Y, farPointH.Z) / farPointH.W;
-        var rayDir = Vector3.Normalize(farPoint - rayOrigin);
-
-        // 2. Intersect in physical display space, then return normalized texture
-        // coordinates because acoustic/segmentation integrations use [0,1]^3.
-        float tNear, tFar;
-        var boxMin = Vector3.Zero;
-        var boxMax = VolumeScale;
-
-        var invRayDir = new Vector3(1.0f / rayDir.X, 1.0f / rayDir.Y, 1.0f / rayDir.Z);
-        var t1 = (boxMin - rayOrigin) * invRayDir;
-        var t2 = (boxMax - rayOrigin) * invRayDir;
-        var tMin = Vector3.Min(t1, t2);
-        var tMax = Vector3.Max(t1, t2);
-
-        tNear = Math.Max(Math.Max(tMin.X, tMin.Y), tMin.Z);
-        tFar = Math.Min(Math.Min(tMax.X, tMax.Y), tMax.Z);
-
-        if (tFar < tNear || tFar < 0.0) return false;
-
-        intersection = (rayOrigin + rayDir * tNear) / VolumeScale;
-        intersection = Vector3.Clamp(intersection, Vector3.Zero, Vector3.One); // Clamp to be safe
-        return true;
-    }
-
-    #endregion
-
-    #region Public Control Methods
-
-    public void UpdateClippingPlaneNormal(ClippingPlane plane)
-    {
-        var rotX = Matrix4x4.CreateRotationX(plane.Rotation.X * MathF.PI / 180.0f);
-        var rotY = Matrix4x4.CreateRotationY(plane.Rotation.Y * MathF.PI / 180.0f);
-        var rotZ = Matrix4x4.CreateRotationZ(plane.Rotation.Z * MathF.PI / 180.0f);
-        plane.Normal = Vector3.Normalize(Vector3.Transform(-Vector3.UnitZ, rotZ * rotY * rotX));
-    }
-
-    public void MarkLabelsAsDirty()
-    {
-        _labelsDirty = true;
-    }
-
-    public bool GetMaterialVisibility(byte id)
-    {
-        return _editableDataset.Materials.FirstOrDefault(m => m.ID == id)?.IsVisible ?? false;
-    }
-
-    public float GetMaterialOpacity(byte id)
-    {
-        if (_materialOpacity.TryGetValue(id, out var opacity))
-            return opacity;
-        return 1.0f;
-    }
-
-    public void SetMaterialVisibility(byte id, bool visible)
-    {
-        var mat = _editableDataset.Materials.FirstOrDefault(m => m.ID == id);
-        if (mat != null)
-        {
-            mat.IsVisible = visible;
-            _materialParamsDirty = true;
-        }
-    }
-
-    public void SetMaterialOpacity(byte id, float opacity)
-    {
-        _materialOpacity[id] = opacity;
-        _materialParamsDirty = true;
-    }
-
-    public void SetAllMaterialsVisibility(bool visible)
-    {
-        foreach (var mat in _editableDataset.Materials.Where(m => m.ID != 0)) mat.IsVisible = visible;
-        _materialParamsDirty = true;
-    }
-
-    public void ResetAllMaterialOpacities()
-    {
-        _materialOpacity.Clear();
-        foreach (var mat in _editableDataset.Materials.Where(m => m.ID != 0)) _materialOpacity[mat.ID] = 1.0f;
-        _materialParamsDirty = true;
-    }
-
-    public void SaveScreenshot(string filePath)
-    {
-        var device = VeldridManager.GraphicsDevice;
-        var stagingDesc = new TextureDescription(_renderTexture.Width, _renderTexture.Height, 1, 1, 1,
-            _renderTexture.Format, TextureUsage.Staging, TextureType.Texture2D);
-        var stagingTexture = device.ResourceFactory.CreateTexture(stagingDesc);
-        var cl = device.ResourceFactory.CreateCommandList();
-        cl.Begin();
-        cl.CopyTexture(_renderTexture, stagingTexture);
-        cl.End();
-        device.SubmitCommands(cl);
-        device.WaitForIdle();
-        var mapped = device.Map(stagingTexture, MapMode.Read);
-        try
-        {
-            var imageData = new byte[stagingTexture.Width * stagingTexture.Height * 4];
-            for (uint y = 0; y < stagingTexture.Height; y++)
-            {
-                var sourceRowPtr = IntPtr.Add(mapped.Data, (int)(y * mapped.RowPitch));
-                Marshal.Copy(sourceRowPtr, imageData, (int)(y * stagingTexture.Width * 4),
-                    (int)(stagingTexture.Width * 4));
-            }
-
-            using (var stream = File.Create(filePath))
-            {
-                new ImageWriter().WritePng(imageData, (int)stagingTexture.Width, (int)stagingTexture.Height,
-                    ColorComponents.RedGreenBlueAlpha, stream);
-            }
-
-            Logger.Log($"[CtVolume3DViewer] Screenshot saved to {filePath}");
-        }
-        catch (Exception e)
-        {
-            Logger.LogError($"[CtVolume3DViewer] Failed to save screenshot: {e.Message}");
-        }
-        finally
-        {
-            device.Unmap(stagingTexture);
-            stagingTexture.Dispose();
-            cl.Dispose();
-        }
-    }
-
-    public void ResetCamera()
-    {
-        _cameraTarget = VolumeScale * 0.5f;
-        _cameraYaw = -MathF.PI / 4f;
-        _cameraPitch = MathF.PI / 6f;
-        _cameraDistance = Math.Max(1.5f, VolumeScale.Length() * 1.25f);
-        UpdateCameraMatrices();
-    }
-
-    public void ResetView()
-    {
-        ResetCamera();
-        CutXEnabled = CutYEnabled = CutZEnabled = false;
-        CutXPosition = CutYPosition = CutZPosition = 0.5f;
-        ClippingPlanes.Clear();
-    }
-
-    #endregion
-
-    #region Helpers
-
-    private Texture CreateDownsampledTexture3D(ResourceFactory factory, IVolumeData volume, long budget)
-    {
-        if (volume == null)
-        {
-            var dummy = factory.CreateTexture(TextureDescription.Texture3D(1, 1, 1, 1, PixelFormat.R8_UNorm,
-                TextureUsage.Sampled));
-            VeldridManager.GraphicsDevice.UpdateTexture(dummy, new byte[] { 0 }, 0, 0, 0, 1, 1, 1, 0, 0);
-            return dummy;
-        }
-
-        var baseLod = _streamingDataset.RenderLod;
-        var targetWidth = baseLod.Width;
-        var targetHeight = baseLod.Height;
-        var targetDepth = baseLod.Depth;
-        var targetVoxels = (long)targetWidth * targetHeight * targetDepth;
-        if (targetVoxels > budget)
-        {
-            var scale = Math.Pow(budget / (double)targetVoxels, 1.0 / 3.0);
-            targetWidth = Math.Max(1, (int)(targetWidth * scale));
-            targetHeight = Math.Max(1, (int)(targetHeight * scale));
-            targetDepth = Math.Max(1, (int)(targetDepth * scale));
-        }
-        Logger.Log(
-            $"[CtVolume3DViewer] Creating label texture to match volume LOD: {targetWidth}x{targetHeight}x{targetDepth}");
-        var factorX = Math.Max(1, volume.Width / targetWidth);
-        var factorY = Math.Max(1, volume.Height / targetHeight);
-        var factorZ = Math.Max(1, volume.Depth / targetDepth);
-        var w = (uint)targetWidth;
-        var h = (uint)targetHeight;
-        var d = (uint)targetDepth;
-        var desc = TextureDescription.Texture3D(w, h, d, 1, PixelFormat.R8_UNorm, TextureUsage.Sampled);
-        var texture = factory.CreateTexture(desc);
-        var downsampledData = new byte[w * h * d];
-        Parallel.For(0, targetDepth, z =>
-        {
-            for (var y = 0; y < targetHeight; y++)
-            for (var x = 0; x < targetWidth; x++)
-            {
-                var srcX = Math.Min(x * factorX, volume.Width - 1);
-                var srcY = Math.Min(y * factorY, volume.Height - 1);
-                var srcZ = Math.Min(z * factorZ, volume.Depth - 1);
-                downsampledData[z * targetWidth * targetHeight + y * targetWidth + x] = volume[srcX, srcY, srcZ];
-            }
-        });
-        VeldridManager.GraphicsDevice.UpdateTexture(texture, downsampledData, 0, 0, 0, w, h, d, 0, 0);
-        return texture;
-    }
-
-    private static RgbaFloat HsvToRgb(float h, float s, float v)
-    {
-        float r, g, b;
-        var i = (int)(h * 6);
-        var f = h * 6 - i;
-        var p = v * (1 - s);
-        var q = v * (1 - f * s);
-        var t = v * (1 - (1 - f) * s);
-        switch (i % 6)
-        {
-            case 0:
-                r = v;
-                g = t;
-                b = p;
-                break;
-            case 1:
-                r = q;
-                g = v;
-                b = p;
-                break;
-            case 2:
-                r = p;
-                g = v;
-                b = t;
-                break;
-            case 3:
-                r = p;
-                g = q;
-                b = v;
-                break;
-            case 4:
-                r = t;
-                g = p;
-                b = v;
-                break;
-            default:
-                r = v;
-                g = p;
-                b = q;
-                break;
-        }
-
-        return new RgbaFloat(r, g, b, 1.0f);
-    }
-
-    #endregion
+    private const string VertexShader=@"#version 330 core
+layout(location=0) in vec3 p; uniform mat4 uView,uProjection; uniform vec3 uScale; out vec3 world; void main(){world=p*uScale;gl_Position=uProjection*uView*vec4(world,1);}";
+    private const string FragmentShader=@"#version 330 core
+in vec3 world;out vec4 outColor;uniform sampler3D uVolume,uLabels,uPreview;uniform vec3 uScale,uCamera,uVolumeSize;uniform float uMin,uMax,uStep;uniform int uShowGray,uColorMap,uShowPreview,uPlaneCount;uniform vec4 uCutX,uCutY,uCutZ,uPlanes[8],uPreviewColor;
+bool boxHit(vec3 ro,vec3 rd,out float a,out float b){vec3 q0=(vec3(0)-ro)/rd,q1=(uScale-ro)/rd,mn=min(q0,q1),mx=max(q0,q1);a=max(max(mn.x,mn.y),mn.z);b=min(min(mx.x,mx.y),mx.z);return b>=max(a,0.0);}bool cut(vec3 p){if(uCutX.x>.5&&(p.x-uCutX.z)*uCutX.y>0)return true;if(uCutY.x>.5&&(p.y-uCutY.z)*uCutY.y>0)return true;if(uCutZ.x>.5&&(p.z-uCutZ.z)*uCutZ.y>0)return true;for(int i=0;i<uPlaneCount;i++){vec3 n=normalize(uPlanes[i].xyz);float d=abs(uPlanes[i].w);float s=dot(p-vec3(.5),n)-(d-.5);if(uPlanes[i].w<0?s<0:s>0)return true;}return false;}vec3 cmap(float x){if(uColorMap==0)return vec3(x);if(uColorMap==1)return clamp(vec3(3*x,3*x-1,3*x-2),0,1);if(uColorMap==2)return vec3(x,1-x,1);return clamp(abs(mod(x*6+vec3(0,4,2),6)-3)-1,0,1);}void main(){vec3 ro=uCamera,rd=normalize(world-ro);float a,b;if(!boxHit(ro,rd,a,b))discard;a=max(a,0);vec4 acc=vec4(0);float base=min(uScale.x/uVolumeSize.x,min(uScale.y/uVolumeSize.y,uScale.z/uVolumeSize.z));float ds=max(base*uStep,(b-a)/2048.0);for(int i=0;i<2048&&a<=b&&acc.a<.985;i++,a+=ds){vec3 p=(ro+rd*a)/uScale;if(cut(p))continue;float den=texture(uVolume,p).r;float n=clamp((den-uMin)/max(.001,uMax-uMin),0,1);float al=uShowGray!=0?smoothstep(0,1,n):0;vec3 col=cmap(n);if(al>.01){vec3 e=1/uVolumeSize;vec3 g=vec3(texture(uVolume,p+vec3(e.x,0,0)).r-texture(uVolume,p-vec3(e.x,0,0)).r,texture(uVolume,p+vec3(0,e.y,0)).r-texture(uVolume,p-vec3(0,e.y,0)).r,texture(uVolume,p+vec3(0,0,e.z)).r-texture(uVolume,p-vec3(0,0,e.z)).r);if(length(g)>.0001)col*=.3+.7*abs(dot(normalize(g),normalize(vec3(.4,.6,1))));}if(uShowPreview!=0&&texture(uPreview,p).r>.5){col=mix(col,uPreviewColor.rgb,uPreviewColor.a);al=max(al,uPreviewColor.a);}float ca=clamp(al*ds*80,0,1);acc+=(1-acc.a)*vec4(col*ca,ca);}outColor=acc;}";
 }

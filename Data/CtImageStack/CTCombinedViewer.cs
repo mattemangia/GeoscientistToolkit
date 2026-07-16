@@ -530,15 +530,24 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             {
                 _loadingProgress = 0.88f;
                 _loadingStatus = "Creating GPU volume resources...";
-                // Veldrid/OpenGL resources must be created on the render thread.
-                VolumeViewer = new CtVolume3DViewer(_streamingDataset)
+                try
                 {
-                    ShowGrayscale = ShowVolumeData,
-                    StepSize = 2.0f,
-                    MinThreshold = 0.05f,
-                    MaxThreshold = 1.0f
-                };
-                UpdateVolumeViewerSlices();
+                    VolumeViewer = new CtVolume3DViewer(_streamingDataset)
+                    {
+                        ShowGrayscale = ShowVolumeData,
+                        StepSize = 2.0f,
+                        MinThreshold = 0.05f,
+                        MaxThreshold = 1.0f
+                    };
+                    UpdateVolumeViewerSlices();
+                }
+                catch (Exception ex)
+                {
+                    // Keep the native-resolution orthogonal viewer available while a
+                    // 3D backend is unavailable or still being initialized.
+                    _volumeRenderError = ex.Message;
+                    Logger.LogError($"[CtCombinedViewer] 3D initialization failed: {ex}");
+                }
             }
             _loadingProgress = 1.0f;
             _loadingStatus = "Viewer ready";
