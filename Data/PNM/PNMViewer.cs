@@ -3,7 +3,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Text;
 using GAIA.Analysis.Pnm;
 using GAIA.Business;
 using GAIA.Data.Pnm;
@@ -11,8 +10,6 @@ using GAIA.UI.Interfaces;
 using GAIA.UI.Utils;
 using GAIA.Util;
 using ImGuiNET;
-using Veldrid;
-using Veldrid.SPIRV;
 
 namespace GAIA.UI;
 
@@ -35,12 +32,11 @@ public class PNMViewer : IDatasetViewer
 
     // Dataset & Veldrid Resources
     private readonly PNMDataset _dataset;
+    private readonly OpenTkPnmRenderer _openTkRenderer;
     private readonly object _flowDataLock = new();
     private readonly string _flowLegendWindowId = "##PNMFlowLegend";
     private readonly ConcurrentBag<int> _inletPoreIds = new();
 
-    // Platform detection
-    private readonly bool _isMetal;
     private readonly string _legendWindowId = "##PNMLegend";
 
     // NEW: Diffusivity visualization data
@@ -73,14 +69,10 @@ public class PNMViewer : IDatasetViewer
 
     // UI & Rendering State
     private int _colorByIndex;
-    private Texture _colorRampTexture;
-    private CommandList _commandList;
-    private Texture _depthTexture;
 
     // Flow direction info
     private string _flowAxis = "Z";
     private Vector3 _flowDirection = new(0, 0, 1);
-    private Framebuffer _framebuffer;
     private volatile bool _hasDiffusivityData;
     private volatile bool _hasFlowData;
     private bool _isDragging;
@@ -92,19 +84,8 @@ public class PNMViewer : IDatasetViewer
     private Vector3 _modelCenter;
     private float _modelRadius = 10.0f;
     private bool _pendingGeometryRebuild;
-    private DeviceBuffer _poreConstantsBuffer;
-    private DeviceBuffer _poreIndexBuffer;
-
-    // Pore (Sphere) rendering resources
-    private DeviceBuffer _poreInstanceBuffer;
     private int _poreInstanceCount;
-    private Pipeline _porePipeline;
-    private ResourceLayout _poreResourceLayout;
-    private ResourceSet _poreResourceSet;
     private float _poreSizeMultiplier = 1.0f;
-    private DeviceBuffer _poreVertexBuffer;
-    private Texture _renderTexture;
-    private TextureManager _renderTextureManager;
     private float _screenshotNotificationTimer;
     private Pore _selectedPore;
 
@@ -119,18 +100,13 @@ public class PNMViewer : IDatasetViewer
     private bool _showPores = true;
     private bool _showScreenshotNotification;
     private bool _showThroats = true;
-    private DeviceBuffer _throatConstantsBuffer;
-    private Pipeline _throatPipeline;
-    private ResourceLayout _throatResourceLayout;
-    private ResourceSet _throatResourceSet;
-
-    // Throat (Line) rendering resources
-    private DeviceBuffer _throatVertexBuffer;
     private uint _throatVertexCount;
     private bool _useLogScaleForDiffusivity = true;
 
     // Camera & Interaction
     private Matrix4x4 _viewMatrix, _projMatrix;
+    private float _minColorValue;
+    private float _maxColorValue = 1f;
 
     public PNMViewer(PNMDataset dataset)
     {
@@ -138,7 +114,7 @@ public class PNMViewer : IDatasetViewer
         ProjectManager.Instance.DatasetDataChanged += d =>
         {
             if (ReferenceEquals(d, _dataset))
-                VeldridManager.ExecuteOnMainThread(() =>
+                OpenTkManager.ExecuteOnMainThread(() =>
                 {
                     _pendingGeometryRebuild = true;
                     UpdateFlowData();
@@ -153,9 +129,7 @@ public class PNMViewer : IDatasetViewer
             (".jpg", "JPEG Image")
         );
 
-        _isMetal = VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal;
-
-        InitializeVeldridResources();
+        _openTkRenderer = new OpenTkPnmRenderer();
         UpdateFlowData();
         UpdateDiffusivityData(); // NEW
         UpdateReactiveTransportData(); // NEW
@@ -165,26 +139,7 @@ public class PNMViewer : IDatasetViewer
 
     public void Dispose()
     {
-        _renderTextureManager?.Dispose();
-        _renderTexture?.Dispose();
-        _depthTexture?.Dispose();
-        _framebuffer?.Dispose();
-        _commandList?.Dispose();
-        _colorRampTexture?.Dispose();
-
-        _poreInstanceBuffer?.Dispose();
-        _poreVertexBuffer?.Dispose();
-        _poreIndexBuffer?.Dispose();
-        _poreConstantsBuffer?.Dispose();
-        _porePipeline?.Dispose();
-        _poreResourceLayout?.Dispose();
-        _poreResourceSet?.Dispose();
-
-        _throatVertexBuffer?.Dispose();
-        _throatConstantsBuffer?.Dispose();
-        _throatPipeline?.Dispose();
-        _throatResourceLayout?.Dispose();
-        _throatResourceSet?.Dispose();
+        _openTkRenderer?.Dispose();
     }
 
     // NEW: Update diffusivity data from dataset
@@ -450,6 +405,7 @@ public class PNMViewer : IDatasetViewer
         }
     }
 
+#if false // Legacy backend retained only until final source cleanup; excluded from compilation.
     private void InitializeVeldridResources()
     {
         var factory = VeldridManager.Factory;
@@ -584,6 +540,7 @@ public class PNMViewer : IDatasetViewer
             PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
         VeldridManager.GraphicsDevice.UpdateTexture(_colorRampTexture, colorMapData, 0, 0, 0, mapSize, 1, 1, 0, 0);
     }
+#endif
 
     private void DrawScreenshotNotification(Vector2 viewPos, Vector2 viewSize)
     {
@@ -636,7 +593,7 @@ public class PNMViewer : IDatasetViewer
                 format,
                 (success, filePath) =>
                 {
-                    VeldridManager.ExecuteOnMainThread(() =>
+                    OpenTkManager.ExecuteOnMainThread(() =>
                     {
                         if (success)
                         {
@@ -705,6 +662,7 @@ public class PNMViewer : IDatasetViewer
 
     #region Resource Creation
 
+#if false // Replaced by OpenTkPnmRenderer.
     private void CreatePoreResourcesGLSL(ResourceFactory factory)
     {
         var (vertices, indices) = CreateSphereGeometry();
@@ -717,7 +675,7 @@ public class PNMViewer : IDatasetViewer
         VeldridManager.GraphicsDevice.UpdateBuffer(_poreIndexBuffer, 0, indices);
 
         var vertexShader = @"
-#version 450
+// legacy shader version 450
 layout(location = 0) in vec3 in_Position;
 layout(location = 1) in vec3 in_InstancePosition;
 layout(location = 2) in float in_InstanceColorValue;
@@ -747,7 +705,7 @@ void main()
 }";
 
         var fragmentShader = @"
-#version 450
+// legacy shader version 450
 layout(location = 0) in vec3 in_WorldPos;
 layout(location = 1) in vec3 in_Normal;
 layout(location = 2) in float in_ColorValue;
@@ -829,7 +787,7 @@ void main()
     private void CreateThroatResourcesGLSL(ResourceFactory factory)
     {
         var vertexShader = @"
-#version 450
+// legacy shader version 450
 layout(location = 0) in vec3 in_Position;
 layout(location = 1) in float in_ColorValue;
 
@@ -844,7 +802,7 @@ void main()
 }";
 
         var fragmentShader = @"
-#version 450
+// legacy shader version 450
 layout(location = 0) in float in_ColorValue;
 layout(location = 0) out vec4 out_Color;
 
@@ -901,6 +859,7 @@ void main()
     {
         CreateThroatResourcesGLSL(factory);
     }
+#endif
 
     private (Vector3[] vertices, ushort[] indices) CreateSphereGeometry()
     {
@@ -1074,7 +1033,6 @@ void main()
         if (ImGui.Combo("##ColorBy", ref localIndex, availableOptions.ToArray(), availableOptions.Count))
         {
             _colorByIndex = optionIndices[localIndex];
-            CreateColorRampTexture(VeldridManager.Factory);
             RebuildGeometryFromDataset();
         }
 
@@ -1130,12 +1088,13 @@ void main()
             _pendingGeometryRebuild = false;
         }
 
+        var availableSize = ImGui.GetContentRegionAvail();
+        if (availableSize.X < 2 || availableSize.Y < 2) return;
+        _openTkRenderer.Resize((int)availableSize.X, (int)availableSize.Y);
         Render();
 
-        var textureId = _renderTextureManager.GetImGuiTextureId();
+        var textureId = _openTkRenderer.TextureId;
         if (textureId == IntPtr.Zero) return;
-
-        var availableSize = ImGui.GetContentRegionAvail();
         var imagePos = ImGui.GetCursorScreenPos();
         _lastViewerScreenPos = imagePos;
         _lastViewerSize = availableSize;
@@ -1228,9 +1187,7 @@ void main()
 
     private void RebuildGeometryFromDataset()
     {
-        var factory = VeldridManager.Factory;
-
-        var poreInstances = new List<PoreInstanceData>();
+        var poreInstances = new List<OpenTkPnmRenderer.PoreGpuData>();
         foreach (var p in _dataset.Pores)
         {
             var isInlet = _inletPoreIds.Contains(p.ID);
@@ -1253,26 +1210,14 @@ void main()
                 else if (isOutlet) colorValue = 0.0f;
             }
 
-            poreInstances.Add(new PoreInstanceData(p.Position, colorValue, p.Radius * radiusMultiplier));
+            poreInstances.Add(new OpenTkPnmRenderer.PoreGpuData(p.Position, colorValue,
+                p.Radius * radiusMultiplier));
         }
 
         _poreInstanceCount = poreInstances.Count;
 
-        _poreInstanceBuffer?.Dispose();
-        if (_poreInstanceCount > 0)
-        {
-            var instanceSize = (uint)Marshal.SizeOf<PoreInstanceData>();
-            _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription(instanceSize * (uint)_poreInstanceCount,
-                BufferUsage.VertexBuffer));
-            VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, poreInstances.ToArray());
-        }
-        else
-        {
-            _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription(20, BufferUsage.VertexBuffer));
-        }
-
         var poreById = _dataset.Pores.ToDictionary(p => p.ID, p => p);
-        var throatVertices = new List<ThroatVertexData>();
+        var throatVertices = new List<OpenTkPnmRenderer.ThroatGpuData>();
 
         foreach (var t in _dataset.Throats)
             if (poreById.TryGetValue(t.Pore1ID, out var p1) && poreById.TryGetValue(t.Pore2ID, out var p2))
@@ -1297,25 +1242,13 @@ void main()
                 var colorValue = GetThroatColorValue(t, p1, p2);
                 if (isFlowPath) colorValue = 0.5f;
 
-                throatVertices.Add(new ThroatVertexData(p1.Position, colorValue));
-                throatVertices.Add(new ThroatVertexData(p2.Position, colorValue));
+                throatVertices.Add(new OpenTkPnmRenderer.ThroatGpuData(p1.Position, colorValue));
+                throatVertices.Add(new OpenTkPnmRenderer.ThroatGpuData(p2.Position, colorValue));
             }
 
         _throatVertexCount = (uint)throatVertices.Count;
 
-        _throatVertexBuffer?.Dispose();
-        if (_throatVertexCount > 0)
-        {
-            var vertSize = (uint)Marshal.SizeOf<ThroatVertexData>();
-            _throatVertexBuffer =
-                factory.CreateBuffer(new BufferDescription(vertSize * _throatVertexCount, BufferUsage.VertexBuffer));
-            VeldridManager.GraphicsDevice.UpdateBuffer(_throatVertexBuffer, 0, throatVertices.ToArray());
-        }
-        else
-        {
-            _throatVertexBuffer = factory.CreateBuffer(new BufferDescription(16, BufferUsage.VertexBuffer));
-        }
-
+        _openTkRenderer.Upload(poreInstances, throatVertices);
         UpdateConstantBuffers();
     }
 
@@ -1412,34 +1345,8 @@ void main()
     private void Render()
     {
         UpdateConstantBuffers();
-
-        _commandList.Begin();
-        _commandList.SetFramebuffer(_framebuffer);
-        _commandList.ClearColorTarget(0, new RgbaFloat(0.08f, 0.08f, 0.10f, 1.0f));
-        _commandList.ClearDepthStencil(1f);
-
-        if (_showThroats && _throatVertexCount > 0)
-        {
-            _commandList.SetPipeline(_throatPipeline);
-            _commandList.SetGraphicsResourceSet(0, _throatResourceSet);
-            _commandList.SetVertexBuffer(0, _throatVertexBuffer);
-            _commandList.Draw(_throatVertexCount);
-        }
-
-        if (_showPores && _poreInstanceCount > 0)
-        {
-            var indexCount = _poreIndexBuffer.SizeInBytes / sizeof(ushort);
-            _commandList.SetPipeline(_porePipeline);
-            _commandList.SetGraphicsResourceSet(0, _poreResourceSet);
-            _commandList.SetVertexBuffer(0, _poreVertexBuffer);
-            _commandList.SetVertexBuffer(1, _poreInstanceBuffer);
-            _commandList.SetIndexBuffer(_poreIndexBuffer, IndexFormat.UInt16);
-            _commandList.DrawIndexed(indexCount, (uint)_poreInstanceCount, 0, 0, 0);
-        }
-
-        _commandList.End();
-        VeldridManager.GraphicsDevice.SubmitCommands(_commandList);
-        VeldridManager.GraphicsDevice.WaitForIdle();
+        _openTkRenderer.Render(_viewMatrix * _projMatrix, _cameraPosition, _minColorValue,
+            _maxColorValue, _poreSizeMultiplier, _showPores, _showThroats);
     }
 
     private void UpdateConstantBuffers()
@@ -1501,31 +1408,41 @@ void main()
                     }
 
                     break;
-                case 6: // NEW: Diffusivity
+                case 6: // Diffusivity is rendered in log10 space.
                     if (_localDiffusivity.Any())
                     {
-                        minVal = _localDiffusivity.Values.Min();
-                        maxVal = _localDiffusivity.Values.Max();
+                        var positive = _localDiffusivity.Values.Where(value => value > 0).ToArray();
+                        if (positive.Length > 0)
+                        {
+                            minVal = MathF.Log10(positive.Min());
+                            maxVal = MathF.Log10(positive.Max());
+                        }
+                        else
+                        {
+                            minVal = -20f;
+                            maxVal = -19f;
+                        }
                     }
 
+                    break;
+                case 7: // Temperature
+                case 8: // Species concentration
+                case 9: // Mineral precipitation
+                case 10: // Reaction rate
+                    if (_dataset.Pores.Count > 0)
+                    {
+                        var displayedValues = _dataset.Pores.Select(GetPoreColorValue).ToArray();
+                        minVal = displayedValues.Min();
+                        maxVal = displayedValues.Max();
+                    }
                     break;
             }
         }
 
         if (Math.Abs(maxVal - minVal) < 0.001f) maxVal = minVal + 1.0f;
 
-        var constants = new Constants
-        {
-            ViewProjection = _viewMatrix * _projMatrix,
-            CameraPosition = new Vector4(_cameraPosition, 1),
-            ColorRampInfo = new Vector4(minVal, maxVal, 1.0f / (maxVal - minVal), 0),
-            SizeInfo = new Vector4(_poreSizeMultiplier, 0, 0, 0)
-        };
-
-        if (_poreConstantsBuffer != null)
-            VeldridManager.GraphicsDevice.UpdateBuffer(_poreConstantsBuffer, 0, ref constants);
-        if (_throatConstantsBuffer != null)
-            VeldridManager.GraphicsDevice.UpdateBuffer(_throatConstantsBuffer, 0, ref constants);
+        _minColorValue = minVal;
+        _maxColorValue = maxVal;
     }
 
     private void HandleMouseInput()
@@ -1593,7 +1510,7 @@ void main()
 
         _viewMatrix = Matrix4x4.CreateLookAt(_cameraPosition, _cameraTarget, Vector3.UnitY);
 
-        var aspectRatio = _renderTexture.Width / (float)Math.Max(1, _renderTexture.Height);
+        var aspectRatio = _openTkRenderer.Width / (float)Math.Max(1, _openTkRenderer.Height);
         _projMatrix = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspectRatio, 0.01f, 1000f);
     }
 
