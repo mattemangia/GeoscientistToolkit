@@ -41,13 +41,13 @@ public sealed class DiagnosticApp : GameWindow
     {
         base.OnRenderFrame(args);_imGui.Update(this,(float)Math.Max(args.Time,1e-6));
         if(!_started){_started=true;_=RunDiagnosticsAsync(_cancellation.Token);}
-        while(_messages.TryDequeue(out var message))_visible.Add(message);
-        DrawUi();GL.BindFramebuffer(FramebufferTarget.Framebuffer,0);GL.Viewport(0,0,FramebufferSize.X,FramebufferSize.Y);
+        var added=0;while(_messages.TryDequeue(out var message)){_visible.Add(message);added++;}
+        DrawUi(added>0);GL.BindFramebuffer(FramebufferTarget.Framebuffer,0);GL.Viewport(0,0,FramebufferSize.X,FramebufferSize.Y);
         GL.ClearColor(.07f,.075f,.095f,1);GL.Clear(ClearBufferMask.ColorBufferBit|ClearBufferMask.DepthBufferBit);
         _imGui.Render();SwapBuffers();
     }
 
-    private void DrawUi()
+    private void DrawUi(bool scrollBottom)
     {
         ImGui.SetNextWindowPos(Vector2.Zero);ImGui.SetNextWindowSize(new Vector2(ClientSize.X,ClientSize.Y));
         ImGui.Begin("Diagnostics",ImGuiWindowFlags.NoDecoration|ImGuiWindowFlags.NoMove|ImGuiWindowFlags.NoResize);
@@ -55,7 +55,7 @@ public sealed class DiagnosticApp : GameWindow
         ImGui.SameLine();ImGui.Text(_finished?"Completed":"Running diagnostics…");ImGui.Separator();
         ImGui.BeginChild("log",new Vector2(0,0),ImGuiChildFlags.Border);
         foreach(var (text,error) in _visible){if(error)ImGui.PushStyleColor(ImGuiCol.Text,new Vector4(1,.3f,.3f,1));ImGui.TextWrapped(text);if(error)ImGui.PopStyleColor();}
-        if(_messages.Count>0)ImGui.SetScrollHereY(1);ImGui.EndChild();ImGui.End();
+        if(scrollBottom)ImGui.SetScrollHereY(1);ImGui.EndChild();ImGui.End();
     }
 
     private async Task RunDiagnosticsAsync(CancellationToken token)

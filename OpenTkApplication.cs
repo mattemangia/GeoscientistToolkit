@@ -44,22 +44,44 @@ internal sealed class OpenTkApplication : GameWindow
         base.OnLoad();
         EnsureRequiredOpenGlVersion();
 
-        SettingsManager.Instance.LoadSettings();
-        var settings = SettingsManager.Instance.Settings;
-        Logger.Initialize(settings.Logging);
-        GlobalPerformanceManager.Instance.Initialize(settings);
-
-        VSync = settings.Hardware.EnableVSync ? VSyncMode.On : VSyncMode.Off;
         _imGui = new OpenTkImGuiController(ClientSize.X, ClientSize.Y, FramebufferSize.X, FramebufferSize.Y);
         OpenTkManager.MainWindow = this;
         OpenTkManager.ImGuiController = _imGui;
 
-        ThemeManager.ApplyTheme(settings.Appearance);
+        // Splash screen with logo (2 s)
+        using (var splash = new SplashScreen())
+            splash.Show(2000, RenderStartupFrame);
+
+        // Loading screen with progress + host diagnostics
+        var loading = new LoadingScreen();
+        ShowLoading(loading, "Starting GAIA...", 0.0f);
+
+        ShowLoading(loading, "Loading settings...", 0.1f);
+        SettingsManager.Instance.LoadSettings();
+        var settings = SettingsManager.Instance.Settings;
+
+        ShowLoading(loading, "Initializing logger...", 0.15f);
+        Logger.Initialize(settings.Logging);
+
+        ShowLoading(loading, "Checking graphics configuration...", 0.2f);
+        ShowLoading(loading, "Initializing performance manager...", 0.25f);
+        GlobalPerformanceManager.Instance.Initialize(settings);
+
+        ShowLoading(loading, "Configuring render context...", 0.3f);
+        VSync = settings.Hardware.EnableVSync ? VSyncMode.On : VSyncMode.Off;
+
+        ShowLoading(loading, "Initializing UI...", 0.6f);
         _mainWindow = new MainWindow();
         _mainWindow.OnExitConfirmed += ConfirmExit;
 
+        ShowLoading(loading, "Applying theme...", 0.7f);
+        ThemeManager.ApplyTheme(settings.Appearance);
+
+        ShowLoading(loading, "Loading project...", 0.8f);
         if (!string.IsNullOrWhiteSpace(Program.StartingProjectPath) && File.Exists(Program.StartingProjectPath))
             ProjectManager.Instance.LoadProject(Program.StartingProjectPath);
+
+        ShowLoading(loading, "Starting application...", 1.0f);
 
         TextInput += OnTextInput;
         Logger.Log("GAIA OpenTK host initialized.");
@@ -69,6 +91,29 @@ internal sealed class OpenTkApplication : GameWindow
             Logger.Log("GAIA OpenTK graphics self-test passed.");
             _exitConfirmed = true;
         }
+    }
+
+    /// <summary>
+    ///     Renders a single frame during startup (splash/loading). Pumps input events so the
+    ///     window stays responsive, draws the supplied ImGui callback, then swaps buffers.
+    /// </summary>
+    private void RenderStartupFrame(Action draw)
+    {
+        ProcessEvents(0.0);
+        _imGui.Update(this, 1f / 60f);
+        draw();
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        GL.Viewport(0, 0, FramebufferSize.X, FramebufferSize.Y);
+        GL.ClearColor(0.1f, 0.1f, 0.12f, 1f);
+        GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        _imGui.Render();
+        SwapBuffers();
+    }
+
+    private void ShowLoading(LoadingScreen loading, string status, float progress)
+    {
+        loading.UpdateStatus(status, progress);
+        RenderStartupFrame(loading.Draw);
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
