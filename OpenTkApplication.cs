@@ -28,7 +28,8 @@ internal sealed class OpenTkApplication : GameWindow
         : base(GameWindowSettings.Default, new NativeWindowSettings
         {
             ClientSize = new Vector2i(1700, 950),
-            Title = "GAIA — Geoscience Analysis, Imaging & Automation",
+            // Plain hyphen: the em dash renders as a white box in some Linux title bars.
+            Title = "GAIA - Geoscience Analysis, Imaging & Automation",
             APIVersion = new Version(3, 3),
             Profile = ContextProfile.Core,
             Flags = ContextFlags.ForwardCompatible,

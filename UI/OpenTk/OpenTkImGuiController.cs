@@ -12,7 +12,13 @@ namespace GAIA.UI.OpenTk;
 public sealed class ImGuiController : IDisposable
 {
     private const float UiFontSizePixels = 14f;
+    private const float PanelTitleFontSizePixels = 21f;
     private static readonly Keys[] AllKeys = (Keys[])Enum.GetValues(typeof(Keys));
+
+    // Fonts belong to the atlas of the context that built them, and each pop-out window runs
+    // its own controller and context, so callers must look up the font for whichever context
+    // is current rather than caching a single ImFontPtr.
+    private static readonly Dictionary<IntPtr, ImGuiController> ByContext = new();
     private static readonly ushort[] UiGlyphRanges =
     [
         0x0020, 0x00FF, // Basic Latin + Latin-1 Supplement: accents, degree, micro, superscript 1/2/3.
@@ -53,6 +59,21 @@ public sealed class ImGuiController : IDisposable
     private int _framebufferWidth;
     private int _framebufferHeight;
     private readonly IntPtr _context;
+    private ImFontPtr _titleFont;
+
+    /// <summary>Larger face for panel headers. Scaling the 14px atlas instead would blur it.</summary>
+    public ImFontPtr TitleFont => _titleFont;
+
+    /// <summary>Whether <see cref="TitleFont"/> was built; false when the atlas fell back to the
+    /// built-in font. Callers test this instead of the pointer, which needs an unsafe context.</summary>
+    public bool HasTitleFont { get; private set; }
+
+    /// <summary>The controller owning the ImGui context that is current on this thread, if any.</summary>
+    public static ImGuiController ForCurrentContext()
+    {
+        var current = ImGui.GetCurrentContext();
+        return current != IntPtr.Zero && ByContext.TryGetValue(current, out var controller) ? controller : null;
+    }
 
     /// <summary>
     /// The ImGui context this controller created. Useful for multi-window setups
@@ -74,6 +95,7 @@ public sealed class ImGuiController : IDisposable
         io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
         io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
         ConfigureFonts(io);
+        ByContext[_context] = this;
 
         CreateDeviceResources();
         SetPerFrameImGuiData(1f / 60f);
@@ -169,6 +191,7 @@ public sealed class ImGuiController : IDisposable
 
     public void Dispose()
     {
+        ByContext.Remove(_context);
         GL.DeleteBuffer(_vertexBuffer);
         GL.DeleteBuffer(_indexBuffer);
         GL.DeleteVertexArray(_vertexArray);
@@ -278,14 +301,19 @@ public sealed class ImGuiController : IDisposable
         };
     }
 
-    private static void ConfigureFonts(ImGuiIOPtr io)
+    /// <summary>Builds the atlas, adding the panel-title face when a TTF is available.</summary>
+    private void ConfigureFonts(ImGuiIOPtr io)
     {
         var fontPath = FindUiFontPath();
         if (!string.IsNullOrWhiteSpace(fontPath))
         {
             try
             {
+                // The first font added stays the default for the rest of the UI.
                 io.Fonts.AddFontFromFileTTF(fontPath, UiFontSizePixels, null, UiGlyphRangesHandle.AddrOfPinnedObject());
+                _titleFont = io.Fonts.AddFontFromFileTTF(fontPath, PanelTitleFontSizePixels, null,
+                    UiGlyphRangesHandle.AddrOfPinnedObject());
+                HasTitleFont = true;
                 return;
             }
             catch
@@ -294,6 +322,7 @@ public sealed class ImGuiController : IDisposable
         }
 
         io.Fonts.AddFontDefault();
+        HasTitleFont = false;
     }
 
     internal static bool IsUiGlyphCovered(int codePoint)
@@ -511,14 +540,12 @@ void main()
             GL.BindBuffer(BufferTarget.ElementArrayBuffer, _indexBuffer);
             GL.BufferSubData(BufferTarget.ElementArrayBuffer, IntPtr.Zero, indexSize, (IntPtr)cmdList.IdxBuffer.Data);
 
-            int idxOffset = 0;
             for (int cmdIndex = 0; cmdIndex < cmdList.CmdBuffer.Size; cmdIndex++)
             {
                 var pcmd = cmdList.CmdBuffer[cmdIndex];
                 if (pcmd.UserCallback != IntPtr.Zero)
                 {
                     SetupRenderState();
-                    idxOffset += (int)pcmd.ElemCount;
                     continue;
                 }
 
@@ -529,14 +556,15 @@ void main()
                     (int)(pcmd.ClipRect.Z - pcmd.ClipRect.X),
                     (int)(pcmd.ClipRect.W - pcmd.ClipRect.Y));
 
+                // Index ranges must come from the command itself. Accumulating ElemCount assumes
+                // commands are contiguous, which breaks as soon as ImGui splits or merges channels
+                // (popups, tables): every later command then draws a neighbour's geometry.
                 GL.DrawElementsBaseVertex(
                     PrimitiveType.Triangles,
                     (int)pcmd.ElemCount,
                     DrawElementsType.UnsignedShort,
-                    (IntPtr)(idxOffset * sizeof(ushort)),
+                    (IntPtr)(pcmd.IdxOffset * sizeof(ushort)),
                     (int)pcmd.VtxOffset);
-
-                idxOffset += (int)pcmd.ElemCount;
             }
         }
 

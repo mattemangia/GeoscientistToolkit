@@ -104,9 +104,6 @@ public class MainWindow : IDisposable
     private readonly ProjectMetadataEditor _projectMetadataEditor = new();
     private readonly MetadataTableViewer _metadataTableViewer = new();
 
-    // Logo texture for About window
-    private IntPtr _logoTextureId;
-    private Vector2 _logoSize;
     private readonly IconFactory _icons;
     private bool _disposed;
 
@@ -174,58 +171,10 @@ public class MainWindow : IDisposable
         try
         {
             _icons.Dispose();
-            if (_logoTextureId != IntPtr.Zero)
-            {
-                OpenTK.Graphics.OpenGL.GL.DeleteTexture((int)_logoTextureId);
-                _logoTextureId = IntPtr.Zero;
-            }
         }
         catch (Exception ex)
         {
             Logger.LogWarning($"Could not dispose application icons: {ex.Message}");
-        }
-    }
-
-    private void LoadLogoTexture()
-    {
-        if (_logoTextureId != IntPtr.Zero)
-            return; // Already loaded
-
-        try
-        {
-            // Load embedded image resource
-            var assembly = Assembly.GetExecutingAssembly();
-            var resourceName = "GAIA.image.png";
-
-            using var stream = assembly.GetManifestResourceStream(resourceName);
-            if (stream == null)
-            {
-                Logger.LogWarning($"Could not find embedded resource '{resourceName}'");
-                return;
-            }
-
-            // Load image using StbImageSharp
-            var image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
-
-            var logoTexture = OpenTK.Graphics.OpenGL.GL.GenTexture();
-                OpenTK.Graphics.OpenGL.GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, logoTexture);
-                OpenTK.Graphics.OpenGL.GL.TexImage2D(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, 0,
-                    OpenTK.Graphics.OpenGL.PixelInternalFormat.Rgba8, image.Width, image.Height, 0,
-                    OpenTK.Graphics.OpenGL.PixelFormat.Rgba, OpenTK.Graphics.OpenGL.PixelType.UnsignedByte,
-                    image.Data);
-                OpenTK.Graphics.OpenGL.GL.TexParameter(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D,
-                    OpenTK.Graphics.OpenGL.TextureParameterName.TextureMinFilter,
-                    (int)OpenTK.Graphics.OpenGL.TextureMinFilter.Linear);
-                OpenTK.Graphics.OpenGL.GL.TexParameter(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D,
-                    OpenTK.Graphics.OpenGL.TextureParameterName.TextureMagFilter,
-                    (int)OpenTK.Graphics.OpenGL.TextureMagFilter.Linear);
-                OpenTK.Graphics.OpenGL.GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, 0);
-                _logoTextureId = (IntPtr)logoTexture;
-                _logoSize = new Vector2(image.Width, image.Height);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError($"Error loading logo texture: {ex.Message}");
         }
     }
 
@@ -1373,34 +1322,25 @@ public class MainWindow : IDisposable
         // ============================================================================
         // About popup
         // ============================================================================
-        if (_showAboutPopup)
-        {
-            ImGui.OpenPopup("About GAIA");
-            LoadLogoTexture(); // Ensure logo is loaded when showing About
-        }
+        if (_showAboutPopup) ImGui.OpenPopup("About GAIA");
 
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
         if (ImGui.BeginPopupModal("About GAIA", ref _showAboutPopup, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            // Display logo if loaded
-            if (_logoTextureId != IntPtr.Zero)
+            // The mark already reads "GAIA", so no wordmark line is needed beside it.
+            if (GaiaLogo.TextureId != IntPtr.Zero && GaiaLogo.Aspect > 0)
             {
-                // Scale logo to fit nicely (max 300px width)
-                var maxWidth = 300f;
-                var scale = Math.Min(maxWidth / _logoSize.X, 1.0f);
-                var displaySize = _logoSize * scale;
-
-                // Center the logo
-                var windowWidth = ImGui.GetWindowWidth();
-                var cursorX = (windowWidth - displaySize.X) * 0.5f;
+                var displaySize = new Vector2(300f, 300f / GaiaLogo.Aspect);
+                var cursorX = (ImGui.GetWindowWidth() - displaySize.X) * 0.5f;
                 if (cursorX > 0) ImGui.SetCursorPosX(cursorX);
-
-                ImGui.Image(_logoTextureId, displaySize);
+                ImGui.Image(GaiaLogo.TextureId, displaySize);
                 ImGui.Spacing();
             }
-
-            ImGui.Text("GAIA");
-            ImGui.Spacing();
+            else
+            {
+                ImGui.Text("GAIA");
+                ImGui.Spacing();
+            }
 
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.7f, 0.7f, 0.75f, 1.0f));
             ImGui.Text("Research Preview");

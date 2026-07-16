@@ -155,6 +155,7 @@
     <!-- Embed logo image as resource -->
     <ItemGroup>
         <EmbeddedResource Include="image.png" />
+        <EmbeddedResource Include="UI\Resources\gaia-mark.png" />
     </ItemGroup>
 
     <Target Name="BuildVerificationTests" AfterTargets="Build;Publish" Condition="'$(IsTestProject)' != 'true' and '$(SkipVerificationTests)' != 'true'">

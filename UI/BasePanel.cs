@@ -13,6 +13,9 @@ namespace GAIA.UI;
 public abstract class BasePanel : IDisposable
 {
     private static readonly List<BasePanel> _allPanels = new();
+
+    private const float HeaderLogoHeight = 30f;
+
     protected Vector2 _defaultSize;
     protected bool _isOpen = true;
     protected bool _isPoppedOut;
@@ -153,12 +156,46 @@ public abstract class BasePanel : IDisposable
     protected abstract void DrawContent();
 
     /// <summary>
-    ///     Draws the pop-out/pop-in button
+    ///     Name shown in the header. Defaults to the window title; panels whose title is not the
+    ///     thing being viewed (a dataset panel is titled after the dataset) override this.
+    /// </summary>
+    protected virtual string HeaderTitle => _title;
+
+    /// <summary>Draws the GAIA mark and the panel name at the left of the header bar.</summary>
+    private void DrawHeaderBrand(Vector2 origin)
+    {
+        ImGui.SetCursorPos(origin);
+
+        if (GaiaLogo.TextureId != IntPtr.Zero && GaiaLogo.Aspect > 0)
+        {
+            ImGui.Image(GaiaLogo.TextureId, new Vector2(HeaderLogoHeight * GaiaLogo.Aspect, HeaderLogoHeight));
+            ImGui.SameLine(0, 10);
+        }
+
+        var title = HeaderTitle;
+        if (string.IsNullOrWhiteSpace(title)) return;
+
+        var controller = ImGuiController.ForCurrentContext();
+        var pushed = controller is { HasTitleFont: true };
+        if (pushed) ImGui.PushFont(controller.TitleFont);
+
+        // Centre the text against the taller logo rather than letting it sit on the top edge.
+        var textHeight = ImGui.GetTextLineHeight();
+        ImGui.SetCursorPosY(origin.Y + MathF.Max(0, (HeaderLogoHeight - textHeight) * 0.5f));
+        ImGui.TextUnformatted(title);
+
+        if (pushed) ImGui.PopFont();
+    }
+
+    /// <summary>
+    ///     Draws the header bar: GAIA mark and panel name on the left, pop-out/pop-in on the right
     /// </summary>
     protected virtual void DrawPopOutButton()
     {
         // Save current cursor position
         var cursorPos = ImGui.GetCursorPos();
+
+        DrawHeaderBrand(cursorPos);
 
         // Position button at top-right of content area
         var contentWidth = ImGui.GetContentRegionAvail().X;
@@ -252,8 +289,8 @@ public abstract class BasePanel : IDisposable
         // Restore cursor position
         ImGui.SetCursorPos(cursorPos);
 
-        // Add spacing to push content down below the button
-        ImGui.Dummy(new Vector2(0, buttonSize.Y + 5));
+        // Push content below the header, which is as tall as the logo now rather than the button.
+        ImGui.Dummy(new Vector2(0, MathF.Max(buttonSize.Y, HeaderLogoHeight) + 5));
         ImGui.Separator();
         ImGui.Spacing();
     }

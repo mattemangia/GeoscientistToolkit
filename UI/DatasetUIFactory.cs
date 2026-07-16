@@ -33,6 +33,52 @@ public static class DatasetUIFactory
     // Static cache to track BoreholeViewer instances for callback connection
     private static readonly Dictionary<BoreholeDataset, BoreholeViewer> _boreholeViewers = new();
 
+    /// <summary>
+    ///     Human-readable name of the viewer type, shown in the panel header next to the GAIA
+    ///     logo. Naming lives here because this factory already owns every viewer type. Viewers
+    ///     not listed fall back to their spaced-out class name rather than going unnamed.
+    /// </summary>
+    public static string GetViewerDisplayName(IDatasetViewer viewer) => viewer switch
+    {
+        null => string.Empty,
+        CtCombinedViewer => "Composite CT Viewer",
+        CtVolume3DViewer => "CT Volume Viewer",
+        CtImageStackViewer => "CT Image Stack Viewer",
+        ImageViewer => "Image Viewer",
+        Mesh3DViewer => "3D Mesh Viewer",
+        PointCloudViewer => "Point Cloud Viewer",
+        TableViewer => "Table Viewer",
+        GISViewer => "GIS Viewer",
+        AcousticVolumeViewer => "Acoustic Volume Viewer",
+        PNMViewer => "PNM Viewer",
+        BoreholeViewer => "Borehole Viewer",
+        TwoDGeologyViewerWrapper => "2D Geology Viewer",
+        SeismicCubeViewer => "Seismic Cube Viewer",
+        SeismicViewer => "Seismic Viewer",
+        PhysicoChemViewer => "PhysicoChem Viewer",
+        VideoDatasetViewer => "Video Viewer",
+        AudioDatasetViewer => "Audio Viewer",
+        TextViewer => "Text Viewer",
+        NerfViewer => "NeRF Viewer",
+        SlopeStabilityViewer => "Slope Stability Viewer",
+        SlopeStability2DViewer => "Slope Stability 2D Viewer",
+        _ => SpaceOutTypeName(viewer.GetType().Name)
+    };
+
+    private static string SpaceOutTypeName(string name)
+    {
+        var text = new System.Text.StringBuilder(name.Length + 8);
+        for (var i = 0; i < name.Length; i++)
+        {
+            // Break before a capital that starts a new word, keeping runs like "CT" or "GIS" intact.
+            if (i > 0 && char.IsUpper(name[i]) && (!char.IsUpper(name[i - 1]) ||
+                    (i + 1 < name.Length && char.IsLower(name[i + 1]))))
+                text.Append(' ');
+            text.Append(name[i]);
+        }
+        return text.ToString();
+    }
+
     public static IDatasetViewer CreateViewer(Dataset dataset)
 {
 return dataset switch

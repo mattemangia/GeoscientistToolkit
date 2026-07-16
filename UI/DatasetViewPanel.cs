@@ -26,6 +26,9 @@ public class DatasetViewPanel : BasePanel
 
     public Dataset Dataset { get; }
 
+    // The window is titled after the dataset, but the header names the viewer itself.
+    protected override string HeaderTitle => DatasetUIFactory.GetViewerDisplayName(_viewer);
+
     public static void CloseViewFor(Dataset datasetToClose)
     {
         foreach (var panel in AllPanels.ToList())
