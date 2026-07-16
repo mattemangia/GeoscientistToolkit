@@ -1869,7 +1869,9 @@ void main() {
         GL.EnableVertexAttribArray(3);GL.VertexAttribPointer(3,3,VertexAttribPointerType.Float,false,stride,52);
     }
 
-    private void SetOpenGlMatrix(string name,Matrix4x4 m){var a=new[]{m.M11,m.M12,m.M13,m.M14,m.M21,m.M22,m.M23,m.M24,m.M31,m.M32,m.M33,m.M34,m.M41,m.M42,m.M43,m.M44};GL.UniformMatrix4(GL.GetUniformLocation(_glProgram,name),1,true,a);}
+    // System.Numerics is row-vector (v*M); GLSL is column-vector (M*v). Passing the row-major
+    // array with transpose=false makes GL read it column-major, which is the transpose GLSL needs.
+    private void SetOpenGlMatrix(string name,Matrix4x4 m){var a=new[]{m.M11,m.M12,m.M13,m.M14,m.M21,m.M22,m.M23,m.M24,m.M31,m.M32,m.M33,m.M34,m.M41,m.M42,m.M43,m.M44};GL.UniformMatrix4(GL.GetUniformLocation(_glProgram,name),1,false,a);}
     private static int CreateOpenGlProgram(string vs,string fs){static int C(ShaderType t,string s){var x=GL.CreateShader(t);GL.ShaderSource(x,s);GL.CompileShader(x);GL.GetShader(x,ShaderParameter.CompileStatus,out var ok);if(ok==0)throw new InvalidOperationException(GL.GetShaderInfoLog(x));return x;}var v=C(ShaderType.VertexShader,vs);var f=C(ShaderType.FragmentShader,fs);var p=GL.CreateProgram();GL.AttachShader(p,v);GL.AttachShader(p,f);GL.LinkProgram(p);GL.GetProgram(p,GetProgramParameterName.LinkStatus,out var ok);GL.DeleteShader(v);GL.DeleteShader(f);if(ok==0)throw new InvalidOperationException(GL.GetProgramInfoLog(p));return p;}
     private const string OpenGlVertexShader=@"#version 330 core
 layout(location=0)in vec3 p;layout(location=1)in vec4 c;layout(location=2)in vec3 n;layout(location=3)in vec3 uvw;uniform mat4 uMvp;out vec4 C;out vec3 N;out vec3 P;out vec3 U;void main(){C=c;N=n;P=p;U=uvw;gl_Position=uMvp*vec4(p,1);}";

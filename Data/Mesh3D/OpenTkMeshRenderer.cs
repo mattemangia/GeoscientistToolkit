@@ -43,7 +43,9 @@ internal sealed class OpenTkMeshRenderer : IDisposable
     {
         GL.BindFramebuffer(FramebufferTarget.Framebuffer,_fbo);GL.Viewport(0,0,Width,Height);GL.Enable(EnableCap.DepthTest);GL.Enable(EnableCap.CullFace);GL.ClearColor(.035f,.045f,.06f,1);GL.Clear(ClearBufferMask.ColorBufferBit|ClearBufferMask.DepthBufferBit);GL.UseProgram(_program);SetMatrix("uMvp",view*projection);GL.BindVertexArray(_vao);GL.DrawElements(PrimitiveType.Triangles,_indexCount,DrawElementsType.UnsignedInt,0);GL.BindFramebuffer(FramebufferTarget.Framebuffer,0);
     }
-    private void SetMatrix(string n,Matrix4x4 m){var a=new[]{m.M11,m.M12,m.M13,m.M14,m.M21,m.M22,m.M23,m.M24,m.M31,m.M32,m.M33,m.M34,m.M41,m.M42,m.M43,m.M44};GL.UniformMatrix4(GL.GetUniformLocation(_program,n),1,true,a);}
+    // System.Numerics is row-vector (v*M); GLSL is column-vector (M*v). Passing the row-major
+    // array with transpose=false makes GL read it column-major, which is the transpose GLSL needs.
+    private void SetMatrix(string n,Matrix4x4 m){var a=new[]{m.M11,m.M12,m.M13,m.M14,m.M21,m.M22,m.M23,m.M24,m.M31,m.M32,m.M33,m.M34,m.M41,m.M42,m.M43,m.M44};GL.UniformMatrix4(GL.GetUniformLocation(_program,n),1,false,a);}
     private static int Program(string vs,string fs){int C(ShaderType t,string s){var x=GL.CreateShader(t);GL.ShaderSource(x,s);GL.CompileShader(x);GL.GetShader(x,ShaderParameter.CompileStatus,out var ok);if(ok==0)throw new InvalidOperationException(GL.GetShaderInfoLog(x));return x;}var v=C(ShaderType.VertexShader,vs);var f=C(ShaderType.FragmentShader,fs);var p=GL.CreateProgram();GL.AttachShader(p,v);GL.AttachShader(p,f);GL.LinkProgram(p);GL.DeleteShader(v);GL.DeleteShader(f);return p;}
     public void Dispose(){if(_vbo!=0)GL.DeleteBuffer(_vbo);if(_ebo!=0)GL.DeleteBuffer(_ebo);if(_vao!=0)GL.DeleteVertexArray(_vao);if(_program!=0)GL.DeleteProgram(_program);if(ColorTexture!=0)GL.DeleteTexture(ColorTexture);if(_depth!=0)GL.DeleteRenderbuffer(_depth);if(_fbo!=0)GL.DeleteFramebuffer(_fbo);}
     private const string Vertex=@"#version 330 core

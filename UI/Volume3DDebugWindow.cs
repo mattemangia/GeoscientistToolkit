@@ -5,6 +5,7 @@ using System.Numerics;
 using GAIA.Data.CtImageStack;
 using GAIA.Data.VolumeData;
 using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
 namespace GAIA.UI;
@@ -301,7 +302,6 @@ internal class Volume3DDebugWindow
 
     private async Task CreateDebugViewer()
     {
-        CtVolume3DViewer newViewer = null;
         CtImageStackDataset newEditableDataset = null;
         StreamingCtVolumeDataset newStreamingDataset = null;
 
@@ -347,21 +347,40 @@ internal class Volume3DDebugWindow
                 EditablePartner = newEditableDataset
             };
 
-            AddLog("BG Task: Creating viewer instance...");
-            newViewer = new CtVolume3DViewer(newStreamingDataset);
+            // Decode off the render thread so the main thread only pays for the GL uploads.
+            newStreamingDataset.Load();
+            newEditableDataset.Load();
 
-            lock (_viewerLock)
+            AddLog("BG Task: Handing viewer creation to the render thread...");
+            var editable = newEditableDataset;
+            var streaming = newStreamingDataset;
+            OpenTkManager.ExecuteOnMainThread(() =>
             {
-                _newViewerData = (newViewer, newEditableDataset, newStreamingDataset);
-            }
+                // The GL context is only current on the render thread; building the viewer's
+                // shaders and textures anywhere else fails at glCreateShader.
+                try
+                {
+                    var viewer = new CtVolume3DViewer(streaming);
+                    lock (_viewerLock)
+                    {
+                        _newViewerData = (viewer, editable, streaming);
+                    }
 
-            AddLog("BG Task: Handoff complete. Task finished.");
+                    AddLog("Render thread: viewer created. Handoff complete.");
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"ERROR creating viewer on render thread: {ex.Message}");
+                    editable?.Unload();
+                    streaming?.Unload();
+                    _isCreating = false;
+                }
+            });
         }
         catch (Exception ex)
         {
             AddLog($"ERROR in background task: {ex.Message}");
             AddLog($"Stack trace: {ex.StackTrace}");
-            newViewer?.Dispose();
             newEditableDataset?.Unload();
             newStreamingDataset?.Unload();
             _isCreating = false;

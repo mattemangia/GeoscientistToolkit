@@ -159,7 +159,9 @@ internal sealed class OpenTkPnmRenderer : IDisposable
         GL.AttachShader(p,v);GL.AttachShader(p,f);GL.LinkProgram(p);GL.GetProgram(p,GetProgramParameterName.LinkStatus,out var ok);
         GL.DeleteShader(v);GL.DeleteShader(f);if(ok==0)throw new InvalidOperationException(GL.GetProgramInfoLog(p));return p;
     }
-    private static void SetMatrix(int p,string n,Matrix4x4 m){var a=new[]{m.M11,m.M12,m.M13,m.M14,m.M21,m.M22,m.M23,m.M24,m.M31,m.M32,m.M33,m.M34,m.M41,m.M42,m.M43,m.M44};GL.UniformMatrix4(GL.GetUniformLocation(p,n),1,true,a);}
+    // System.Numerics is row-vector (v*M); GLSL is column-vector (M*v). Passing the row-major
+    // array with transpose=false makes GL read it column-major, which is the transpose GLSL needs.
+    private static void SetMatrix(int p,string n,Matrix4x4 m){var a=new[]{m.M11,m.M12,m.M13,m.M14,m.M21,m.M22,m.M23,m.M24,m.M31,m.M32,m.M33,m.M34,m.M41,m.M42,m.M43,m.M44};GL.UniformMatrix4(GL.GetUniformLocation(p,n),1,false,a);}
     public void Dispose(){if(_sphereVbo!=0)GL.DeleteBuffer(_sphereVbo);if(_sphereEbo!=0)GL.DeleteBuffer(_sphereEbo);if(_instanceVbo!=0)GL.DeleteBuffer(_instanceVbo);if(_poreVao!=0)GL.DeleteVertexArray(_poreVao);if(_throatVbo!=0)GL.DeleteBuffer(_throatVbo);if(_throatVao!=0)GL.DeleteVertexArray(_throatVao);if(_poreProgram!=0)GL.DeleteProgram(_poreProgram);if(_throatProgram!=0)GL.DeleteProgram(_throatProgram);if(_color!=0)GL.DeleteTexture(_color);if(_depth!=0)GL.DeleteRenderbuffer(_depth);if(_fbo!=0)GL.DeleteFramebuffer(_fbo);}
 
     private const string ColorFunction=@"vec3 ramp(float t){t=clamp(t,0.,1.);return clamp(vec3(1.5-abs(4.*t-3.),1.5-abs(4.*t-2.),1.5-abs(4.*t-1.)),0.,1.);}";

@@ -1289,7 +1289,9 @@ public class ProfileCorrelation3DViewer : IDisposable
         var values = new[] { matrix.M11, matrix.M12, matrix.M13, matrix.M14, matrix.M21, matrix.M22,
             matrix.M23, matrix.M24, matrix.M31, matrix.M32, matrix.M33, matrix.M34, matrix.M41,
             matrix.M42, matrix.M43, matrix.M44 };
-        GL.UniformMatrix4(GL.GetUniformLocation(program, name), 1, true, values);
+        // System.Numerics is row-vector (v*M); GLSL is column-vector (M*v). Passing the row-major
+        // array with transpose=false makes GL read it column-major, which is the transpose GLSL needs.
+        GL.UniformMatrix4(GL.GetUniformLocation(program, name), 1, false, values);
     }
 
     private static int CreateProgram(string vertexSource, string fragmentSource)

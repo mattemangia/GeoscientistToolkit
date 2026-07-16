@@ -102,29 +102,26 @@ public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
 
             BaseLodVolumeData = new byte[baseLodByteSize];
             fs.Seek(baseLodInfo.FileOffset, SeekOrigin.Begin);
-            var bytesRead = fs.Read(BaseLodVolumeData, 0, (int)baseLodByteSize);
+            fs.ReadExactly(BaseLodVolumeData);
             RenderLod = baseLodInfo;
             RenderLodVolumeData = BaseLodVolumeData;
             RenderLodIndex = LodCount - 1;
 
-            Logger.Log($"[StreamingCtVolumeDataset] Read {bytesRead} bytes for base LOD");
+            Logger.Log($"[StreamingCtVolumeDataset] Read {baseLodByteSize} bytes for base LOD");
 
-            // Check if base LOD has any data
-            var nonZeroCount = 0;
-            for (var i = 0; i < Math.Min(1000, BaseLodVolumeData.Length); i++)
-                if (BaseLodVolumeData[i] > 0)
-                {
+            // Scan the whole buffer: the leading bytes are the volume corner, which is
+            // air in almost every scan, so a prefix-only check reports false emptiness.
+            long nonZeroCount = 0;
+            foreach (var value in BaseLodVolumeData)
+                if (value > 0)
                     nonZeroCount++;
-                    if (nonZeroCount <= 10)
-                        Logger.Log(
-                            $"[StreamingCtVolumeDataset] Found non-zero value {BaseLodVolumeData[i]} at index {i}");
-                }
 
             if (nonZeroCount == 0)
                 Logger.LogError("[StreamingCtVolumeDataset] WARNING: Base LOD appears to be empty!");
             else
                 Logger.Log(
-                    $"[StreamingCtVolumeDataset] Base LOD has {nonZeroCount} non-zero values in first 1000 bytes");
+                    $"[StreamingCtVolumeDataset] Base LOD has {nonZeroCount} non-zero voxels " +
+                    $"({100.0 * nonZeroCount / BaseLodVolumeData.LongLength:F1}% fill)");
         }
     }
 
