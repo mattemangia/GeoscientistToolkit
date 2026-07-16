@@ -76,6 +76,8 @@ internal sealed class OpenTkApplication : GameWindow
 
         _mainWindow.SubmitUI(_closeRequested);
         _imGui.Render();
+        ViewerScreenshotUtility.ProcessDeferredCaptures();
+        ScreenshotUtility.ProcessDeferredCaptures();
         BasePanel.ProcessAllPopOutWindows();
         SwapBuffers();
 

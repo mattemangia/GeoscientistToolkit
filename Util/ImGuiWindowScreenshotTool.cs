@@ -4,7 +4,6 @@ using System.Numerics;
 using GAIA.UI.Utils;
 using GAIA.Util;
 using ImGuiNET;
-using Veldrid;
 
 namespace GAIA.UI;
 
@@ -43,15 +42,6 @@ public class ImGuiWindowScreenshotTool
     public void StartSelection()
     {
         if (IsActive) return;
-
-        // Check if we're on Metal backend
-        var gd = VeldridManager.GraphicsDevice;
-        if (gd != null && gd.BackendType == GraphicsBackend.Metal)
-        {
-            _showMetalWarningDialog = true;
-            Logger.LogError("[Screenshot] Screenshot functionality not supported on Metal (macOS) backend");
-            return;
-        }
 
         IsActive = true;
         _isDragging = false;
@@ -384,15 +374,6 @@ public class ImGuiWindowScreenshotTool
 
     public void TakeFullScreenshot()
     {
-        // Check if we're on Metal backend
-        var gd = VeldridManager.GraphicsDevice;
-        if (gd != null && gd.BackendType == GraphicsBackend.Metal)
-        {
-            _showMetalWarningDialog = true;
-            Logger.LogError("[Screenshot] Screenshot functionality not supported on Metal (macOS) backend");
-            return;
-        }
-
         var viewport = ImGui.GetMainViewport();
         _capturePos = viewport.Pos;
         _captureSize = viewport.Size;
