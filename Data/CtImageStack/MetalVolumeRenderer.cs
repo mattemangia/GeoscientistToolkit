@@ -331,7 +331,17 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
                     texCoord.y = (float(colorMapIndex) + 0.5) / 4.0; // Y coordinate selects the colormap
                     float4 colorMapColor = colorMapTex.sample(volumeSampler, texCoord);
                     
-                    sampleColor = float4(colorMapColor.rgb, normalizedDensity);
+                    float alpha = smoothstep(0.0, 1.0, normalizedDensity);
+                    float3 texel = 1.0 / constants.VolumeSize.xyz;
+                    float3 gradient = float3(
+                        volumeTex.sample(volumeSampler, pos + float3(texel.x,0,0)).r - volumeTex.sample(volumeSampler, pos - float3(texel.x,0,0)).r,
+                        volumeTex.sample(volumeSampler, pos + float3(0,texel.y,0)).r - volumeTex.sample(volumeSampler, pos - float3(0,texel.y,0)).r,
+                        volumeTex.sample(volumeSampler, pos + float3(0,0,texel.z)).r - volumeTex.sample(volumeSampler, pos - float3(0,0,texel.z)).r);
+                    float gradientLength = length(gradient);
+                    float lighting = gradientLength > 0.0001
+                        ? 0.3 + 0.7 * abs(dot(gradient / gradientLength, normalize(float3(0.4, 0.6, 1.0))))
+                        : 1.0;
+                    sampleColor = float4(colorMapColor.rgb * lighting, alpha);
                 }
             }
 

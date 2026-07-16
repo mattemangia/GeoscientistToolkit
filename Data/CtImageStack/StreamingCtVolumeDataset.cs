@@ -28,6 +28,9 @@ public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
     public GvtLodInfo[] LodInfos { get; private set; }
     public GvtLodInfo BaseLod => LodInfos[LodCount - 1];
     public byte[] BaseLodVolumeData { get; private set; }
+    public GvtLodInfo RenderLod { get; private set; }
+    public byte[] RenderLodVolumeData { get; private set; }
+    public int RenderLodIndex { get; private set; } = -1;
     public IGrayscaleVolumeData VolumeData { get; set; }
     public ILabelVolumeData LabelData { get; set; }
     public List<Material> Materials { get; set; }
@@ -100,6 +103,9 @@ public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
             BaseLodVolumeData = new byte[baseLodByteSize];
             fs.Seek(baseLodInfo.FileOffset, SeekOrigin.Begin);
             var bytesRead = fs.Read(BaseLodVolumeData, 0, (int)baseLodByteSize);
+            RenderLod = baseLodInfo;
+            RenderLodVolumeData = BaseLodVolumeData;
+            RenderLodIndex = LodCount - 1;
 
             Logger.Log($"[StreamingCtVolumeDataset] Read {bytesRead} bytes for base LOD");
 
@@ -122,8 +128,45 @@ public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
         }
     }
 
+    /// <summary>Loads the finest complete LOD that fits the renderer's VRAM budget.</summary>
+    public void LoadBestRenderLod(long byteBudget, int maxAxisSize)
+    {
+        Load();
+        var selected = LodCount - 1;
+        long selectedBytes = BaseLodVolumeData.LongLength;
+        for (var i = 0; i < LodCount; i++)
+        {
+            var lod = LodInfos[i];
+            if (lod.Width > maxAxisSize || lod.Height > maxAxisSize || lod.Depth > maxAxisSize) continue;
+            var bx = (lod.Width + BrickSize - 1L) / BrickSize;
+            var by = (lod.Height + BrickSize - 1L) / BrickSize;
+            var bz = (lod.Depth + BrickSize - 1L) / BrickSize;
+            var bytes = bx * by * bz * BrickSize * BrickSize * BrickSize;
+            if (bytes <= byteBudget)
+            {
+                selected = i;
+                selectedBytes = bytes;
+                break;
+            }
+        }
+
+        if (selected == LodCount - 1) return;
+        var data = new byte[selectedBytes];
+        using var fs = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        fs.Seek(LodInfos[selected].FileOffset, SeekOrigin.Begin);
+        fs.ReadExactly(data);
+        RenderLod = LodInfos[selected];
+        RenderLodVolumeData = data;
+        RenderLodIndex = selected;
+        Logger.Log($"[StreamingCtVolumeDataset] Selected render LOD {selected}: " +
+                   $"{RenderLod.Width}×{RenderLod.Height}×{RenderLod.Depth} ({selectedBytes / 1048576.0:F1} MiB)");
+    }
+
     public override void Unload()
     {
         BaseLodVolumeData = null;
+        RenderLodVolumeData = null;
+        RenderLod = null;
+        RenderLodIndex = -1;
     }
 }

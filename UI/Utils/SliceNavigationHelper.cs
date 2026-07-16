@@ -10,6 +10,7 @@ namespace GAIA.UI.Utils;
 /// </summary>
 public static class SliceNavigationHelper
 {
+    private static readonly Dictionary<string, int> PendingSliderValues = new();
     /// <summary>
     ///     Draws enhanced slice navigation controls with slider, input field, and +/- buttons
     /// </summary>
@@ -21,6 +22,8 @@ public static class SliceNavigationHelper
     public static bool DrawSliceControls(string label, ref int currentSlice, int maxSlice, string id = "")
     {
         var changed = false;
+        var pendingKey = $"{label}:{id}";
+        if (PendingSliderValues.TryGetValue(pendingKey, out var pendingValue)) currentSlice = pendingValue;
         var originalSlice = currentSlice;
 
         // Start the control group
@@ -50,7 +53,15 @@ public static class SliceNavigationHelper
 
         // Slider
         ImGui.SetNextItemWidth(sliderWidth);
-        if (ImGui.SliderInt($"##{id}Slider", ref currentSlice, 0, maxSlice, "")) changed = true;
+        if (ImGui.SliderInt($"##{id}Slider", ref currentSlice, 0, maxSlice, ""))
+            PendingSliderValues[pendingKey] = currentSlice;
+        // Rendering a CT slice is expensive: commit when the drag ends instead of
+        // rebuilding a CPU image and GPU texture for every mouse event.
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            changed = true;
+            PendingSliderValues.Remove(pendingKey);
+        }
 
         ImGui.SameLine();
 

@@ -17,6 +17,9 @@ public class CtRenderingPanel : BasePanel
     private readonly CtImageStackDataset _dataset;
     private readonly CtCombinedViewer _viewer;
     private int _currentViewMode;
+    private int? _pendingSliceX;
+    private int? _pendingSliceY;
+    private int? _pendingSliceZ;
 
     public CtRenderingPanel(CtCombinedViewer viewer, CtImageStackDataset dataset)
         : base("CT Rendering Controls", new Vector2(400, 600))
@@ -120,18 +123,30 @@ public class CtRenderingPanel : BasePanel
         ImGui.Separator();
 
         ImGui.Text("Slice Positions:");
-        var sliceX = _viewer.SliceX;
-        var sliceY = _viewer.SliceY;
-        var sliceZ = _viewer.SliceZ;
+        var sliceX = _pendingSliceX ?? _viewer.SliceX;
+        var sliceY = _pendingSliceY ?? _viewer.SliceY;
+        var sliceZ = _pendingSliceZ ?? _viewer.SliceZ;
 
-        if (ImGui.SliderInt("X", ref sliceX, 0, _dataset.Width - 1))
+        if (ImGui.SliderInt("X", ref sliceX, 0, _dataset.Width - 1)) _pendingSliceX = sliceX;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
             _viewer.SliceX = sliceX;
+            _pendingSliceX = null;
+        }
 
-        if (ImGui.SliderInt("Y", ref sliceY, 0, _dataset.Height - 1))
+        if (ImGui.SliderInt("Y", ref sliceY, 0, _dataset.Height - 1)) _pendingSliceY = sliceY;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
             _viewer.SliceY = sliceY;
+            _pendingSliceY = null;
+        }
 
-        if (ImGui.SliderInt("Z", ref sliceZ, 0, _dataset.Depth - 1))
+        if (ImGui.SliderInt("Z", ref sliceZ, 0, _dataset.Depth - 1)) _pendingSliceZ = sliceZ;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
             _viewer.SliceZ = sliceZ;
+            _pendingSliceZ = null;
+        }
 
         if (ImGui.Button("Center All"))
         {

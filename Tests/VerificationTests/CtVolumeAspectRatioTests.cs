@@ -29,6 +29,18 @@ public class CtVolumeAspectRatioTests
         AssertVector(scale, new Vector3(1f, 0.5f, 0.25f));
     }
 
+    [Fact]
+    public void OtsuThreshold_SeparatesAirFromDenseCore()
+    {
+        var voxels = new byte[10_000];
+        Array.Fill(voxels, (byte)8, 0, 7_000);
+        Array.Fill(voxels, (byte)180, 7_000, 3_000);
+
+        var threshold = CtVolume3DViewer.CalculateOtsuThreshold(voxels);
+
+        Assert.InRange(threshold, (byte)8, (byte)179);
+    }
+
     private static void AssertVector(Vector3 actual, Vector3 expected)
     {
         const float tolerance = 0.00001f;

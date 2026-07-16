@@ -39,7 +39,7 @@ public class ClippingPlane
 
 public class CtVolume3DViewer : IDatasetViewer, IDisposable
 {
-    private const long VRAM_BUDGET_LABELS = 512L * 1024 * 1024;
+    private readonly long _auxiliaryTextureBudget;
     internal const int MAX_CLIPPING_PLANES = 8;
     private readonly CtVolume3DControlPanel _controlPanel;
     internal readonly CtImageStackDataset _editableDataset;
@@ -113,7 +113,7 @@ public class CtVolume3DViewer : IDatasetViewer, IDisposable
     public bool CutZEnabled;
     public bool CutZForward = true;
     public float CutZPosition = 0.5f;
-    public float MaxThreshold = 0.8f;
+    public float MaxThreshold = 1.0f;
     public float MinThreshold = 0.05f;
     public bool ShowGrayscale = true;
     public bool ShowSlices = false;
@@ -125,6 +125,9 @@ public class CtVolume3DViewer : IDatasetViewer, IDisposable
     public CtVolume3DViewer(StreamingCtVolumeDataset dataset)
     {
         _streamingDataset = dataset;
+        var memoryLimitMb = GAIA.Settings.SettingsManager.Instance.Settings.Hardware.TextureMemoryLimit;
+        _auxiliaryTextureBudget = Math.Clamp(memoryLimitMb * 1024L * 1024L / 16,
+            48L * 1024 * 1024, 128L * 1024 * 1024);
         _editableDataset = dataset.EditablePartner;
         if (_editableDataset == null)
             throw new InvalidOperationException(
@@ -136,7 +139,7 @@ public class CtVolume3DViewer : IDatasetViewer, IDisposable
             _editableDataset.Depth, _editableDataset.PixelSize, _editableDataset.SliceThickness);
 
         Logger.Log(
-            $"[CtVolume3DViewer] Streaming dataset LOD dimensions: {_streamingDataset.BaseLod.Width}x{_streamingDataset.BaseLod.Height}x{_streamingDataset.BaseLod.Depth}");
+            $"[CtVolume3DViewer] Streaming render LOD dimensions: {_streamingDataset.RenderLod.Width}x{_streamingDataset.RenderLod.Height}x{_streamingDataset.RenderLod.Depth}");
         Logger.Log(
             $"[CtVolume3DViewer] Editable dataset dimensions: {_editableDataset.Width}x{_editableDataset.Height}x{_editableDataset.Depth}");
 
@@ -311,21 +314,26 @@ public class CtVolume3DViewer : IDatasetViewer, IDisposable
 
     private void CreateVolumeTextures(ResourceFactory factory)
     {
-        var baseLodInfo = _streamingDataset.BaseLod;
-        var volumeData = ReconstructVolumeFromBricks(baseLodInfo, _streamingDataset.BaseLodVolumeData,
+        var baseLodInfo = _streamingDataset.RenderLod;
+        var volumeData = ReconstructVolumeFromBricks(baseLodInfo, _streamingDataset.RenderLodVolumeData,
             _streamingDataset.BrickSize);
+        // Separate the surrounding air from the specimen automatically. Without this,
+        // thousands of low-density samples accumulate into an opaque cuboid.
+        MinThreshold = Math.Max(MinThreshold, CalculateOtsuThreshold(volumeData) / 255f * 0.8f);
         var desc = TextureDescription.Texture3D((uint)baseLodInfo.Width, (uint)baseLodInfo.Height,
             (uint)baseLodInfo.Depth, 1, PixelFormat.R8_UNorm, TextureUsage.Sampled);
         _volumeTexture = factory.CreateTexture(desc);
         VeldridManager.GraphicsDevice.UpdateTexture(_volumeTexture, volumeData, 0, 0, 0, (uint)baseLodInfo.Width,
             (uint)baseLodInfo.Height, (uint)baseLodInfo.Depth, 0, 0);
 
-        _labelTexture = CreateDownsampledTexture3D(factory, _editableDataset.LabelData, VRAM_BUDGET_LABELS);
+        _labelTexture = CreateDownsampledTexture3D(factory, _editableDataset.LabelData, _auxiliaryTextureBudget);
 
-        _previewTexture = factory.CreateTexture(desc);
-        var emptyData = new byte[baseLodInfo.Width * baseLodInfo.Height * baseLodInfo.Depth];
-        VeldridManager.GraphicsDevice.UpdateTexture(_previewTexture, emptyData, 0, 0, 0, (uint)baseLodInfo.Width,
-            (uint)baseLodInfo.Height, (uint)baseLodInfo.Depth, 0, 0);
+        var previewDesc = TextureDescription.Texture3D(_labelTexture.Width, _labelTexture.Height,
+            _labelTexture.Depth, 1, PixelFormat.R8_UNorm, TextureUsage.Sampled);
+        _previewTexture = factory.CreateTexture(previewDesc);
+        var emptyData = new byte[checked((int)(_previewTexture.Width * _previewTexture.Height * _previewTexture.Depth))];
+        VeldridManager.GraphicsDevice.UpdateTexture(_previewTexture, emptyData, 0, 0, 0, _previewTexture.Width,
+            _previewTexture.Height, _previewTexture.Depth, 0, 0);
 
         _volumeSampler = factory.CreateSampler(new SamplerDescription(
             SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp,
@@ -335,7 +343,12 @@ public class CtVolume3DViewer : IDatasetViewer, IDisposable
     private void UpdatePreviewTexture(byte[] previewMask)
     {
         if (previewMask == null || _previewTexture == null) return;
-        var baseLod = _streamingDataset.BaseLod;
+        var baseLod = new GvtLodInfo
+        {
+            Width = (int)_previewTexture.Width,
+            Height = (int)_previewTexture.Height,
+            Depth = (int)_previewTexture.Depth
+        };
         var downsampledPreview = DownsampleVolumeData(previewMask, _editableDataset.Width, _editableDataset.Height,
             _editableDataset.Depth, baseLod.Width, baseLod.Height, baseLod.Depth);
         VeldridManager.GraphicsDevice.UpdateTexture(_previewTexture, downsampledPreview, 0, 0, 0, (uint)baseLod.Width,
@@ -652,7 +665,29 @@ void main()
                 
                 // FIXED: Always apply colormap, colormap index 0 is grayscale
                 sampledColor = ApplyColorMap(normIntensity, colorMapIndex);
-                sampledColor.a = normIntensity;
+                sampledColor.a = smoothstep(0.0, 1.0, normIntensity);
+
+                // Gradient lighting exposes cylindrical surfaces and fine density
+                // changes without allocating an additional gradient volume.
+                if (sampledColor.a > 0.01)
+                {
+                    vec3 texel = 1.0 / VolumeSize.xyz;
+                    vec3 gradient = vec3(
+                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos + vec3(texel.x,0,0), 0.0).r -
+                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos - vec3(texel.x,0,0), 0.0).r,
+                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos + vec3(0,texel.y,0), 0.0).r -
+                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos - vec3(0,texel.y,0), 0.0).r,
+                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos + vec3(0,0,texel.z), 0.0).r -
+                        textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos - vec3(0,0,texel.z), 0.0).r);
+                    float gradientLength = length(gradient);
+                    if (gradientLength > 0.0001)
+                    {
+                        vec3 normal = gradient / gradientLength;
+                        vec3 lightDir = normalize(vec3(0.4, 0.6, 1.0));
+                        float lighting = 0.3 + 0.7 * abs(dot(normal, lightDir));
+                        sampledColor.rgb *= lighting;
+                    }
+                }
             }
         }
 
@@ -870,6 +905,35 @@ void main() { out_Color = PlaneColor; }";
         return longest > 0 && float.IsFinite(longest) ? physical / longest : Vector3.One;
     }
 
+    public static byte CalculateOtsuThreshold(byte[] data)
+    {
+        if (data == null || data.Length == 0) return 0;
+        var histogram = new long[256];
+        foreach (var value in data) histogram[value]++;
+        long total = data.LongLength, backgroundWeight = 0;
+        double totalSum = 0, backgroundSum = 0, bestVariance = -1;
+        for (var i = 0; i < 256; i++) totalSum += i * histogram[i];
+        byte threshold = 0;
+        for (var i = 0; i < 255; i++)
+        {
+            backgroundWeight += histogram[i];
+            if (backgroundWeight == 0) continue;
+            var foregroundWeight = total - backgroundWeight;
+            if (foregroundWeight == 0) break;
+            backgroundSum += i * histogram[i];
+            var backgroundMean = backgroundSum / backgroundWeight;
+            var foregroundMean = (totalSum - backgroundSum) / foregroundWeight;
+            var variance = backgroundWeight * (double)foregroundWeight *
+                           (backgroundMean - foregroundMean) * (backgroundMean - foregroundMean);
+            if (variance > bestVariance)
+            {
+                bestVariance = variance;
+                threshold = (byte)i;
+            }
+        }
+        return threshold;
+    }
+
     private unsafe void UpdateConstantBuffer()
     {
         Matrix4x4.Invert(_viewMatrix, out var invView);
@@ -951,7 +1015,7 @@ void main() { out_Color = PlaneColor; }";
     {
         _labelTexture?.Dispose();
         _labelTexture =
-            CreateDownsampledTexture3D(VeldridManager.Factory, _editableDataset.LabelData, VRAM_BUDGET_LABELS);
+            CreateDownsampledTexture3D(VeldridManager.Factory, _editableDataset.LabelData, _auxiliaryTextureBudget);
 
         if (_metalRenderer != null)
         {
@@ -1405,10 +1469,18 @@ void main() { out_Color = PlaneColor; }";
             return dummy;
         }
 
-        var baseLod = _streamingDataset.BaseLod;
+        var baseLod = _streamingDataset.RenderLod;
         var targetWidth = baseLod.Width;
         var targetHeight = baseLod.Height;
         var targetDepth = baseLod.Depth;
+        var targetVoxels = (long)targetWidth * targetHeight * targetDepth;
+        if (targetVoxels > budget)
+        {
+            var scale = Math.Pow(budget / (double)targetVoxels, 1.0 / 3.0);
+            targetWidth = Math.Max(1, (int)(targetWidth * scale));
+            targetHeight = Math.Max(1, (int)(targetHeight * scale));
+            targetDepth = Math.Max(1, (int)(targetDepth * scale));
+        }
         Logger.Log(
             $"[CtVolume3DViewer] Creating label texture to match volume LOD: {targetWidth}x{targetHeight}x{targetDepth}");
         var factorX = Math.Max(1, volume.Width / targetWidth);

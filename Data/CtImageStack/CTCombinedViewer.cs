@@ -43,6 +43,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private readonly List<(Vector2, Vector2)> _cachedIsocontoursXZ = new();
     private readonly List<(Vector2, Vector2)> _cachedIsocontoursYZ = new();
     private readonly CtImageStackDataset _dataset;
+    private readonly SliceLruCache _grayscaleSliceCache = new(96L * 1024 * 1024);
+    private readonly SliceLruCache _labelSliceCache = new(48L * 1024 * 1024);
     private CtSegmentationIntegration _interactiveSegmentation;
     private readonly Dictionary<byte, float> _materialOpacity = new();
     private readonly Dictionary<byte, bool> _materialVisibility = new();
@@ -332,6 +334,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         CtImageStackTools.Preview3DChanged -= OnPreview3DChanged;
         CtImageStackTools.PreviewChanged -= OnGenericPreviewChanged;
         AcousticIntegration.OnPositionsChanged -= OnAcousticPositionsChanged;
+        _grayscaleSliceCache.Clear();
+        _labelSliceCache.Clear();
 
         CtSegmentationIntegration.Cleanup(_dataset);
         RockCoreIntegration.UnregisterTool(_dataset);
@@ -461,6 +465,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     {
         if (dataset == _dataset)
         {
+            _grayscaleSliceCache.Clear();
+            _labelSliceCache.Clear();
             _needsUpdateXY = true;
             _needsUpdateXZ = true;
             _needsUpdateYZ = true;
@@ -481,7 +487,15 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             _dataset.Load();
             _loadingProgress = 0.45f;
             _loadingStatus = "Loading the multiresolution volume...";
-            if (_streamingDataset != null) _streamingDataset.Load();
+            if (_streamingDataset != null)
+            {
+                var memoryLimitMb = GAIA.Settings.SettingsManager.Instance.Settings.Hardware.TextureMemoryLimit;
+                // Reserve at most 20% of the configured texture pool for density;
+                // labels and previews use separate, smaller adaptive textures.
+                var densityBudget = Math.Clamp(memoryLimitMb * 1024L * 1024L / 5,
+                    96L * 1024 * 1024, 512L * 1024 * 1024);
+                _streamingDataset.LoadBestRenderLod(densityBudget, 2048);
+            }
             _loadingProgress = 0.7f;
             _loadingStatus = "Volume data ready; initializing the viewer...";
         }
@@ -522,7 +536,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                     ShowGrayscale = ShowVolumeData,
                     StepSize = 2.0f,
                     MinThreshold = 0.05f,
-                    MaxThreshold = 0.8f
+                    MaxThreshold = 1.0f
                 };
                 UpdateVolumeViewerSlices();
             }
@@ -1451,6 +1465,13 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
     private byte[] ExtractSliceData(int viewIndex, int width, int height)
     {
+        var slice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
+        return _grayscaleSliceCache.GetOrAdd(viewIndex, slice,
+            () => ExtractSliceDataUncached(viewIndex, width, height));
+    }
+
+    private byte[] ExtractSliceDataUncached(int viewIndex, int width, int height)
+    {
         var data = new byte[width * height];
         var volume = _dataset.VolumeData;
 
@@ -1480,6 +1501,13 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     }
 
     private byte[] ExtractLabelSliceData(int viewIndex, int width, int height)
+    {
+        var slice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
+        return _labelSliceCache.GetOrAdd(viewIndex, slice,
+            () => ExtractLabelSliceDataUncached(viewIndex, width, height));
+    }
+
+    private byte[] ExtractLabelSliceDataUncached(int viewIndex, int width, int height)
     {
         var data = new byte[width * height];
         var labels = _dataset.LabelData;
