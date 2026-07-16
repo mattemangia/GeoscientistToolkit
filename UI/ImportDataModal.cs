@@ -108,6 +108,11 @@ public class ImportDataModal
     private Task<Dataset> _importTask;
     private Dataset _pendingDataset;
     private float _progress;
+    private readonly Dictionary<string, object> _optionInfoCache = new(StringComparer.Ordinal);
+    private int _optionRevision;
+    private int _validatedRevision = -1;
+    private int _validatedType = -1;
+    private bool _cachedCanImport;
 
     private int _selectedDatasetTypeIndex;
     private bool _shouldOpenOrganizer;
@@ -184,6 +189,23 @@ public class ImportDataModal
         _currentState = ImportState.ShowingOptions;
     }
 
+    public bool IsActive => _currentState != ImportState.Idle || _organizerDialog.IsOpen;
+
+    private void InvalidateOptionCaches()
+    {
+        _optionRevision++;
+        _optionInfoCache.Clear();
+        _validatedRevision = -1;
+    }
+
+    private T CachedInfo<T>(string key, Func<T> factory)
+    {
+        if (_optionInfoCache.TryGetValue(key, out var value) && value is T typed) return typed;
+        var created = factory();
+        _optionInfoCache[key] = created;
+        return created;
+    }
+
     public void Submit()
     {
         if (_currentState == ImportState.Idle) return;
@@ -227,6 +249,7 @@ public class ImportDataModal
     private void HandleDialogSubmissions()
     {
         if (_folderDialog.Submit())
+        {
             switch (_selectedDatasetTypeIndex)
             {
                 case 1: // Image Folder
@@ -244,21 +267,23 @@ public class ImportDataModal
                     _stratiFixDatasetFolderLoader.DatasetFolderPath = _folderDialog.SelectedPath;
                     break;
             }
+            InvalidateOptionCaches();
+        }
 
         if (_stratiFixFolderDialog.Submit())
+        {
             _stratiFixDatasetFolderLoader.DatasetFolderPath = _stratiFixFolderDialog.SelectedPath;
+            InvalidateOptionCaches();
+        }
 
-        if (_acousticDialog.Submit()) _acousticVolumeLoader.DirectoryPath = _acousticDialog.SelectedPath;
-
-        if (_segmentationDialog.Submit()) _segmentationLoader.SegmentationPath = _segmentationDialog.SelectedPath;
-
-        if (_fileDialog.Submit()) _singleImageLoader.ImagePath = _fileDialog.SelectedPath;
-        
-        if (_boreholeBinaryDialog.Submit()) _boreholeBinaryLoader.FilePath = _boreholeBinaryDialog.SelectedPath;
-        
-        if (_lasDialog.Submit()) _lasLoader.FilePath = _lasDialog.SelectedPath;
+        SubmitDialog(_acousticDialog, path => _acousticVolumeLoader.DirectoryPath = path);
+        SubmitDialog(_segmentationDialog, path => _segmentationLoader.SegmentationPath = path);
+        SubmitDialog(_fileDialog, path => _singleImageLoader.ImagePath = path);
+        SubmitDialog(_boreholeBinaryDialog, path => _boreholeBinaryLoader.FilePath = path);
+        SubmitDialog(_lasDialog, path => _lasLoader.FilePath = path);
 
         if (_tiffDialog.Submit())
+        {
             switch (_selectedDatasetTypeIndex)
             {
                 case 2: // CT Stack Optimized
@@ -271,50 +296,40 @@ public class ImportDataModal
                     _labeledVolumeLoader.IsMultiPageTiff = true;
                     break;
             }
+            InvalidateOptionCaches();
+        }
 
-        if (_mesh3DDialog.Submit()) _mesh3DLoader.ModelPath = _mesh3DDialog.SelectedPath;
+        SubmitDialog(_mesh3DDialog, path => _mesh3DLoader.ModelPath = path);
+        SubmitDialog(_tableDialog, path => _tableLoader.FilePath = path);
+        SubmitDialog(_gisDialog, path => _gisLoader.FilePath = path);
+        SubmitDialog(_pnmDialog, path => _pnmLoader.FilePath = path);
+        SubmitDialog(_dualPnmDialog, path => _dualPnmLoader.FilePath = path);
+        SubmitDialog(_physicoChemDialog, path => _physicoChemLoader.FilePath = path);
+        SubmitDialog(_tough2Dialog, path => _tough2Loader.FilePath = path);
+        SubmitDialog(_twoDGeologyDialog, path => _twoDGeologyLoader.FilePath = path);
+        SubmitDialog(_subsurfaceGisDialog, path => _subsurfaceGisLoader.FilePath = path);
+        SubmitDialog(_seismicDialog, path => _seismicLoader.FilePath = path);
+        SubmitDialog(_videoDialog, path => _videoLoader.VideoPath = path);
+        SubmitDialog(_audioDialog, path => _audioLoader.AudioPath = path);
+        SubmitDialog(_textDialog, path => _textLoader.TextPath = path);
+        SubmitDialog(_slopeResultsDialog, path => _slopeResultsLoader.FilePath = path);
+        SubmitDialog(_dicomDialog, path => _dicomLoader.SourcePath = path);
+        SubmitDialog(_ctStackFileDialog, path => _ctStackFileLoader.SourcePath = path);
+        SubmitDialog(_pointCloudDialog, path => _pointCloudLoader.FilePath = path);
+    }
 
-        if (_tableDialog.Submit()) _tableLoader.FilePath = _tableDialog.SelectedPath;
-
-        if (_gisDialog.Submit()) _gisLoader.FilePath = _gisDialog.SelectedPath;
-
-        // Added for PNM
-        if (_pnmDialog.Submit()) _pnmLoader.FilePath = _pnmDialog.SelectedPath;
-
-        // Added for Dual PNM
-        if (_dualPnmDialog.Submit()) _dualPnmLoader.FilePath = _dualPnmDialog.SelectedPath;
-
-        // Added for PhysicoChem
-        if (_physicoChemDialog.Submit()) _physicoChemLoader.FilePath = _physicoChemDialog.SelectedPath;
-
-        // Added for TOUGH2
-        if (_tough2Dialog.Submit()) _tough2Loader.FilePath = _tough2Dialog.SelectedPath;
-
-        // Added for 2D Geology
-        if (_twoDGeologyDialog.Submit()) _twoDGeologyLoader.FilePath = _twoDGeologyDialog.SelectedPath;
-
-        // Added for Subsurface GIS
-        if (_subsurfaceGisDialog.Submit()) _subsurfaceGisLoader.FilePath = _subsurfaceGisDialog.SelectedPath;
-
-        // Added for Seismic
-        if (_seismicDialog.Submit()) _seismicLoader.FilePath = _seismicDialog.SelectedPath;
-
-        // Added for Video
-        if (_videoDialog.Submit()) _videoLoader.VideoPath = _videoDialog.SelectedPath;
-
-        // Added for Audio
-        if (_audioDialog.Submit()) _audioLoader.AudioPath = _audioDialog.SelectedPath;
-        if (_textDialog.Submit()) _textLoader.TextPath = _textDialog.SelectedPath;
-        if (_slopeResultsDialog.Submit()) _slopeResultsLoader.FilePath = _slopeResultsDialog.SelectedPath;
-        if (_dicomDialog.Submit()) _dicomLoader.SourcePath = _dicomDialog.SelectedPath;
-        if (_ctStackFileDialog.Submit()) _ctStackFileLoader.SourcePath = _ctStackFileDialog.SelectedPath;
-        if (_pointCloudDialog.Submit()) _pointCloudLoader.FilePath = _pointCloudDialog.SelectedPath;
+    private void SubmitDialog(ImGuiFileDialog dialog, Action<string> apply)
+    {
+        if (!dialog.Submit()) return;
+        apply(dialog.SelectedPath);
+        InvalidateOptionCaches();
     }
 
     private void DrawOptions()
     {
         ImGui.Text("Select the type of data to import:");
-        ImGui.Combo("##DatasetType", ref _selectedDatasetTypeIndex, _datasetTypeNames, _datasetTypeNames.Length);
+        if (ImGui.Combo("##DatasetType", ref _selectedDatasetTypeIndex, _datasetTypeNames, _datasetTypeNames.Length))
+            InvalidateOptionCaches();
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -927,16 +942,18 @@ public class ImportDataModal
             _dicomLoader.UseMemoryMapping = useMemMap;
         }
 
-        if (_dicomLoader.CanImport)
+        var dicomValidation = CachedInfo($"dicom:{_dicomLoader.SourcePath}", () =>
+            (CanImport: _dicomLoader.CanImport, Message: _dicomLoader.ValidationMessage));
+        if (dicomValidation.CanImport)
         {
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ready to import DICOM series");
         }
-        else if (!string.IsNullOrEmpty(_dicomLoader.ValidationMessage))
+        else if (!string.IsNullOrEmpty(dicomValidation.Message))
         {
-             ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), $"⚠ Warning: {_dicomLoader.ValidationMessage}");
+             ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), $"⚠ Warning: {dicomValidation.Message}");
         }
     }
 
@@ -1045,7 +1062,7 @@ public class ImportDataModal
             ImGui.SetTooltip("Rotation around the Z-axis in degrees");
 
         // File info
-        var info = _pointCloudLoader.GetFileInfo();
+        var info = CachedInfo($"point-cloud:{_pointCloudLoader.FilePath}", _pointCloudLoader.GetFileInfo);
         if (info != null)
         {
             ImGui.Spacing();
@@ -1171,7 +1188,7 @@ public class ImportDataModal
         if (ImGui.InputText("##SegmentationName", ref name, 256)) _segmentationLoader.DatasetName = name;
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Optional: Leave empty to use the file name");
 
-        var info = _segmentationLoader.GetSegmentationInfo();
+        var info = CachedInfo($"segmentation:{_segmentationLoader.SegmentationPath}", _segmentationLoader.GetSegmentationInfo);
         if (info != null)
         {
             ImGui.Spacing();
@@ -1289,7 +1306,7 @@ public class ImportDataModal
 
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Set the physical size of each pixel. Leave as 1.0 if unknown.");
 
-        var info = _singleImageLoader.GetImageInfo();
+        var info = CachedInfo($"image:{_singleImageLoader.ImagePath}", _singleImageLoader.GetImageInfo);
         if (info != null)
         {
             ImGui.Spacing();
@@ -1314,7 +1331,7 @@ public class ImportDataModal
         ImGui.TextWrapped(
             "This option allows you to load multiple images from a folder and organize them into groups.");
 
-        var info = _imageFolderLoader.GetFolderInfo();
+        var info = CachedInfo($"folder:{_imageFolderLoader.FolderPath}", _imageFolderLoader.GetFolderInfo);
         if (info.ImageCount > 0)
         {
             ImGui.Spacing();
@@ -1336,6 +1353,7 @@ public class ImportDataModal
         {
             _ctStackLoader.IsMultiPageTiff = false;
             _ctStackLoader.SourcePath = "";
+            InvalidateOptionCaches();
         }
 
         ImGui.SameLine();
@@ -1343,6 +1361,7 @@ public class ImportDataModal
         {
             _ctStackLoader.IsMultiPageTiff = true;
             _ctStackLoader.SourcePath = "";
+            InvalidateOptionCaches();
         }
 
         ImGui.Spacing();
@@ -1392,7 +1411,7 @@ public class ImportDataModal
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Reduces dataset size by averaging voxels. A factor of 2 makes the data 8 times smaller.");
 
-        var info = _ctStackLoader.GetStackInfo();
+        var info = CachedInfo($"ct:{_ctStackLoader.SourcePath}:{_ctStackLoader.IsMultiPageTiff}", _ctStackLoader.GetStackInfo);
         if (info.SliceCount > 0)
         {
             ImGui.Spacing();
@@ -1429,7 +1448,7 @@ public class ImportDataModal
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Scale factor to apply when loading the model. 1.0 = original size.");
 
-        var info = _mesh3DLoader.GetModelInfo();
+        var info = CachedInfo($"mesh:{_mesh3DLoader.ModelPath}", _mesh3DLoader.GetModelInfo);
         if (info != null)
         {
             ImGui.Spacing();
@@ -1460,6 +1479,7 @@ public class ImportDataModal
         {
             _labeledVolumeLoader.IsMultiPageTiff = false;
             _labeledVolumeLoader.SourcePath = "";
+            InvalidateOptionCaches();
         }
 
         ImGui.SameLine();
@@ -1467,6 +1487,7 @@ public class ImportDataModal
         {
             _labeledVolumeLoader.IsMultiPageTiff = true;
             _labeledVolumeLoader.SourcePath = "";
+            InvalidateOptionCaches();
         }
 
         ImGui.Spacing();
@@ -1506,7 +1527,7 @@ public class ImportDataModal
 
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Physical size of each voxel in the volume.");
 
-        var info = _labeledVolumeLoader.GetVolumeInfo();
+        var info = CachedInfo($"labels:{_labeledVolumeLoader.SourcePath}:{_labeledVolumeLoader.IsMultiPageTiff}", _labeledVolumeLoader.GetVolumeInfo);
         if (info.IsReady)
         {
             ImGui.Spacing();
@@ -1557,7 +1578,7 @@ public class ImportDataModal
         ImGui.RadioButton("TSV (tab)", ref format, 2);
         _tableLoader.Format = (TableLoader.FileFormat)format;
 
-        var info = _tableLoader.GetTableInfo();
+        var info = CachedInfo($"table:{_tableLoader.FilePath}:{_tableLoader.Format}", _tableLoader.GetTableInfo);
         if (info != null) ImGui.Text($"Detected: {info.DetectedDelimiter}");
 
         ImGui.Spacing();
@@ -1591,7 +1612,7 @@ public class ImportDataModal
             ImGui.BulletText($"Size: {info.FileSize / 1024} KB");
 
             // Show preview
-            var preview = _tableLoader.GetPreview();
+            var preview = CachedInfo<DataTable>($"table-preview:{_tableLoader.FilePath}:{_tableLoader.Format}:{_tableLoader.HasHeaders}:{_tableLoader.Encoding}", () => _tableLoader.GetPreview());
             if (preview != null && preview.Rows.Count > 0)
             {
                 ImGui.Spacing();
@@ -1643,10 +1664,15 @@ public class ImportDataModal
         {
             _gisLoader.CreateEmpty = true;
             _gisLoader.FilePath = "";
+            InvalidateOptionCaches();
         }
 
         ImGui.SameLine();
-        if (ImGui.RadioButton("Load GIS File", !createEmpty)) _gisLoader.CreateEmpty = false;
+        if (ImGui.RadioButton("Load GIS File", !createEmpty))
+        {
+            _gisLoader.CreateEmpty = false;
+            InvalidateOptionCaches();
+        }
 
         ImGui.Spacing();
 
@@ -1673,7 +1699,7 @@ public class ImportDataModal
                 _gisDialog.Open(null, gisExtensions);
             }
 
-            var info = _gisLoader.GetFileInfo();
+            var info = CachedInfo($"gis:{_gisLoader.FilePath}", _gisLoader.GetFileInfo);
             if (info != null && !string.IsNullOrEmpty(info.FileName))
             {
                 ImGui.Spacing();
@@ -1727,7 +1753,7 @@ public class ImportDataModal
         if (ImGui.Checkbox("Import DEM Cache (dem_cache.json)", ref importDem))
             _stratiFixDatasetFolderLoader.ImportDemCache = importDem;
 
-        var info = _stratiFixDatasetFolderLoader.GetFolderInfo();
+        var info = CachedInfo($"stratifix:{_stratiFixDatasetFolderLoader.DatasetFolderPath}", _stratiFixDatasetFolderLoader.GetFolderInfo);
         if (info.IsValid)
         {
             ImGui.Spacing();
@@ -1761,7 +1787,13 @@ public class ImportDataModal
 
     private void DrawButtons()
     {
-        var canImport = GetCurrentLoader()?.CanImport ?? false;
+        if (_validatedRevision != _optionRevision || _validatedType != _selectedDatasetTypeIndex)
+        {
+            _cachedCanImport = GetCurrentLoader()?.CanImport ?? false;
+            _validatedRevision = _optionRevision;
+            _validatedType = _selectedDatasetTypeIndex;
+        }
+        var canImport = _cachedCanImport;
 
         if (ImGui.Button("Cancel", new Vector2(120, 0)))
             _currentState = ImportState.Idle;
@@ -1902,6 +1934,7 @@ public class ImportDataModal
         _currentState = ImportState.Idle;
         _pendingDataset = null;
         _shouldOpenOrganizer = false;
+        InvalidateOptionCaches();
     }
 
     private enum ImportState

@@ -311,27 +311,32 @@ public class MainWindow : IDisposable
         if (_showLog) _log.Submit(ref _showLog);
         if (_showTools) _tools.Submit(ref _showTools, _selectedDataset);
 
-        // Viewers
-        for (var i = _viewers.Count - 1; i >= 0; --i)
+        // Dataset viewers can contain expensive volume/mesh renderers. While Import Data is
+        // active they are intentionally not submitted: the import window remains responsive
+        // and the docked viewers resume unchanged as soon as it closes.
+        if (!_import.IsActive)
         {
-            var open = true;
-            _viewers[i].Submit(ref open);
-            if (!open)
+            for (var i = _viewers.Count - 1; i >= 0; --i)
             {
-                _viewers[i].Dispose();
-                _viewers.RemoveAt(i);
+                var open = true;
+                _viewers[i].Submit(ref open);
+                if (!open)
+                {
+                    _viewers[i].Dispose();
+                    _viewers.RemoveAt(i);
+                }
             }
-        }
 
-        for (var i = _thumbnailViewers.Count - 1; i >= 0; --i)
-        {
-            var open = true;
-            var viewer = _thumbnailViewers[i];
-            viewer.Submit(ref open, OnDatasetSelected);
-            if (!open)
+            for (var i = _thumbnailViewers.Count - 1; i >= 0; --i)
             {
-                viewer.Dispose();
-                _thumbnailViewers.RemoveAt(i);
+                var open = true;
+                var viewer = _thumbnailViewers[i];
+                viewer.Submit(ref open, OnDatasetSelected);
+                if (!open)
+                {
+                    viewer.Dispose();
+                    _thumbnailViewers.RemoveAt(i);
+                }
             }
         }
 

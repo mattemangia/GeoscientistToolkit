@@ -20,6 +20,9 @@ public class ImGuiFileDialog
     private string _defaultExtension = "";
     private string _newFolderName = "";
     private string _selectedFileName = "";
+    private string _cachedListDirectory;
+    private (string Path, bool IsDirectory)[] _cachedEntries = Array.Empty<(string, bool)>();
+    private bool _fileListDirty = true;
 
     // New folder creation fields
     private bool _showCreateFolderPopup;
@@ -209,6 +212,32 @@ public class ImGuiFileDialog
         }
 
         RefreshDrives();
+        _fileListDirty = true;
+    }
+
+    private void ChangeDirectory(string path)
+    {
+        if (string.Equals(CurrentDirectory, path, StringComparison.Ordinal)) return;
+        CurrentDirectory = path;
+        _fileListDirty = true;
+    }
+
+    private void EnsureFileListCache()
+    {
+        if (!_fileListDirty && string.Equals(_cachedListDirectory, CurrentDirectory, StringComparison.Ordinal)) return;
+        var directories = Directory.EnumerateDirectories(CurrentDirectory)
+            .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+            .Select(path => (path, true));
+        IEnumerable<(string Path, bool IsDirectory)> files = Array.Empty<(string, bool)>();
+        if (_dialogType != FileDialogType.OpenDirectory)
+            files = Directory.EnumerateFiles(CurrentDirectory)
+                .Where(path => _dialogType != FileDialogType.OpenFile || _allowedExtensions.Length == 0 ||
+                               _allowedExtensions.Contains(Path.GetExtension(path).ToLowerInvariant()))
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                .Select(path => (path, false));
+        _cachedEntries = directories.Concat(files).ToArray();
+        _cachedListDirectory = CurrentDirectory;
+        _fileListDirty = false;
     }
 
     public bool Submit()
@@ -267,14 +296,14 @@ public class ImGuiFileDialog
 
         if (ImGui.InputText("##Path", ref tempPath, 260))
             if (Directory.Exists(tempPath))
-                CurrentDirectory = tempPath;
+                ChangeDirectory(tempPath);
 
         ImGui.SameLine();
         if (ImGui.Button("Up", new Vector2(upButtonWidth, 0)))
         {
             var parent = Directory.GetParent(CurrentDirectory);
             if (parent != null)
-                CurrentDirectory = parent.FullName;
+                ChangeDirectory(parent.FullName);
         }
 
         ImGui.SameLine();
@@ -313,7 +342,7 @@ public class ImGuiFileDialog
                 if (ImGui.Button($"{buttonLabel}###{volume.Path}", new Vector2(-1, 0)))
                     if (volume.IsReady && Directory.Exists(volume.Path))
                     {
-                        CurrentDirectory = volume.Path;
+                        ChangeDirectory(volume.Path);
                         // Don't clear filename for save dialog
                         if (_dialogType != FileDialogType.SaveFile) _selectedFileName = "";
                     }
@@ -340,58 +369,51 @@ public class ImGuiFileDialog
 
             // Refresh button
             ImGui.Separator();
-            if (ImGui.Button("Refresh Drives", new Vector2(-1, 0))) RefreshDrives();
+            if (ImGui.Button("Refresh", new Vector2(-1, 0)))
+            {
+                RefreshDrives();
+                _fileListDirty = true;
+            }
 
             ImGui.EndChild();
         }
     }
 
-    private void DrawFileList(ref bool selectionMade, Vector2 size)
+    private unsafe void DrawFileList(ref bool selectionMade, Vector2 size)
     {
         if (ImGui.BeginChild("##FileList", size, ImGuiChildFlags.Border))
         {
             try
             {
-                var directories = Directory.GetDirectories(CurrentDirectory).OrderBy(d => Path.GetFileName(d));
-                foreach (var dir in directories)
+                EnsureFileListCache();
+                var clipper = new ImGuiListClipperPtr(ImGuiNative.ImGuiListClipper_ImGuiListClipper());
+                clipper.Begin(_cachedEntries.Length);
+                while (clipper.Step())
+                for (var index = clipper.DisplayStart; index < clipper.DisplayEnd; index++)
                 {
-                    var dirName = Path.GetFileName(dir);
-
-                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 0.5f, 1.0f));
-                    if (ImGui.Selectable($"[D] {dirName}", false, ImGuiSelectableFlags.AllowDoubleClick))
-                        if (ImGui.IsMouseDoubleClicked(0))
+                    var entry = _cachedEntries[index];
+                    var fileName = Path.GetFileName(entry.Path);
+                    if (entry.IsDirectory)
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 0.5f, 1.0f));
+                        if (ImGui.Selectable($"[D] {fileName}", false, ImGuiSelectableFlags.AllowDoubleClick) &&
+                            ImGui.IsMouseDoubleClicked(0))
                         {
-                            CurrentDirectory = dir;
-                            // Don't clear filename for save dialog
+                            ChangeDirectory(entry.Path);
                             if (_dialogType != FileDialogType.SaveFile) _selectedFileName = "";
                         }
-
-                    ImGui.PopStyleColor();
-                }
-
-                if (_dialogType != FileDialogType.OpenDirectory)
-                {
-                    var files = Directory.GetFiles(CurrentDirectory).OrderBy(f => Path.GetFileName(f));
-                    foreach (var file in files)
+                        ImGui.PopStyleColor();
+                    }
+                    else
                     {
-                        var fileName = Path.GetFileName(file);
-
-                        // For save dialog, show all files but highlight those with matching extensions
                         var isAllowed = _allowedExtensions.Length == 0 ||
-                                        _allowedExtensions.Contains(Path.GetExtension(file).ToLower());
-
-                        // For open dialog, filter; for save dialog, show all
-                        if (_dialogType == FileDialogType.OpenFile && !isAllowed) continue;
-
+                                        _allowedExtensions.Contains(Path.GetExtension(entry.Path).ToLowerInvariant());
                         var isSelected = _selectedFileName == fileName;
                         var filePrefix = "[F]";
-                        var ext = Path.GetExtension(file).ToUpper();
+                        var ext = Path.GetExtension(entry.Path).ToUpperInvariant();
                         if (!string.IsNullOrEmpty(ext) && ext.Length <= 5) filePrefix = $"[{ext.TrimStart('.')}]";
-
-                        // Dim non-matching files in save dialog
                         if (_dialogType == FileDialogType.SaveFile && !isAllowed)
                             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
-
                         if (ImGui.Selectable($"{filePrefix} {fileName}", isSelected,
                                 ImGuiSelectableFlags.AllowDoubleClick))
                         {
@@ -539,7 +561,7 @@ public class ImGuiFileDialog
             Logger.Log($"[ImGuiFileDialog] Created new folder: {newFolderPath}");
 
             // Navigate to the new folder
-            CurrentDirectory = newFolderPath;
+            ChangeDirectory(newFolderPath);
             _selectedFileName = "";
 
             return true;
