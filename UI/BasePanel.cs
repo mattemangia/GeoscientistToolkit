@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using GAIA.Util;
+using GAIA.UI.OpenTk;
 using ImGuiNET;
 
 namespace GAIA.UI;
@@ -18,7 +19,7 @@ public abstract class BasePanel : IDisposable
 
     private Vector2 _lastMainWindowPos;
     private Vector2 _lastMainWindowSize;
-    protected PopOutWindow _popOutWindow;
+    private IPopOutWindow _popOutWindow;
     private bool _popOutWindowWantsClosed;
     private bool _disposed;
     protected string _title;
@@ -170,7 +171,7 @@ public abstract class BasePanel : IDisposable
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(3, 3));
         ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 3.0f);
 
-        var canPopOut = _isPoppedOut || PopOutWindow.IsSupported;
+        var canPopOut = _isPoppedOut || OpenTkManager.IsInitialized || PopOutWindow.IsSupported;
         if (!canPopOut) ImGui.BeginDisabled();
 
         // Use a regular button instead of invisible button for better visibility
@@ -297,13 +298,11 @@ public abstract class BasePanel : IDisposable
 
         try
         {
-            _popOutWindow = new PopOutWindow(
-                _title,
-                newX,
-                newY,
-                (int)_lastMainWindowSize.X,
-                (int)_lastMainWindowSize.Y
-            );
+            _popOutWindow = OpenTkManager.IsInitialized
+                ? new OpenTkPopOutWindow(_title, newX, newY,
+                    (int)_lastMainWindowSize.X, (int)_lastMainWindowSize.Y)
+                : new PopOutWindow(_title, newX, newY,
+                    (int)_lastMainWindowSize.X, (int)_lastMainWindowSize.Y);
         }
         catch (Exception ex)
         {

@@ -11,7 +11,7 @@ namespace GAIA.UI;
 /// <summary>
 ///     Represents a separate Veldrid window for popped-out panels
 /// </summary>
-public class PopOutWindow : IDisposable
+public class PopOutWindow : IPopOutWindow
 {
     public static bool IsSupported => VeldridManager.GraphicsDevice?.BackendType != GraphicsBackend.OpenGL;
 

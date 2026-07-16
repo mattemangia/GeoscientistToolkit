@@ -3,6 +3,8 @@
 using System.Numerics;
 using GAIA.Business;
 using GAIA.Data;
+using GAIA.UI.OpenTk;
+using GAIA.Util;
 using ImGuiNET;
 
 namespace GAIA.UI.Windows;
@@ -17,7 +19,7 @@ public class GeoScriptTerminalWindow
     private bool _isOpen;
     private bool _isPoppedOut;
     private bool _pendingPopIn; // Flag to defer pop-in until safe
-    private PopOutWindow _popOutWindow;
+    private IPopOutWindow _popOutWindow;
     private Dataset _selectedContextDataset;
     private int _selectedDatasetIndex = -1;
 
@@ -185,7 +187,9 @@ public class GeoScriptTerminalWindow
         var width = (int)Math.Max(size.X, minWidth);
         var height = (int)Math.Max(size.Y, minHeight);
 
-        _popOutWindow = new PopOutWindow("GeoScript Terminal", (int)pos.X, (int)pos.Y, width, height);
+        _popOutWindow = OpenTkManager.IsInitialized
+            ? new OpenTkPopOutWindow("GeoScript Terminal", (int)pos.X, (int)pos.Y, width, height)
+            : new PopOutWindow("GeoScript Terminal", (int)pos.X, (int)pos.Y, width, height);
         _popOutWindow.SetDrawCallback(DrawPoppedOutWindow);
         _isPoppedOut = true;
     }

@@ -6,6 +6,7 @@ using System.Text;
 using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
+using OpenTK.Graphics.OpenGL;
 
 // Ensure you have added the System.Management NuGet package to your project.
 
@@ -33,6 +34,19 @@ public class SystemInfoWindow
     {
         _isOpen = true;
         GatherAllInfo(gd);
+        _exportMessage = string.Empty;
+    }
+
+    public void OpenOpenTk()
+    {
+        _isOpen = true;
+        GatherCommonInfo();
+        _veldridInfo = new[]
+        {
+            ("Graphics Backend", "OpenTK / OpenGL"),
+            ("OpenGL Renderer", GL.GetString(StringName.Renderer) ?? "Unknown"),
+            ("OpenGL Version", GL.GetString(StringName.Version) ?? "Unknown")
+        };
         _exportMessage = string.Empty;
     }
 
@@ -147,6 +161,17 @@ public class SystemInfoWindow
 
     private void GatherAllInfo(GraphicsDevice gd)
     {
+        GatherCommonInfo();
+
+        _veldridInfo = new[]
+        {
+            ("Veldrid Backend", gd.BackendType.ToString()),
+            ("Active Device", gd.DeviceName)
+        };
+    }
+
+    private void GatherCommonInfo()
+    {
         _systemInfo = new[]
         {
             ("OS", RuntimeInformation.OSDescription),
@@ -167,11 +192,6 @@ public class SystemInfoWindow
 
         _gpuInfo = GraphicsAdapterUtil.GetGpuList().ToArray();
 
-        _veldridInfo = new[]
-        {
-            ("Veldrid Backend", gd.BackendType.ToString()),
-            ("Active Device", gd.DeviceName)
-        };
     }
 
     #region Export Logic

@@ -3,6 +3,9 @@
 using System.Numerics;
 using SkiaSharp;
 using Veldrid;
+using GL = OpenTK.Graphics.OpenGL.GL;
+using GLPixelFormat = OpenTK.Graphics.OpenGL.PixelFormat;
+using OpenTK.Graphics.OpenGL;
 
 namespace GAIA.UI;
 
@@ -98,6 +101,8 @@ public sealed class IconFactory : IDisposable
     private readonly ImGuiController _controller;
     private readonly List<Texture> _textures = new();
     private readonly List<TextureView> _views = new();
+    private readonly List<int> _openTkTextures = new();
+    private readonly bool _useOpenTk;
     private readonly Dictionary<GaiaIcon, (SKColor Background, Action<SKCanvas, float, float> Draw)> _recipes;
     private bool _disposed;
 
@@ -105,6 +110,14 @@ public sealed class IconFactory : IDisposable
     {
         _gd = gd;
         _controller = controller;
+        _recipes = BuildRecipes();
+    }
+
+    public IconFactory()
+    {
+        if (!Util.OpenTkManager.IsInitialized)
+            throw new InvalidOperationException("OpenTK is not initialized.");
+        _useOpenTk = true;
         _recipes = BuildRecipes();
     }
 
@@ -140,6 +153,14 @@ public sealed class IconFactory : IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        if (_useOpenTk)
+        {
+            foreach (var texture in _openTkTextures) GL.DeleteTexture(texture);
+            _openTkTextures.Clear();
+            _bindings.Clear();
+            return;
+        }
+
         // Drop each ImGui binding before its view: the controller's resource sets reference them.
         foreach (var view in _views)
         {
@@ -170,8 +191,24 @@ public sealed class IconFactory : IDisposable
 
         var pixels = bitmap.Bytes;
 
+        if (_useOpenTk)
+        {
+            var textureId = GL.GenTexture();
+            GL.BindTexture(TextureTarget.Texture2D, textureId);
+            GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8,
+                IconSize, IconSize, 0, GLPixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter,
+                (int)TextureMinFilter.Linear);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter,
+                (int)TextureMagFilter.Linear);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+            _openTkTextures.Add(textureId);
+            return (IntPtr)textureId;
+        }
+
         var texture = _gd.ResourceFactory.CreateTexture(TextureDescription.Texture2D(
-            IconSize, IconSize, 1, 1, PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
+            IconSize, IconSize, 1, 1, Veldrid.PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
         _gd.UpdateTexture(texture, pixels, 0, 0, 0, IconSize, IconSize, 1, 0, 0);
 
         var view = _gd.ResourceFactory.CreateTextureView(texture);

@@ -113,7 +113,9 @@ public class MainWindow : IDisposable
 
     public MainWindow()
     {
-        _icons = new IconFactory(VeldridManager.GraphicsDevice, VeldridManager.ImGuiController);
+        _icons = OpenTkManager.IsInitialized
+            ? new IconFactory()
+            : new IconFactory(VeldridManager.GraphicsDevice, VeldridManager.ImGuiController);
 
         // Subscribe to dataset removal events
         ProjectManager.Instance.DatasetRemoved += OnDatasetRemoved;
@@ -175,6 +177,11 @@ public class MainWindow : IDisposable
         try
         {
             _icons.Dispose();
+            if (GraphicsRuntime.IsOpenTk && _logoTextureId != IntPtr.Zero)
+            {
+                OpenTK.Graphics.OpenGL.GL.DeleteTexture((int)_logoTextureId);
+                _logoTextureId = IntPtr.Zero;
+            }
         }
         catch (Exception ex)
         {
@@ -202,6 +209,26 @@ public class MainWindow : IDisposable
 
             // Load image using StbImageSharp
             var image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+
+            if (GraphicsRuntime.IsOpenTk)
+            {
+                var logoTexture = OpenTK.Graphics.OpenGL.GL.GenTexture();
+                OpenTK.Graphics.OpenGL.GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, logoTexture);
+                OpenTK.Graphics.OpenGL.GL.TexImage2D(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, 0,
+                    OpenTK.Graphics.OpenGL.PixelInternalFormat.Rgba8, image.Width, image.Height, 0,
+                    OpenTK.Graphics.OpenGL.PixelFormat.Rgba, OpenTK.Graphics.OpenGL.PixelType.UnsignedByte,
+                    image.Data);
+                OpenTK.Graphics.OpenGL.GL.TexParameter(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D,
+                    OpenTK.Graphics.OpenGL.TextureParameterName.TextureMinFilter,
+                    (int)OpenTK.Graphics.OpenGL.TextureMinFilter.Linear);
+                OpenTK.Graphics.OpenGL.GL.TexParameter(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D,
+                    OpenTK.Graphics.OpenGL.TextureParameterName.TextureMagFilter,
+                    (int)OpenTK.Graphics.OpenGL.TextureMagFilter.Linear);
+                OpenTK.Graphics.OpenGL.GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, 0);
+                _logoTextureId = (IntPtr)logoTexture;
+                _logoSize = new Vector2(image.Width, image.Height);
+                return;
+            }
 
             // Get graphics device and ImGui controller from VeldridManager
             var graphicsDevice = VeldridManager.GraphicsDevice;
@@ -276,7 +303,7 @@ public class MainWindow : IDisposable
     // ----------------------------------------------------------------------
     public void SubmitUI(bool windowCloseRequested = false)
     {
-        VeldridManager.ProcessMainThreadActions();
+        GraphicsRuntime.ProcessMainThreadActions();
         HandleTimers();
 
         // Handle window close request from Application.cs (X button was clicked)
@@ -795,10 +822,10 @@ public class MainWindow : IDisposable
             ImGui.Separator();
 
             // Full Screen toggle (disabled on macOS)
-            var fsSupported = VeldridManager.IsFullScreenSupported;
-            var isFs = VeldridManager.IsFullScreen;
+            var fsSupported = GraphicsRuntime.IsFullScreenSupported;
+            var isFs = GraphicsRuntime.IsFullScreen;
             if (IconMenuItem(GaiaIcon.FullScreen, "Full Screen (F11)", string.Empty, fsSupported, isFs))
-                VeldridManager.ToggleFullScreen();
+                GraphicsRuntime.ToggleFullScreen();
 
             if (IconMenuItem(GaiaIcon.ResetLayout, "Reset Layout"))
             {
@@ -843,7 +870,11 @@ public class MainWindow : IDisposable
         if (ImGui.BeginMenu("Help"))
         {
             if (IconMenuItem(GaiaIcon.About, "About")) _showAboutPopup = true;
-            if (IconMenuItem(GaiaIcon.SystemInfo, "System Info...")) _systemInfoWindow.Open(VeldridManager.GraphicsDevice);
+            if (IconMenuItem(GaiaIcon.SystemInfo, "System Info..."))
+            {
+                if (GraphicsRuntime.IsOpenTk) _systemInfoWindow.OpenOpenTk();
+                else _systemInfoWindow.Open(VeldridManager.GraphicsDevice);
+            }
 
             ImGui.Separator();
             if (IconMenuItem(GaiaIcon.VolumeDebug, "3D Volume Debug...")) _volume3DDebugWindow.Show();
@@ -854,11 +885,11 @@ public class MainWindow : IDisposable
             ImGui.EndMenu();
         }
 
-        if (VeldridManager.IsFullScreenSupported)
+        if (GraphicsRuntime.IsFullScreenSupported)
         {
             // Space to the far right
             var frameH = ImGui.GetTextLineHeight() + ImGui.GetStyle().FramePadding.Y * 2f;
-            var icon = VeldridManager.IsFullScreen ? "[=]" : "[ ]";
+            var icon = GraphicsRuntime.IsFullScreen ? "[=]" : "[ ]";
 
             var iconSize = ImGui.CalcTextSize(icon);
             var btnW = iconSize.X + ImGui.GetStyle().FramePadding.X * 2f;
@@ -867,13 +898,13 @@ public class MainWindow : IDisposable
             ImGui.SameLine();
             ImGui.SetCursorPosX(posX);
 
-            if (ImGui.Button(icon, new Vector2(btnW, frameH))) VeldridManager.ToggleFullScreen();
+            if (ImGui.Button(icon, new Vector2(btnW, frameH))) GraphicsRuntime.ToggleFullScreen();
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Toggle Full Screen (F11)");
         }
 
         // Keyboard shortcut (F11)
-        if (ImGui.IsKeyPressed(ImGuiKey.F11)) VeldridManager.ToggleFullScreen();
+        if (ImGui.IsKeyPressed(ImGuiKey.F11)) GraphicsRuntime.ToggleFullScreen();
 
         ImGui.EndMenuBar();
     }

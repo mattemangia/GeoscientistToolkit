@@ -16,6 +16,13 @@ public static class Program
             return;
         }
 
+        if (args.Any(arg => arg.Equals("--opentk-preview", StringComparison.OrdinalIgnoreCase)))
+        {
+            using var openTkApp = new OpenTkApplication();
+            openTkApp.Run();
+            return;
+        }
+
         if (args.Any(arg => arg.Equals("--help", StringComparison.OrdinalIgnoreCase)
                             || arg.Equals("-h", StringComparison.OrdinalIgnoreCase)))
         {
