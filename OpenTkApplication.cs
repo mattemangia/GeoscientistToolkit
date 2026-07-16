@@ -27,7 +27,7 @@ internal sealed class OpenTkApplication : GameWindow
         : base(GameWindowSettings.Default, new NativeWindowSettings
         {
             ClientSize = new Vector2i(1700, 950),
-            Title = "GAIA — OpenTK migration preview",
+            Title = "GAIA — Geoscience Analysis, Imaging & Automation",
             APIVersion = new Version(3, 3),
             Profile = ContextProfile.Core,
             Flags = ContextFlags.ForwardCompatible,
@@ -66,6 +66,7 @@ internal sealed class OpenTkApplication : GameWindow
     protected override void OnRenderFrame(FrameEventArgs args)
     {
         base.OnRenderFrame(args);
+        OpenTkManager.ProcessMainThreadActions();
         _imGui.Update(this, (float)Math.Max(args.Time, 1e-6));
 
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);

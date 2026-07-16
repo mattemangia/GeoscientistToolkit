@@ -16,13 +16,6 @@ public static class Program
             return;
         }
 
-        if (args.Any(arg => arg.Equals("--opentk-preview", StringComparison.OrdinalIgnoreCase)))
-        {
-            using var openTkApp = new OpenTkApplication();
-            openTkApp.Run();
-            return;
-        }
-
         if (args.Any(arg => arg.Equals("--help", StringComparison.OrdinalIgnoreCase)
                             || arg.Equals("-h", StringComparison.OrdinalIgnoreCase)))
         {
@@ -42,7 +35,7 @@ public static class Program
         if (args.Length > 0 && args[0].EndsWith(".gtp", StringComparison.OrdinalIgnoreCase))
             StartingProjectPath = args[0];
 
-        var app = new Application();
+        using var app = new OpenTkApplication();
         app.Run();
     }
 

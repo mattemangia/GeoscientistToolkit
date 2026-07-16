@@ -331,7 +331,7 @@ public class PointCloudViewer : IDatasetViewer, IDisposable
         ImGui.SameLine();
         ImGui.Separator();
         ImGui.SameLine();
-        ImGui.TextDisabled($"[{VeldridManager.GraphicsDevice.BackendType}]");
+        ImGui.TextDisabled("[OpenTK / OpenGL]");
     }
 
     public void DrawContent(ref float zoom, ref Vector2 pan)

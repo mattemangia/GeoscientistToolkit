@@ -872,8 +872,7 @@ public class MainWindow : IDisposable
             if (IconMenuItem(GaiaIcon.About, "About")) _showAboutPopup = true;
             if (IconMenuItem(GaiaIcon.SystemInfo, "System Info..."))
             {
-                if (GraphicsRuntime.IsOpenTk) _systemInfoWindow.OpenOpenTk();
-                else _systemInfoWindow.Open(VeldridManager.GraphicsDevice);
+                _systemInfoWindow.OpenOpenTk();
             }
 
             ImGui.Separator();
