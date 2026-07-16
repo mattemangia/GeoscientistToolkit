@@ -4,7 +4,6 @@ using System.Numerics;
 using GAIA.UI.Interfaces;
 using GAIA.Util;
 using ImGuiNET;
-using Veldrid;
 
 namespace GAIA.Data.Nerf;
 
@@ -313,11 +312,11 @@ public class NerfViewer : IDatasetViewer
 
             if (_renderedTextureManager == null)
             {
-                _renderedTextureManager = TextureManager.CreateFromPixelData(pixelData, (uint)_renderWidth, (uint)_renderHeight, PixelFormat.R8_G8_B8_A8_UNorm);
+                _renderedTextureManager = TextureManager.CreateFromPixelData(pixelData, (uint)_renderWidth, (uint)_renderHeight);
             }
             else
             {
-                _renderedTextureManager.UpdateFromPixelData(pixelData, (uint)_renderWidth, (uint)_renderHeight, PixelFormat.R8_G8_B8_A8_UNorm);
+                _renderedTextureManager.UpdateFromPixelData(pixelData, (uint)_renderWidth, (uint)_renderHeight);
             }
         }
         catch (Exception ex)
@@ -396,8 +395,7 @@ public class NerfViewer : IDatasetViewer
                     texManager = TextureManager.CreateFromPixelData(
                         frame.ThumbnailData,
                         (uint)frame.ThumbnailWidth,
-                        (uint)frame.ThumbnailHeight,
-                        frame.Channels == 4 ? PixelFormat.R8_G8_B8_A8_UNorm : PixelFormat.R8_G8_B8_A8_UNorm);
+                        (uint)frame.ThumbnailHeight);
                     _thumbnailTextures[frame.Id] = texManager;
                 }
                 catch
@@ -600,11 +598,11 @@ public class NerfViewer : IDatasetViewer
 
             if (_previewTextureManager == null)
             {
-                _previewTextureManager = TextureManager.CreateFromPixelData(pixelData, (uint)width, (uint)height, PixelFormat.R8_G8_B8_A8_UNorm);
+                _previewTextureManager = TextureManager.CreateFromPixelData(pixelData, (uint)width, (uint)height);
             }
             else
             {
-                _previewTextureManager.UpdateFromPixelData(pixelData, (uint)width, (uint)height, PixelFormat.R8_G8_B8_A8_UNorm);
+                _previewTextureManager.UpdateFromPixelData(pixelData, (uint)width, (uint)height);
             }
         }
         catch (Exception ex)

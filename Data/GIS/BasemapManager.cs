@@ -4,7 +4,6 @@ using System.Numerics;
 using GAIA.Data.GIS;
 using GAIA.Util;
 using OSGeo.GDAL;
-using Veldrid;
 
 namespace GAIA.UI.GIS;
 
@@ -134,9 +133,7 @@ public class BasemapManager
     private readonly string _cacheDirectory;
 
     private readonly HttpClient _httpClient;
-    private readonly Dictionary<string, Texture> _textureCache = new();
     private readonly Dictionary<string, TileCache> _tileCaches = new();
-    private GraphicsDevice _graphicsDevice;
     private bool _isOnline = true;
 
     private BasemapManager()
@@ -181,10 +178,7 @@ public class BasemapManager
     public BasemapProvider CurrentProvider { get; set; }
     public string ApiKey { get; set; } // For providers that require API keys
 
-    public void Initialize(GraphicsDevice device)
-    {
-        _graphicsDevice = device;
-    }
+    public void Initialize() { }
 
     private async Task CheckConnectivity()
     {
@@ -356,7 +350,6 @@ public class BasemapManager
             Directory.Delete(_cacheDirectory, true);
             Directory.CreateDirectory(_cacheDirectory);
             _tileCaches.Clear();
-            _textureCache.Clear();
             Logger.Log("Tile cache cleared");
         }
         catch (Exception ex)

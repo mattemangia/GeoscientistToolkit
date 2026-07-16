@@ -6,7 +6,8 @@ using GAIA.UI.Interfaces;
 using GAIA.UI.Utils;
 using GAIA.Util;
 using ImGuiNET;
-using Veldrid;
+using OpenTK.Graphics.OpenGL;
+using StbImageWriteSharp;
 
 namespace GAIA.UI.GIS;
 
@@ -303,7 +304,7 @@ public class GISViewer : IDatasetViewer
         try
         {
             _basemapManager = BasemapManager.Instance;
-            _basemapManager.Initialize(VeldridManager.GraphicsDevice);
+            _basemapManager.Initialize();
             return true;
         }
         catch (TypeInitializationException ex)
@@ -462,27 +463,21 @@ public class GISViewer : IDatasetViewer
 
     private void TakeScreenshot(string filePath, Vector2 rectMin, Vector2 rectMax)
     {
-        var gd = VeldridManager.GraphicsDevice;
-        if (gd == null) return;
-
-        var cl = VeldridManager.Factory.CreateCommandList();
-
-        var sourceTexture = gd.SwapchainFramebuffer.ColorTargets[0].Target;
-
         var mainViewport = ImGui.GetMainViewport();
-        var scaleX = gd.SwapchainFramebuffer.Width / mainViewport.Size.X;
-        var scaleY = gd.SwapchainFramebuffer.Height / mainViewport.Size.Y;
-
-        var captureRect = new Rectangle(
-            (int)((rectMin.X - mainViewport.Pos.X) * scaleX),
-            (int)((rectMin.Y - mainViewport.Pos.Y) * scaleY),
-            (int)((rectMax.X - rectMin.X) * scaleX),
-            (int)((rectMax.Y - rectMin.Y) * scaleY)
-        );
-
-        ImageExporter.SaveTexture(gd, cl, sourceTexture, captureRect, filePath);
-
-        cl.Dispose();
+        var fb = OpenTkManager.MainWindow.FramebufferSize;
+        var scaleX = fb.X / mainViewport.Size.X;
+        var scaleY = fb.Y / mainViewport.Size.Y;
+        var x = Math.Max(0, (int)((rectMin.X - mainViewport.Pos.X) * scaleX));
+        var y = Math.Max(0, fb.Y - (int)((rectMax.Y - mainViewport.Pos.Y) * scaleY));
+        var width = Math.Min(fb.X - x, Math.Max(1, (int)((rectMax.X - rectMin.X) * scaleX)));
+        var height = Math.Min(fb.Y - y, Math.Max(1, (int)((rectMax.Y - rectMin.Y) * scaleY)));
+        var pixels = new byte[width * height * 4];
+        GL.ReadPixels(x, y, width, height, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+        var flipped = new byte[pixels.Length];
+        for (var row = 0; row < height; row++)
+            System.Buffer.BlockCopy(pixels, row * width * 4, flipped, (height - 1 - row) * width * 4, width * 4);
+        using var stream = File.Create(filePath);
+        new ImageWriter().WritePng(flipped, width, height, ColorComponents.RedGreenBlueAlpha, stream);
     }
 
     private void HandleInput(ImGuiIOPtr io, ref float zoom, ref Vector2 pan, Vector2 canvas_pos, Vector2 canvas_size,
@@ -732,7 +727,7 @@ public class GISViewer : IDatasetViewer
             }
 
             if (tileData != null && tileData.ImageData != null)
-                VeldridManager.ExecuteOnMainThread(() =>
+                OpenTkManager.ExecuteOnMainThread(() =>
                 {
                     try
                     {
