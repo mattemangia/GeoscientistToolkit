@@ -72,14 +72,15 @@ public class Application
                 preferStandardClipSpaceYDirection: true,
                 preferDepthRangeZeroToOne: true);
         else
-            // Linux: Use Default binding model and disable clip-space hacks for OpenGL compatibility
+            // Linux defaults to Vulkan so detached windows can share one device and
+            // create independent swapchains. OpenGL remains the compatibility fallback.
             basicGraphicsOptions = new GraphicsDeviceOptions(
                 false,
                 null,
                 true,
-                ResourceBindingModel.Default,
-                preferStandardClipSpaceYDirection: false,
-                preferDepthRangeZeroToOne: false);
+                ResourceBindingModel.Improved,
+                preferStandardClipSpaceYDirection: true,
+                preferDepthRangeZeroToOne: true);
 
         try
         {
@@ -449,8 +450,9 @@ public class Application
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return GraphicsBackend.Direct3D11;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return GraphicsBackend.Metal;
-        // Linux: OpenGL is more compatible than Vulkan on many Ubuntu/distro setups
-        return GraphicsBackend.OpenGL;
+        // Vulkan supports multiple swapchains on the shared Veldrid device, required
+        // by GAIA's real detached viewer windows. OpenGL is retained as fallback.
+        return GraphicsBackend.Vulkan;
     }
 
     private void TryCreateWithWindowsFallbacks(

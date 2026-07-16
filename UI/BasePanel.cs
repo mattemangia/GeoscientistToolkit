@@ -1,6 +1,7 @@
 ﻿// GAIA/UI/BasePanel.cs (Fixed pop-out window rendering)
 
 using System.Numerics;
+using GAIA.Util;
 using ImGuiNET;
 
 namespace GAIA.UI;
@@ -169,6 +170,9 @@ public abstract class BasePanel : IDisposable
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(3, 3));
         ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 3.0f);
 
+        var canPopOut = _isPoppedOut || PopOutWindow.IsSupported;
+        if (!canPopOut) ImGui.BeginDisabled();
+
         // Use a regular button instead of invisible button for better visibility
         if (ImGui.Button($"##PopOutBtn{_title}", buttonSize))
         {
@@ -177,6 +181,8 @@ public abstract class BasePanel : IDisposable
             else
                 PopOut();
         }
+
+        if (!canPopOut) ImGui.EndDisabled();
 
         ImGui.PopStyleVar(2);
 
@@ -237,8 +243,10 @@ public abstract class BasePanel : IDisposable
 
         ImGui.PopStyleColor(3);
 
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(_isPoppedOut ? "Return panel to main window" : "Pop out to separate window");
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(!canPopOut
+                ? "Multi-window requires the Vulkan backend. Select Vulkan in Settings > Hardware and restart GAIA."
+                : _isPoppedOut ? "Return panel to main window" : "Pop out to separate window");
 
         // Restore cursor position
         ImGui.SetCursorPos(cursorPos);
@@ -287,14 +295,22 @@ public abstract class BasePanel : IDisposable
         var newX = (int)(_lastMainWindowPos.X + mainVp.Pos.X + 20);
         var newY = (int)(_lastMainWindowPos.Y + mainVp.Pos.Y + 20);
 
-        // Create the pop-out window
-        _popOutWindow = new PopOutWindow(
-            _title,
-            newX,
-            newY,
-            (int)_lastMainWindowSize.X,
-            (int)_lastMainWindowSize.Y
-        );
+        try
+        {
+            _popOutWindow = new PopOutWindow(
+                _title,
+                newX,
+                newY,
+                (int)_lastMainWindowSize.X,
+                (int)_lastMainWindowSize.Y
+            );
+        }
+        catch (Exception ex)
+        {
+            _popOutWindow = null;
+            Logger.LogError($"Could not pop out '{_title}': {ex.Message}");
+            return;
+        }
 
         // Set the draw callback - use method reference instead of lambda
         _popOutWindow.SetDrawCallback(DrawInPopOutWindow);

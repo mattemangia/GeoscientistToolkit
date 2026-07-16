@@ -13,6 +13,8 @@ namespace GAIA.UI;
 /// </summary>
 public class PopOutWindow : IDisposable
 {
+    public static bool IsSupported => VeldridManager.GraphicsDevice?.BackendType != GraphicsBackend.OpenGL;
+
     private readonly CommandList _commandList;
     private readonly ImGuiController _imGuiController;
     private readonly IntPtr _mainContext;
@@ -24,6 +26,10 @@ public class PopOutWindow : IDisposable
 
     public PopOutWindow(string title, int x, int y, int width, int height)
     {
+        if (!IsSupported)
+            throw new NotSupportedException(
+                "Detached windows require Vulkan on Linux because Veldrid OpenGL supports only the main swapchain.");
+
         // Store the main context before creating new one
         _mainContext = ImGui.GetCurrentContext();
 
