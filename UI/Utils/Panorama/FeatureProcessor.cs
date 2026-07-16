@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/FeatureProcessor.cs
+﻿// GAIA/Business/Photogrammetry/FeatureProcessor.cs
 
 // =================================================================================================
 // FIXED VERSION - Robust Cheirality Check
@@ -14,9 +14,9 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.Photogrammetry;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Util;
+using GAIA.Business.Photogrammetry;
+using GAIA.Data.Image;
+using GAIA.Util;
 using MathNet.Numerics.LinearAlgebra;
 using MathNet.Numerics.LinearAlgebra.Double;
 
@@ -24,7 +24,7 @@ using Vector2 = System.Numerics.Vector2;
 using Matrix4x4 = System.Numerics.Matrix4x4;
 using Vector = MathNet.Numerics.LinearAlgebra.Double.Vector;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     internal class FeatureProcessor
     {

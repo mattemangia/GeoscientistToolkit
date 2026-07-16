@@ -1,15 +1,15 @@
-// GeoscientistToolkit/Analysis/MaterialManager/PhysicalMaterialAssignmentTool.cs
+// GAIA/Analysis/MaterialManager/PhysicalMaterialAssignmentTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.Materials;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Materials;
+namespace GAIA.Analysis.Materials;
 
 /// <summary>
 ///     A dedicated tool for assigning physical properties from the MaterialLibrary to materials within a CT dataset.

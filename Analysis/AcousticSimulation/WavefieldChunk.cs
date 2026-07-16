@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Analysis/AcousticSimulation/WaveFieldChunk.cs
+// GAIA/Analysis/AcousticSimulation/WaveFieldChunk.cs
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 /// <summary>
 ///     Represents a chunk of the wave field for memory-efficient processing.

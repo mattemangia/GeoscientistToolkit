@@ -1,6 +1,6 @@
-# Geoscientist's Toolkit User Guide
+# GAIA (Geoscience Analysis, Imaging & Automation) User Guide
 
-![Geoscientist's Toolkit Logo](image.png)
+![GAIA (Geoscience Analysis, Imaging & Automation) Logo](image.png)
 
 ## Table of Contents
 
@@ -18,9 +18,9 @@
 
 ## Introduction
 
-### What is Geoscientist's Toolkit?
+### What is GAIA (Geoscience Analysis, Imaging & Automation)?
 
-Geoscientist's Toolkit is a comprehensive desktop application for advanced geoscientific data analysis and simulation. Built on .NET 8.0, it provides an integrated environment for working with diverse geophysical and geochemical datasets, from seismic surveys to microscale rock analysis.
+GAIA (Geoscience Analysis, Imaging & Automation) is a comprehensive desktop application for advanced geoscientific data analysis and simulation. Built on .NET 8.0, it provides an integrated environment for working with diverse geophysical and geochemical datasets, from seismic surveys to microscale rock analysis.
 
 The application combines interactive 3D visualization, GPU-accelerated simulations, and a domain-specific scripting language to enable sophisticated workflows across multiple geoscience disciplines.
 
@@ -90,7 +90,7 @@ To open a project:
 
 You can also pass a `.gtp` file as a command-line argument:
 ```bash
-./GeoscientistToolkit myproject.gtp
+./GAIA myproject.gtp
 ```
 
 ---
@@ -109,7 +109,7 @@ Projects support auto-save functionality with configurable intervals.
 
 ### Datasets
 
-Everything in GeoscientistToolkit is a dataset. A dataset represents a discrete unit of geoscientific data with:
+Everything in GAIA is a dataset. A dataset represents a discrete unit of geoscientific data with:
 - **Type**: One of 27 supported types (CT volumes, images, tables, boreholes, etc.)
 - **Name**: User-defined identifier
 - **Metadata**: Creation date, source, location, sample information
@@ -567,7 +567,7 @@ Display system capabilities:
 
 ## Analysis Modules
 
-Geoscientist's Toolkit includes 22 specialized analysis modules for different geoscience domains.
+GAIA (Geoscience Analysis, Imaging & Automation) includes 22 specialized analysis modules for different geoscience domains.
 
 ### Pore Network Modeling
 
@@ -1099,7 +1099,7 @@ TO "Transport_Results"
 
 **Method 3: Command Line**
 ```bash
-./GeoscientistToolkit --script myscript.geoscript
+./GAIA --script myscript.geoscript
 ```
 
 ### Error Handling
@@ -1122,7 +1122,7 @@ Error at line 15: Dataset "NonExistentData" not found in project
 
 #### OpenCL Support
 
-Geoscientist's Toolkit can leverage GPU compute for performance-critical simulations.
+GAIA (Geoscience Analysis, Imaging & Automation) can leverage GPU compute for performance-critical simulations.
 
 **Supported operations:**
 - Geothermal heat transport
@@ -1241,7 +1241,7 @@ for file in *.tif; do
     echo "LOAD \"$file\" AS \"Data\"" > process.geoscript
     echo "WITH \"Data\" DO SEGMENT \"Pore\" 128 TO \"Result\"" >> process.geoscript
     echo "WITH \"Result\" DO SAVE \"${file%.tif}_segmented.tif\"" >> process.geoscript
-    ./GeoscientistToolkit --script process.geoscript
+    ./GAIA --script process.geoscript
 done
 ```
 
@@ -1316,7 +1316,7 @@ Improve viewport responsiveness:
 #### Application Structure
 
 ```
-GeoscientistToolkit (Main Application)
+GAIA (Main Application)
 │
 ├── Graphics Layer (Veldrid + ImGui)
 │   ├── Window Management
@@ -1633,7 +1633,7 @@ Typical performance (reference hardware: Intel i7, 16GB RAM, NVIDIA GTX 1660):
 
 **Solution:**
 1. Delete `settings.json` to reset graphics backend
-2. Run with failsafe mode: `./GeoscientistToolkit --failsafe`
+2. Run with failsafe mode: `./GAIA --failsafe`
 3. Select compatible graphics backend
 
 **File reference:** `/Settings/GraphicsFailsafe.cs`
@@ -1679,7 +1679,7 @@ Typical performance (reference hardware: Intel i7, 16GB RAM, NVIDIA GTX 1660):
 
 ## Conclusion
 
-Geoscientist's Toolkit provides a comprehensive platform for multi-scale geoscience analysis, from micro-CT pore imaging to basin-scale geothermal modeling. The combination of interactive visualization, GPU-accelerated simulation, and scriptable workflows enables sophisticated research and engineering applications.
+GAIA (Geoscience Analysis, Imaging & Automation) provides a comprehensive platform for multi-scale geoscience analysis, from micro-CT pore imaging to basin-scale geothermal modeling. The combination of interactive visualization, GPU-accelerated simulation, and scriptable workflows enables sophisticated research and engineering applications.
 
 ### Learning Resources
 
@@ -1713,28 +1713,28 @@ UI: ImGui.NET 1.90.8.1
 
 ## Citation
 
-If you use Geoscientist's Toolkit in your research or projects, please cite:
+If you use GAIA (Geoscience Analysis, Imaging & Automation) in your research or projects, please cite:
 
 ```
-Mangiagalli, M. (2026). Geoscientist's Toolkit: A Comprehensive Platform for
+Mangiagalli, M. (2026). GAIA (Geoscience Analysis, Imaging & Automation): A Comprehensive Platform for
 Geoscientific Data Analysis and Simulation. Università degli Studi di Urbino
-Carlo Bo. Available at: https://github.com/mattemangia/GeoscientistToolkit
+Carlo Bo. Available at: https://github.com/mattemangia/GAIA
 ```
 
 BibTeX format:
 ```bibtex
 @software{mangiagalli2026geoscientist,
   author = {Mangiagalli, Matteo},
-  title = {Geoscientist's Toolkit: A Comprehensive Platform for Geoscientific Data Analysis and Simulation},
+  title = {GAIA (Geoscience Analysis, Imaging & Automation): A Comprehensive Platform for Geoscientific Data Analysis and Simulation},
   year = {2026},
   institution = {Università degli Studi di Urbino Carlo Bo},
   email = {m.mangiagalli@campus.uniurb.it},
-  url = {https://github.com/mattemangia/GeoscientistToolkit}
+  url = {https://github.com/mattemangia/GAIA}
 }
 ```
 
 ---
 
 **Document Generated:** 2026-11-17
-**Software:** Geoscientist's Toolkit
+**Software:** GAIA (Geoscience Analysis, Imaging & Automation)
 **License:** See LICENSE file in repository

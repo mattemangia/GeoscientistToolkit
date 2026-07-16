@@ -1,14 +1,14 @@
-// GeoscientistToolkit/UI/GIS/GISViewer.cs
+// GAIA/UI/GIS/GISViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data.GIS;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 public class GISViewer : IDatasetViewer
 {
@@ -331,7 +331,7 @@ public class GISViewer : IDatasetViewer
     {
         try
         {
-            var settings = GeoscientistToolkit.Settings.SettingsManager.Instance.Settings;
+            var settings = GAIA.Settings.SettingsManager.Instance.Settings;
             if (settings?.GIS?.EnableOnlineBasemaps == true && settings.GIS.AutoLoadBasemaps)
             {
                 if (InitializeBasemapManager())

@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalSimulatorCPU_Plasticity.cs
+// GAIA/Analysis/Geomechanics/GeomechanicalSimulatorCPU_Plasticity.cs
 // Partial class extension for plasticity algorithms
 
 using System.Diagnostics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public partial class GeomechanicalSimulatorCPU
 {

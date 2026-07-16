@@ -1,6 +1,6 @@
 # API Reference
 
-Documentation for the Geoscientist's Toolkit API for external automation and integration.
+Documentation for the GAIA (Geoscience Analysis, Imaging & Automation) API for external automation and integration.
 
 ---
 
@@ -24,7 +24,7 @@ Add reference to the API DLL in your C# project:
 
 ```xml
 <ItemGroup>
-  <Reference Include="GeoscientistToolkit.Api">
+  <Reference Include="GAIA.Api">
     <HintPath>path/to/Api.dll</HintPath>
   </Reference>
 </ItemGroup>
@@ -33,7 +33,7 @@ Add reference to the API DLL in your C# project:
 ### Basic Usage
 
 ```csharp
-using GeoscientistToolkit.Api;
+using GAIA.Api;
 
 // Initialize API
 var api = new GtkApi();

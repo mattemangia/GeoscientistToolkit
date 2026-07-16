@@ -1,18 +1,18 @@
-// GeoscientistToolkit/UI/GIS/Tools/GeoreferenceTool.cs
+// GAIA/UI/GIS/Tools/GeoreferenceTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Business.GIS;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.Data.Image;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using ProjNet.CoordinateSystems;
 
-namespace GeoscientistToolkit.UI.GIS.Tools;
+namespace GAIA.UI.GIS.Tools;
 
 /// <summary>
 /// Tool for georeferencing images and rasters by defining ground control points

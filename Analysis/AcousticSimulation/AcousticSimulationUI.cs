@@ -1,17 +1,17 @@
-// GeoscientistToolkit/Analysis/AcousticSimulation/AcousticSimulationUI.cs
+// GAIA/Analysis/AcousticSimulation/AcousticSimulationUI.cs
 
 using System.Collections.Concurrent;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.UI;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 /// <summary>
 ///     Static class to manage the state of interactive transducer placement across different viewers.

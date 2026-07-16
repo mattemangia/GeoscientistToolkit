@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Nerf/NerfPropertiesRenderer.cs
+// GAIA/Data/Nerf/NerfPropertiesRenderer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Nerf;
+namespace GAIA.Data.Nerf;
 
 /// <summary>
 /// Properties panel renderer for NeRF datasets.

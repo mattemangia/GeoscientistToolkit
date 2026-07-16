@@ -1,6 +1,6 @@
-using GeoscientistToolkit.Analysis.AcousticSimulation;
+using GAIA.Analysis.AcousticSimulation;
 
-namespace GeoscientistToolkit.Api;
+namespace GAIA.Api;
 
 /// <summary>
 ///     Provides access to 3D acoustic velocity simulation workflows.

@@ -1,6 +1,6 @@
 # Documentation
 
-This folder contains all project documentation for Geoscientist's Toolkit.
+This folder contains all project documentation for GAIA (Geoscience Analysis, Imaging & Automation).
 
 **Last Updated:** January 2026
 
@@ -93,4 +93,4 @@ This folder contains all project documentation for Geoscientist's Toolkit.
 
 See [../LICENSE](../LICENSE) for license information.
 
-**© 2026 Matteo Mangiagalli - Geoscientist's Toolkit Project**
+**© 2026 Matteo Mangiagalli - GAIA (Geoscience Analysis, Imaging & Automation) Project**

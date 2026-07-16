@@ -1,4 +1,4 @@
-# Start Here: Geoscientist's Toolkit
+# Start Here: GAIA (Geoscience Analysis, Imaging & Automation)
 
 This page provides a single linear onboarding flow and points to the most relevant documentation so you can go from installation to results without hopping across many guides.
 
@@ -22,7 +22,7 @@ Choose one of the following paths:
 
 ## 2) Create your first project
 
-1. Launch the app (`./GeoscientistToolkit` or the release executable).
+1. Launch the app (`./GAIA` or the release executable).
 2. Go to **File → New Project**.
 3. Choose a folder and project `.gtp` name.
 

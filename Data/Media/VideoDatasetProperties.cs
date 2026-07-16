@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Media/VideoDatasetProperties.cs
+// GAIA/Data/Media/VideoDatasetProperties.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Media;
+namespace GAIA.Data.Media;
 
 /// <summary>
 /// Properties renderer for video datasets

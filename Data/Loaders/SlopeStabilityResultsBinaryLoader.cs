@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Loaders/SlopeStabilityResultsBinaryLoader.cs
+// GAIA/Data/Loaders/SlopeStabilityResultsBinaryLoader.cs
 
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Analysis.SlopeStability;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.SlopeStability;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class SlopeStabilityResultsBinaryLoader : IDataLoader
 {

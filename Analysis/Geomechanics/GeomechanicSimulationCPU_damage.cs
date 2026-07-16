@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalSimulatorCPU_Damage.cs
+// GAIA/Analysis/Geomechanics/GeomechanicalSimulatorCPU_Damage.cs
 // Partial class extension for damage mechanics
 
 using System.Diagnostics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public partial class GeomechanicalSimulatorCPU
 {

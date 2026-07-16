@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Data/VolumeData/ChunkedLabelVolume.cs
+﻿// GAIA/Data/VolumeData/ChunkedLabelVolume.cs
 
 using System.IO.MemoryMappedFiles;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.VolumeData;
+namespace GAIA.Data.VolumeData;
 
 /// <summary>
 ///     Provides chunked storage for volumetric label data with support for both

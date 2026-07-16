@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Business/OllamaService.cs
+// GAIA/Business/OllamaService.cs
 
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Settings;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 ///     Service for interacting with Ollama LLM API
@@ -20,7 +20,7 @@ public class OllamaService
     private OllamaService()
     {
         _httpClient = new HttpClient();
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", "GeoscientistToolkit/1.0");
+        _httpClient.DefaultRequestHeaders.Add("User-Agent", "GAIA/1.0");
     }
 
     public static OllamaService Instance

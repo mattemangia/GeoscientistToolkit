@@ -1,14 +1,14 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/Products/ProductGenerator.cs
+﻿// GAIA/Business/Photogrammetry/Products/ProductGenerator.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.Photogrammetry;
+using GAIA.Business.Photogrammetry;
 using SkiaSharp;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     /// <summary>
     /// Generates orthomosaics, DEMs, and other photogrammetric products

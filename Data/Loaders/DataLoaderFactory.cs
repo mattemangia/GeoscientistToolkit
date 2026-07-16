@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using GeoscientistToolkit.Data;
+using GAIA.Data;
 
-namespace GeoscientistToolkit.Data.Loaders
+namespace GAIA.Data.Loaders
 {
     public static class DataLoaderFactory
     {

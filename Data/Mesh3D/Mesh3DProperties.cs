@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Mesh3D/Mesh3DProperties.cs
+// GAIA/Data/Mesh3D/Mesh3DProperties.cs
 
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Mesh3D;
+namespace GAIA.Data.Mesh3D;
 
 /// <summary>
 ///     Displays properties of a Mesh3DDataset in the Properties panel.

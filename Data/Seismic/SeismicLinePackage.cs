@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/Seismic/SeismicLinePackage.cs
+// GAIA/Data/Seismic/SeismicLinePackage.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.Seismic;
+namespace GAIA.Data.Seismic;
 
 /// <summary>
 /// Represents a package/group of seismic traces for organization and analysis

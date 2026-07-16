@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geothermal/EnhancedHVACCalculator.cs
+// GAIA/Analysis/Geothermal/EnhancedHVACCalculator.cs
 //
 // ================================================================================================
 // REFERENCES (APA Format):
@@ -24,9 +24,9 @@
 // ================================================================================================
 
 using System;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 /// Enhanced HVAC and heat pump performance calculator

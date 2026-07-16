@@ -1,19 +1,19 @@
-// GeoscientistToolkit/Analysis/NMR/NMRAnalysisTool.cs
+// GAIA/Analysis/NMR/NMRAnalysisTool.cs
 
 using System.Data;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.Table;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.NMR;
+namespace GAIA.Analysis.NMR;
 
 public class NMRAnalysisTool : IDatasetTools
 {
@@ -57,12 +57,12 @@ public class NMRAnalysisTool : IDatasetTools
         // Check GPU availability using centralized device manager
         try
         {
-            var device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+            var device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
             _gpuAvailable = device != 0;
 
             if (_gpuAvailable)
             {
-                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
                 Logger.Log($"[NMRAnalysisTool] OpenCL device available: {deviceInfo.Name} ({deviceInfo.Vendor})");
             }
             else

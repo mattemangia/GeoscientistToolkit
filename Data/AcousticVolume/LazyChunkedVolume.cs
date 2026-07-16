@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/VolumeData/LazyChunkedVolume.cs
+// GAIA/Data/VolumeData/LazyChunkedVolume.cs
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.VolumeData;
+namespace GAIA.Data.VolumeData;
 
 /// <summary>
 ///     A lazy-loading wrapper around ChunkedVolume that loads chunks on demand.

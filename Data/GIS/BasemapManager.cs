@@ -1,12 +1,12 @@
-// GeoscientistToolkit/UI/GIS/BasemapManager.cs
+// GAIA/UI/GIS/BasemapManager.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.GIS;
+using GAIA.Util;
 using OSGeo.GDAL;
 using Veldrid;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 public class BasemapManager
 {
@@ -142,11 +142,11 @@ public class BasemapManager
     private BasemapManager()
     {
         _httpClient = new HttpClient();
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", "GeoscientistToolkit/1.0");
+        _httpClient.DefaultRequestHeaders.Add("User-Agent", "GAIA/1.0");
 
         _cacheDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "GeoscientistToolkit", "TileCache");
+            "GAIA", "TileCache");
 
         Directory.CreateDirectory(_cacheDirectory);
 

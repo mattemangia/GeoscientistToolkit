@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Photogrammetry/GeoreferencingManager.cs
+// GAIA/Analysis/Photogrammetry/GeoreferencingManager.cs
 
 using System;
 using System.Collections.Generic;
@@ -6,9 +6,9 @@ using System.Numerics;
 using MathNet.Numerics.LinearAlgebra;
 using MathNet.Numerics.LinearAlgebra.Double;
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Photogrammetry;
+namespace GAIA.Analysis.Photogrammetry;
 
 /// <summary>
 /// Manages georeferencing with Ground Control Points (GCP).

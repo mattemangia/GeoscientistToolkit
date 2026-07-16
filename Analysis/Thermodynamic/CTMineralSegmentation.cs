@@ -1,6 +1,6 @@
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Business.Thermodynamics;
+using GAIA.Data.Materials;
+using GAIA.Util;
 
 /// <summary>
 ///     COMPLETE IMPLEMENTATION: Improved CT mineral segmentation with density and composition data.

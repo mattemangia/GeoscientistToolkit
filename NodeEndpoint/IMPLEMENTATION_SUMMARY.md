@@ -2,7 +2,7 @@
 
 ## Overview
 
-Created a complete node endpoint architecture for the GeoscientistToolkit that exposes simulations and CT operations via REST API with keepalive connections and an advanced production-ready Terminal User Interface (TUI).
+Created a complete node endpoint architecture for the GAIA that exposes simulations and CT operations via REST API with keepalive connections and an advanced production-ready Terminal User Interface (TUI).
 
 ## What Was Created
 
@@ -278,10 +278,10 @@ Edit `appsettings.json` to customize:
 
 ## Solution Integration
 
-Updated `GeoscientistToolkit.sln` to include NodeEndpoint project:
+Updated `GAIA.sln` to include NodeEndpoint project:
 - Added project reference with GUID
 - Configured Debug and Release builds
-- Maintains existing GeoscientistToolkit project
+- Maintains existing GAIA project
 
 ## Next Steps
 

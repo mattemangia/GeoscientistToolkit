@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalResults.cs
+// GAIA/Analysis/Geomechanics/GeomechanicalResults.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public partial class GeomechanicalResults
 {

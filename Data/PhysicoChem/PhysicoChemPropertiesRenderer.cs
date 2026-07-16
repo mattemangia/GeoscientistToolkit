@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Data/PhysicoChem/PhysicoChemPropertiesRenderer.cs
+// GAIA/Data/PhysicoChem/PhysicoChemPropertiesRenderer.cs
 
 using System;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.PhysicoChem;
+namespace GAIA.Data.PhysicoChem;
 
 /// <summary>
 /// Properties renderer for PhysicoChem datasets - displays dataset information,

@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 public struct SoundRay
 {

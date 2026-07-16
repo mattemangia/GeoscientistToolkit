@@ -1,4 +1,4 @@
-namespace GeoscientistToolkit.UI.Diagnostics;
+namespace GAIA.UI.Diagnostics;
 
 public sealed class DiagnosticOptions
 {

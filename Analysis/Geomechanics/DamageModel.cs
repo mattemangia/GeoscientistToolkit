@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Analysis/Geomechanics/DamageModel.cs
+// GAIA/Analysis/Geomechanics/DamageModel.cs
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public enum DamageModel
 {

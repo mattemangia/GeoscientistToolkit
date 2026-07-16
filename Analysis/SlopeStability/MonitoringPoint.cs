@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Monitoring point for tracking displacement, velocity, and acceleration at specific locations.

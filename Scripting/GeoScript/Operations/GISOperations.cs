@@ -1,8 +1,8 @@
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Business.GIS;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.Util;
 using NetTopologySuite.Geometries;
 using System;
 using System.Collections.Generic;
@@ -10,7 +10,7 @@ using System.Globalization;
 using System.Linq;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Scripting.GeoScript.Operations
+namespace GAIA.Scripting.GeoScript.Operations
 {
     /// <summary>
     /// Create buffer around GIS features

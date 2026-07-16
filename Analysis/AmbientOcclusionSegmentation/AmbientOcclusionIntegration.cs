@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Analysis/AmbientOcclusionSegmentation/AmbientOcclusionIntegration.cs
+// GAIA/Analysis/AmbientOcclusionSegmentation/AmbientOcclusionIntegration.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
+using GAIA.Data.CtImageStack;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.AmbientOcclusionSegmentation;
+namespace GAIA.Analysis.AmbientOcclusionSegmentation;
 
 /// <summary>
 /// Integration layer for ambient occlusion segmentation with CT viewer

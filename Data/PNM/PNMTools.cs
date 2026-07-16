@@ -1,18 +1,18 @@
-// GeoscientistToolkit/UI/PNMTools.cs - Production Version with Confining Pressure
+// GAIA/UI/PNMTools.cs - Production Version with Confining Pressure
 
 using System.Globalization;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Pnm;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.Pnm;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class PNMTools : IDatasetTools
 {

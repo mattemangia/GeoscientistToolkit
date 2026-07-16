@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Media/VideoDataset.cs
+// GAIA/Data/Media/VideoDataset.cs
 
 using FFMpegCore;
 using FFMpegCore.Enums;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Settings;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Media;
+namespace GAIA.Data.Media;
 
 /// <summary>
 /// Dataset for handling video files (MP4, AVI, MOV, etc.)

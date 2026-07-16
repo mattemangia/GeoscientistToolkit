@@ -1,17 +1,17 @@
-// GeoscientistToolkit/Analysis/Transform/TransformTool.cs
+// GAIA/Analysis/Transform/TransformTool.cs
 
 using System.Numerics;
 using System.Reflection;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.UI;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Transform;
+namespace GAIA.Analysis.Transform;
 
 public class TransformTool : IDatasetTools, IDisposable
 {

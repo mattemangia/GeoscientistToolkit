@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Loaders/LabeledVolumeLoaderWrapper.cs
+// GAIA/Data/Loaders/LabeledVolumeLoaderWrapper.cs
 
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class LabeledVolumeLoaderWrapper : IDataLoader
 {

@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Seismic/SeismicCube.cs
+// GAIA/Data/Seismic/SeismicCube.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Seismic;
+namespace GAIA.Data.Seismic;
 
 /// <summary>
 /// Represents a 3D seismic cube constructed from multiple intersecting 2D seismic lines.

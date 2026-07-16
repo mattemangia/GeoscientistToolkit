@@ -1,7 +1,7 @@
 // ================================================================================================
 // COMMERCIAL SOFTWARE BENCHMARK TESTS
 // ================================================================================================
-// This test suite validates GeoscientistToolkit against results published in peer-reviewed studies
+// This test suite validates GAIA against results published in peer-reviewed studies
 // that use commercial software as reference implementations:
 // - TOUGH2/PetraSim (geothermal reservoir simulation)
 // - COMSOL Multiphysics (coupled THM processes)
@@ -17,11 +17,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Analysis.SlopeStability;
-using GeoscientistToolkit.Analysis.Thermodynamic;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Data.Borehole;
+using GAIA.Analysis.Geothermal;
+using GAIA.Analysis.SlopeStability;
+using GAIA.Analysis.Thermodynamic;
+using GAIA.Business.Thermodynamics;
+using GAIA.Data.Borehole;
 using MathNet.Numerics;
 using Xunit;
 using Xunit.Abstractions;
@@ -29,7 +29,7 @@ using Xunit.Abstractions;
 namespace BenchmarkTests;
 
 /// <summary>
-/// Benchmark tests comparing GeoscientistToolkit against commercial software results
+/// Benchmark tests comparing GAIA against commercial software results
 /// from peer-reviewed publications.
 /// </summary>
 public class CommercialSoftwareBenchmarks
@@ -326,7 +326,7 @@ public class CommercialSoftwareBenchmarks
                     analyticalTemp = Ti + (T0 - Ti) * SpecialFunctions.Erfc(xi);
                 }
 
-                // Numerical simulation using GeoscientistToolkit
+                // Numerical simulation using GAIA
                 double numericalTemp = SimulateFractureHeatTransport(
                     x, time_s, Ti, T0, fractureWidth,
                     matrixThermalConductivity, matrixDiffusivity, waterVelocity);

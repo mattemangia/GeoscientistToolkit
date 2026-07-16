@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Util/FileAssociation.cs
+﻿// GAIA/Util/FileAssociation.cs
 
 #if WINDOWS
 using Microsoft.Win32;
@@ -6,7 +6,7 @@ using System;
 using System.Diagnostics;
 #endif
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 ///     Manages .gtp file association on Windows.
@@ -14,8 +14,8 @@ namespace GeoscientistToolkit.Util;
 public static class FileAssociation
 {
     private const string Extension = ".gtp";
-    private const string ProgId = "GeoscientistToolkit.Project";
-    private const string FileDescription = "GeoscientistToolkit Project File";
+    private const string ProgId = "GAIA.Project";
+    private const string FileDescription = "GAIA Project File";
 
     public static bool IsAssociationSupported =>
 #if WINDOWS

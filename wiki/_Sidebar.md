@@ -62,6 +62,6 @@
 
 ## External Links
 
-* [GitHub Repository](https://github.com/mattemangia/GeoscientistToolkit)
-* [Report Issues](https://github.com/mattemangia/GeoscientistToolkit/issues)
-* [Discussions](https://github.com/mattemangia/GeoscientistToolkit/discussions)
+* [GitHub Repository](https://github.com/mattemangia/GAIA)
+* [Report Issues](https://github.com/mattemangia/GAIA/issues)
+* [Discussions](https://github.com/mattemangia/GAIA/discussions)

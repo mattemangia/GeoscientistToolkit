@@ -1,7 +1,7 @@
 using System;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.Seismology
+namespace GAIA.Analysis.Seismology
 {
     /// <summary>
     /// Fault mechanism type

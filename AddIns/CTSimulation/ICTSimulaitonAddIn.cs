@@ -1,11 +1,11 @@
-// GeoscientistToolkit/AddIns/CtSimulation/ICtSimulationAddIn.cs
+// GAIA/AddIns/CtSimulation/ICtSimulationAddIn.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
 using Veldrid;
 
-namespace GeoscientistToolkit.AddIns.CtSimulation;
+namespace GAIA.AddIns.CtSimulation;
 
 /// <summary>
 ///     Extended interface for CT simulation add-ins

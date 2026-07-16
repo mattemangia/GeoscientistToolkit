@@ -1,13 +1,13 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/CtVolume3DControlPanel.cs
+﻿// GAIA/Data/CtImageStack/CtVolume3DControlPanel.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Mesh3D;
+using GAIA.UI;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 public class CtVolume3DControlPanel : BasePanel
 {

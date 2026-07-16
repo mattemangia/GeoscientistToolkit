@@ -1,12 +1,12 @@
-// GeoscientistToolkit/UI/Borehole/BoreholePropertiesRenderer.cs
+// GAIA/UI/Borehole/BoreholePropertiesRenderer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Borehole;
+namespace GAIA.UI.Borehole;
 
 /// <summary>
 ///     Properties renderer for borehole datasets

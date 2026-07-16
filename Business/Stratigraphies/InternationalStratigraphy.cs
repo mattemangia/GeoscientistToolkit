@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace GeoscientistToolkit.Business.Stratigraphies;
+namespace GAIA.Business.Stratigraphies;
 
 /// <summary>
 ///     International Chronostratigraphic Chart (ICS 2024)

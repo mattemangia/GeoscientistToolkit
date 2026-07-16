@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/TwoDGeology/Geomechanics/GeomechanicalMaterial2D.cs
+// GAIA/Data/TwoDGeology/Geomechanics/GeomechanicalMaterial2D.cs
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using GeoscientistToolkit.Data.Materials;
+using GAIA.Data.Materials;
 
-namespace GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
+namespace GAIA.Data.TwoDGeology.Geomechanics;
 
 /// <summary>
 /// Failure criterion types for 2D geomechanical analysis

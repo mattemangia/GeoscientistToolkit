@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using Newtonsoft.Json;
 
-namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
+namespace GAIA.Tools.CtImageStack.AISegmentation
 {
     /// <summary>
     /// Manages settings for AI segmentation models (SAM2, MicroSAM, Grounding DINO)
@@ -56,7 +56,7 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
 
         private static string SettingsPath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "GeoscientistToolkit",
+            "GAIA",
             "ai_segmentation_settings.json"
         );
 

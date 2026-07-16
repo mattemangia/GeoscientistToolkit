@@ -1,10 +1,10 @@
-// GeoscientistToolkit/UI/ClipboardService.cs
+// GAIA/UI/ClipboardService.cs
 
 using System;
 using System.Collections.Generic;
-using GeoscientistToolkit.Data.Borehole;
+using GAIA.Data.Borehole;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 /// Provides static methods for clipboard operations (copy, cut, paste) for LithologyUnit objects.

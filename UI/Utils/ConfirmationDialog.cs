@@ -1,9 +1,9 @@
-// GeoscientistToolkit/UI/Utils/ConfirmationDialog.cs
+// GAIA/UI/Utils/ConfirmationDialog.cs
 
 using System.Numerics;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     A reusable modal dialog for confirming actions.

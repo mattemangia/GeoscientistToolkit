@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/TwoDGeology/Geomechanics/FEMMesh2D.cs
+// GAIA/Data/TwoDGeology/Geomechanics/FEMMesh2D.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
+namespace GAIA.Data.TwoDGeology.Geomechanics;
 
 /// <summary>
 /// Element types for 2D FEM analysis

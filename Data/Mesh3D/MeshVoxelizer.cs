@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Data/Mesh3D/MeshVoxelizer.cs
+﻿// GAIA/Data/Mesh3D/MeshVoxelizer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Mesh3D;
+namespace GAIA.Data.Mesh3D;
 
 /// <summary>
 ///     Converts 3D mesh models to voxelized volume data

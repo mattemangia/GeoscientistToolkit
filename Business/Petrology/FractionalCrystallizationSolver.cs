@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/Petrology/FractionalCrystallizationSolver.cs
+// GAIA/Business/Petrology/FractionalCrystallizationSolver.cs
 //
 // Solver for magma crystallization modeling using fractional and equilibrium crystallization.
 // Implements Rayleigh fractionation for trace elements and Bowen's reaction series.
@@ -34,9 +34,9 @@
 // - Winter, J.D., 2013. Principles of Igneous and Metamorphic Petrology, 2nd ed.
 
 using System.Data;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.Petrology;
+namespace GAIA.Business.Petrology;
 
 /// <summary>
 ///     Configuration for crystallization modeling.

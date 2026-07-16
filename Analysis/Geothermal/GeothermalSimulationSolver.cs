@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Analysis/Geothermal/GeothermalSimulationSolver.cs
+﻿// GAIA/Analysis/Geothermal/GeothermalSimulationSolver.cs
 //
 // ================================================================================================
 // REFERENCES (APA Format):
@@ -99,12 +99,12 @@
 using System.Numerics;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.VolumeData;
+using GAIA.Network;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 ///     Implements the numerical solver for coupled heat transfer and groundwater flow in geothermal systems.

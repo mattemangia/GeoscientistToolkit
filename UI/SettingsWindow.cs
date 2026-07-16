@@ -1,14 +1,14 @@
-﻿// GeoscientistToolkit/UI/SettingsWindow.cs
+﻿// GAIA/UI/SettingsWindow.cs
 
 using System.Numerics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Settings;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class SettingsWindow
 {

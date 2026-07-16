@@ -1,20 +1,20 @@
-// GeoscientistToolkit/UI/PNMViewer.cs - With Diffusivity Visualization
+// GAIA/UI/PNMViewer.cs - With Diffusivity Visualization
 
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Pnm;
+using GAIA.Business;
+using GAIA.Data.Pnm;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 using Veldrid.SPIRV;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class PNMViewer : IDatasetViewer
 {

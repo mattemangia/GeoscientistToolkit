@@ -1,14 +1,14 @@
-// GeoscientistToolkit/UI/AcousticVolume/AcousticExportResultsTool.cs
+// GAIA/UI/AcousticVolume/AcousticExportResultsTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.AcousticVolume;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.AcousticVolume;
+namespace GAIA.UI.AcousticVolume;
 
 public class AcousticExportResultsTool : IDatasetTools
 {

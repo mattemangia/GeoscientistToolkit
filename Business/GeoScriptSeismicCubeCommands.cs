@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptSeismicCubeCommands.cs
+// GAIA/Business/GeoScript/GeoScriptSeismicCubeCommands.cs
 
 using System;
 using System.Collections.Generic;
@@ -8,16 +8,16 @@ using System.Linq;
 using System.Numerics;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Util;
-using static GeoscientistToolkit.Business.GeoScriptSeismicCommands.SeismicCubeCommandHelpers;
+using GAIA.Business;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.Data.Seismic;
+using GAIA.Data.Table;
+using GAIA.Util;
+using static GAIA.Business.GeoScriptSeismicCommands.SeismicCubeCommandHelpers;
 
-namespace GeoscientistToolkit.Business.GeoScriptSeismicCommands;
+namespace GAIA.Business.GeoScriptSeismicCommands;
 
 public class CubeCreateCommand : IGeoScriptCommand
 {

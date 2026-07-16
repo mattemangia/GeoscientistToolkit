@@ -1,12 +1,12 @@
-// GeoscientistToolkit/UI/GIS/TwoDGeologyProperties.cs
+// GAIA/UI/GIS/TwoDGeologyProperties.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.Data.TwoDGeology;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 public class TwoDGeologyProperties : IDatasetPropertiesRenderer
 {

@@ -1,4 +1,4 @@
-namespace GeoscientistToolkit.Scripting.GeoScript
+namespace GAIA.Scripting.GeoScript
 {
     /// <summary>
     /// Token types for GeoScript lexer

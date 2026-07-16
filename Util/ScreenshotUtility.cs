@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Util/ScreenshotUtility.cs
+// GAIA/Util/ScreenshotUtility.cs
 
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -6,7 +6,7 @@ using ImGuiNET;
 using StbImageWriteSharp;
 using Veldrid;
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 ///     Utility class for capturing screenshots from ImGui windows and Veldrid render targets.
@@ -623,7 +623,7 @@ public class ScreenshotSession : IDisposable
         if (string.IsNullOrEmpty(baseDirectory))
             baseDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
-                "GeoscientistToolkit_Screenshots");
+                "GAIA_Screenshots");
 
         _sessionDirectory = Path.Combine(baseDirectory,
             $"Session_{DateTime.Now:yyyyMMdd_HHmmss}");

@@ -5,7 +5,7 @@ using System.Linq;
 using System.Numerics;
 using System.Text.Json;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Imports results from external simulations to use as initial conditions

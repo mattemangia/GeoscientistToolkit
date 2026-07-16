@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Image/Selection/ImageSelection.cs
+// GAIA/Data/Image/Selection/ImageSelection.cs
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.Image.Selection
+namespace GAIA.Data.Image.Selection
 {
     /// <summary>
     /// Represents a selection region in an image

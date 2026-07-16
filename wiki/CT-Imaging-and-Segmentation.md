@@ -1,6 +1,6 @@
 # CT Imaging and Segmentation
 
-Comprehensive guide for CT imaging, segmentation, and AI-powered analysis in Geoscientist's Toolkit.
+Comprehensive guide for CT imaging, segmentation, and AI-powered analysis in GAIA (Geoscience Analysis, Imaging & Automation).
 
 ---
 
@@ -107,7 +107,7 @@ The toolkit includes state-of-the-art AI models for automatic segmentation.
    Download the pre-trained models and place in the `ONNX/` directory:
 
    ```
-   GeoscientistToolkit/
+   GAIA/
    ├── ONNX/
    │   ├── sam2.1_large.encoder.onnx
    │   ├── sam2.1_large.decoder.onnx

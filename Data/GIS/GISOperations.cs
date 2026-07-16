@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Business/GIS/GISOperations.cs
+// GAIA/Business/GIS/GISOperations.cs
 
 using System.Numerics;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.Operation.Buffer;
 using NetTopologySuite.Simplify;
 
-namespace GeoscientistToolkit.Business.GIS;
+namespace GAIA.Business.GIS;
 
 /// <summary>
 ///     Complete implementations of GIS operations with real algorithms

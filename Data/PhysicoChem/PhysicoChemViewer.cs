@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Data/PhysicoChem/PhysicoChemViewer.cs
+// GAIA/Data/PhysicoChem/PhysicoChemViewer.cs
 
 using System;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.PhysicoChem;
+namespace GAIA.Data.PhysicoChem;
 
 /// <summary>
 /// Viewer for PhysicoChem datasets - displays 3D mesh, simulation results,

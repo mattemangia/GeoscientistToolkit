@@ -1,13 +1,13 @@
-// GeoscientistToolkit/UI/Tools/SubsurfaceGISTools.cs
+// GAIA/UI/Tools/SubsurfaceGISTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data.GIS;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 /// <summary>
 /// Tools for working with SubsurfaceGISDataset

@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Business/Vector4JsonConverter.cs
+// GAIA/Business/Vector4JsonConverter.cs
 
 using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 public class Vector4JsonConverter : JsonConverter<Vector4>
 {

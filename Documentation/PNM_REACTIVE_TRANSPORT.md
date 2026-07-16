@@ -51,8 +51,8 @@ This creates a powerful tool for studying reactive transport at the pore scale, 
 ### Method 1: Programmatic API
 
 ```csharp
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Data.Pnm;
+using GAIA.Analysis.Pnm;
+using GAIA.Data.Pnm;
 
 // Load or generate PNM
 var pnm = /* your PNMDataset */;

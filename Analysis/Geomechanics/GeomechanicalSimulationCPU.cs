@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalSimulatorCPU.cs
+// GAIA/Analysis/Geomechanics/GeomechanicalSimulatorCPU.cs
 // CRITICAL FIX: Properly handle displacement-controlled boundary conditions in matrix-vector product
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Network;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposable
 {

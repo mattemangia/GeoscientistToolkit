@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace GeoscientistToolkit.NodeEndpoint.Services;
+namespace GAIA.NodeEndpoint.Services;
 
 /// <summary>
 /// Manages data references to avoid transmitting large datasets over the network.

@@ -1,17 +1,17 @@
-// GeoscientistToolkit/UI/AcousticVolume/AcousticVolumeTools.cs
+// GAIA/UI/AcousticVolume/AcousticVolumeTools.cs
 
 using System.Numerics;
 using System.Text.Json;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.AcousticVolume;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data.VolumeData;
+using GAIA.UI;
+using GAIA.UI.AcousticVolume;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using StbImageWriteSharp;
 
-namespace GeoscientistToolkit.Data.AcousticVolume;
+namespace GAIA.Data.AcousticVolume;
 
 /// <summary>
 ///     Categorized tool panel for Acoustic Volume datasets.

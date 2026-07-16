@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptPNMCommands.cs
+// GAIA/Business/GeoScript/GeoScriptPNMCommands.cs
 
 using System;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.Pnm;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptPNMCommands;
+namespace GAIA.Business.GeoScriptPNMCommands;
 
 /// <summary>
 /// PNM_FILTER_PORES - Filter pores by criteria

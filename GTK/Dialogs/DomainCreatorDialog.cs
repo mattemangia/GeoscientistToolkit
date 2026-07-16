@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Data.Materials;
+using GAIA.Data.PhysicoChem;
+using GAIA.Data.Materials;
 using Gtk;
 
-namespace GeoscientistToolkit.GtkUI.Dialogs;
+namespace GAIA.GtkUI.Dialogs;
 
 /// <summary>
 /// Domain Creator Dialog - Professional interface for creating reactor domains

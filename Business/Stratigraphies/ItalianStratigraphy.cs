@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Business/Stratigraphies/ItalianStratigraphy.cs
+// GAIA/Business/Stratigraphies/ItalianStratigraphy.cs
 
 using System.Drawing;
 
-namespace GeoscientistToolkit.Business.Stratigraphies;
+namespace GAIA.Business.Stratigraphies;
 
 /// <summary>
 ///     Stratigrafia italiana completa con unità regionali e denominazioni italiane

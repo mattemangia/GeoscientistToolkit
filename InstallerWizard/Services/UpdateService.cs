@@ -1,8 +1,8 @@
 using System.Text.Json;
-using GeoscientistToolkit.Installer.Models;
-using GeoscientistToolkit.Installer.Utilities;
+using GAIA.Installer.Models;
+using GAIA.Installer.Utilities;
 
-namespace GeoscientistToolkit.Installer.Services;
+namespace GAIA.Installer.Services;
 
 internal sealed class UpdateService
 {

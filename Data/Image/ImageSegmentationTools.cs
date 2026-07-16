@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Data/Image/Segmentation/ImageSegmentationTools.cs
+// GAIA/Data/Image/Segmentation/ImageSegmentationTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.Image.AISegmentation;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
+using GAIA.Business;
+using GAIA.Data.Image.AISegmentation;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Image.Segmentation;
+namespace GAIA.Data.Image.Segmentation;
 
 public static class ImageSegmentationTools
 {

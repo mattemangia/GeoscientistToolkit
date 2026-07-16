@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Nerf/NerfExporter.cs
+// GAIA/Data/Nerf/NerfExporter.cs
 
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Mesh3D;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Nerf;
+namespace GAIA.Data.Nerf;
 
 /// <summary>
 /// Export functionality for NeRF datasets including mesh, texture, and point cloud export.

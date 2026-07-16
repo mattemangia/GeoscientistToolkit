@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Analysis/Photogrammetry/MatTextureConverter.cs
+// GAIA/Analysis/Photogrammetry/MatTextureConverter.cs
 
 using OpenCvSharp;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Photogrammetry;
+namespace GAIA.Analysis.Photogrammetry;
 
 /// <summary>
 /// Converts OpenCV Mat images to GPU textures for real-time display.

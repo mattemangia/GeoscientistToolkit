@@ -1,8 +1,8 @@
-//GeoscientistToolkit/Business/Stratigraphies/USStratigraphy.cs
+//GAIA/Business/Stratigraphies/USStratigraphy.cs
 
 using System.Drawing;
 
-namespace GeoscientistToolkit.Business.Stratigraphies;
+namespace GAIA.Business.Stratigraphies;
 
 /// <summary>
 ///     United States regional stratigraphy with North American-specific units and nomenclature

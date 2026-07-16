@@ -1,13 +1,13 @@
-// GeoscientistToolkit/UI/Utils/AnimationExporter.cs
+// GAIA/UI/Utils/AnimationExporter.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GIS;
+using GAIA.Data.TwoDGeology;
+using GAIA.Util;
 using ImGuiNET;
 using StbImageWriteSharp;
 
-namespace GeoscientistToolkit.UI.Utils;
+namespace GAIA.UI.Utils;
 
 /// <summary>
 ///     Exports animations of structural restoration and forward modeling processes.

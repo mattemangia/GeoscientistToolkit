@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geothermal/MultiphaseFlowSolver.cs
+// GAIA/Analysis/Geothermal/MultiphaseFlowSolver.cs
 //
 // ================================================================================================
 // REFERENCES (APA Format):
@@ -30,11 +30,11 @@
 
 using System;
 using System.Numerics;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Mesh3D;
+using GAIA.Network;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 /// Multiphase flow solver supporting water-steam-CO2 systems with salinity effects

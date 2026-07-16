@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Util/GraphicsAdapterUtil.cs
+﻿// GAIA/Util/GraphicsAdapterUtil.cs
 
 using System.Collections;
 using System.Diagnostics;
@@ -6,7 +6,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 ///     A multiplatform utility to enumerate the names of graphics adapters installed in the system.

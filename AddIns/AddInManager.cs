@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/AddIns/AddInManager.cs
+﻿// GAIA/AddIns/AddInManager.cs
 
 using System.Reflection;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Settings;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.AddIns;
+namespace GAIA.AddIns;
 
 /// <summary>
 ///     Manages loading, unloading, and interaction with add-ins

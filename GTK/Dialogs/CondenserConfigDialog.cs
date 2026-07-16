@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using Gtk;
 
-namespace GeoscientistToolkit.GtkUI.Dialogs
+namespace GAIA.GtkUI.Dialogs
 {
     /// <summary>
     /// Configuration dialog for ORC condenser setup.

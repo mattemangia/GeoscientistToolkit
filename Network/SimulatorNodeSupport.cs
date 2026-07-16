@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Network/SimulatorNodeSupport.cs
+// GAIA/Network/SimulatorNodeSupport.cs
 
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Settings;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Network;
+namespace GAIA.Network;
 
 /// <summary>
 ///     Helper class providing node manager integration support for simulators

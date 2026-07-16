@@ -3,15 +3,15 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Mesh3D;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Data;
+using GAIA.Data.Mesh3D;
 using ImGuiNET;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// GUI tools for slope stability analysis configuration and simulation.

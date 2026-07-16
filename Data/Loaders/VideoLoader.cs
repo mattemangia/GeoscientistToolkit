@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Loaders/VideoLoader.cs
+// GAIA/Data/Loaders/VideoLoader.cs
 
-using GeoscientistToolkit.Data.Media;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Media;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 /// <summary>
 /// Loader for video files (MP4, AVI, MOV, etc.)

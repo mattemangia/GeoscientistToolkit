@@ -1,15 +1,15 @@
-// GeoscientistToolkit/Analysis/PNM/DualPNMGenerator.cs
+// GAIA/Analysis/PNM/DualPNMGenerator.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.Image;
+using GAIA.Data.Pnm;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Pnm;
+namespace GAIA.Analysis.Pnm;
 
 /// <summary>
 /// Workflow tool for generating Dual Pore Network Models.

@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Borehole/ProfileCorrelationSystem.cs
+// GAIA/Data/Borehole/ProfileCorrelationSystem.cs
 
 using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.GIS;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Borehole;
+namespace GAIA.Data.Borehole;
 
 /// <summary>
 /// Represents a correlation profile - a line connecting multiple boreholes

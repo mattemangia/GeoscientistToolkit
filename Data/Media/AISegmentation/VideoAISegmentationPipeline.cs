@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Media/AISegmentation/VideoAISegmentationPipeline.cs
+// GAIA/Data/Media/AISegmentation/VideoAISegmentationPipeline.cs
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
 using SkiaSharp;
-using GeoscientistToolkit.Tools.CtImageStack.AISegmentation;
+using GAIA.Tools.CtImageStack.AISegmentation;
 
-namespace GeoscientistToolkit.Data.Media.AISegmentation
+namespace GAIA.Data.Media.AISegmentation
 {
     /// <summary>
     /// AI segmentation pipeline for VideoDataset

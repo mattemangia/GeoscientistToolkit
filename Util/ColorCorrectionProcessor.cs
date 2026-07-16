@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Business/Image/ColorCorrectionProcessor.cs
+// GAIA/Business/Image/ColorCorrectionProcessor.cs
 
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Image;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.Image;
+namespace GAIA.Business.Image;
 
 /// <summary>
 ///     Advanced color correction and enhancement for satellite imagery

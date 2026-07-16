@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Network/NodeMessages.cs
+// GAIA/Network/NodeMessages.cs
 
 using System.Text.Json.Serialization;
 
-namespace GeoscientistToolkit.Network;
+namespace GAIA.Network;
 
 /// <summary>
 ///     Base class for all network messages

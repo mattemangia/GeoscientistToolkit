@@ -1,6 +1,6 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/Options/OrthomosaicOptions.cs
+﻿// GAIA/Business/Photogrammetry/Options/OrthomosaicOptions.cs
 
-namespace GeoscientistToolkit.Business.Photogrammetry
+namespace GAIA.Business.Photogrammetry
 {
     /// <summary>
     /// Options for orthomosaic generation

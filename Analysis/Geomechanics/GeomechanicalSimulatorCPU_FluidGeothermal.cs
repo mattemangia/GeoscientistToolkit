@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalSimulatorCPU_FluidGeothermal.cs
+// GAIA/Analysis/Geomechanics/GeomechanicalSimulatorCPU_FluidGeothermal.cs
 // Partial class extension for geothermal and hydraulic fracturing simulations
 
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public partial class GeomechanicalSimulatorCPU
 {

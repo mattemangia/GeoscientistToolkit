@@ -1,32 +1,32 @@
-﻿// GeoscientistToolkit/UI/DatasetUIFactory.cs
+﻿// GAIA/UI/DatasetUIFactory.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.Nerf;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.Data.Media;
-using GeoscientistToolkit.Data.Text;
-using GeoscientistToolkit.Data.PointCloud;
-using GeoscientistToolkit.UI.Borehole;
-using GeoscientistToolkit.UI.GIS;
-using GeoscientistToolkit.UI.Seismic;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Tools;
+using GAIA.Data;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.Borehole;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.GIS;
+using GAIA.Data.Image;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.Nerf;
+using GAIA.Data.PhysicoChem;
+using GAIA.Data.Pnm;
+using GAIA.Data.Table;
+using GAIA.Data.TwoDGeology;
+using GAIA.Data.Seismic;
+using GAIA.Data.Media;
+using GAIA.Data.Text;
+using GAIA.Data.PointCloud;
+using GAIA.UI.Borehole;
+using GAIA.UI.GIS;
+using GAIA.UI.Seismic;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Tools;
 using ImGuiNET;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Analysis.SlopeStability;
+using GAIA.Analysis.Geothermal;
+using GAIA.Analysis.SlopeStability;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public static class DatasetUIFactory
 {
@@ -450,7 +450,7 @@ private class ImageTools : IDatasetTools
         {
             if (string.IsNullOrWhiteSpace(path))
             {
-                GeoscientistToolkit.Util.Logger.LogError("Export path is empty");
+                GAIA.Util.Logger.LogError("Export path is empty");
                 return;
             }
 
@@ -464,7 +464,7 @@ private class ImageTools : IDatasetTools
             // Check if we have image data
             if (image.ImageData == null || image.ImageData.Length == 0)
             {
-                GeoscientistToolkit.Util.Logger.LogError("No pixel data available for export");
+                GAIA.Util.Logger.LogError("No pixel data available for export");
                 return;
             }
 
@@ -474,7 +474,7 @@ private class ImageTools : IDatasetTools
 
             if (channels < 1 || channels > 4)
             {
-                GeoscientistToolkit.Util.Logger.LogError($"Invalid channel count: {channels}");
+                GAIA.Util.Logger.LogError($"Invalid channel count: {channels}");
                 return;
             }
 
@@ -487,7 +487,7 @@ private class ImageTools : IDatasetTools
                 _ => StbImageWriteSharp.ColorComponents.RedGreenBlue
             };
 
-            GeoscientistToolkit.Util.Logger.Log($"Exporting {image.Width}x{image.Height} image ({channels} channels) to {path}...");
+            GAIA.Util.Logger.Log($"Exporting {image.Width}x{image.Height} image ({channels} channels) to {path}...");
 
             var writer = new StbImageWriteSharp.ImageWriter();
             using var stream = File.Create(path);
@@ -508,15 +508,15 @@ private class ImageTools : IDatasetTools
                     break;
 
                 default:
-                    GeoscientistToolkit.Util.Logger.LogError($"Unsupported format: {format}");
+                    GAIA.Util.Logger.LogError($"Unsupported format: {format}");
                     return;
             }
 
-            GeoscientistToolkit.Util.Logger.Log($"Successfully exported image to: {path}");
+            GAIA.Util.Logger.Log($"Successfully exported image to: {path}");
         }
         catch (Exception ex)
         {
-            GeoscientistToolkit.Util.Logger.LogError($"Failed to export image: {ex.Message}");
+            GAIA.Util.Logger.LogError($"Failed to export image: {ex.Message}");
         }
     }
 }

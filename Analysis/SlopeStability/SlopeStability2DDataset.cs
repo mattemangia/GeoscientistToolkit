@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Analysis/SlopeStability/SlopeStability2DDataset.cs
+// GAIA/Analysis/SlopeStability/SlopeStability2DDataset.cs
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
+using GAIA.Data;
+using GAIA.Data.Borehole;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Dataset for 2D slope stability analysis from geological cross-sections.

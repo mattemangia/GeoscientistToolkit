@@ -1,16 +1,16 @@
-// GeoscientistToolkit/Data/GIS/HydrologicalVisualization.cs
+// GAIA/Data/GIS/HydrologicalVisualization.cs
 //
 // Visualization overlay system for hydrological analysis in GISViewer
 //
 
 using System.Numerics;
-using GeoscientistToolkit.Analysis.Hydrological;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.GIS.Tools;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Hydrological;
+using GAIA.Data.GIS;
+using GAIA.UI.GIS.Tools;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 /// <summary>
 /// Renders hydrological analysis results as overlays on the GIS map

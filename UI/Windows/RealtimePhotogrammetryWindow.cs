@@ -1,7 +1,7 @@
-// GeoscientistToolkit/UI/Windows/RealtimePhotogrammetryWindow.cs
+// GAIA/UI/Windows/RealtimePhotogrammetryWindow.cs
 
-using GeoscientistToolkit.Analysis.Photogrammetry;
-using GeoscientistToolkit.Settings;
+using GAIA.Analysis.Photogrammetry;
+using GAIA.Settings;
 using ImGuiNET;
 using OpenCvSharp;
 using System;
@@ -10,9 +10,9 @@ using System.Numerics;
 using System.IO;
 using System.Text.Json;
 using Veldrid;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
-namespace GeoscientistToolkit.UI.Windows;
+using GAIA.UI.Utils;
+using GAIA.Util;
+namespace GAIA.UI.Windows;
 
 /// <summary>
 /// Real-time photogrammetry window with live video feed and reconstruction.

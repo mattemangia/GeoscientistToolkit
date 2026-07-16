@@ -2,7 +2,7 @@
 
 ## Overview
 
-GeoscientistToolkit now includes advanced AI-powered segmentation capabilities based on state-of-the-art models from the CTS project. This module provides three main AI models and combined pipelines for automatic and interactive segmentation of CT image stacks.
+GAIA now includes advanced AI-powered segmentation capabilities based on state-of-the-art models from the CTS project. This module provides three main AI models and combined pipelines for automatic and interactive segmentation of CT image stacks.
 
 ## Models Included
 
@@ -35,10 +35,10 @@ Download the pre-trained ONNX models from the CTS repository or official sources
 
 ### 2. Place Models in ONNX Directory
 
-Copy all model files to the `ONNX/` directory in your GeoscientistToolkit installation:
+Copy all model files to the `ONNX/` directory in your GAIA installation:
 
 ```
-GeoscientistToolkit/
+GAIA/
 ├── ONNX/
 │   ├── sam2.1_large.encoder.onnx
 │   ├── sam2.1_large.decoder.onnx
@@ -50,7 +50,7 @@ GeoscientistToolkit/
 
 ### 3. Configure Paths
 
-Open GeoscientistToolkit and navigate to:
+Open GAIA and navigate to:
 **CT Combined Tools → AI Segmentation → AI Settings**
 
 Use the file browser to configure the correct paths for each model if they differ from the defaults.
@@ -251,5 +251,5 @@ Models and architecture:
 
 ## License
 
-AI segmentation modules follow the same license as GeoscientistToolkit.
+AI segmentation modules follow the same license as GAIA.
 ONNX models retain their original licenses from respective projects.

@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Data/Media/AudioDatasetViewer.cs
+// GAIA/Data/Media/AudioDatasetViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 using NAudio.Wave;
 using NAudio.Dsp;
 
-namespace GeoscientistToolkit.Data.Media;
+namespace GAIA.Data.Media;
 
 /// <summary>
 /// Viewer for audio datasets with waveform display and playback controls

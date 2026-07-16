@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/CtStackConverter.cs
+﻿// GAIA/Data/CtImageStack/CtStackConverter.cs
 
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 /// <summary>
 ///     Converts a CT image stack into an optimized, streamable format (.gvt)

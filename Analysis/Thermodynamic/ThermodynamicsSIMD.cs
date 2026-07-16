@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/Thermodynamics/ThermodynamicsSIMD.cs
+// GAIA/Business/Thermodynamics/ThermodynamicsSIMD.cs
 //
 // SIMD-accelerated thermodynamic calculations using AVX2 (x64) and NEON (ARM).
 // Vectorizes activity coefficient calculations, rate evaluations, and matrix operations.
@@ -13,9 +13,9 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.Thermodynamics;
+namespace GAIA.Business.Thermodynamics;
 
 /// <summary>
 ///     SIMD-accelerated thermodynamic calculations.

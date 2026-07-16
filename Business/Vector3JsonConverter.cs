@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/Vector3JsonConverter.cs
+// GAIA/Business/Vector3JsonConverter.cs
 
 using System.Numerics;
 using System.Text.Json;

@@ -1,13 +1,13 @@
 using System;
 using System.IO;
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
+namespace GAIA.Tools.CtImageStack.AISegmentation
 {
     /// <summary>
     /// Settings tool for AI segmentation models

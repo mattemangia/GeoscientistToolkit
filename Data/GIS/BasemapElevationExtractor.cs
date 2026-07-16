@@ -1,15 +1,15 @@
-// GeoscientistToolkit/Data/GIS/BasemapElevationExtractor.cs
+// GAIA/Data/GIS/BasemapElevationExtractor.cs
 //
 // Extract elevation data from online basemap tiles for hydrological analysis
 //
 
 using System.Numerics;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.GIS;
+using GAIA.UI.GIS;
+using GAIA.Util;
 using StbImageSharp;
 
-namespace GeoscientistToolkit.Data.GIS;
+namespace GAIA.Data.GIS;
 
 /// <summary>
 /// Extracts and processes elevation data from online basemap tiles

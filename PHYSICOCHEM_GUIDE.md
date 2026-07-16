@@ -3,7 +3,7 @@
 
 **Version:** 1.0
 **Date:** 2026-11-14
-**Author:** GeoscientistToolkit Development Team
+**Author:** GAIA Development Team
 
 ---
 
@@ -56,8 +56,8 @@ Both front-ends expose the PhysicoChem dataset features so you can build reactor
 ### Example 1: Simple Box Reactor with Two Reactants
 
 ```csharp
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Analysis.PhysicoChem;
+using GAIA.Data.PhysicoChem;
+using GAIA.Analysis.PhysicoChem;
 
 // Create dataset
 var dataset = new PhysicoChemDataset("TwoBoxReactor",
@@ -652,11 +652,11 @@ Analysis/PhysicoChem/
 
 ## Support
 
-For questions, issues, or feature requests, please contact the GeoscientistToolkit development team.
+For questions, issues, or feature requests, please contact the GAIA development team.
 
 **Version History:**
 - v1.0 (2026-11-14): Initial release with full multiphysics capabilities
 
 ---
 
-**© 2026 The Geoscientist's Toolkit Project**
+**© 2026 The GAIA (Geoscience Analysis, Imaging & Automation) Project**

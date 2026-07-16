@@ -4,12 +4,12 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Loaders;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.Loaders;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptMiscDatasetCommands
+namespace GAIA.Business.GeoScriptMiscDatasetCommands
 {
     public class LoadCommand : IGeoScriptCommand
     {

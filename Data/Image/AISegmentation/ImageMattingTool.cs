@@ -1,16 +1,16 @@
-// GeoscientistToolkit/Data/Image/AISegmentation/ImageMattingTool.cs
+// GAIA/Data/Image/AISegmentation/ImageMattingTool.cs
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Tools.CtImageStack.AISegmentation;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Tools.CtImageStack.AISegmentation;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Image.AISegmentation
+namespace GAIA.Data.Image.AISegmentation
 {
     /// <summary>
     /// SAM-powered image matting tool

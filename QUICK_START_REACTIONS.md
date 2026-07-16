@@ -1,6 +1,6 @@
 # Quick Guide: Starting a Sample Reaction
 
-**GeoscientistToolkit - Quick Start Guide for Reactive Simulations**
+**GAIA - Quick Start Guide for Reactive Simulations**
 
 ---
 
@@ -18,7 +18,7 @@
 
 ## Introduction
 
-GeoscientistToolkit offers two main systems for reactive simulations:
+GAIA offers two main systems for reactive simulations:
 
 - **PhysicoChem**: Multiphysics reactors with custom geometries (box, cylinders, spheres, Voronoi meshes)
 - **PNM Reactive Transport**: Reactive transport through pore networks from CT images
@@ -31,14 +31,14 @@ This guide shows you how to quickly start a sample simulation.
 
 ### The Simplest Way: Test the Default Reactor
 
-On startup, GeoscientistToolkit GTK automatically creates a **default exothermic reactor** ready to be tested!
+On startup, GAIA GTK automatically creates a **default exothermic reactor** ready to be tested!
 
 #### Step 1: Launch the GTK Application
 
 ```bash
-cd GeoscientistToolkit
-./bin/GeoscientistToolkit-gtk
-# or on Windows: bin\GeoscientistToolkit-gtk.exe
+cd GAIA
+./bin/GAIA-gtk
+# or on Windows: bin\GAIA-gtk.exe
 ```
 
 #### Step 2: View the Default Reactor
@@ -388,8 +388,8 @@ Two stacked boxes with different reactants that can mix through an interface.
 ### C# Code
 
 ```csharp
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Analysis.PhysicoChem;
+using GAIA.Data.PhysicoChem;
+using GAIA.Analysis.PhysicoChem;
 
 // Create the dataset
 var dataset = new PhysicoChemDataset("SimpleReactor",
@@ -581,8 +581,8 @@ Reactive transport simulation through a pore network extracted from CT images, w
 ### Method 1: C# Code
 
 ```csharp
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Data.Pnm;
+using GAIA.Analysis.Pnm;
+using GAIA.Data.Pnm;
 
 // Assume you already have a loaded PNM
 // var pnm = ... (generated from CT scan)
@@ -833,4 +833,4 @@ EXPORT_PNM_RESULTS /home/user/results
 
 ---
 
-**© 2026 GeoscientistToolkit Project**
+**© 2026 GAIA Project**

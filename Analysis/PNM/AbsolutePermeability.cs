@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Analysis/Pnm/AbsolutePermeability.cs - Production Version with Fixed Diffusivity
+// GAIA/Analysis/Pnm/AbsolutePermeability.cs - Production Version with Fixed Diffusivity
 
 using System.Diagnostics;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Pnm;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.Pnm;
+namespace GAIA.Analysis.Pnm;
 
 #region Molecular Diffusivity FIXED
 
@@ -1327,7 +1327,7 @@ internal static class OpenCLContext
             unsafe
             {
                 // Use centralized device manager to get the device from settings
-                _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+                _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
                 if (_device == 0)
                 {
@@ -1336,7 +1336,7 @@ internal static class OpenCLContext
                 }
 
                 // Get device info from the centralized manager
-                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
                 Logger.Log($"[OpenCL/AbsolutePermeability] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
                 // Create context and command queue

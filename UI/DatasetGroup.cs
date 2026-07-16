@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Data/DatasetGroup.cs
+﻿// GAIA/Data/DatasetGroup.cs
 
 using System.Collections.Generic;
 using System.Linq;
 
-namespace GeoscientistToolkit.Data;
+namespace GAIA.Data;
 
 public class DatasetGroup : Dataset, ISerializableDataset
 {

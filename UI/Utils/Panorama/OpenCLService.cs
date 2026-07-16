@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/OpenCLService.cs
+﻿// GAIA/Business/Photogrammetry/OpenCLService.cs
 
 using System;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit;
+namespace GAIA;
 
 /// <summary>
 /// OpenCL Service - manages OpenCL initialization and context
@@ -31,7 +31,7 @@ public static class OpenCLService
             _cl = CL.GetApi();
 
             // Use centralized device manager to get the device from settings
-            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+            _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
             if (_device == 0)
             {
@@ -40,7 +40,7 @@ public static class OpenCLService
                 return;
             }
 
-            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
             Util.Logger.Log($"[OpenCLService]: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
             int err;

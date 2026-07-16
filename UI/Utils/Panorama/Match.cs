@@ -1,5 +1,5 @@
-﻿// GeoscientistToolkit/Business/Panorama/Match.cs
-namespace GeoscientistToolkit.Business.Panorama;
+﻿// GAIA/Business/Panorama/Match.cs
+namespace GAIA.Business.Panorama;
 
 public class Match
 {

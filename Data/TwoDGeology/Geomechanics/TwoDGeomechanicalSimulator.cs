@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/TwoDGeology/Geomechanics/TwoDGeomechanicalSimulator.cs
+// GAIA/Data/TwoDGeology/Geomechanics/TwoDGeomechanicalSimulator.cs
 
 using System;
 using System.Collections.Generic;
@@ -7,7 +7,7 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
+namespace GAIA.Data.TwoDGeology.Geomechanics;
 
 /// <summary>
 /// Analysis type for 2D geomechanical simulation

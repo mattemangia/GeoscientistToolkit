@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/Thermodynamics/ReactionGenerator.cs
+// GAIA/Business/Thermodynamics/ReactionGenerator.cs
 //
 // Automatically generates chemical reactions from compound thermodynamic data
 // without hardcoding. Uses stoichiometric matrix analysis and thermodynamic feasibility.
@@ -13,11 +13,11 @@
 // - Sander, R., 2015. Compilation of Henry's law constants. Atmos. Chem. Phys., 15, 4399-4981.
 
 using System.Text.RegularExpressions;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Util;
 using MathNet.Numerics.LinearAlgebra;
 
-namespace GeoscientistToolkit.Business.Thermodynamics;
+namespace GAIA.Business.Thermodynamics;
 
 /// <summary>
 ///     Generates chemical reactions automatically from compound library data

@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalParametersExtended.cs
+// GAIA/Analysis/Geomechanics/GeomechanicalParametersExtended.cs
 // Extension to GeomechanicalParameters for geothermal and fluid injection
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 // Add these properties to the existing GeomechanicalParameters class
 public partial class GeomechanicalParameters

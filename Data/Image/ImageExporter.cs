@@ -1,15 +1,15 @@
-﻿// GeoscientistToolkit/Data/Image/ImageExporter.cs
+﻿// GAIA/Data/Image/ImageExporter.cs
 // Modified to use SkiaSharp and BitMiracle.LibTiff.NET for cross-platform, open-source image processing.
 
 using System.Globalization;
 using System.Runtime.InteropServices;
 using BitMiracle.LibTiff.Classic;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using SkiaSharp;
 
 // Added for TIFF support
 
-namespace GeoscientistToolkit.Data.Image;
+namespace GAIA.Data.Image;
 
 public class ImageExporter
 {

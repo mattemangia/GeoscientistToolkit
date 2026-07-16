@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/PhysicoChem/ReactorDomain.cs
+// GAIA/Data/PhysicoChem/ReactorDomain.cs
 //
 // Reactor domain definition with geometry, materials, and initial conditions
 
@@ -7,7 +7,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using Newtonsoft.Json;
 
-namespace GeoscientistToolkit.Data.PhysicoChem;
+namespace GAIA.Data.PhysicoChem;
 
 /// <summary>
 /// Defines a spatial domain within the reactor with specific geometry,

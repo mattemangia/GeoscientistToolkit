@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptGISExtendedCommands.cs
+// GAIA/Business/GeoScript/GeoScriptGISExtendedCommands.cs
 
 using System;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptGISExtendedCommands;
+namespace GAIA.Business.GeoScriptGISExtendedCommands;
 
 /// <summary>
 /// GIS_ADD_LAYER - Add a new layer to GIS dataset

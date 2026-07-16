@@ -378,8 +378,8 @@ Complete dataset serialization including blocks, materials, parameters, and resu
 
 ## License
 
-Part of GeoscientistToolkit - See main project license.
+Part of GAIA - See main project license.
 
 ## Support
 
-For issues, questions, or contributions, please refer to the main GeoscientistToolkit repository.
+For issues, questions, or contributions, please refer to the main GAIA repository.

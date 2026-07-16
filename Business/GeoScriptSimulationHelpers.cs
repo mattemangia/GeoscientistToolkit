@@ -1,17 +1,17 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptSimulationHelpers.cs
+// GAIA/Business/GeoScript/GeoScriptSimulationHelpers.cs
 
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Numerics;
-using GeoscientistToolkit.Analysis.AcousticSimulation;
-using GeoscientistToolkit.Analysis.Geomechanics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.AcousticSimulation;
+using GAIA.Analysis.Geomechanics;
+using GAIA.Business;
+using GAIA.Business.GeoScript;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptCtImageStackCommands;
+namespace GAIA.Business.GeoScriptCtImageStackCommands;
 
 public static class GeoScriptSimulationHelpers
 {
@@ -39,7 +39,7 @@ public static class GeoScriptSimulationHelpers
         }
     }
 
-    public static GeoscientistToolkit.Analysis.Geomechanics.BoundingBox BuildGeomechanicsExtent(
+    public static GAIA.Analysis.Geomechanics.BoundingBox BuildGeomechanicsExtent(
         CtImageStackDataset dataset,
         Dictionary<string, string> args,
         GeoScriptContext context)
@@ -52,7 +52,7 @@ public static class GeoScriptSimulationHelpers
         var height = GetExtentValue(args, "extent_height", "height", dataset.Height, context);
         var depth = GetExtentValue(args, "extent_depth", "depth", dataset.Depth, context);
 
-        return new GeoscientistToolkit.Analysis.Geomechanics.BoundingBox(minX, minY, minZ, width, height, depth);
+        return new GAIA.Analysis.Geomechanics.BoundingBox(minX, minY, minZ, width, height, depth);
     }
 
     public static Analysis.AcousticSimulation.BoundingBox BuildAcousticExtent(
@@ -70,7 +70,7 @@ public static class GeoScriptSimulationHelpers
     }
 
     public static async Task<byte[,,]> ExtractLabelsAsync(CtImageStackDataset dataset,
-        GeoscientistToolkit.Analysis.Geomechanics.BoundingBox extent)
+        GAIA.Analysis.Geomechanics.BoundingBox extent)
     {
         return await Task.Run(() =>
         {
@@ -87,7 +87,7 @@ public static class GeoScriptSimulationHelpers
     }
 
     public static async Task<float[,,]> ExtractGeomechanicsDensityAsync(CtImageStackDataset dataset,
-        GeoscientistToolkit.Analysis.Geomechanics.BoundingBox extent)
+        GAIA.Analysis.Geomechanics.BoundingBox extent)
     {
         return await Task.Run(() =>
         {

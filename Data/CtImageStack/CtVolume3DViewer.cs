@@ -1,20 +1,20 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/CtVolume3DViewer.cs
+﻿// GAIA/Data/CtImageStack/CtVolume3DViewer.cs
 
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Analysis.AcousticSimulation;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.AcousticSimulation;
+using GAIA.Business;
+using GAIA.Data.VolumeData;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using StbImageWriteSharp;
 using Veldrid;
 using Veldrid.SPIRV;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 public class ClippingPlane
 {

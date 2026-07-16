@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/Thermodynamics/KineticsSolver.cs
+// GAIA/Business/Thermodynamics/KineticsSolver.cs
 //
 // Kinetic solver for time-dependent dissolution, precipitation, and reaction rates.
 // Uses transition state theory and empirical rate laws from the literature.
@@ -12,12 +12,12 @@
 // - Steefel, C.I. & Lasaga, A.C., 1994. A coupled model for transport of multiple chemical species
 //   and kinetic precipitation/dissolution reactions. American Journal of Science, 294(5), 529-592.
 
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Network;
+using GAIA.Util;
 using MathNet.Numerics.LinearAlgebra;
 
-namespace GeoscientistToolkit.Business.Thermodynamics;
+namespace GAIA.Business.Thermodynamics;
 
 /// <summary>
 ///     Solves time-dependent chemical kinetics for dissolution and precipitation.

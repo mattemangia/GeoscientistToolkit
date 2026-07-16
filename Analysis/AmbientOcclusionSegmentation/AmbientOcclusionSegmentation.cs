@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/AmbientOcclusionSegmentation/AmbientOcclusionSegmentation.cs
+// GAIA/Analysis/AmbientOcclusionSegmentation/AmbientOcclusionSegmentation.cs
 //
 // ================================================================================================
 // Ambient Occlusion Segmentation for CT Image Stacks
@@ -23,11 +23,11 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.AmbientOcclusionSegmentation;
+namespace GAIA.Analysis.AmbientOcclusionSegmentation;
 
 /// <summary>
 /// Settings for ambient occlusion segmentation
@@ -450,11 +450,11 @@ __kernel void threshold_ao(
         _cl = CL.GetApi();
         int err;
 
-        var selectedDevice = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+        var selectedDevice = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
         if (selectedDevice == 0)
             throw new InvalidOperationException("No OpenCL device available.");
 
-        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
         Logger.Log($"[AmbientOcclusionSegmentation] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
         _context = _cl.CreateContext(null, 1, &selectedDevice, null, null, &err);

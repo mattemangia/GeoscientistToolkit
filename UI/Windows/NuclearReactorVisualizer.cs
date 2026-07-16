@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using ImGuiNET;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Analysis.PhysicoChem;
+using GAIA.Data.PhysicoChem;
+using GAIA.Analysis.PhysicoChem;
 
-namespace GeoscientistToolkit.UI.Windows
+namespace GAIA.UI.Windows
 {
     /// <summary>
     /// ImGui-based 2D/3D visualizer for nuclear reactor simulation.

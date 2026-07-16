@@ -1,28 +1,28 @@
-// GeoscientistToolkit/UI/MainWindow.cs
+// GAIA/UI/MainWindow.cs
 
 using System.Data;
 using System.Numerics;
 using System.Reflection;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Data.Text;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.UI.GIS;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.UI.Windows;
-using GeoscientistToolkit.Util;
-using GeoscientistToolkit.Analysis.Geothermal;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.GIS;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.Table;
+using GAIA.Data.Text;
+using GAIA.Data.TwoDGeology;
+using GAIA.Settings;
+using GAIA.UI.GIS;
+using GAIA.UI.Utils;
+using GAIA.UI.Windows;
+using GAIA.Util;
+using GAIA.Analysis.Geothermal;
 using ImGuiNET;
 using StbImageSharp;
 using Veldrid;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class MainWindow
 {
@@ -140,7 +140,7 @@ public class MainWindow
         {
             // Load embedded image resource
             var assembly = Assembly.GetExecutingAssembly();
-            var resourceName = "GeoscientistToolkit.image.png";
+            var resourceName = "GAIA.image.png";
 
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null)
@@ -251,14 +251,14 @@ public class MainWindow
                                            ImGuiWindowFlags.NoNavFocus | ImGuiWindowFlags.MenuBar;
 
         // Add project name to window title
-        var windowTitle = "GeoscientistToolkit";
+        var windowTitle = "GAIA";
         if (!string.IsNullOrEmpty(ProjectManager.Instance.ProjectName))
         {
-            windowTitle = $"GeoscientistToolkit - {ProjectManager.Instance.ProjectName}";
+            windowTitle = $"GAIA - {ProjectManager.Instance.ProjectName}";
             if (ProjectManager.Instance.HasUnsavedChanges) windowTitle += " *";
         }
 
-        ImGui.Begin(windowTitle + "###GeoscientistToolkit DockSpace", rootFlags);
+        ImGui.Begin(windowTitle + "###GAIA DockSpace", rootFlags);
         ImGui.PopStyleVar(3);
 
         SubmitMainMenu();
@@ -1020,7 +1020,7 @@ public class MainWindow
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
         if (ImGui.BeginPopupModal("Welcome!", ref welcome, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.Text("Welcome to GeoscientistToolkit!");
+            ImGui.Text("Welcome to GAIA!");
             ImGui.Separator();
             ImGui.TextWrapped("Import data via File → Import Data. Use the 'Pop-Out' button to pop-out panels.");
             ImGui.Spacing();
@@ -1173,12 +1173,12 @@ public class MainWindow
         // ============================================================================
         if (_showAboutPopup)
         {
-            ImGui.OpenPopup("About GeoscientistToolkit");
+            ImGui.OpenPopup("About GAIA");
             LoadLogoTexture(); // Ensure logo is loaded when showing About
         }
 
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
-        if (ImGui.BeginPopupModal("About GeoscientistToolkit", ref _showAboutPopup, ImGuiWindowFlags.AlwaysAutoResize))
+        if (ImGui.BeginPopupModal("About GAIA", ref _showAboutPopup, ImGuiWindowFlags.AlwaysAutoResize))
         {
             // Display logo if loaded
             if (_logoTextureId != IntPtr.Zero)
@@ -1197,7 +1197,7 @@ public class MainWindow
                 ImGui.Spacing();
             }
 
-            ImGui.Text("GeoscientistToolkit");
+            ImGui.Text("GAIA");
             ImGui.Spacing();
 
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.7f, 0.7f, 0.75f, 1.0f));
@@ -1241,17 +1241,17 @@ public class MainWindow
             ImGui.Text("Citation");
             ImGui.Spacing();
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.6f, 0.8f, 0.6f, 1.0f));
-            ImGui.TextWrapped("If you use Geoscientist's Toolkit in your research, please cite:");
+            ImGui.TextWrapped("If you use GAIA (Geoscience Analysis, Imaging & Automation) in your research, please cite:");
             ImGui.PopStyleColor();
             ImGui.Spacing();
 
             ImGui.PushFont(ImGui.GetIO().Fonts.Fonts[0]); // Use monospace-like default font
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.85f, 0.85f, 0.85f, 1.0f));
             ImGui.TextWrapped("@software{geoscientist_toolkit,");
-            ImGui.TextWrapped("  title = {Geoscientist's Toolkit: Integrated Geoscientific Analysis Platform},");
+            ImGui.TextWrapped("  title = {GAIA (Geoscience Analysis, Imaging & Automation): Integrated Geoscientific Analysis Platform},");
             ImGui.TextWrapped("  author = {Mangiagalli, Matteo},");
             ImGui.TextWrapped("  year = {2026},");
-            ImGui.TextWrapped("  url = {https://github.com/mattemangia/GeoscientistToolkit}");
+            ImGui.TextWrapped("  url = {https://github.com/mattemangia/GAIA}");
             ImGui.TextWrapped("}");
             ImGui.PopStyleColor();
             ImGui.PopFont();

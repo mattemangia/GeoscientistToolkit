@@ -1,10 +1,10 @@
-using GeoscientistToolkit.Analysis.RockCoreExtractor;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Analysis.RockCoreExtractor;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 public partial class CtImageStackCompositeTool
 {

@@ -1,8 +1,8 @@
-﻿// GeoscientistToolkit/UI/Interfaces/IDatasetViewer.cs
+﻿// GAIA/UI/Interfaces/IDatasetViewer.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.UI.Interfaces;
+namespace GAIA.UI.Interfaces;
 
 /// <summary>
 ///     Interface for dataset-specific viewers.

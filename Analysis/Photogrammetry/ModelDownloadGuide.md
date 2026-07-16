@@ -20,7 +20,7 @@ Questa guida spiega come ottenere i modelli ONNX necessari per la fotogrammetria
 
 4. Copia nella cartella `models/`:
    ```
-   GeoscientistToolkit/models/midas_small.onnx
+   GAIA/models/midas_small.onnx
    ```
 
 ### SuperPoint (Keypoint Detection)
@@ -34,7 +34,7 @@ Questa guida spiega come ottenere i modelli ONNX necessari per la fotogrammetria
 
 3. Copia nella cartella `models/`:
    ```
-   GeoscientistToolkit/models/superpoint.onnx
+   GAIA/models/superpoint.onnx
    ```
 
 ### LightGlue (Feature Matching) - Opzionale
@@ -212,4 +212,4 @@ print("SuperPoint OK:", len(output), "outputs")
 ## Supporto
 
 Per problemi con i modelli, apri un issue su:
-https://github.com/mattemangia/GeoscientistToolkit/issues
+https://github.com/mattemangia/GAIA/issues

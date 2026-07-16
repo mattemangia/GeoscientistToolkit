@@ -1,12 +1,12 @@
-﻿// GeoscientistToolkit/Data/DatasetDTO.cs
+﻿// GAIA/Data/DatasetDTO.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Data.PhysicoChem;
+using GAIA.Data.Materials;
+using GAIA.Data.GIS;
+using GAIA.Business.GIS;
+using GAIA.Data.PhysicoChem;
 
-namespace GeoscientistToolkit.Data;
+namespace GAIA.Data;
 
 // Base DTO
 public class DatasetDTO

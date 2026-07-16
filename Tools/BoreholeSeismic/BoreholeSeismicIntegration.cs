@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Tools/BoreholeSeismic/BoreholeSeismicIntegration.cs
+// GAIA/Tools/BoreholeSeismic/BoreholeSeismicIntegration.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.Seismic;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Tools.BoreholeSeismic;
+namespace GAIA.Tools.BoreholeSeismic;
 
 /// <summary>
 /// Integration tools for borehole and seismic data:

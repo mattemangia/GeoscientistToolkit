@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geothermal/GeothermalOpenCLSolver.cs
+// GAIA/Analysis/Geothermal/GeothermalOpenCLSolver.cs
 //
 // ================================================================================================
 // REFERENCES (APA Format):
@@ -98,10 +98,10 @@
 
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 ///     OpenCL accelerated geothermal simulation solver using Silk.NET OpenCL 1.2.
@@ -218,12 +218,12 @@ public class GeothermalOpenCLSolver : IDisposable
             Logger.Log("GeothermalOpenCLSolver: Initializing OpenCL...");
 
             // Check if multi-GPU mode is enabled
-            _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
+            _multiGPUMode = GAIA.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
 
             if (_multiGPUMode)
             {
                 // Multi-GPU mode: get all GPU devices
-                var deviceInfos = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
+                var deviceInfos = GAIA.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
 
                 if (deviceInfos == null || deviceInfos.Count == 0)
                 {
@@ -276,7 +276,7 @@ public class GeothermalOpenCLSolver : IDisposable
             else
             {
                 // Single GPU mode
-                _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+                _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
                 if (_device == 0)
                 {
@@ -285,7 +285,7 @@ public class GeothermalOpenCLSolver : IDisposable
                     return false;
                 }
 
-                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
                 DeviceName = deviceInfo.Name;
                 DeviceVendor = deviceInfo.Vendor;
                 DeviceGlobalMemory = deviceInfo.GlobalMemory;

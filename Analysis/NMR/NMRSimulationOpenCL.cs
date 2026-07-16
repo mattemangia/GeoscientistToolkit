@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Analysis/NMR/NMRSimulationOpenCL.cs
+// GAIA/Analysis/NMR/NMRSimulationOpenCL.cs
 // FIXED: Correct physics in GPU kernel
 
 using System.Diagnostics;
 using System.Text;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.NMR;
+namespace GAIA.Analysis.NMR;
 
 /// <summary>
 ///     GPU-accelerated NMR simulation using OpenCL via SILK.NET.
@@ -211,12 +211,12 @@ public unsafe class NMRSimulationOpenCL : IDisposable
         nint device1;
 
         // Check if multi-GPU mode is enabled
-        _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
+        _multiGPUMode = GAIA.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
 
         if (_multiGPUMode)
         {
             // Multi-GPU mode: get all GPU devices
-            var deviceInfos = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
+            var deviceInfos = GAIA.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
 
             if (deviceInfos == null || deviceInfos.Count == 0)
             {
@@ -265,7 +265,7 @@ public unsafe class NMRSimulationOpenCL : IDisposable
         else
         {
             // Single GPU mode
-            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+            _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
             if (_device == 0)
             {
@@ -273,7 +273,7 @@ public unsafe class NMRSimulationOpenCL : IDisposable
             }
 
             // Get device info from the centralized manager
-            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
             Logger.Log($"NMRSimulationOpenCL: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
             Logger.Log($"NMRSimulationOpenCL: Global Memory: {deviceInfo.GlobalMemory / (1024 * 1024)} MB");
 

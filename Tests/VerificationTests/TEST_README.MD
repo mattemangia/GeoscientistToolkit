@@ -1,6 +1,6 @@
 # VerificationTests – Peer‑Reviewed Benchmarks
 
-This suite verifies the simulations described in `VerificationReport.md` using data and parameters published in peer‑reviewed studies. Each test calls the **GeoscientistToolkit** APIs (no external simulations) and compares results against expected values derived from the literature. Detailed verification metadata (DOI source, inputs, equations, theoretical results, actual results, error, pass/fail) lives in the per-test reports under `Reports/`.
+This suite verifies the simulations described in `VerificationReport.md` using data and parameters published in peer‑reviewed studies. Each test calls the **GAIA** APIs (no external simulations) and compares results against expected values derived from the literature. Detailed verification metadata (DOI source, inputs, equations, theoretical results, actual results, error, pass/fail) lives in the per-test reports under `Reports/`.
 
 ## Covered tests
 

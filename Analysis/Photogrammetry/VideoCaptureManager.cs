@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Analysis/Photogrammetry/VideoCaptureManager.cs
+// GAIA/Analysis/Photogrammetry/VideoCaptureManager.cs
 
 using OpenCvSharp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Photogrammetry;
+namespace GAIA.Analysis.Photogrammetry;
 
 /// <summary>
 /// Manages video capture from webcam or file.

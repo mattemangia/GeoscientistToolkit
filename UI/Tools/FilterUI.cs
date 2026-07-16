@@ -1,16 +1,16 @@
-// GeoscientistToolkit/Analysis/Filtering/FilterUI.cs
+// GAIA/Analysis/Filtering/FilterUI.cs
 
 using System.Diagnostics;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 using ImGuiNET;
 using Silk.NET.Core.Native;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.Filtering;
+namespace GAIA.Analysis.Filtering;
 
 public enum FilterType
 {
@@ -824,13 +824,13 @@ internal unsafe class GpuProcessor : IDisposable
         _cl = CL.GetApi();
 
         // Use centralized device manager to get the device from settings
-        _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+        _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
         if (_device == 0)
             throw new DllNotFoundException("No OpenCL device available from OpenCLDeviceManager.");
 
         // Get device info from the centralized manager
-        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
         Logger.Log($"[GpuProcessor/FilterUI] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
         // Context

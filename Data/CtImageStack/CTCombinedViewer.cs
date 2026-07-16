@@ -1,23 +1,23 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/CtCombinedViewer.cs
+﻿// GAIA/Data/CtImageStack/CtCombinedViewer.cs
 // FIXED: Material color and opacity changes now update 2D slices immediately
 
 using System.Numerics;
-using GeoscientistToolkit.Analysis;
-using GeoscientistToolkit.Analysis.AcousticSimulation;
-using GeoscientistToolkit.Analysis.AmbientOcclusionSegmentation;
-using GeoscientistToolkit.Analysis.RockCoreExtractor;
-using GeoscientistToolkit.Analysis.TextureClassification;
-using GeoscientistToolkit.Analysis.Transform;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.CtImageStack.Segmentation;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Tools;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis;
+using GAIA.Analysis.AcousticSimulation;
+using GAIA.Analysis.AmbientOcclusionSegmentation;
+using GAIA.Analysis.RockCoreExtractor;
+using GAIA.Analysis.TextureClassification;
+using GAIA.Analysis.Transform;
+using GAIA.Business;
+using GAIA.Data.CtImageStack.Segmentation;
+using GAIA.UI;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Tools;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 public class CtCombinedViewer : IDatasetViewer, IDisposable
 {

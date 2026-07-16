@@ -1,17 +1,17 @@
-// GeoscientistToolkit/UI/AcousticVolume/AcousticReportGenerator.cs
+// GAIA/UI/AcousticVolume/AcousticReportGenerator.cs
 
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.VolumeData;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using StbImageWriteSharp;
 
-namespace GeoscientistToolkit.UI.AcousticVolume;
+namespace GAIA.UI.AcousticVolume;
 
 /// <summary>
 ///     A tool for generating comprehensive analysis reports for Acoustic Volume datasets.

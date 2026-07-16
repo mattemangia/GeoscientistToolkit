@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Photogrammetry/PointCloudExporter.cs
+// GAIA/Analysis/Photogrammetry/PointCloudExporter.cs
 
 using OpenCvSharp;
 using System;
@@ -6,9 +6,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Photogrammetry;
+namespace GAIA.Analysis.Photogrammetry;
 
 /// <summary>
 /// Export point clouds from photogrammetry pipeline.

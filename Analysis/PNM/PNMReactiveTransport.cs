@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/PNM/PNMReactiveTransport.cs
+// GAIA/Analysis/PNM/PNMReactiveTransport.cs
 //
 // Reactive transport solver for Pore Network Models
 // Couples flow, heat transfer, species transport, and thermodynamic reactions
@@ -7,14 +7,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Util;
-using ChemicalCompound = GeoscientistToolkit.Data.Materials.ChemicalCompound;
-using CompoundLibrary = GeoscientistToolkit.Data.Materials.CompoundLibrary;
-using CompoundPhase = GeoscientistToolkit.Data.Materials.CompoundPhase;
+using GAIA.Business.Thermodynamics;
+using GAIA.Data.Pnm;
+using GAIA.Util;
+using ChemicalCompound = GAIA.Data.Materials.ChemicalCompound;
+using CompoundLibrary = GAIA.Data.Materials.CompoundLibrary;
+using CompoundPhase = GAIA.Data.Materials.CompoundPhase;
 
-namespace GeoscientistToolkit.Analysis.Pnm;
+namespace GAIA.Analysis.Pnm;
 
 /// <summary>
 /// Options for PNM reactive transport simulation

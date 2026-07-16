@@ -1,15 +1,15 @@
-// GeoscientistToolkit/Data/TwoDGeology/Interactive2DProfileDrawingTool.cs
+// GAIA/Data/TwoDGeology/Interactive2DProfileDrawingTool.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GIS;
+using GAIA.Util;
 using ImGuiNET;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping;
+using static GAIA.Business.GIS.GeologicalMapping;
 
-namespace GeoscientistToolkit.Data.TwoDGeology
+namespace GAIA.Data.TwoDGeology
 {
     /// <summary>
     /// Interactive tool for drawing 2D geological profiles by hand.

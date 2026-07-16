@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/AcousticVolume/AcousticVolumeDataset.cs
+// GAIA/Data/AcousticVolume/AcousticVolumeDataset.cs
 
 using System.Text.Json;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.AcousticVolume;
+namespace GAIA.Data.AcousticVolume;
 
 /// <summary>
 ///     Dataset type for acoustic simulation results containing wave field data,

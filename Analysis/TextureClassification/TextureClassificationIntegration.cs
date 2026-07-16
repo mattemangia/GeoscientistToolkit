@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Analysis/TextureClassification/TextureClassificationIntegration.cs
+// GAIA/Analysis/TextureClassification/TextureClassificationIntegration.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Tools;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Tools;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.TextureClassification;
+namespace GAIA.Analysis.TextureClassification;
 
 public static class TextureClassificationIntegration
 {

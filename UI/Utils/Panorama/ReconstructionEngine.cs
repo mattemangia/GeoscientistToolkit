@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/Reconstruction/ReconstructionEngine.cs
+﻿// GAIA/Business/Photogrammetry/Reconstruction/ReconstructionEngine.cs
 
 // =================================================================================================
 // FINAL ROBUST VERSION v5 - Critical Pose Orientation Fixes
@@ -24,13 +24,13 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.Panorama;
-using GeoscientistToolkit.Business.Photogrammetry;
-using GeoscientistToolkit.Data.Image;
+using GAIA.Business.Panorama;
+using GAIA.Business.Photogrammetry;
+using GAIA.Data.Image;
 using MathNet.Numerics.LinearAlgebra;
 using MathNet.Numerics.LinearAlgebra.Double;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     /// <summary>
     /// Handles 3D reconstruction from matched features

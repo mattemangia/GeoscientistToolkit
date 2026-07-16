@@ -1,6 +1,6 @@
 # Simulation Modules
 
-This page is an index of the simulation-oriented modules in Geoscientist's Toolkit, with entry points, required datasets, and references to the underlying systems in the codebase.
+This page is an index of the simulation-oriented modules in GAIA (Geoscience Analysis, Imaging & Automation), with entry points, required datasets, and references to the underlying systems in the codebase.
 
 ---
 

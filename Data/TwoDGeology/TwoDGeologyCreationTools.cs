@@ -1,14 +1,14 @@
-// GeoscientistToolkit/UI/GIS/TwoDGeologyCreationTools.cs
+// GAIA/UI/GIS/TwoDGeologyCreationTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GIS;
+using GAIA.Data;
+using GAIA.Data.TwoDGeology;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 /// <summary>
 ///     Tools for creating and setting up 2D geology profiles from scratch.

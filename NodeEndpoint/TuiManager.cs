@@ -1,12 +1,12 @@
 using Terminal.Gui;
-using GeoscientistToolkit.Network;
+using GAIA.Network;
 using System.Diagnostics;
 using System.Text;
 using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Collections.Concurrent;
 
-namespace GeoscientistToolkit.NodeEndpoint;
+namespace GAIA.NodeEndpoint;
 
 public class TuiManager
 {
@@ -227,7 +227,7 @@ public class TuiManager
         top.Add(menu);
 
         // Main window with tabs
-        _mainWindow = new Window("GeoscientistToolkit Node Endpoint")
+        _mainWindow = new Window("GAIA Node Endpoint")
         {
             X = 0,
             Y = 1,
@@ -1912,7 +1912,7 @@ public class TuiManager
 
         // Node Name
         var nodeNameLabel = new Label("Node Name:") { X = 2, Y = y };
-        var nodeNameField = new TextField(GetJsonValue(configDoc, "NodeManager.NodeName", "GeoscientistToolkit_Endpoint"))
+        var nodeNameField = new TextField(GetJsonValue(configDoc, "NodeManager.NodeName", "GAIA_Endpoint"))
         {
             X = 28,
             Y = y,
@@ -3054,7 +3054,7 @@ public class TuiManager
 
     private void ShowAbout()
     {
-        var dialog = new Dialog("About GeoscientistToolkit Node Endpoint", 80, 28);
+        var dialog = new Dialog("About GAIA Node Endpoint", 80, 28);
 
         var aboutText = new TextView()
         {
@@ -3084,7 +3084,7 @@ public class TuiManager
     {
         var sb = new StringBuilder();
         sb.AppendLine("═══════════════════════════════════════════════════════════════════");
-        sb.AppendLine("        GeoscientistToolkit Node Endpoint - Enhanced Edition");
+        sb.AppendLine("        GAIA Node Endpoint - Enhanced Edition");
         sb.AppendLine("═══════════════════════════════════════════════════════════════════");
         sb.AppendLine();
         sb.AppendLine("Version:          2.0 (Production Ready)");
@@ -3186,7 +3186,7 @@ public class TuiManager
         sb.AppendLine();
         sb.AppendLine("═══ LICENSE ═══");
         sb.AppendLine();
-        sb.AppendLine("MIT License - Part of the GeoscientistToolkit project");
+        sb.AppendLine("MIT License - Part of the GAIA project");
         sb.AppendLine();
         sb.AppendLine("═══════════════════════════════════════════════════════════════════");
         sb.AppendLine();

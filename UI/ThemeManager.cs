@@ -1,10 +1,10 @@
-﻿// GeoscientistToolkit/UI/ThemeManager.cs
+﻿// GAIA/UI/ThemeManager.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Settings;
+using GAIA.Settings;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public static class ThemeManager
 {

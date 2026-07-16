@@ -1,11 +1,11 @@
 using System.Drawing;
 using System.Numerics;
-using GeoscientistToolkit.Business.Stratigraphies;
-using GeoscientistToolkit.UI.Windows;
-using GeoscientistToolkit.Util;
+using GAIA.Business.Stratigraphies;
+using GAIA.UI.Windows;
+using GAIA.Util;
 using StbImageWriteSharp;
 
-namespace GeoscientistToolkit.UI.Utils;
+namespace GAIA.UI.Utils;
 
 // Data structure to pass settings from the viewer to the exporter
 public class StratigraphyExportSettings

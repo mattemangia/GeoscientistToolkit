@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Gtk;
-using GeoscientistToolkit.Data.Mesh3D;
+using GAIA.Data.Mesh3D;
 
-namespace GeoscientistToolkit.GtkUI.Dialogs
+namespace GAIA.GtkUI.Dialogs
 {
     public class BooleanOperationsUI : Dialog
     {

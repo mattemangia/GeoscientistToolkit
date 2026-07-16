@@ -2,7 +2,7 @@ using System;
 using System.Numerics;
 using System.Collections.Generic;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Earthquake loading for triggering slope failure.

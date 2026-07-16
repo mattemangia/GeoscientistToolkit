@@ -1,7 +1,7 @@
 using System;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Material properties for slope stability analysis.

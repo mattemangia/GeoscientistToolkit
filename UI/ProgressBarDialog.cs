@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/UI/ProgressBarDialog.cs
+﻿// GAIA/UI/ProgressBarDialog.cs
 
 using System.Numerics;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     A reusable modal dialog for displaying progress of a long-running operation.

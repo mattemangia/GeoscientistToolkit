@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/QuaternionJsonConverter.cs
+// GAIA/Business/QuaternionJsonConverter.cs
 
 using System.Numerics;
 using System.Text.Json;

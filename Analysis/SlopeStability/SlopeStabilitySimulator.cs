@@ -9,7 +9,7 @@ using System.Runtime.Intrinsics.Arm;
 using System.Diagnostics;
 using System.Collections.Concurrent;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Physics simulator for slope stability analysis using Discrete Element Method (DEM).

@@ -1,6 +1,6 @@
 # Seismic Analysis
 
-Guide for seismic data processing, visualization, and earthquake simulation in Geoscientist's Toolkit.
+Guide for seismic data processing, visualization, and earthquake simulation in GAIA (Geoscience Analysis, Imaging & Automation).
 
 ---
 

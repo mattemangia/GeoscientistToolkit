@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Data/PNM/PNMPropertiesRenderer.cs
+// GAIA/Data/PNM/PNMPropertiesRenderer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Analysis.Pnm;
+using GAIA.Data;
+using GAIA.Data.Pnm;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
 {

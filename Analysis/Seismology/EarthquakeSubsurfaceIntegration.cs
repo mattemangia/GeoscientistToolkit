@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Linq;
-using GeoscientistToolkit.Data.GIS;
+using GAIA.Data.GIS;
 
-namespace GeoscientistToolkit.Analysis.Seismology
+namespace GAIA.Analysis.Seismology
 {
     /// <summary>
     /// Represents seismic data at a subsurface voxel location over time

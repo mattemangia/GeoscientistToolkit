@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Loaders/SingleImageLoader.cs
+// GAIA/Data/Loaders/SingleImageLoader.cs
 
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Image;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class SingleImageLoader : IDataLoader
 {

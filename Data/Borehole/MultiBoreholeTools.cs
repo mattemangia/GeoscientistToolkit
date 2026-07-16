@@ -1,13 +1,13 @@
-﻿// GeoscientistToolkit/UI/Tools/MultiBoreholeTools.cs
+﻿// GAIA/UI/Tools/MultiBoreholeTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Analysis.Geothermal;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 /// <summary>
 ///     Tools wrapper for DatasetGroup containing multiple boreholes

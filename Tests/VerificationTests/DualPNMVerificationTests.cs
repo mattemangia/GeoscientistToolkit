@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Data.Pnm;
+using GAIA.Analysis.Pnm;
+using GAIA.Data.Pnm;
 using Xunit;
 
 namespace VerificationTests;

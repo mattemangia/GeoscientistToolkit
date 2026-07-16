@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Thermodynamic/MultiphaseReactiveTransportSolver.cs
+// GAIA/Analysis/Thermodynamic/MultiphaseReactiveTransportSolver.cs
 //
 // Integrated multiphase reactive transport solver
 // Couples MultiphaseFlowSolver with ReactiveTransportSolver for complete simulation
@@ -11,12 +11,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using GeoscientistToolkit.Analysis.Multiphase;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Multiphase;
+using GAIA.Business.Thermodynamics;
+using GAIA.Network;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Thermodynamic;
+namespace GAIA.Analysis.Thermodynamic;
 
 /// <summary>
 /// Integrated multiphase reactive transport solver combining:

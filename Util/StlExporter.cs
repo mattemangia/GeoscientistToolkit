@@ -1,12 +1,12 @@
-﻿// GeoscientistToolkit/Util/StlExporter.cs
+﻿// GAIA/Util/StlExporter.cs
 
 using System.Globalization;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.Mesh3D;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.Mesh3D;
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 ///     Exports a 3D model from volume data to an STL file using a Greedy Meshing algorithm.
@@ -250,7 +250,7 @@ public static class StlExporter
     private static void WriteStlFile(string filePath, List<Vector3> vertices, List<Vector3> normals, float pixelSize)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("solid GeoscientistToolkitExport");
+        sb.AppendLine("solid GAIAExport");
 
         // Convert voxel coordinates to physical units
         var scale = pixelSize / 1000.0f; // Convert to mm if pixelSize is in micrometers
@@ -271,7 +271,7 @@ public static class StlExporter
             sb.AppendLine("  endfacet");
         }
 
-        sb.AppendLine("endsolid GeoscientistToolkitExport");
+        sb.AppendLine("endsolid GAIAExport");
         File.WriteAllText(filePath, sb.ToString());
 
         Logger.Log($"[StlExporter] STL file written to: {filePath}");

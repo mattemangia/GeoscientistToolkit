@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/UI/Utils/Panorama/PanoramaWizardPanel.cs
+﻿// GAIA/UI/Utils/Panorama/PanoramaWizardPanel.cs
 //
 // ==========================================================================================
 // FINAL VERSION:
@@ -26,14 +26,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
-using GeoscientistToolkit.Business.Panorama;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business.Panorama;
+using GAIA.Data;
+using GAIA.Data.Image;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     public sealed class PanoramaWizardPanel
     {

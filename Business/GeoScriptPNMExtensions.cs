@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/GeoScriptPNMExtensions.cs
+// GAIA/Business/GeoScriptPNMExtensions.cs
 //
 // GeoScript extensions for PNM reactive transport simulations
 // Provides commands to run reactive transport through pore networks
@@ -9,13 +9,13 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Pnm;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.Pnm;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 /// RUN_PNM_REACTIVE_TRANSPORT: Runs reactive transport simulation through a PNM

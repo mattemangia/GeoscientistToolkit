@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Photogrammetry/KeyframeManager.cs
+// GAIA/Analysis/Photogrammetry/KeyframeManager.cs
 
 using OpenCvSharp;
 using System;
@@ -6,13 +6,13 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Linq;
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
 // MathNet is used for Bundle Adjustment
 using MathNet.Numerics.LinearAlgebra;
 using MathNet.Numerics.LinearAlgebra.Double;
 
-namespace GeoscientistToolkit.Analysis.Photogrammetry;
+namespace GAIA.Analysis.Photogrammetry;
 
 /// <summary>
 /// Manages keyframes with 2.5D information (keypoints + depth).

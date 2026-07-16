@@ -1,15 +1,15 @@
-// GeoscientistToolkit/AddIns/AcousticSimulation/AcousticSimulationTool.cs (COMPLETE INTEGRATED)
+// GAIA/AddIns/AcousticSimulation/AcousticSimulationTool.cs (COMPLETE INTEGRATED)
 
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 using ImGuiNET;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.AddIns.AcousticSimulation;
+namespace GAIA.AddIns.AcousticSimulation;
 
 /// <summary>
 ///     Main tool providing UI and simulation control with full integration
@@ -1266,7 +1266,7 @@ internal class ChunkedAcousticSimulator : IDisposable
     private unsafe void InitOpenCL()
     {
         // Use centralized device manager to get the device from settings
-        _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+        _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
         if (_device == 0)
         {
@@ -1274,7 +1274,7 @@ internal class ChunkedAcousticSimulator : IDisposable
             throw new InvalidOperationException("No OpenCL device available.");
         }
 
-        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
         Logger.Log($"[AcousticSimulationTool]: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
         // Context & queue

@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/GIS/SubsurfaceGISBuilder.cs
+// GAIA/Data/GIS/SubsurfaceGISBuilder.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.GIS;
+namespace GAIA.Data.GIS;
 
 /// <summary>
 /// Builder for creating 3D subsurface GIS datasets from 2D geological data

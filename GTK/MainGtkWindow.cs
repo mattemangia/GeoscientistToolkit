@@ -1,27 +1,27 @@
 using System.IO;
 using System.Linq;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Data.Loaders;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
-using GeoscientistToolkit.GtkUI.Dialogs;
-using GeoscientistToolkit.GtkUI.Views;
+using GAIA.Business;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.PhysicoChem;
+using GAIA.Data.Table;
+using GAIA.Data.Loaders;
+using GAIA.Data.Materials;
+using GAIA.Network;
+using GAIA.Settings;
+using GAIA.Util;
+using GAIA.GtkUI.Dialogs;
+using GAIA.GtkUI.Views;
 using Cairo;
 using Gdk;
 using Gtk;
 
 using Pixbuf = Gdk.Pixbuf;
 
-namespace GeoscientistToolkit.GtkUI;
+namespace GAIA.GtkUI;
 
 public class MainGtkWindow : Gtk.Window
 {
@@ -82,7 +82,7 @@ public class MainGtkWindow : Gtk.Window
 
     private Dataset? _selectedDataset;
 
-    public MainGtkWindow(ProjectManager projectManager, SettingsManager settingsManager, NodeManager nodeManager) : base("Geoscientist's Toolkit - Reactor (GTK)")
+    public MainGtkWindow(ProjectManager projectManager, SettingsManager settingsManager, NodeManager nodeManager) : base("GAIA (Geoscience Analysis, Imaging & Automation) - Reactor (GTK)")
     {
         _projectManager = projectManager;
         _settingsManager = settingsManager;
@@ -1313,8 +1313,8 @@ public class MainGtkWindow : Gtk.Window
 
     private void ShowAboutDialog()
     {
-        const string citation = "Mangiagalli, M. (2026). Geoscientist's Toolkit - Reactor (GTK) [Computer software]. GitHub. https://github.com/mattemangia/geoscientisttoolkit";
-        var dialog = new Dialog("About Geoscientist's Toolkit - Reactor (GTK)", this, DialogFlags.Modal)
+        const string citation = "Mangiagalli, M. (2026). GAIA (Geoscience Analysis, Imaging & Automation) - Reactor (GTK) [Computer software]. GitHub. https://github.com/mattemangia/gaia";
+        var dialog = new Dialog("About GAIA (Geoscience Analysis, Imaging & Automation) - Reactor (GTK)", this, DialogFlags.Modal)
         {
             TransientFor = this,
             Modal = true,
@@ -1338,15 +1338,15 @@ public class MainGtkWindow : Gtk.Window
             logo = new Image(Stock.MissingImage, IconSize.Dialog);
         }
         var infoBox = new VBox(false, 2);
-        infoBox.PackStart(new Label("Geoscientist's Toolkit - Reactor (GTK)") { Xalign = 0 }, false, false, 0);
-        infoBox.PackStart(new Label("The Geoscientist's Toolkit Dev Team") { Xalign = 0 }, false, false, 0);
+        infoBox.PackStart(new Label("GAIA (Geoscience Analysis, Imaging & Automation) - Reactor (GTK)") { Xalign = 0 }, false, false, 0);
+        infoBox.PackStart(new Label("The GAIA (Geoscience Analysis, Imaging & Automation) Dev Team") { Xalign = 0 }, false, false, 0);
         infoBox.PackStart(new Label("Contact: Matteo Mangiagalli - Universita degli Studi di Urbino Carlo Bo\nm.mangiagalli@campus.uniurb.it")
         {
             Xalign = 0,
             Justify = Justification.Left,
             LineWrap = true
         }, false, false, 0);
-        infoBox.PackStart(new LinkButton("https://github.com/mattemangia/geoscientisttoolkit", "Project Page") { Xalign = 0 }, false, false, 0);
+        infoBox.PackStart(new LinkButton("https://github.com/mattemangia/gaia", "Project Page") { Xalign = 0 }, false, false, 0);
 
         // Contributors section
         var contributorsBox = new VBox(false, 2);

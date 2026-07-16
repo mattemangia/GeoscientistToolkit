@@ -1,19 +1,19 @@
-// GeoscientistToolkit/UI/GIS/Tools/RasterCalculatorTool.cs
+// GAIA/UI/GIS/Tools/RasterCalculatorTool.cs
 
 using System.Numerics;
 using System.Text.RegularExpressions;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Business.GeoScript;
+using GAIA.Business.GIS;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using NCalc;
 
-namespace GeoscientistToolkit.UI.GIS.Tools;
+namespace GAIA.UI.GIS.Tools;
 
 /// <summary>
 /// Raster calculator tool that allows mathematical operations on raster layers using GeoScript

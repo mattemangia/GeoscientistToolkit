@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Analysis/TextureClassification/TextureFeatureExtractor.cs
+// GAIA/Analysis/TextureClassification/TextureFeatureExtractor.cs
 
-namespace GeoscientistToolkit.Analysis.TextureClassification;
+namespace GAIA.Analysis.TextureClassification;
 
 public class TextureFeatureExtractor
 {

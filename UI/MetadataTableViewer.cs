@@ -1,15 +1,15 @@
-// GeoscientistToolkit/UI/MetadataTableViewer.cs - Complete with GIS Integration
+// GAIA/UI/MetadataTableViewer.cs - Complete with GIS Integration
 
 using System.Data;
 using System.Numerics;
 using ClosedXML.Excel;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.GIS;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class MetadataTableViewer
 {

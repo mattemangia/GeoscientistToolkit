@@ -1,6 +1,6 @@
 # Slope Stability
 
-Guide for slope stability analysis and landslide simulation in Geoscientist's Toolkit.
+Guide for slope stability analysis and landslide simulation in GAIA (Geoscience Analysis, Imaging & Automation).
 
 ---
 

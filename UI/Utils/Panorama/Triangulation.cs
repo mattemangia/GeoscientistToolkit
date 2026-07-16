@@ -1,10 +1,10 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/Triangulation.cs
+﻿// GAIA/Business/Photogrammetry/Triangulation.cs
 
 using System;
 using MathNet.Numerics.LinearAlgebra;
 using MathNet.Numerics.LinearAlgebra.Double;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     /// <summary>
     /// Provides triangulation methods for 3D reconstruction using Direct Linear Transform (DLT).

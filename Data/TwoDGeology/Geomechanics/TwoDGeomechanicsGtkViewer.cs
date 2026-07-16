@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/TwoDGeology/Geomechanics/TwoDGeomechanicsGtkViewer.cs
+// GAIA/Data/TwoDGeology/Geomechanics/TwoDGeomechanicsGtkViewer.cs
 
 using System;
 using System.Collections.Generic;
@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using Gtk;
 using Cairo;
 
-namespace GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
+namespace GAIA.Data.TwoDGeology.Geomechanics;
 
 /// <summary>
 /// GTK-based viewer for 2D geomechanical simulations.

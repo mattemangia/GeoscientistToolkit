@@ -1,12 +1,12 @@
-// GeoscientistToolkit/UI/Seismic/SeismicCubeViewer.cs
+// GAIA/UI/Seismic/SeismicCubeViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Seismic;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Seismic;
+namespace GAIA.UI.Seismic;
 
 /// <summary>
 /// Viewer for 3D seismic cubes - displays time slices, inline sections, and crossline sections

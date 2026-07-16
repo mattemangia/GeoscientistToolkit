@@ -1,12 +1,12 @@
-// GeoscientistToolkit/UI/TableProperties.cs
+// GAIA/UI/TableProperties.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.Data.Table;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class TableProperties : IDatasetPropertiesRenderer
 {

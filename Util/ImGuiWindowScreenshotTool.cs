@@ -1,12 +1,12 @@
-// GeoscientistToolkit/UI/ImGuiWindowScreenshotTool.cs
+// GAIA/UI/ImGuiWindowScreenshotTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     Tool for capturing screenshots of screen regions or full screen.

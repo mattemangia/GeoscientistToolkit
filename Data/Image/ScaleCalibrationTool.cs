@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Image/ScaleCalibrationTool.cs
+// GAIA/Data/Image/ScaleCalibrationTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Image;
+namespace GAIA.Data.Image;
 
 /// <summary>
 ///     Tool for calibrating image scale by drawing a reference line

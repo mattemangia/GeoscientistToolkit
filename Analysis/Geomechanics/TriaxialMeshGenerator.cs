@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Analysis/Geomechanics/TriaxialMeshGenerator.cs
+// GAIA/Analysis/Geomechanics/TriaxialMeshGenerator.cs
 // Generates 3D cylindrical meshes for triaxial compression/extension tests
 // Supports various mesh densities and boundary conditions
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 /// <summary>
 /// Generates hexahedral mesh for cylindrical rock samples used in triaxial testing.

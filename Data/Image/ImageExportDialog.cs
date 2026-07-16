@@ -1,12 +1,12 @@
-﻿// GeoscientistToolkit/Data/Image/ImageExportDialog.cs
+﻿// GAIA/Data/Image/ImageExportDialog.cs
 
 using System.Numerics;
-using GeoscientistToolkit.UI.Utils;
+using GAIA.UI.Utils;
 using ImGuiNET;
 
 // Added for Path
 
-namespace GeoscientistToolkit.Data.Image;
+namespace GAIA.Data.Image;
 
 public class ImageExportDialog
 {

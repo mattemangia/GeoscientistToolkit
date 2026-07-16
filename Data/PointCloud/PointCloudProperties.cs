@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/PointCloud/PointCloudProperties.cs
+// GAIA/Data/PointCloud/PointCloudProperties.cs
 
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.PointCloud;
+namespace GAIA.Data.PointCloud;
 
 /// <summary>
 /// Displays properties of a PointCloudDataset in the Properties panel.

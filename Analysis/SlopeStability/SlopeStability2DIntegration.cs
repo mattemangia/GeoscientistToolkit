@@ -1,15 +1,15 @@
-// GeoscientistToolkit/Analysis/SlopeStability/SlopeStability2DIntegration.cs
+// GAIA/Analysis/SlopeStability/SlopeStability2DIntegration.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.TwoDGeology;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Integration utilities for creating 2D slope stability analyses from geological sections.
@@ -94,7 +94,7 @@ namespace GeoscientistToolkit.Analysis.SlopeStability
         /// Convert CrossSection to GeologicalSection format.
         /// </summary>
         private static GeologicalSection ConvertCrossSectionToGeologicalSection(
-            GeoscientistToolkit.Business.GIS.GeologicalMapping.CrossSectionGenerator.CrossSection crossSection)
+            GAIA.Business.GIS.GeologicalMapping.CrossSectionGenerator.CrossSection crossSection)
         {
             var section = new GeologicalSection
             {

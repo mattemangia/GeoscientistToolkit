@@ -1,19 +1,19 @@
-// GeoscientistToolkit/UI/Borehole/BoreholeCorrelation3DViewer.cs
+// GAIA/UI/Borehole/BoreholeCorrelation3DViewer.cs
 
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.GIS;
+using GAIA.Data.Mesh3D;
+using GAIA.Business;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 using Veldrid.SPIRV;
 
-namespace GeoscientistToolkit.UI.Borehole;
+namespace GAIA.UI.Borehole;
 
 /// <summary>
 /// 3D viewer for visualizing borehole log correlations with topography (DEM) support.

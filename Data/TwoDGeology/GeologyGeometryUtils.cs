@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Business/GIS/GeologyGeometryUtils.cs
+// GAIA/Business/GIS/GeologyGeometryUtils.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Util;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping.CrossSectionGenerator;
+using GAIA.Business.GIS;
+using GAIA.Util;
+using static GAIA.Business.GIS.GeologicalMapping.CrossSectionGenerator;
 
-namespace GeoscientistToolkit.Business.GIS;
+namespace GAIA.Business.GIS;
 
 /// <summary>
 /// Utility class for geological geometry operations including formation splitting

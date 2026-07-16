@@ -1,16 +1,16 @@
-// GeoscientistToolkit/Data/Pnm/PNMDataset.cs
+// GAIA/Data/Pnm/PNMDataset.cs
 
 using System.Data;
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.Table;
+using GAIA.Util;
 
 // Added for ISerializableDataset
 
-namespace GeoscientistToolkit.Data.Pnm;
+namespace GAIA.Data.Pnm;
 
 public class Pore
 {

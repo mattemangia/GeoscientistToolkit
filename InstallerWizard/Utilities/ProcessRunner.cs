@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace GeoscientistToolkit.Installer.Utilities;
+namespace GAIA.Installer.Utilities;
 
 public static class ProcessRunner
 {

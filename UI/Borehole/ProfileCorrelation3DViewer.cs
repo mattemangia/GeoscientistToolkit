@@ -1,18 +1,18 @@
-// GeoscientistToolkit/UI/Borehole/ProfileCorrelation3DViewer.cs
+// GAIA/UI/Borehole/ProfileCorrelation3DViewer.cs
 
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.GIS;
+using GAIA.Business;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 using Veldrid.SPIRV;
 
-namespace GeoscientistToolkit.UI.Borehole;
+namespace GAIA.UI.Borehole;
 
 /// <summary>
 /// 3D viewer for multi-profile borehole correlation with interpolated surfaces.

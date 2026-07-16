@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Analysis/RockCoreExtractor/RockCoreOverlay.cs
+// GAIA/Analysis/RockCoreExtractor/RockCoreOverlay.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
+using GAIA.Data.CtImageStack;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.RockCoreExtractor;
+namespace GAIA.Analysis.RockCoreExtractor;
 
 /// <summary>
 ///     Interactive overlay for the Rock Core tool with defensive guards.

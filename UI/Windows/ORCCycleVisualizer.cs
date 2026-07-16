@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Windows
+namespace GAIA.UI.Windows
 {
     /// <summary>
     /// Visualizes ORC thermodynamic cycles using P-h and T-s diagrams.

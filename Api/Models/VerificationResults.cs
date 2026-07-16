@@ -1,4 +1,4 @@
-namespace GeoscientistToolkit.Api;
+namespace GAIA.Api;
 
 /// <summary>
 ///     Result from the geomechanics triaxial compression verification case.

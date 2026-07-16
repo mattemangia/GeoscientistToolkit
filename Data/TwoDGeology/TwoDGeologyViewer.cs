@@ -1,17 +1,17 @@
-// GeoscientistToolkit/UI/GIS/TwoDGeologyViewer.cs
+// GAIA/UI/GIS/TwoDGeologyViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.TwoDGeology;
+using GAIA.Business.GIS;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping.CrossSectionGenerator;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping.ProfileGenerator;
-using GeoscientistToolkit.UI.Utils;
+using static GAIA.Business.GIS.GeologicalMapping;
+using static GAIA.Business.GIS.GeologicalMapping.CrossSectionGenerator;
+using static GAIA.Business.GIS.GeologicalMapping.ProfileGenerator;
+using GAIA.UI.Utils;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 /// <summary>
 /// Viewer for 2D geological cross-sections with editing capabilities

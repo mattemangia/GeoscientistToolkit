@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Analysis/NMR/DiffusionEditing.cs
+// GAIA/Analysis/NMR/DiffusionEditing.cs
 
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.NMR;
+namespace GAIA.Analysis.NMR;
 
 /// <summary>
 ///     Implements diffusion editing sequences for NMR to separate fluids based on diffusion coefficients.

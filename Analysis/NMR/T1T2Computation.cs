@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Analysis/NMR/T1T2Computation.cs
+// GAIA/Analysis/NMR/T1T2Computation.cs
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.NMR;
+namespace GAIA.Analysis.NMR;
 
 /// <summary>
 ///     Computes 2D T1-T2 correlation maps from NMR decay data.

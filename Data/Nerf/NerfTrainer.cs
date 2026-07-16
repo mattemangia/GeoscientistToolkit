@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Nerf/NerfTrainer.cs
+// GAIA/Data/Nerf/NerfTrainer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Nerf;
+namespace GAIA.Data.Nerf;
 
 /// <summary>
 /// Trainer for Neural Radiance Fields using Instant-NGP style optimization.

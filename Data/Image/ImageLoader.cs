@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/Util/ImageLoader.cs
+﻿// GAIA/Util/ImageLoader.cs
 
 using BitMiracle.LibTiff.Classic;
 using StbImageSharp;
 using MetadataExtractor;
 using MetadataExtractor.Formats.Exif;
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 public static class ImageLoader
 {

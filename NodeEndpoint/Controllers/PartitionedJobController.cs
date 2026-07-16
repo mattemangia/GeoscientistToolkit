@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
-using GeoscientistToolkit.NodeEndpoint.Services;
+using GAIA.NodeEndpoint.Services;
 
-namespace GeoscientistToolkit.NodeEndpoint.Controllers;
+namespace GAIA.NodeEndpoint.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]

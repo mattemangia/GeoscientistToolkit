@@ -1,17 +1,17 @@
-// GeoscientistToolkit/Analysis/Geothermal/GeothermalThermodynamicsIntegration.cs
+// GAIA/Analysis/Geothermal/GeothermalThermodynamicsIntegration.cs
 
 using System.Collections.Concurrent;
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Analysis.Thermodynamic;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Pnm;
+using GAIA.Analysis.Thermodynamic;
+using GAIA.Business;
+using GAIA.Business.Thermodynamics;
+using GAIA.Data.Borehole;
+using GAIA.Data.Materials;
+using GAIA.Data.Pnm;
+using GAIA.Util;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 /// Handles integration of thermodynamic modeling with geothermal simulation:

@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Analysis/RockCoreExtractor/RockCoreIntegration.cs
+// GAIA/Analysis/RockCoreExtractor/RockCoreIntegration.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
+using GAIA.Data.CtImageStack;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.RockCoreExtractor;
+namespace GAIA.Analysis.RockCoreExtractor;
 
 /// <summary>
 ///     Integrates the Rock Core Extractor overlay with viewers.

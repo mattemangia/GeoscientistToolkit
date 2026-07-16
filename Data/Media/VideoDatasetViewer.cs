@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Media/VideoDatasetViewer.cs
+// GAIA/Data/Media/VideoDatasetViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Media.AISegmentation;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Media.AISegmentation;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Media;
+namespace GAIA.Data.Media;
 
 /// <summary>
 /// Viewer for video datasets with playback controls and frame display

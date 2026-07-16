@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptThermodynamicsExtensions.cs
+// GAIA/Business/GeoScript/GeoScriptThermodynamicsExtensions.cs
 //
 // Additional thermodynamics commands for GeoScript:
 // - CALCULATE_PHASES: Separates equilibrium results into solid, aqueous, and gas phases
@@ -13,14 +13,14 @@
 using System.Data;
 using System.Globalization;
 using System.Text.RegularExpressions;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Business.Thermodynamics;
+using GAIA.Data;
+using GAIA.Data.Materials;
+using GAIA.Data.Table;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 ///     CALCULATE_PHASES: Separates thermodynamic equilibrium results into phases.

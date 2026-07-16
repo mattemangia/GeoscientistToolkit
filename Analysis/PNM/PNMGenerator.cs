@@ -1,19 +1,19 @@
-// GeoscientistToolkit/Analysis/Pnm/PNMGenerator.cs
+// GAIA/Analysis/Pnm/PNMGenerator.cs
 // Fixed version with proper throat detection and detailed progress reporting
 
 using System.Collections.Concurrent;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.Pnm;
+using GAIA.UI;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.Pnm;
+namespace GAIA.Analysis.Pnm;
 
 #region Options & enums
 
@@ -1760,7 +1760,7 @@ public static class PNMGenerator
         unsafe
         {
             // Use centralized device manager to get the device from settings
-            var device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+            var device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
             if (device == 0)
             {
@@ -1768,7 +1768,7 @@ public static class PNMGenerator
                 throw new Exception("No OpenCL device available.");
             }
 
-            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
             Logger.Log($"[PNMGenerator]: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
             int err;

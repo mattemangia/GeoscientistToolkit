@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/UI/ExampleTexturePanel.cs
+﻿// GAIA/UI/ExampleTexturePanel.cs
 // Example showing how to use TextureManager in any panel
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     Example panel showing how to use TextureManager for displaying textures

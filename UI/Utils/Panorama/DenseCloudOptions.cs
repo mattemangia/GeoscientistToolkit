@@ -1,6 +1,6 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/Options/DenseCloudOptions.cs
+﻿// GAIA/Business/Photogrammetry/Options/DenseCloudOptions.cs
 
-namespace GeoscientistToolkit.Business.Photogrammetry
+namespace GAIA.Business.Photogrammetry
 {
     /// <summary>
     /// Options for dense cloud generation

@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Analysis/NMR/NMRResults.cs
+// GAIA/Analysis/NMR/NMRResults.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.NMR;
+namespace GAIA.Analysis.NMR;
 
 /// <summary>
 ///     Contains the results from an NMR simulation including decay curves and T2 distribution.

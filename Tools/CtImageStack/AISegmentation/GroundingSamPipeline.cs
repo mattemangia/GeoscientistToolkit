@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SkiaSharp;
 
-namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
+namespace GAIA.Tools.CtImageStack.AISegmentation
 {
     /// <summary>
     /// Combined pipeline: Grounding DINO detection + SAM/MicroSAM segmentation

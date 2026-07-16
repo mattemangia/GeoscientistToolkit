@@ -2,12 +2,12 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Business.Stratigraphies;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business.Stratigraphies;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Windows;
+namespace GAIA.UI.Windows;
 
 /// <summary>
 ///     Window for viewing and comparing different stratigraphic charts with visual correlations

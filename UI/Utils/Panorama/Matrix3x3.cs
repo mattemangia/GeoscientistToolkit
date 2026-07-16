@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/Math/Matrix3x3.cs
+﻿// GAIA/Business/Photogrammetry/Math/Matrix3x3.cs
 
 using System;
 using System.Numerics;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     /// <summary>
     /// Represents a 3x3 matrix for photogrammetry calculations

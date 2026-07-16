@@ -1,7 +1,7 @@
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Settings;
+using GAIA.Network;
+using GAIA.Settings;
 
-namespace GeoscientistToolkit.NodeEndpoint;
+namespace GAIA.NodeEndpoint;
 
 /// <summary>
 /// Service that manages the NodeManager lifecycle and configuration

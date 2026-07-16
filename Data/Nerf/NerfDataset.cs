@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Nerf/NerfDataset.cs
+// GAIA/Data/Nerf/NerfDataset.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Nerf;
+namespace GAIA.Data.Nerf;
 
 /// <summary>
 /// Dataset for Neural Radiance Fields (NeRF) reconstruction from images.

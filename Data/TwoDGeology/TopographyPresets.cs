@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Business/GIS/TopographyPresets.cs
+// GAIA/Business/GIS/TopographyPresets.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business.GIS;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping.ProfileGenerator;
+using GAIA.Business.GIS;
+using static GAIA.Business.GIS.GeologicalMapping.ProfileGenerator;
 
-namespace GeoscientistToolkit.Business.GIS;
+namespace GAIA.Business.GIS;
 
 /// <summary>
 /// Provides preset topography configurations for 2D geological profiles

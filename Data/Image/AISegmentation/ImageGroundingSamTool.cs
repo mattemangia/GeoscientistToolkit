@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Data/Image/AISegmentation/ImageGroundingSamTool.cs
+// GAIA/Data/Image/AISegmentation/ImageGroundingSamTool.cs
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Tools.CtImageStack.AISegmentation;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.Tools.CtImageStack.AISegmentation;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Image.AISegmentation
+namespace GAIA.Data.Image.AISegmentation
 {
     /// <summary>
     /// Grounding DINO + SAM pipeline tool for ImageDataset

@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/Nerf/NerfDTO.cs
+// GAIA/Data/Nerf/NerfDTO.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.Nerf;
+namespace GAIA.Data.Nerf;
 
 /// <summary>
 /// DTO for NerfDataset serialization.

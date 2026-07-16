@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Loaders/PointCloudLoader.cs
+// GAIA/Data/Loaders/PointCloudLoader.cs
 
-using GeoscientistToolkit.Data.PointCloud;
-using GeoscientistToolkit.Util;
+using GAIA.Data.PointCloud;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 /// <summary>
 /// Loader for point cloud files (XYZ, TXT, CSV, PTS, ASC formats).

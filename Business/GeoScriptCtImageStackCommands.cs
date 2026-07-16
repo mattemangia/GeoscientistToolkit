@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptCtImageStackCommands.cs
+// GAIA/Business/GeoScript/GeoScriptCtImageStackCommands.cs
 
 using System;
 using System.Collections.Generic;
@@ -9,19 +9,19 @@ using System.Numerics;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Analysis.AcousticSimulation;
-using GeoscientistToolkit.Analysis.Geomechanics;
-using GeoscientistToolkit.Analysis.NMR;
-using GeoscientistToolkit.Analysis.ThermalConductivity;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Analysis.AcousticSimulation;
+using GAIA.Analysis.Geomechanics;
+using GAIA.Analysis.NMR;
+using GAIA.Analysis.ThermalConductivity;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.Materials;
+using GAIA.Data.Table;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptCtImageStackCommands;
+namespace GAIA.Business.GeoScriptCtImageStackCommands;
 
 /// <summary>
 /// CT_SEGMENT - Segment CT image stack

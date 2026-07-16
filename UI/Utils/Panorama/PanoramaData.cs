@@ -1,14 +1,14 @@
-﻿// GeoscientistToolkit/Business/Panorama/PanoramaData.cs
+﻿// GAIA/Business/Panorama/PanoramaData.cs
 // FINAL CORRECTION: The StitchGraph was incorrectly using Matrix.Transpose instead of a
 // proper Matrix.Invert for the reverse edge, causing rotation estimation to fail.
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using GeoscientistToolkit.Business.Photogrammetry;
-using GeoscientistToolkit.Data.Image;
+using GAIA.Business.Photogrammetry;
+using GAIA.Data.Image;
 
-namespace GeoscientistToolkit;
+namespace GAIA;
 
 public enum PanoramaState
 {

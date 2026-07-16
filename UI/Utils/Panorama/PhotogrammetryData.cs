@@ -1,13 +1,13 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/PhotogrammetryData.cs
+﻿// GAIA/Business/Photogrammetry/PhotogrammetryData.cs
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using GeoscientistToolkit.Business.Panorama; // Reuse DetectedFeatures, KeyPoint, FeatureMatch
-using GeoscientistToolkit.Business.Photogrammetry;
-using GeoscientistToolkit.Data.Image;
+using GAIA.Business.Panorama; // Reuse DetectedFeatures, KeyPoint, FeatureMatch
+using GAIA.Business.Photogrammetry;
+using GAIA.Data.Image;
 
-namespace GeoscientistToolkit;
+namespace GAIA;
 
 public enum PhotogrammetryState
 {

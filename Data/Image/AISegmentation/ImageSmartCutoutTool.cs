@@ -1,15 +1,15 @@
-// GeoscientistToolkit/Data/Image/AISegmentation/ImageSmartCutoutTool.cs
+// GAIA/Data/Image/AISegmentation/ImageSmartCutoutTool.cs
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Tools.CtImageStack.AISegmentation;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Tools.CtImageStack.AISegmentation;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Image.AISegmentation
+namespace GAIA.Data.Image.AISegmentation
 {
     /// <summary>
     /// Quick SAM-powered cutout tool

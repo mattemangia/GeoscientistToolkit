@@ -1,8 +1,8 @@
-﻿// GeoscientistToolkit/Business/UndoManager.cs
+﻿// GAIA/Business/UndoManager.cs
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 ///     Represents an action that can be executed and un-executed.

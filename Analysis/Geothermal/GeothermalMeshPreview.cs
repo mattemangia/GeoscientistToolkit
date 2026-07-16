@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Analysis/Geothermal/GeothermalMeshPreview.cs
+// GAIA/Analysis/Geothermal/GeothermalMeshPreview.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Borehole;
+using GAIA.Data.Mesh3D;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 ///     Provides a 3D mesh preview for geothermal simulation configuration.

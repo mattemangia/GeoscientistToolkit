@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Analysis/RemoveSmallIslands/RemoveSmallIslandsUI.cs
+// GAIA/Analysis/RemoveSmallIslands/RemoveSmallIslandsUI.cs
 
 using System.Collections.Concurrent;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.RemoveSmallIslands;
+namespace GAIA.Analysis.RemoveSmallIslands;
 
 /// <summary>
 ///     Provides the UI and logic for removing small material islands.

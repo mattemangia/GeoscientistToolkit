@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Data/VolumeData/ChunkedVolume.cs
+﻿// GAIA/Data/VolumeData/ChunkedVolume.cs
 
 using System.IO.MemoryMappedFiles;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.VolumeData;
+namespace GAIA.Data.VolumeData;
 
 /// <summary>
 ///     Efficient storage for large 3D grayscale volumes using a chunked approach

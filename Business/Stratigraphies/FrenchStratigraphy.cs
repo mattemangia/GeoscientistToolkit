@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Business/Stratigraphies/FrenchStratigraphy.cs
+// GAIA/Business/Stratigraphies/FrenchStratigraphy.cs
 
 using System.Drawing;
 
-namespace GeoscientistToolkit.Business.Stratigraphies;
+namespace GAIA.Business.Stratigraphies;
 
 /// <summary>
 ///     Stratigraphie régionale française, enrichie avec les unités nationales et historiques

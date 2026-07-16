@@ -1,27 +1,27 @@
-// GeoscientistToolkit/UI/DatasetPanel.cs
+// GAIA/UI/DatasetPanel.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.UI.AcousticVolume;
-using GeoscientistToolkit.UI.Borehole;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.Borehole;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.GIS;
+using GAIA.Data.Image;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.Pnm;
+using GAIA.Data.Table;
+using GAIA.UI.AcousticVolume;
+using GAIA.UI.Borehole;
 using ImGuiNET;
 using System.Linq;
 using System.Collections.Generic;
 using System;
-using GeoscientistToolkit.UI.Panorama;
-using GeoscientistToolkit.UI.Photogrammetry;
-using GeoscientistToolkit.Util; // Needed for VeldridManager
+using GAIA.UI.Panorama;
+using GAIA.UI.Photogrammetry;
+using GAIA.Util; // Needed for VeldridManager
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class DatasetPanel : BasePanel
 {
@@ -427,7 +427,7 @@ public class DatasetPanel : BasePanel
             ImGui.Separator();
 
             // Generate Report with Ollama
-            var ollamaSettings = GeoscientistToolkit.Settings.SettingsManager.Instance.Settings.Ollama;
+            var ollamaSettings = GAIA.Settings.SettingsManager.Instance.Settings.Ollama;
             bool ollamaConfigured = ollamaSettings.Enabled && !string.IsNullOrEmpty(ollamaSettings.SelectedModel);
 
             if (ImGui.MenuItem("Generate Project Report with AI...", null, false, ollamaConfigured))
@@ -628,7 +628,7 @@ public class DatasetPanel : BasePanel
     {
         try
         {
-            var ollamaSettings = GeoscientistToolkit.Settings.SettingsManager.Instance.Settings.Ollama;
+            var ollamaSettings = GAIA.Settings.SettingsManager.Instance.Settings.Ollama;
 
             if (!ollamaSettings.Enabled)
             {

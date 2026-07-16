@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Analysis.Geomechanics;
-using GeoscientistToolkit.Analysis.AcousticSimulation;
+using GAIA.Network;
+using GAIA.Analysis.Geomechanics;
+using GAIA.Analysis.AcousticSimulation;
 
-namespace GeoscientistToolkit.NodeEndpoint.Controllers;
+namespace GAIA.NodeEndpoint.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]

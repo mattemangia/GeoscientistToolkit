@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Analysis/TextureClassification/TexturePatchManager.cs
+// GAIA/Analysis/TextureClassification/TexturePatchManager.cs
 
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.TextureClassification;
+namespace GAIA.Analysis.TextureClassification;
 
 public class TrainingPatch
 {

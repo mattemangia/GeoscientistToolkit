@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Nerf/NerfTools.cs
+// GAIA/Data/Nerf/NerfTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Nerf;
+namespace GAIA.Data.Nerf;
 
 /// <summary>
 /// Tools panel for NeRF dataset operations including training, import, and export.

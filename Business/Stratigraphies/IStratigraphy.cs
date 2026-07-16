@@ -1,8 +1,8 @@
-//GeoscientistToolkit/Business/Stratigraphies/IStratigraphy.cs
+//GAIA/Business/Stratigraphies/IStratigraphy.cs
 
 using System.Drawing;
 
-namespace GeoscientistToolkit.Business.Stratigraphies;
+namespace GAIA.Business.Stratigraphies;
 
 /// <summary>
 ///     Represents a stratigraphic unit (Era, Period, Epoch, or Age)

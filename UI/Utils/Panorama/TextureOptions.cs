@@ -1,6 +1,6 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/Options/TextureOptions.cs
+﻿// GAIA/Business/Photogrammetry/Options/TextureOptions.cs
 
-namespace GeoscientistToolkit.Business.Photogrammetry
+namespace GAIA.Business.Photogrammetry
 {
     /// <summary>
     /// Options for texture generation

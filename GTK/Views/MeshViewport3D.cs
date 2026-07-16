@@ -2,13 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.PhysicoChem;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.PhysicoChem;
 using Gtk;
 using Gdk;
 using GdkKey = Gdk.Key;
 
-namespace GeoscientistToolkit.GtkUI;
+namespace GAIA.GtkUI;
 
 /// <summary>
 /// Lightweight 3D viewport built with GTK that mirrors the mesh behaviour of the ImGui renderer.

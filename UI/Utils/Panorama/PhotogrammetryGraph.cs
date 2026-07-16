@@ -1,13 +1,13 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/PhotogrammetryGraph.cs
+﻿// GAIA/Business/Photogrammetry/PhotogrammetryGraph.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Business.Panorama;
-using GeoscientistToolkit.Data.Image;
+using GAIA.Business.Panorama;
+using GAIA.Data.Image;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     /// <summary>
     /// Graph structure for managing image relationships and poses

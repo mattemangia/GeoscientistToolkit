@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/TwoDGeology/Geomechanics/TwoDGeomechanicsTools.cs
+// GAIA/Data/TwoDGeology/Geomechanics/TwoDGeomechanicsTools.cs
 
 using System;
 using System.Collections.Generic;
@@ -7,9 +7,9 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using ImGuiNET;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
+namespace GAIA.Data.TwoDGeology.Geomechanics;
 
 /// <summary>
 /// Current tool mode for geomechanical editing

@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Media/AudioDatasetTools.cs
+// GAIA/Data/Media/AudioDatasetTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Media;
+namespace GAIA.Data.Media;
 
 /// <summary>
 /// Tools panel for audio datasets with analysis and export options

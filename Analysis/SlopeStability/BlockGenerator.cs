@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Data.Mesh3D;
+using GAIA.Data.Mesh3D;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Generates blocks from a 3D mesh using Discrete Fracture Network (DFN) approach.

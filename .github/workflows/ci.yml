@@ -18,7 +18,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Restore
-        run: dotnet restore GeoscientistToolkit.sln
+        run: dotnet restore GAIA.sln
 
       - name: Build
-        run: dotnet build GeoscientistToolkit.sln -c Release --no-restore
+        run: dotnet build GAIA.sln -c Release --no-restore

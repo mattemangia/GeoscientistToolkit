@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/Data/Image/ImagePropertiesRenderer.cs
+﻿// GAIA/Data/Image/ImagePropertiesRenderer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.UI;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Image;
+namespace GAIA.Data.Image;
 
 public class ImagePropertiesRenderer : IDatasetPropertiesRenderer
 {

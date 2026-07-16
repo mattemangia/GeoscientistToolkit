@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Util/ImageExporter.cs
+// GAIA/Util/ImageExporter.cs
 
 using System.Runtime.InteropServices;
 using StbImageWriteSharp;
@@ -6,7 +6,7 @@ using Veldrid;
 
 // Required for Marshal.Copy
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 public static class ImageExporter
 {

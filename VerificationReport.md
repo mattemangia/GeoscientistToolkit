@@ -1,7 +1,7 @@
 # Real Case Study Verification Report
 
 ## Objective
-This report documents the rigorous verification of the **Geoscientist Toolkit** simulation modules against **Real Case Studies** sourced from peer-reviewed scientific literature. The goal is to ensure that the physics engines produce results consistent with experimental data and established theoretical models.
+This report documents the rigorous verification of the **GAIA (Geoscience Analysis, Imaging & Automation)** simulation modules against **Real Case Studies** sourced from peer-reviewed scientific literature. The goal is to ensure that the physics engines produce results consistent with experimental data and established theoretical models.
 
 ## Methodology
 A permanent verification test suite (`VerificationTests/RealCaseVerifier`) has been integrated into the solution. This suite executes simulations with parameters from specific papers and compares the output against the expected values derived from equations or reported data.

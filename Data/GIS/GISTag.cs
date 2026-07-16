@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Data/GIS/GISTag.cs
+// GAIA/Data/GIS/GISTag.cs
 
-namespace GeoscientistToolkit.Data.GIS;
+namespace GAIA.Data.GIS;
 
 /// <summary>
 ///     Defines the type/category of a GIS dataset for specialized processing and operations

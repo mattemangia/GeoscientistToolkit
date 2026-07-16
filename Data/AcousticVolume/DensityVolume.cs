@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Data/AcousticVolume/DensityVolume.cs
+// GAIA/Data/AcousticVolume/DensityVolume.cs
 
-namespace GeoscientistToolkit.Data.AcousticVolume;
+namespace GAIA.Data.AcousticVolume;
 
 public class DensityVolume : IDisposable
 {

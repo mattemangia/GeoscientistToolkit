@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/UI/Utils/ImGuiFileDialog.cs
+﻿// GAIA/UI/Utils/ImGuiFileDialog.cs
 
 using System.Numerics;
 using System.Runtime.InteropServices;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Utils;
+namespace GAIA.UI.Utils;
 
 public class ImGuiFileDialog
 {

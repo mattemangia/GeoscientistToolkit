@@ -1,6 +1,6 @@
 # ORC (Organic Rankine Cycle) System Guide
 
-This guide explains how to design, configure, and simulate ORC geothermal power systems in GeoscientistToolkit.
+This guide explains how to design, configure, and simulate ORC geothermal power systems in GAIA.
 
 ## Overview
 

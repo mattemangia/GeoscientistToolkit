@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/UI/ToolsPanel.cs (Fixed to handle pop-out state correctly)
+﻿// GAIA/UI/ToolsPanel.cs (Fixed to handle pop-out state correctly)
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class ToolsPanel : BasePanel
 {

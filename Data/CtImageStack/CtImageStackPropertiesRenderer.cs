@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackPropertiesRenderer.cs
+﻿// GAIA/Data/CtImageStack/CtImageStackPropertiesRenderer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.UI;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 public class CtImageStackPropertiesRenderer : IDatasetPropertiesRenderer
 {

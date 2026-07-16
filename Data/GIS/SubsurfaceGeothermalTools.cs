@@ -1,12 +1,12 @@
-﻿// GeoscientistToolkit/Analysis/Geothermal/SubsurfaceGeothermalTools.cs
+﻿// GAIA/Analysis/Geothermal/SubsurfaceGeothermalTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.GIS;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 /// Helper class for creating subsurface geothermal models from multiple boreholes

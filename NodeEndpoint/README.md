@@ -1,6 +1,6 @@
-# GeoscientistToolkit Node Endpoint
+# GAIA Node Endpoint
 
-A production-ready REST API server that exposes the GeoscientistToolkit's simulation and CT processing capabilities through HTTP endpoints with an advanced Terminal User Interface (TUI) for monitoring and management.
+A production-ready REST API server that exposes the GAIA's simulation and CT processing capabilities through HTTP endpoints with an advanced Terminal User Interface (TUI) for monitoring and management.
 
 ## Overview
 
@@ -127,7 +127,7 @@ The TUI includes a built-in configuration editor with:
 ## Architecture
 
 The NodeEndpoint project is a nested ASP.NET Core Web API that:
-1. References simulation files from the parent GeoscientistToolkit project (no duplication)
+1. References simulation files from the parent GAIA project (no duplication)
 2. Wraps the NodeManager with HTTP endpoints
 3. Provides job tracking and result retrieval
 4. Supports long polling for async job completion
@@ -200,7 +200,7 @@ Create `/etc/systemd/system/geoscientist-nodeendpoint.service`:
 
 ```ini
 [Unit]
-Description=GeoscientistToolkit NodeEndpoint
+Description=GAIA NodeEndpoint
 After=network.target
 
 [Service]
@@ -692,4 +692,4 @@ This is a development/internal endpoint. For production use, consider adding:
 
 ## License
 
-Part of the GeoscientistToolkit project.
+Part of the GAIA project.

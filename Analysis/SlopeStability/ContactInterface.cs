@@ -1,7 +1,7 @@
 using System;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Represents a contact interface between two blocks or a block and a boundary.

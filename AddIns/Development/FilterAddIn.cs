@@ -1,20 +1,20 @@
 ﻿// --- FilterAddIn.cs ---
-// Complete implementation of image filtering tools for Geoscientist Toolkit
+// Complete implementation of image filtering tools for GAIA (Geoscience Analysis, Imaging & Automation)
 // Supports: Gaussian, Median, Mean, Non-Local Means, Edge Detection (Sobel, Canny), Unsharp Masking
 // Processing modes: 2D/3D, CPU (parallel)/GPU (OpenCL)
 
 using System.Diagnostics;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 using ImGuiNET;
 using Silk.NET.Core.Native;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.AddIns.Development;
+namespace GAIA.AddIns.Development;
 
 /// <summary>
 ///     Defines the types of filters available in the add-in.
@@ -38,10 +38,10 @@ public enum FilterType
 public class FilterAddIn : IAddIn
 {
     private readonly FilterTool _filterTool = new();
-    public string Id => "com.geoscientisttoolkit.imagefilters";
+    public string Id => "com.gaia.imagefilters";
     public string Name => "Advanced Image Filtering Tools";
     public string Version => "2.0";
-    public string Author => "Geoscientist Toolkit";
+    public string Author => "GAIA (Geoscience Analysis, Imaging & Automation)";
 
     public string Description =>
         "Comprehensive CPU and GPU-accelerated image filters (Gaussian, Median, Mean, Non-Local Means, Edge Detection, Unsharp Masking) for CT data.";
@@ -919,13 +919,13 @@ internal unsafe class GpuProcessor : IDisposable
         _cl = CL.GetApi();
 
         // Use centralized device manager to get the device from settings
-        _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+        _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
         if (_device == 0)
             throw new DllNotFoundException("No OpenCL device available from OpenCLDeviceManager.");
 
         // Get device info from the centralized manager
-        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
         Logger.Log($"[GpuProcessor/FilterAddIn] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
         // Context

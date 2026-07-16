@@ -1,20 +1,20 @@
-// GeoscientistToolkit/UI/TableTools.cs
+// GAIA/UI/TableTools.cs
 
 using System;
 using System.Data;
 using System.Globalization;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Business.Thermodynamics;
+using GAIA.Data;
+using GAIA.Data.Table;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     Categorized tool panel for Table datasets.

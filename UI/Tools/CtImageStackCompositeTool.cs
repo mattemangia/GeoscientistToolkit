@@ -1,24 +1,24 @@
-// GeoscientistToolkit/UI/Tools/CompositeTool.cs
+// GAIA/UI/Tools/CompositeTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Analysis.AcousticSimulation;
-using GeoscientistToolkit.Analysis.AmbientOcclusionSegmentation;
-using GeoscientistToolkit.Analysis.ImageAdjustment;
-using GeoscientistToolkit.Analysis.MaterialManager;
-using GeoscientistToolkit.Analysis.Materials;
-using GeoscientistToolkit.Analysis.MaterialStatistics;
-using GeoscientistToolkit.Analysis.NMR;
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Analysis.RockCoreExtractor;
-using GeoscientistToolkit.Analysis.ThermalConductivity;
-using GeoscientistToolkit.Analysis.Transform;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Tools.CtImageStack.AISegmentation;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Analysis.AcousticSimulation;
+using GAIA.Analysis.AmbientOcclusionSegmentation;
+using GAIA.Analysis.ImageAdjustment;
+using GAIA.Analysis.MaterialManager;
+using GAIA.Analysis.Materials;
+using GAIA.Analysis.MaterialStatistics;
+using GAIA.Analysis.NMR;
+using GAIA.Analysis.Pnm;
+using GAIA.Analysis.RockCoreExtractor;
+using GAIA.Analysis.ThermalConductivity;
+using GAIA.Analysis.Transform;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Tools.CtImageStack.AISegmentation;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 /// <summary>
 ///     Categorized tool panel for CT Image Stack datasets.

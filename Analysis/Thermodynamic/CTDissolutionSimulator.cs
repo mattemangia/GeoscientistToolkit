@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/Thermodynamics/CTDissolutionSimulator.cs
+// GAIA/Business/Thermodynamics/CTDissolutionSimulator.cs
 //
 // Simulates dissolution and precipitation in 3D porous media using CT scan data.
 // Couples thermodynamics with pore-scale geometry from micro-CT imaging.
@@ -17,10 +17,10 @@
 //
 
 using System.Collections.Concurrent;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.Thermodynamics;
+namespace GAIA.Business.Thermodynamics;
 
 /// <summary>
 ///     Represents a 3D voxel grid from CT scan data.

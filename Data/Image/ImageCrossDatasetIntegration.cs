@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Data/Image/ImageCrossDatasetIntegration.cs (Complete Implementation)
+// GAIA/Data/Image/ImageCrossDatasetIntegration.cs (Complete Implementation)
 
 using System.Numerics;
 using System.Text;
 using System.Text.RegularExpressions;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.GIS;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Image;
+namespace GAIA.Data.Image;
 
 /// <summary>
 ///     Provides integration between tagged images and other dataset types

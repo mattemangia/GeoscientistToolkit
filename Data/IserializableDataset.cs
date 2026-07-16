@@ -1,6 +1,6 @@
-﻿// GeoscientistToolkit/Data/ISerializableDataset.cs
+﻿// GAIA/Data/ISerializableDataset.cs
 
-namespace GeoscientistToolkit.Data;
+namespace GAIA.Data;
 
 /// <summary>
 ///     Defines a contract for datasets that can be serialized.

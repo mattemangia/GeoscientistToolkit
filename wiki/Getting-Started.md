@@ -23,8 +23,8 @@ See [Installation](Installation.md) for detailed instructions.
 For development or local customization:
 
 ```bash
-git clone https://github.com/mattemangia/GeoscientistToolkit.git
-cd GeoscientistToolkit
+git clone https://github.com/mattemangia/GAIA.git
+cd GAIA
 dotnet build
 dotnet run
 ```
@@ -44,7 +44,7 @@ dotnet run
 
 1. **Launch the application**
    ```bash
-   ./GeoscientistToolkit
+   ./GAIA
    ```
 
 2. **Create a new project**
@@ -237,4 +237,4 @@ Visualize temperature distribution and flow paths
 
 ---
 
-**Need help?** Open an issue on [GitHub](https://github.com/mattemangia/GeoscientistToolkit/issues) or contact m.mangiagalli@campus.uniurb.it
+**Need help?** Open an issue on [GitHub](https://github.com/mattemangia/GAIA/issues) or contact m.mangiagalli@campus.uniurb.it

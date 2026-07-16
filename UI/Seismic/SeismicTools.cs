@@ -1,17 +1,17 @@
-// GeoscientistToolkit/UI/Seismic/SeismicTools.cs
+// GAIA/UI/Seismic/SeismicTools.cs
 
 using System;
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.Tools.BoreholeSeismic;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Seismic;
+using GAIA.Tools.BoreholeSeismic;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using StbImageWriteSharp;
 
-namespace GeoscientistToolkit.UI.Seismic;
+namespace GAIA.UI.Seismic;
 
 /// <summary>
 /// Tools panel for seismic datasets - manage line packages, analysis, and processing

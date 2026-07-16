@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/AcousticSimulation/AcousticSimulatorCPU.cs
+// GAIA/Analysis/AcousticSimulation/AcousticSimulatorCPU.cs
 // OPTIMIZED VERSION - Better parallelization and reduced overhead
 //
 // ALGORITHM: Staggered-Grid Finite Difference for Elastic Wave Propagation
@@ -23,7 +23,7 @@
 
 using System.Runtime.CompilerServices;
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 public class AcousticSimulatorCPU : IAcousticKernel
 {

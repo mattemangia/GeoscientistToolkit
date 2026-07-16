@@ -1,9 +1,9 @@
 using System;
 using System.IO;
 using System.Text.Json;
-using GeoscientistToolkit.Analysis.Seismology;
+using GAIA.Analysis.Seismology;
 
-namespace GeoscientistToolkit.Data
+namespace GAIA.Data
 {
     /// <summary>
     /// Dataset for earthquake simulation results

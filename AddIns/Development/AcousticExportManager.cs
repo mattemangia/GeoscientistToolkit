@@ -1,18 +1,18 @@
-// GeoscientistToolkit/AddIns/AcousticSimulation/AcousticExportManager.cs
+// GAIA/AddIns/AcousticSimulation/AcousticExportManager.cs
 
 using System.Numerics;
 using System.Text.Json;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.AcousticVolume;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.UI;
+using GAIA.UI.AcousticVolume;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.AddIns.AcousticSimulation;
+namespace GAIA.AddIns.AcousticSimulation;
 
 /// <summary>
 ///     Manages exporting acoustic simulation results with progress tracking

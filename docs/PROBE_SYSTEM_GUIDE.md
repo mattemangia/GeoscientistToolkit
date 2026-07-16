@@ -1,6 +1,6 @@
 # Simulation Probe System Guide
 
-This guide explains how to use the probe system for measuring and visualizing simulation variables in GeoscientistToolkit.
+This guide explains how to use the probe system for measuring and visualizing simulation variables in GAIA.
 
 ## Overview
 

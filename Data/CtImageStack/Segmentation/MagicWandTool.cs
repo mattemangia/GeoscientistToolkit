@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/CtImageStack/Segmentation/MagicWandTool.cs
+// GAIA/Data/CtImageStack/Segmentation/MagicWandTool.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.CtImageStack.Segmentation;
+namespace GAIA.Data.CtImageStack.Segmentation;
 
 public class MagicWandTool : ISegmentationTool
 {

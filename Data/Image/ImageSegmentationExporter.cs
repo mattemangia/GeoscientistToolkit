@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Data/Image/ImageSegmentationExporter.cs
+// GAIA/Data/Image/ImageSegmentationExporter.cs
 
 using System.Numerics;
 using System.Text.Json;
 using System.Runtime.InteropServices;
 using BitMiracle.LibTiff.Classic;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using SkiaSharp;
 
-namespace GeoscientistToolkit.Data.Image;
+namespace GAIA.Data.Image;
 
 public static class ImageSegmentationExporter
 {

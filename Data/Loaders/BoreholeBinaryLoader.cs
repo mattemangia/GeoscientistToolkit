@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Loaders/BoreholeBinaryLoader.cs
+// GAIA/Data/Loaders/BoreholeBinaryLoader.cs
 
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Borehole;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class BoreholeBinaryLoader : IDataLoader
 {

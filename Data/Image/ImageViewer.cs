@@ -1,14 +1,14 @@
-﻿// GeoscientistToolkit/Data/Image/ImageViewer.cs
+﻿// GAIA/Data/Image/ImageViewer.cs
 
 using System.Globalization;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.Image.Segmentation;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.Image.Segmentation;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Image;
+namespace GAIA.Data.Image;
 
 public class ImageViewer : IDatasetViewer
 {

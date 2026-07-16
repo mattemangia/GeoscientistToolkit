@@ -1,17 +1,17 @@
-// GeoscientistToolkit/UI/GIS/GeologicalMappingViewer.cs
+// GAIA/UI/GIS/GeologicalMappingViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Business.Stratigraphies;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Business.GIS;
+using GAIA.Business.Stratigraphies;
+using GAIA.Data.Borehole;
+using GAIA.Data.GIS;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping;
+using static GAIA.Business.GIS.GeologicalMapping;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 /// <summary>
 /// Extended GIS viewer with geological mapping capabilities and profile tools

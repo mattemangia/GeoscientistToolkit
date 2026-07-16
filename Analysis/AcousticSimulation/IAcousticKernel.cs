@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Analysis/AcousticSimulation/IAcousticKernel.cs
+// GAIA/Analysis/AcousticSimulation/IAcousticKernel.cs
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 /// <summary>
 ///     Interface for acoustic wave propagation kernels (CPU or GPU).

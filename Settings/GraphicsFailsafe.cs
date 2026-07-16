@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Settings/GraphicsFailsafe.cs
+﻿// GAIA/Settings/GraphicsFailsafe.cs
 
 using System.Text.Json;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Settings;
+namespace GAIA.Settings;
 
 /// <summary>
 ///     Manages failsafe graphics settings to prevent startup failures
@@ -12,11 +12,11 @@ public static class GraphicsFailsafe
 {
     private static readonly string FailsafeFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "GeoscientistToolkit", ".graphics_failsafe");
+        "GAIA", ".graphics_failsafe");
 
     private static readonly string LastKnownGoodPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "GeoscientistToolkit", ".last_known_good_graphics");
+        "GAIA", ".last_known_good_graphics");
 
     /// <summary>
     ///     Check if we should use failsafe graphics settings

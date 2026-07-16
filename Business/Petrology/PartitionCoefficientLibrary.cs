@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/Petrology/PartitionCoefficientLibrary.cs
+// GAIA/Business/Petrology/PartitionCoefficientLibrary.cs
 //
 // Library of partition coefficients (Kd) for trace elements between minerals and melt.
 // Used for modeling fractional crystallization and trace element evolution in magmas.
@@ -22,9 +22,9 @@
 // - Henderson, P., 1982. Inorganic Geochemistry. Pergamon Press.
 // - Philpotts, A.R. & Ague, J.J., 2009. Principles of Igneous and Metamorphic Petrology.
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.Petrology;
+namespace GAIA.Business.Petrology;
 
 /// <summary>
 ///     Represents a partition coefficient for a trace element in a mineral-melt system.

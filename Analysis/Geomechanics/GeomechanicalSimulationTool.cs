@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/Tools/GeomechanicalSimulationTool.cs
+// GAIA/UI/Tools/GeomechanicalSimulationTool.cs
 
-using GeoscientistToolkit.Analysis.Geomechanics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Analysis.Geomechanics;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
 
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 /// <summary>
 ///     Tool for geomechanical stress/strain analysis with Mohr circle visualization

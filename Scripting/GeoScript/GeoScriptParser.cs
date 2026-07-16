@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace GeoscientistToolkit.Scripting.GeoScript
+namespace GAIA.Scripting.GeoScript
 {
     /// <summary>
     /// Parser for GeoScript language

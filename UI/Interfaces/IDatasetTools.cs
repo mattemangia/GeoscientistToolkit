@@ -1,8 +1,8 @@
-﻿// GeoscientistToolkit/UI/Interfaces/IDatasetTools.cs
+﻿// GAIA/UI/Interfaces/IDatasetTools.cs
 
-using GeoscientistToolkit.Data;
+using GAIA.Data;
 
-namespace GeoscientistToolkit.UI.Interfaces;
+namespace GAIA.UI.Interfaces;
 
 /// <summary>
 ///     Interface for dataset-specific tools in the Tools panel.

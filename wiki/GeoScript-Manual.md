@@ -1,6 +1,6 @@
 # GeoScript Manual
 
-**Version 1.0** - Official Documentation for Geoscientist's Toolkit
+**Version 1.0** - Official Documentation for GAIA (Geoscience Analysis, Imaging & Automation)
 
 ---
 
@@ -22,9 +22,9 @@
 
 ### What is GeoScript?
 
-GeoScript is a domain-specific scripting language (DSL) designed specifically for geoscientific data analysis and manipulation within the Geoscientist's Toolkit application. It provides a powerful, intuitive syntax for automating complex workflows involving CT scans, seismic data, well logs, GIS datasets, and more.
+GeoScript is a domain-specific scripting language (DSL) designed specifically for geoscientific data analysis and manipulation within the GAIA (Geoscience Analysis, Imaging & Automation) application. It provides a powerful, intuitive syntax for automating complex workflows involving CT scans, seismic data, well logs, GIS datasets, and more.
 
-> **Note:** GeoScript in this project is an internal language for Geoscientist's Toolkit and is not affiliated with https://geoscript.net or any of its components.
+> **Note:** GeoScript in this project is an internal language for GAIA (Geoscience Analysis, Imaging & Automation) and is not affiliated with https://geoscript.net or any of its components.
 
 ### Key Features
 
@@ -58,7 +58,7 @@ Access GeoScript through two interfaces:
 
 #### Datasets
 
-All GeoScript operations work on datasets. A dataset is any data structure loaded into the Geoscientist's Toolkit, including:
+All GeoScript operations work on datasets. A dataset is any data structure loaded into the GAIA (Geoscience Analysis, Imaging & Automation), including:
 - Images (2D raster data)
 - CT image stacks (3D volumetric data)
 - Tables (tabular data from CSV, Excel, etc.)

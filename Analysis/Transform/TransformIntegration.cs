@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Analysis/Transform/TransformIntegration.cs
+// GAIA/Analysis/Transform/TransformIntegration.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
+using GAIA.Data.CtImageStack;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Transform;
+namespace GAIA.Analysis.Transform;
 
 /// <summary>
 ///     Integrates the Transform/Crop Tool overlay with the CtCombinedViewer / CtImageStackViewer.

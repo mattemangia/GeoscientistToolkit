@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/TwoDGeology/Geomechanics/JointSet2D.cs
+// GAIA/Data/TwoDGeology/Geomechanics/JointSet2D.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
+namespace GAIA.Data.TwoDGeology.Geomechanics;
 
 /// <summary>
 /// Types of discontinuities in rock masses

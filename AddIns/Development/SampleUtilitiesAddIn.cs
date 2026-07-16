@@ -1,14 +1,14 @@
-﻿// GeoscientistToolkit/AddIns/Development/SampleUtilitiesAddIn.cs
+﻿// GAIA/AddIns/Development/SampleUtilitiesAddIn.cs
 // --- CORRECTED VERSION ---
 
 using System.Text;
-using GeoscientistToolkit.AddIns;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Util;
+using GAIA.AddIns;
+using GAIA.Data;
+using GAIA.Util;
 
 // Using StringBuilder for cleaner string construction
 
-namespace GeoscientistToolkit.CustomAddIns;
+namespace GAIA.CustomAddIns;
 
 // A tool to show information about the currently selected dataset.
 // This has been updated to use the properties from your actual Dataset.cs file.

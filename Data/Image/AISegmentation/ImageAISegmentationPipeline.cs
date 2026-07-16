@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Image/AISegmentation/ImageAISegmentationPipeline.cs
+// GAIA/Data/Image/AISegmentation/ImageAISegmentationPipeline.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using SkiaSharp;
-using GeoscientistToolkit.Tools.CtImageStack.AISegmentation;
+using GAIA.Tools.CtImageStack.AISegmentation;
 
-namespace GeoscientistToolkit.Data.Image.AISegmentation
+namespace GAIA.Data.Image.AISegmentation
 {
     /// <summary>
     /// AI segmentation pipeline for ImageDataset

@@ -4,7 +4,7 @@
 
 ### 1. Architectural Fit
 
-The GeoscientistToolkit has **perfect infrastructure** for earthquake simulation:
+The GAIA has **perfect infrastructure** for earthquake simulation:
 
 - **Stress Analysis Ready**: Geomechanical solver already computes stress tensors
 - **3D Grid System**: SubsurfaceGISDataset provides voxel grids for fault representation
@@ -329,6 +329,6 @@ float error = Math.Abs(computedMoment - observedMoment) / observedMoment;
 
 ---
 
-**Document Location**: `/home/user/GeoscientistToolkit/EARTHQUAKE_SIM_QUICKSTART.md`
+**Document Location**: `/home/user/GAIA/EARTHQUAKE_SIM_QUICKSTART.md`
 
 Ready to implement earthquake simulation!

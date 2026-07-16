@@ -1,15 +1,15 @@
-// GeoscientistToolkit/UI/DatasetViewPanel.cs (Updated with Status Bar Background)
+// GAIA/UI/DatasetViewPanel.cs (Updated with Status Bar Background)
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Borehole;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Borehole;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
 // For Math
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class DatasetViewPanel : BasePanel
 {

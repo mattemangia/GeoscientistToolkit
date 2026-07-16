@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Business/GIS/GeologicalLayerPresets.cs
+// GAIA/Business/GIS/GeologicalLayerPresets.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping.CrossSectionGenerator;
+using GAIA.Util;
+using static GAIA.Business.GIS.GeologicalMapping;
+using static GAIA.Business.GIS.GeologicalMapping.CrossSectionGenerator;
 
-namespace GeoscientistToolkit.Business.GIS;
+namespace GAIA.Business.GIS;
 
 /// <summary>
 /// Provides complete geological cross-section presets with properly stacked layers.

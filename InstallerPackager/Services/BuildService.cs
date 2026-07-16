@@ -1,9 +1,9 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
-using GeoscientistToolkit.Installer.Models;
-using GeoscientistToolkit.InstallerPackager.Models;
+using GAIA.Installer.Models;
+using GAIA.InstallerPackager.Models;
 
-namespace GeoscientistToolkit.InstallerPackager.Services;
+namespace GAIA.InstallerPackager.Services;
 
 internal sealed class BuildService
 {

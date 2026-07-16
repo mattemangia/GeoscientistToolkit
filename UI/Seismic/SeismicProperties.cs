@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/Seismic/SeismicProperties.cs
+// GAIA/UI/Seismic/SeismicProperties.cs
 
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.Data.Seismic;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Seismic;
+namespace GAIA.UI.Seismic;
 
 /// <summary>
 /// Properties panel for seismic datasets

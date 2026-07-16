@@ -1,10 +1,10 @@
-﻿// GeoscientistToolkit/Analysis/Geothermal/GeothermalMeshGenerator.cs
+﻿// GAIA/Analysis/Geothermal/GeothermalMeshGenerator.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Mesh3D;
+using GAIA.Data.Borehole;
+using GAIA.Data.Mesh3D;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 ///     Generates 3D computational meshes from borehole data for geothermal simulations.

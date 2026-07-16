@@ -2,8 +2,8 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Tools.CtImageStack.AISegmentation;
-using GeoscientistToolkit.Util;
+using GAIA.Tools.CtImageStack.AISegmentation;
+using GAIA.Util;
 using ImGuiNET;
 using Microsoft.ML.OnnxRuntime;
 using Veldrid;
@@ -11,7 +11,7 @@ using Veldrid.Sdl2;
 using Veldrid.SPIRV;
 using Veldrid.StartupUtilities;
 
-namespace GeoscientistToolkit.UI.Diagnostics;
+namespace GAIA.UI.Diagnostics;
 
 public sealed class DiagnosticApp
 {
@@ -482,7 +482,7 @@ void main()
             Y = 50,
             WindowWidth = 1400,
             WindowHeight = 900,
-            WindowTitle = "GeoscientistToolkit Diagnostics"
+            WindowTitle = "GAIA Diagnostics"
         };
 
         GraphicsDeviceOptions options;

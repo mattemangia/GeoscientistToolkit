@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Analysis/AcousticSimulation/UnifiedCalibrationManager.cs
+// GAIA/Analysis/AcousticSimulation/UnifiedCalibrationManager.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Util;
+using GAIA.Data.AcousticVolume;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 /// <summary>
 ///     Unified calibration manager for acoustic simulations.

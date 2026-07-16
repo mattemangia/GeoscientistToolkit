@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Analysis/AcousticSimulation/ChunkedAcousticSimulator.cs
+// GAIA/Analysis/AcousticSimulation/ChunkedAcousticSimulator.cs
 
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 /// <summary>
 ///     Main acoustic wave propagation simulator with chunked processing and GPU/CPU support.

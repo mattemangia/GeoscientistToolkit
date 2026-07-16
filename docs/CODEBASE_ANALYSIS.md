@@ -1,8 +1,8 @@
-# GeoscientistToolkit - Comprehensive Codebase Analysis
+# GAIA - Comprehensive Codebase Analysis
 
 ## Executive Summary
 
-The GeoscientistToolkit is a comprehensive C# (.NET 8.0) desktop application for geoscientific data analysis and visualization. It integrates GIS, borehole, seismic, geomechanical, geothermal, and petrological analysis capabilities. The application uses an extensible architecture with support for multi-threaded simulations, GPU acceleration (OpenCL/Vulkan), and a custom scripting language (GeoScript).
+The GAIA is a comprehensive C# (.NET 8.0) desktop application for geoscientific data analysis and visualization. It integrates GIS, borehole, seismic, geomechanical, geothermal, and petrological analysis capabilities. The application uses an extensible architecture with support for multi-threaded simulations, GPU acceleration (OpenCL/Vulkan), and a custom scripting language (GeoScript).
 
 **Total Codebase**: 375 C# files across 14 major modules
 
@@ -723,8 +723,8 @@ public class EarthquakeSimulation
 
 ### 10.1 Project File Structure
 
-- **GeoscientistToolkit.sln** - Solution entrypoint
-- **GeoscientistToolkit.csproj** - Main application
+- **GAIA.sln** - Solution entrypoint
+- **GAIA.csproj** - Main application
 - **Folder Structure**:
   - `/AddIns/` - Plugin framework and sample add-ins
   - `/Api/` - Public API contracts and helpers

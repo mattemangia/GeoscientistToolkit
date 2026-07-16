@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Image/ImageDrawingTools.cs
+// GAIA/Data/Image/ImageDrawingTools.cs
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using GeoscientistToolkit.Data.Image.Selection;
+using GAIA.Data.Image.Selection;
 
-namespace GeoscientistToolkit.Data.Image
+namespace GAIA.Data.Image
 {
     /// <summary>
     /// Drawing tools for image manipulation: fill, gradient, pencil, eraser, brush

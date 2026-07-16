@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Mesh3D/Mesh3DEditor.cs
+// GAIA/Data/Mesh3D/Mesh3DEditor.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Mesh3D;
+namespace GAIA.Data.Mesh3D;
 
 /// <summary>
 ///     Basic 3D mesh editor with modeling tools and primitives

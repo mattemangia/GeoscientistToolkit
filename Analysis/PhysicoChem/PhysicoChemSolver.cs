@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/PhysicoChem/PhysicoChemSolver.cs
+// GAIA/Analysis/PhysicoChem/PhysicoChemSolver.cs
 //
 // Main multiphysics solver for PhysicoChem reactor simulations
 // Integrates flow, heat transfer, reactive transport, forces, and nucleation
@@ -6,13 +6,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using GeoscientistToolkit.Analysis.Thermodynamic;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Thermodynamic;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.PhysicoChem;
+using GAIA.Network;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.PhysicoChem;
+namespace GAIA.Analysis.PhysicoChem;
 
 /// <summary>
 /// Main solver for PHYSICOCHEM multiphysics reactor simulations.

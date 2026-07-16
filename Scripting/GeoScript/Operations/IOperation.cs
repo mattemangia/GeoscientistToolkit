@@ -1,7 +1,7 @@
-using GeoscientistToolkit.Data;
+using GAIA.Data;
 using System.Collections.Generic;
 
-namespace GeoscientistToolkit.Scripting.GeoScript.Operations
+namespace GAIA.Scripting.GeoScript.Operations
 {
     /// <summary>
     /// Interface for all GeoScript operations

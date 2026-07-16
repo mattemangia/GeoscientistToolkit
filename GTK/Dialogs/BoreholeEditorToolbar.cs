@@ -1,9 +1,9 @@
-// GeoscientistToolkit/GTK/Dialogs/BoreholeEditorToolbar.cs
+// GAIA/GTK/Dialogs/BoreholeEditorToolbar.cs
 
 using Gtk;
 using System;
 
-namespace GeoscientistToolkit.GtkUI.Dialogs
+namespace GAIA.GtkUI.Dialogs
 {
     public class BoreholeEditorToolbar : Box
     {

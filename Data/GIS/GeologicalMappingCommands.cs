@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/GIS/GeologicalMappingCommands.cs
+// GAIA/UI/GIS/GeologicalMappingCommands.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Util;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping;
+using GAIA.Business.GIS;
+using GAIA.Util;
+using static GAIA.Business.GIS.GeologicalMapping;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 /// <summary>
 /// Commands specific to geological mapping operations

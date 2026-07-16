@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Loaders/DicomLoader.cs
+// GAIA/Data/Loaders/DicomLoader.cs
 
 using FellowOakDicom;
 using FellowOakDicom.Imaging;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class DicomLoader : IDataLoader
 {

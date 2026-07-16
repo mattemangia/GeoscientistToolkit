@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Analysis/Geomechanics/FluidGeothermalVisualizationRenderer.cs
+// GAIA/Analysis/Geomechanics/FluidGeothermalVisualizationRenderer.cs
 
 using System.Numerics;
 using ImGuiNET;
 using SkiaSharp;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public class FluidGeothermalVisualizationRenderer : IDisposable
 {

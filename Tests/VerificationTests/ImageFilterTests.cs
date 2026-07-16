@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Scripting.GeoScript.Operations;
+using GAIA.Data;
+using GAIA.Data.Image;
+using GAIA.Scripting.GeoScript.Operations;
 using Xunit;
 
 namespace VerificationTests;

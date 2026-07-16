@@ -1,15 +1,15 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackDataset.cs
+﻿// GAIA/Data/CtImageStack/CtImageStackDataset.cs
 
 using System.Numerics;
 using System.Text.Json;
-using GeoscientistToolkit.Analysis.NMR;
-using GeoscientistToolkit.Analysis.ThermalConductivity;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.NMR;
+using GAIA.Analysis.ThermalConductivity;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
 // Added for material serialization
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 public class CtImageStackDataset : Dataset, ISerializableDataset
 {

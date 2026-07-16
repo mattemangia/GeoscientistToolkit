@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Analysis/Transform/TransformOverlay.cs
+// GAIA/Analysis/Transform/TransformOverlay.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
+using GAIA.Data.CtImageStack;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Transform;
+namespace GAIA.Analysis.Transform;
 
 public interface IOverlay
 {

@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Business/Thermodynamics/PhaseDiagramGenerator.cs
+// GAIA/Business/Thermodynamics/PhaseDiagramGenerator.cs
 
 using System.Collections.Concurrent;
 using System.Data;
-using GeoscientistToolkit.Data.Materials;
+using GAIA.Data.Materials;
 using OxyPlot;
 using OxyPlot.Axes;
 using OxyPlot.Series;
 
-namespace GeoscientistToolkit.Business.Thermodynamics;
+namespace GAIA.Business.Thermodynamics;
 
 /// <summary>
 ///     Generates various phase diagrams from thermodynamic calculations.

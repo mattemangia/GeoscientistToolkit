@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Analysis/AcousticSimulation/SimulationParameters.cs
+// GAIA/Analysis/AcousticSimulation/SimulationParameters.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 public struct BoundingBox
 {

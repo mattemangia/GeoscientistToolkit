@@ -1,15 +1,15 @@
-// GeoscientistToolkit/Data/PointCloud/PointCloudTools.cs
+// GAIA/Data/PointCloud/PointCloudTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Analysis.SlopeStability;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.SlopeStability;
+using GAIA.Business;
+using GAIA.Data.Mesh3D;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.PointCloud;
+namespace GAIA.Data.PointCloud;
 
 /// <summary>
 /// Provides tools for PointCloudDataset in the Tools panel.
@@ -360,7 +360,7 @@ public class PointCloudTools : IDatasetTools
     private void WriteMeshToOBJ(PointCloudMeshGenerator.MeshGenerationResult result, string path)
     {
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("# Generated from point cloud by GeoscientistToolkit");
+        sb.AppendLine("# Generated from point cloud by GAIA");
         sb.AppendLine($"# Vertices: {result.Vertices.Count}");
         sb.AppendLine($"# Faces: {result.Faces.Count}");
         sb.AppendLine();

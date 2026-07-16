@@ -1,4 +1,4 @@
-namespace GeoscientistToolkit.Data.Mesh3D;
+namespace GAIA.Data.Mesh3D;
 
 /// <summary>
 /// Lookup tables for the Marching Cubes algorithm.

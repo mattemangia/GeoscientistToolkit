@@ -1,15 +1,15 @@
-// GeoscientistToolkit/Data/AcousticVolume/CalibrationManagerUI.cs
+// GAIA/Data/AcousticVolume/CalibrationManagerUI.cs
 
 using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.AcousticVolume;
+namespace GAIA.UI.AcousticVolume;
 
 /// <summary>
 ///     Shared calibration UI component for acoustic simulations

@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/Tools/DensityCalibrationTool.cs
+// GAIA/UI/Tools/DensityCalibrationTool.cs
 //
 // Density calibration with working mini-preview + ROI selection,
 // and an integration shim so the main CT viewers can forward clicks
@@ -17,13 +17,13 @@
 // this class also publishes the preview there for backwards-compatibility.
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 public class DensityCalibrationTool : IDatasetTools, IDisposable
 {
@@ -752,9 +752,9 @@ public static class CalibrationIntegration
     // ---- Optional mirror to CtImageStackTools ----
     private static void TryMirrorToCtImageStackTools(CtImageStackDataset ds, byte[] mask, Vector4 color)
     {
-        // If your project defines GeoscientistToolkit.CtImageStackTools with SetPreviewData & RaisePreviewChanged,
+        // If your project defines GAIA.CtImageStackTools with SetPreviewData & RaisePreviewChanged,
         // reflectively call those so existing viewers keep working with zero code changes.
-        var toolsType = Type.GetType("GeoscientistToolkit.CtImageStackTools, GeoscientistToolkit");
+        var toolsType = Type.GetType("GAIA.CtImageStackTools, GAIA");
         if (toolsType == null) return;
 
         try

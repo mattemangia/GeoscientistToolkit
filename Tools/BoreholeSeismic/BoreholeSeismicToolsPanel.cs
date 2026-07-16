@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Tools/BoreholeSeismic/BoreholeSeismicToolsPanel.cs
+// GAIA/Tools/BoreholeSeismic/BoreholeSeismicToolsPanel.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.Seismic;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Tools.BoreholeSeismic;
+namespace GAIA.Tools.BoreholeSeismic;
 
 /// <summary>
 /// UI panel for borehole-seismic integration tools

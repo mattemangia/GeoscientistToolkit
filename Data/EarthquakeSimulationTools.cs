@@ -1,11 +1,11 @@
 using System;
 using System.Numerics;
-using GeoscientistToolkit.Analysis.Seismology;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Analysis.Seismology;
+using GAIA.Business;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data
+namespace GAIA.Data
 {
     /// <summary>
     /// UI tools for earthquake simulation datasets

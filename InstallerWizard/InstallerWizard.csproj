@@ -8,8 +8,8 @@
     <Nullable>enable</Nullable>
     <LangVersion>preview</LangVersion>
     <RuntimeIdentifiers>win-x64;linux-x64;osx-x64;osx-arm64</RuntimeIdentifiers>
-    <RootNamespace>GeoscientistToolkit.Installer</RootNamespace>
-    <AssemblyName>GeoscientistToolkitInstaller</AssemblyName>
+    <RootNamespace>GAIA.Installer</RootNamespace>
+    <AssemblyName>GAIAInstaller</AssemblyName>
     <ApplicationIcon>../image.ico</ApplicationIcon>
     <NoWarn>$(NoWarn);CS8604;NETSDK1206</NoWarn>
     <SkipVerificationTests>true</SkipVerificationTests>
@@ -20,7 +20,7 @@
     <PackageReference Include="Terminal.Gui" Version="1.17.1" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\GeoscientistToolkit.csproj" />
+    <ProjectReference Include="..\GAIA.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="installer-settings.json">

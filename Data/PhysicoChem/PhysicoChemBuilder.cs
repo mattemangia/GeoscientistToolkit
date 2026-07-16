@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/PhysicoChem/PhysicoChemBuilder.cs
+// GAIA/Data/PhysicoChem/PhysicoChemBuilder.cs
 //
 // Interactive 3D builder for PhysicoChem datasets with handles, gizmos, and mesh editing
 
@@ -8,7 +8,7 @@ using System.Linq;
 using System.Numerics;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.PhysicoChem;
+namespace GAIA.Data.PhysicoChem;
 
 /// <summary>
 /// Interactive builder for creating and editing PhysicoChemDatasets

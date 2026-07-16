@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/GeoScriptPetrologyCommands.cs
+// GAIA/Business/GeoScriptPetrologyCommands.cs
 //
 // GeoScript commands for igneous and metamorphic petrology:
 // - FRACTIONATE_MAGMA: Crystallization modeling with trace elements
@@ -11,13 +11,13 @@
 using System.Data;
 using System.Globalization;
 using System.Text.RegularExpressions;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Business.Petrology;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Business.Petrology;
+using GAIA.Data;
+using GAIA.Data.Table;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 ///     FRACTIONATE_MAGMA: Models magma crystallization with trace element evolution.

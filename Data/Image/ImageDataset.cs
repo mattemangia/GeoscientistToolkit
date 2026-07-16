@@ -1,12 +1,12 @@
-﻿// GeoscientistToolkit/Data/Image/ImageDataset.cs (Updated)
+﻿// GAIA/Data/Image/ImageDataset.cs (Updated)
 
 using System.Numerics;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Settings;
+using GAIA.Util;
 
 // Added for Linq
 
-namespace GeoscientistToolkit.Data.Image;
+namespace GAIA.Data.Image;
 
 public class ImageDataset : Dataset, IDisposable, ISerializableDataset
 {

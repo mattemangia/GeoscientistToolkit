@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Thermodynamic/ReactiveTransportSolver.cs
+// GAIA/Analysis/Thermodynamic/ReactiveTransportSolver.cs
 //
 // Reactive transport solver coupling flow, transport, and chemical reactions
 // Similar to TOUGHREACT's Sequential Iterative Approach (SIA)
@@ -14,11 +14,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Business.Thermodynamics;
+using GAIA.Network;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Thermodynamic;
+namespace GAIA.Analysis.Thermodynamic;
 
 /// <summary>
 /// Reactive transport solver using operator splitting:

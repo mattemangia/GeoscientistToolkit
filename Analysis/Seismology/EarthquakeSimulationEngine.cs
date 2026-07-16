@@ -2,10 +2,10 @@ using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Network;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Seismology
+namespace GAIA.Analysis.Seismology
 {
     /// <summary>
     /// Main earthquake simulation engine integrating all components

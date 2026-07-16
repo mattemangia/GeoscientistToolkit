@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/Thermodynamics/ThermodynamicsOpenCL.cs
+// GAIA/Business/Thermodynamics/ThermodynamicsOpenCL.cs
 //
 // GPU-accelerated thermodynamic calculations using OpenCL via Silk.NET.
 // Offloads computationally intensive operations to GPU for massive parallelism.
@@ -12,10 +12,10 @@
 //
 
 using System.Runtime.InteropServices;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Business.Thermodynamics;
+namespace GAIA.Business.Thermodynamics;
 
 /// <summary>
 ///     OpenCL-accelerated thermodynamic calculations for large-scale systems.
@@ -84,12 +84,12 @@ public class ThermodynamicsOpenCL : IDisposable
             Logger.Log("[ThermodynamicsOpenCL] Initializing OpenCL...");
 
             // Check if multi-GPU mode is enabled
-            _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
+            _multiGPUMode = GAIA.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
 
             if (_multiGPUMode)
             {
                 // Multi-GPU mode: get all GPU devices
-                var deviceInfos = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
+                var deviceInfos = GAIA.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
 
                 if (deviceInfos == null || deviceInfos.Count == 0)
                 {
@@ -138,7 +138,7 @@ public class ThermodynamicsOpenCL : IDisposable
             else
             {
                 // Single GPU mode
-                _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+                _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
                 if (_device == 0)
                 {
@@ -147,7 +147,7 @@ public class ThermodynamicsOpenCL : IDisposable
                 }
 
                 // Get device info from the centralized manager
-                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
                 Logger.Log($"[ThermodynamicsOpenCL] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
                 // Create context

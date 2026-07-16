@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/CTStackLoader.cs
+﻿// GAIA/Data/CtImageStack/CTStackLoader.cs
 
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 /// <summary>
 ///     Handles loading of CT image stacks with support for binning and progress reporting

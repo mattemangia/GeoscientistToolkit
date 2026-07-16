@@ -1,8 +1,8 @@
-// GeoscientistToolkit/UI/AcousticVolume/AcousticInteractionManager.cs
+// GAIA/UI/AcousticVolume/AcousticInteractionManager.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.UI.AcousticVolume;
+namespace GAIA.UI.AcousticVolume;
 
 /// <summary>
 ///     Defines the current interactive mode of the Acoustic Volume Viewer.

@@ -1,9 +1,9 @@
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Image;
+using GAIA.Data;
+using GAIA.Data.Image;
 using System;
 using System.Collections.Generic;
 
-namespace GeoscientistToolkit.Scripting.GeoScript.Operations
+namespace GAIA.Scripting.GeoScript.Operations
 {
     /// <summary>
     /// Base class for image operations

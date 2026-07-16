@@ -1,8 +1,8 @@
 using System;
 using Gtk;
-using GeoscientistToolkit.Data.PhysicoChem;
+using GAIA.Data.PhysicoChem;
 
-namespace GeoscientistToolkit.GTK.Dialogs
+namespace GAIA.GTK.Dialogs
 {
     /// <summary>
     /// GTK dialog for configuring nuclear reactor simulation parameters.

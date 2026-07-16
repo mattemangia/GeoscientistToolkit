@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/CtImageStack/Segmentation/LassoTool.cs
+// GAIA/Data/CtImageStack/Segmentation/LassoTool.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.CtImageStack.Segmentation;
+namespace GAIA.Data.CtImageStack.Segmentation;
 
 public class LassoTool : ISegmentationTool
 {

@@ -1,8 +1,8 @@
-﻿// GeoscientistToolkit/Program.cs
-// This file contains the main entry point for the GeoscientistToolkit application.
+﻿// GAIA/Program.cs
+// This file contains the main entry point for the GAIA application.
 // It is responsible for creating and running the main application instance.
 
-namespace GeoscientistToolkit;
+namespace GAIA;
 
 public static class Program
 {
@@ -35,7 +35,7 @@ public static class Program
 
     private static void ShowHelp()
     {
-        Console.WriteLine("GeoscientistToolkit command line options:");
+        Console.WriteLine("GAIA command line options:");
         Console.WriteLine("  --help, -h                Show this help message.");
         Console.WriteLine("  --ai-diagnostic           Run AI diagnostics.");
         Console.WriteLine("  --gui-diagnostic          Run GUI diagnostics.");

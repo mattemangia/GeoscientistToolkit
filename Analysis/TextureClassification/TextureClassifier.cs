@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Analysis/TextureClassification/TextureClassifier.cs
+// GAIA/Analysis/TextureClassification/TextureClassifier.cs
 
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.TextureClassification;
+namespace GAIA.Analysis.TextureClassification;
 
 public class TextureClassifier : IDisposable
 {
@@ -52,7 +52,7 @@ public class TextureClassifier : IDisposable
         try
         {
             // Use centralized device manager to check availability
-            var device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+            var device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
             return device != 0;
         }
         catch
@@ -348,7 +348,7 @@ public class TextureClassifier : IDisposable
             unsafe
             {
                 // Use centralized device manager to get the device from settings
-                var device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+                var device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
                 if (device == 0)
                 {
@@ -357,7 +357,7 @@ public class TextureClassifier : IDisposable
                 }
 
                 // Get device info from the centralized manager
-                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
                 Logger.Log($"[TextureClassifier] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
                 int errorCode;

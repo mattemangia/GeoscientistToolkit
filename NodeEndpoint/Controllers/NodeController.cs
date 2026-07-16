@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
-using GeoscientistToolkit.Network;
+using GAIA.Network;
 
-namespace GeoscientistToolkit.NodeEndpoint.Controllers;
+namespace GAIA.NodeEndpoint.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
@@ -97,7 +97,7 @@ public class NodeController : ControllerBase
     [HttpGet("status")]
     public IActionResult GetStatus()
     {
-        var settings = GeoscientistToolkit.Settings.SettingsManager.Instance.Settings.NodeManager;
+        var settings = GAIA.Settings.SettingsManager.Instance.Settings.NodeManager;
         var nodes = _nodeManager.GetNodes();
 
         return Ok(new

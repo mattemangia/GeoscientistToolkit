@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/PNM/DualPNMDataset.cs
+// GAIA/Data/PNM/DualPNMDataset.cs
 
 using System.Numerics;
 using System.Text.Json;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Pnm;
+namespace GAIA.Data.Pnm;
 
 /// <summary>
 /// Represents a micropore network associated with a specific macro-pore.

@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/Metadata.cs
+// GAIA/Data/Metadata.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data;
+namespace GAIA.Data;
 
 /// <summary>
 ///     Metadata for individual datasets

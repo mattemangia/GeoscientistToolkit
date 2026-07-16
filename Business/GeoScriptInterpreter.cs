@@ -1,14 +1,14 @@
-// GeoscientistToolkit/UI/GeoScriptInterpreter.cs
+// GAIA/UI/GeoScriptInterpreter.cs
 
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
+using GAIA.Business;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     Provides a REPL (Read-Eval-Print-Loop) interface for executing GeoScript commands.

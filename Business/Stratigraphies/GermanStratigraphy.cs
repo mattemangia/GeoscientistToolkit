@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Business/Stratigraphies/GermanStratigraphy.cs
+// GAIA/Business/Stratigraphies/GermanStratigraphy.cs
 
 using System.Drawing;
 
-namespace GeoscientistToolkit.Business.Stratigraphies;
+namespace GAIA.Business.Stratigraphies;
 
 /// <summary>
 ///     German / Swiss regional stratigraphy with widely used local units.

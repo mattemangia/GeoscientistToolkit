@@ -8,6 +8,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\GeoscientistToolkit.csproj" />
+    <ProjectReference Include="..\GAIA.csproj" />
   </ItemGroup>
 </Project>

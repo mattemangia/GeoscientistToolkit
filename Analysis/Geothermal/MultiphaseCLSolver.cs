@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Analysis/Geothermal/MultiphaseCLSolver.cs
+// GAIA/Analysis/Geothermal/MultiphaseCLSolver.cs
 
 using System;
 using System.Runtime.InteropServices;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Mesh3D;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 /// OpenCL 1.2 accelerated multiphase flow solver
@@ -61,7 +61,7 @@ public unsafe class MultiphaseCLSolver : IDisposable
             _totalElements = (nuint)(_nr * _ntheta * _nz);
 
             // Get OpenCL device from centralized manager
-            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+            _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
             if (_device == 0)
             {
                 Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
@@ -69,7 +69,7 @@ public unsafe class MultiphaseCLSolver : IDisposable
             }
 
             // Get device info
-            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
             DeviceName = deviceInfo.Name;
             DeviceGlobalMemory = deviceInfo.GlobalMemory;
 

@@ -1,18 +1,18 @@
-// GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalSimulationUI.cs
+// GAIA/Analysis/Geomechanics/GeomechanicalSimulationUI.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.Loaders;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.Loaders;
+using GAIA.Data.Materials;
+using GAIA.Data.Pnm;
+using GAIA.UI;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public class GeomechanicalSimulationUI : IDisposable
 {
@@ -163,7 +163,7 @@ public class GeomechanicalSimulationUI : IDisposable
         // Set default offload directory
         _offloadDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "GeoscientistToolkit", "GeomechOffload");
+            "GAIA", "GeomechOffload");
     }
 
     public void Dispose()
@@ -1349,7 +1349,7 @@ public class GeomechanicalSimulationUI : IDisposable
                 if (string.IsNullOrEmpty(_offloadDirectory))
                     _offloadDirectory = Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "GeoscientistToolkit", "GeomechOffload");
+                        "GAIA", "GeomechOffload");
 
                 if (!Directory.Exists(_offloadDirectory))
                     Directory.CreateDirectory(_offloadDirectory);

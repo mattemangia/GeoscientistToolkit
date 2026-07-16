@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Seismic/SeismicViewer.cs
+// GAIA/Data/Seismic/SeismicViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Seismic;
+namespace GAIA.Data.Seismic;
 
 /// <summary>
 /// Viewer for seismic datasets with wiggle trace, variable area, and color map display

@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Data/Image/ImageTag.cs
+// GAIA/Data/Image/ImageTag.cs
 
-namespace GeoscientistToolkit.Data.Image;
+namespace GAIA.Data.Image;
 
 /// <summary>
 ///     Defines the type/category of an image for specialized processing

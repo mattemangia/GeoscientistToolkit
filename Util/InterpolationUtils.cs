@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Util/InterpolationUtils.cs
+// GAIA/Util/InterpolationUtils.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Util
+namespace GAIA.Util
 {
     /// <summary>
     /// Provides mathematical helper functions for interpolation.

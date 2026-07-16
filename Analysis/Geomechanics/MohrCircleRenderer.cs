@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Analysis/Geomechanics/MohrCircleRenderer.cs
+// GAIA/Analysis/Geomechanics/MohrCircleRenderer.cs
 
 using System.Numerics;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public class MohrCircleRenderer : IDisposable
 {

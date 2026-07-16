@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Business/GIS/GeologicalConstraints.cs
+// GAIA/Business/GIS/GeologicalConstraints.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping.CrossSectionGenerator;
+using GAIA.Util;
+using static GAIA.Business.GIS.GeologicalMapping.CrossSectionGenerator;
 
-namespace GeoscientistToolkit.Business.GIS;
+namespace GAIA.Business.GIS;
 
 /// <summary>
 /// Enforces geological constraints on cross-sections.

@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/Loaders/Tough2Loader.cs
+// GAIA/Data/Loaders/Tough2Loader.cs
 //
 // TOUGH2 file importer for multiphysics subsurface flow and transport simulations
 // TOUGH2 is a numerical simulation program for multi-dimensional fluid and heat flow in porous media
@@ -10,10 +10,10 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Util;
+using GAIA.Data.PhysicoChem;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class Tough2Loader : IDataLoader
 {

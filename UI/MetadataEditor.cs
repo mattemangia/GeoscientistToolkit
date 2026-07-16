@@ -1,12 +1,12 @@
-// GeoscientistToolkit/UI/MetadataEditor.cs
+// GAIA/UI/MetadataEditor.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class MetadataEditor
 {

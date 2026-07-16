@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Business/Photogrammetry/MeshOptimizer.cs
+// GAIA/Business/Photogrammetry/MeshOptimizer.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Data.Mesh3D;
+using GAIA.Data.Mesh3D;
 
-namespace GeoscientistToolkit.Business.Photogrammetry
+namespace GAIA.Business.Photogrammetry
 {
     /// <summary>
     /// Mesh optimization using algorithms inspired by Gmsh's optimization techniques

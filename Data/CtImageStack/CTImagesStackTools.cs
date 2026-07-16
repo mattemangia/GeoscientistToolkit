@@ -1,13 +1,13 @@
-﻿// GeoscientistToolkit/UI/Tools/CtImageStackTools.cs
+﻿// GAIA/UI/Tools/CtImageStackTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit;
+namespace GAIA;
 
 public class CtImageStackTools : IDatasetTools
 {

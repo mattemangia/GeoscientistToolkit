@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geomechanics/TriaxialSimulationTool.cs
+// GAIA/Analysis/Geomechanics/TriaxialSimulationTool.cs
 // Interactive triaxial compression/extension testing tool with comprehensive UI
 //
 // FEATURES:
@@ -12,15 +12,15 @@
 // - Export results to CSV
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Data.Loaders;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Utils;
+using GAIA.Business;
+using GAIA.Data.Materials;
+using GAIA.Data.Pnm;
+using GAIA.Data.Loaders;
+using GAIA.UI;
+using GAIA.UI.Utils;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public class TriaxialSimulationTool : IDisposable
 {
@@ -1363,7 +1363,7 @@ public class TriaxialSimulationTool : IDisposable
 
             // Use file dialog (simplified - direct write for now)
             var savePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                "GeoscientistToolkit", defaultFilename);
+                "GAIA", defaultFilename);
 
             // Ensure directory exists
             var directory = Path.GetDirectoryName(savePath);

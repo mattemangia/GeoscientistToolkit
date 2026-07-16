@@ -24,8 +24,8 @@ Create 3D subsurface visualizations of earthquake wave propagation showing:
 #### Example Usage
 
 ```csharp
-using GeoscientistToolkit.Analysis.Seismology;
-using GeoscientistToolkit.Data.GIS;
+using GAIA.Analysis.Seismology;
+using GAIA.Data.GIS;
 
 // Set up earthquake simulation
 var parameters = new EarthquakeSimulationParameters
@@ -104,7 +104,7 @@ Create 3D subsurface geological models from rectangular selections on 2D geologi
 #### Example Usage
 
 ```csharp
-using GeoscientistToolkit.Data.GIS;
+using GAIA.Data.GIS;
 using System.Numerics;
 
 // Load 2D geological map

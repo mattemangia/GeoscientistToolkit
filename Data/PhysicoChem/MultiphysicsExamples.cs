@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/PhysicoChem/MultiphysicsExamples.cs
+// GAIA/Data/PhysicoChem/MultiphysicsExamples.cs
 //
 // Example simulation setups demonstrating multiphysics capabilities
 // Including waves, evaporation, wind, currents, and heat sources
@@ -6,7 +6,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace GeoscientistToolkit.Data.PhysicoChem;
+namespace GAIA.Data.PhysicoChem;
 
 /// <summary>
 /// Pre-configured multiphysics simulation examples

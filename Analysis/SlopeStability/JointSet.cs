@@ -1,7 +1,7 @@
 using System;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Represents a set of parallel discontinuities (joints) in the rock mass.

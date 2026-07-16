@@ -3,7 +3,7 @@ using System.Numerics;
 using ImGuiNET;
 using Veldrid;
 
-namespace GeoscientistToolkit.Analysis.Geothermal
+namespace GAIA.Analysis.Geothermal
 {
     /// <summary>
     /// 2D visualization for ORC simulation results with colormap support

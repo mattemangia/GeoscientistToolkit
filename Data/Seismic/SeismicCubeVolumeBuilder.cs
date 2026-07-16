@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Seismic/SeismicCubeVolumeBuilder.cs
+// GAIA/Data/Seismic/SeismicCubeVolumeBuilder.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Seismic;
+namespace GAIA.Data.Seismic;
 
 /// <summary>
 /// Builds a regularized 3D seismic volume from multiple intersecting 2D seismic lines.

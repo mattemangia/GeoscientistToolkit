@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/TwoDGeology/Geomechanics/GeomechanicsParameterSweepManager.cs
+// GAIA/Data/TwoDGeology/Geomechanics/GeomechanicsParameterSweepManager.cs
 //
 // Parameter sweep utilities for 2D geomechanics simulations.
 
@@ -7,9 +7,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using Newtonsoft.Json;
-using GeoscientistToolkit.UI;
+using GAIA.UI;
 
-namespace GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
+namespace GAIA.Data.TwoDGeology.Geomechanics;
 
 /// <summary>
 /// Manages parameter sweeps for geomechanical simulations.

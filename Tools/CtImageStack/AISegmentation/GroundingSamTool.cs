@@ -2,14 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 using SkiaSharp;
 
-namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
+namespace GAIA.Tools.CtImageStack.AISegmentation
 {
     /// <summary>
     /// Combined Grounding DINO + SAM pipeline tool

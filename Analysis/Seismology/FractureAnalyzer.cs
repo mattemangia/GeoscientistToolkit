@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.Seismology
+namespace GAIA.Analysis.Seismology
 {
     /// <summary>
     /// Fracture type classification

@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geothermal/GeomechanicsSolver.cs
+// GAIA/Analysis/Geothermal/GeomechanicsSolver.cs
 //
 // ================================================================================================
 // REFERENCES (APA Format):
@@ -68,12 +68,12 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.OpenCL;
-using GeoscientistToolkit.Util;
+using GAIA.Network;
+using GAIA.OpenCL;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 ///     Geomechanics solver for coupled thermo-hydro-mechanical (THM) processes.

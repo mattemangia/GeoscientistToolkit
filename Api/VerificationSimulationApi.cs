@@ -1,19 +1,19 @@
 using System.Numerics;
-using GeoscientistToolkit.Analysis.AcousticSimulation;
-using GeoscientistToolkit.Analysis.Geomechanics;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Analysis.PhysicoChem;
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Analysis.Seismology;
-using GeoscientistToolkit.Analysis.SlopeStability;
-using GeoscientistToolkit.Analysis.Thermodynamic;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Data.Pnm;
+using GAIA.Analysis.AcousticSimulation;
+using GAIA.Analysis.Geomechanics;
+using GAIA.Analysis.Geothermal;
+using GAIA.Analysis.PhysicoChem;
+using GAIA.Analysis.Pnm;
+using GAIA.Analysis.Seismology;
+using GAIA.Analysis.SlopeStability;
+using GAIA.Analysis.Thermodynamic;
+using GAIA.Business.GIS;
+using GAIA.Data.Borehole;
+using GAIA.Data.Materials;
+using GAIA.Data.PhysicoChem;
+using GAIA.Data.Pnm;
 
-namespace GeoscientistToolkit.Api;
+namespace GAIA.Api;
 
 /// <summary>
 ///     Wraps the verification simulations described in <c>VerificationReport.md</c>.
@@ -363,7 +363,7 @@ public class VerificationSimulationApi
             rho[x, y, z] = targetRho;
         }
 
-        var simParams = new GeoscientistToolkit.Analysis.AcousticSimulation.SimulationParameters();
+        var simParams = new GAIA.Analysis.AcousticSimulation.SimulationParameters();
         var sim = new AcousticSimulatorCPU(simParams);
 
         sxx[10, 5, 5] = 1000.0f;

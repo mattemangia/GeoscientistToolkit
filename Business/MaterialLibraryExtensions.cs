@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/MaterialLibraryExtensions.cs
+// GAIA/Business/MaterialLibraryExtensions.cs
 //
 // Adds an extended catalog of physical materials that complement the
 // default entries bundled with the MaterialLibrary singleton.
@@ -19,10 +19,10 @@
 
 using System;
 using System.Collections.Generic;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 ///     Extension methods that append additional, peer-reviewed materials to the

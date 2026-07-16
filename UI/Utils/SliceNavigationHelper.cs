@@ -1,9 +1,9 @@
-// GeoscientistToolkit/UI/Utils/SliceNavigationHelper.cs
+// GAIA/UI/Utils/SliceNavigationHelper.cs
 
 using System.Numerics;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Utils;
+namespace GAIA.UI.Utils;
 
 /// <summary>
 ///     Helper class for drawing enhanced slice navigation controls

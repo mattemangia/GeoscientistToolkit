@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/Materials/PhysicalMaterial.cs
+// GAIA/Data/Materials/PhysicalMaterial.cs
 
 using System.Text.Json.Serialization;
 
-namespace GeoscientistToolkit.Data.Materials;
+namespace GAIA.Data.Materials;
 
 public enum PhaseType
 {

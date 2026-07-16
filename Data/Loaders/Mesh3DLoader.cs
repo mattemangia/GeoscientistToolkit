@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Loaders/Mesh3DLoader.cs
+// GAIA/Data/Loaders/Mesh3DLoader.cs
 
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Mesh3D;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class Mesh3DLoader : IDataLoader
 {

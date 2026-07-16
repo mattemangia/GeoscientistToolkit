@@ -1,8 +1,8 @@
-//GeoscientistToolkit/Business/Stratigraphies/UkStratigraphy.cs
+//GAIA/Business/Stratigraphies/UkStratigraphy.cs
 
 using System.Drawing;
 
-namespace GeoscientistToolkit.Business.Stratigraphies;
+namespace GAIA.Business.Stratigraphies;
 
 /// <summary>
 ///     United Kingdom regional stratigraphy with British-specific units and nomenclature

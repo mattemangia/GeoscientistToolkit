@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptValueResolver.cs
+// GAIA/Business/GeoScript/GeoScriptValueResolver.cs
 
 using System.Collections;
 using System.Globalization;
 using System.Reflection;
-using GeoscientistToolkit.Data;
+using GAIA.Data;
 
-namespace GeoscientistToolkit.Business.GeoScript;
+namespace GAIA.Business.GeoScript;
 
 public static class GeoScriptValueResolver
 {

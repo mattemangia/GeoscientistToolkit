@@ -5,7 +5,7 @@ using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using SkiaSharp;
 
-namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
+namespace GAIA.Tools.CtImageStack.AISegmentation
 {
     /// <summary>
     /// MicroSAM segmentation implementation optimized for microscopy images

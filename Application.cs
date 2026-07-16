@@ -1,20 +1,20 @@
-// GeoscientistToolkit/Application.cs
+// GAIA/Application.cs
 
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Settings;
+using GAIA.UI;
+using GAIA.Util;
 using ImGuiNET;
 using StbImageSharp;
 using Veldrid;
 using Veldrid.Sdl2;
 using Veldrid.StartupUtilities;
 
-namespace GeoscientistToolkit;
+namespace GAIA;
 
 public class Application
 {
@@ -48,7 +48,7 @@ public class Application
             Y = 50,
             WindowWidth = 1700,
             WindowHeight = 950,
-            WindowTitle = "GeoscientistToolkit"
+            WindowTitle = "GAIA"
         };
 
         // Use safer graphics options for initial creation on Windows
@@ -115,7 +115,7 @@ public class Application
 
             // Create and show loading screen
             _loadingScreen = new LoadingScreen(_graphicsDevice, _commandList, _imGuiController, _window);
-            _loadingScreen.UpdateStatus("Starting GeoscientistToolkit...", 0.0f);
+            _loadingScreen.UpdateStatus("Starting GAIA...", 0.0f);
         }
         catch (Exception ex)
         {
@@ -543,7 +543,7 @@ public class Application
         {
             // Load embedded image resource
             var assembly = Assembly.GetExecutingAssembly();
-            var resourceName = "GeoscientistToolkit.image.png";
+            var resourceName = "GAIA.image.png";
 
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null)

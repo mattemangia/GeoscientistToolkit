@@ -1,15 +1,15 @@
-﻿// GeoscientistToolkit/UI/ImGuiController.cs (Fixed Unicode Ranges for Scientific Characters)
+﻿// GAIA/UI/ImGuiController.cs (Fixed Unicode Ranges for Scientific Characters)
 
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 using Veldrid.SPIRV;
 
-namespace GeoscientistToolkit;
+namespace GAIA;
 
 public sealed class ImGuiController : IDisposable
 {

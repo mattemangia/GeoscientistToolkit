@@ -4,17 +4,17 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Security.Principal;
 using System.Linq;
-using GeoscientistToolkit.Installer.Models;
-using GeoscientistToolkit.Installer.Services;
-using GeoscientistToolkit.Installer.Utilities;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Installer.Models;
+using GAIA.Installer.Services;
+using GAIA.Installer.Utilities;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 using Veldrid.Sdl2;
 using Veldrid.StartupUtilities;
 
-namespace GeoscientistToolkit.Installer;
+namespace GAIA.Installer;
 
 internal sealed class InstallerImGuiApp
 {
@@ -219,7 +219,7 @@ internal sealed class InstallerImGuiApp
 
     private void DrawWelcomeStep()
     {
-        ImGui.TextWrapped("Welcome to the Geoscientist's Toolkit installer.");
+        ImGui.TextWrapped("Welcome to the GAIA (Geoscience Analysis, Imaging & Automation) installer.");
 
         if (_metadata is not null)
         {
@@ -758,14 +758,14 @@ internal sealed class InstallerImGuiApp
     private static void CreateDesktopFile(string desktop, string target)
     {
         var shortcut = Path.Combine(desktop, "geoscientist-toolkit.desktop");
-        var content = $"[Desktop Entry]\nType=Application\nName=Geoscientist's Toolkit\nExec=\"{target}\"\nTerminal=false\n";
+        var content = $"[Desktop Entry]\nType=Application\nName=GAIA (Geoscience Analysis, Imaging & Automation)\nExec=\"{target}\"\nTerminal=false\n";
         File.WriteAllText(shortcut, content);
         MakeExecutable(shortcut);
     }
 
     private static void CreateMacShortcut(string desktop, string target)
     {
-        var shortcut = Path.Combine(desktop, "GeoscientistToolkit.command");
+        var shortcut = Path.Combine(desktop, "GAIA.command");
         File.WriteAllText(shortcut, $"#!/bin/bash\n\"{target}\" \"$@\"\n");
         MakeExecutable(shortcut);
     }

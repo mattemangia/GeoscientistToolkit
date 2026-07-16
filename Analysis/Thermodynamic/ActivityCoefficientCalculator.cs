@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/Thermodynamics/ActivityCoefficientCalculator.cs
+// GAIA/Business/Thermodynamics/ActivityCoefficientCalculator.cs
 //
 // Activity coefficient calculation using Debye-Hückel, extended Debye-Hückel,
 // Davies, and Pitzer equations for various ionic strength ranges.
@@ -15,12 +15,12 @@
 // - Dzombak, D.A. & Morel, F.M.M., 1990. Surface Complexation Modeling: Hydrous Ferric Oxide. Wiley. (For DDLM)
 
 using System.Collections.Concurrent;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Util;
 
 // Added for sorting keys
 
-namespace GeoscientistToolkit.Business.Thermodynamics;
+namespace GAIA.Business.Thermodynamics;
 
 public class ActivityCoefficientCalculator
 {

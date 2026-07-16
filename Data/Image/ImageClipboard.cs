@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Image/ImageClipboard.cs
+// GAIA/Data/Image/ImageClipboard.cs
 
 using System;
-using GeoscientistToolkit.Data.Image.Selection;
+using GAIA.Data.Image.Selection;
 
-namespace GeoscientistToolkit.Data.Image
+namespace GAIA.Data.Image
 {
     /// <summary>
     /// Global clipboard for image data

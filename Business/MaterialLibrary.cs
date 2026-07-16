@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/MaterialLibrary.cs
+// GAIA/Business/MaterialLibrary.cs
 //
 // Singleton service that stores materials, handles I/O, and seeds realistic values.
 //
@@ -13,10 +13,10 @@
 //
 
 using System.Text.Json;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 public sealed class MaterialLibrary
 {

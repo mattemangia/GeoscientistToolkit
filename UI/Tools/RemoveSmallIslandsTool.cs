@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/Tools/RemoveSmallIslandsTool.cs
+// GAIA/UI/Tools/RemoveSmallIslandsTool.cs
 
-using GeoscientistToolkit.Analysis.RemoveSmallIslands;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Analysis.RemoveSmallIslands;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
 
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 /// <summary>
 ///     UI bridge for the Remove Small Islands tool.
