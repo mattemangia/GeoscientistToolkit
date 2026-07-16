@@ -1,378 +1,303 @@
-# GAIA × PRISM — Analisi di Convergenza e Raccomandazioni
+# GAIA × PRISM — Analisi di convergenza verificabile
 
-> **Scopo**: identificare le sovrapposizioni funzionali tra GAIA e PRISM, valutare quale implementazione è più matura/affidabile, e raccomandare quale versione conservare per ogni capacità condivisa. Le due piattaforme devono diventare **complementari**, non ridondanti.
+> **Stato dell'audit:** 16 luglio 2026
+>
+> **Snapshot esaminati:** GAIA `e2177b2`; PRISM `14247f8`
+>
+> **Perimetro:** ispezione statica dei due repository locali, delle solution, dei progetti, dei sorgenti e dei test. I test non sono stati eseguiti come parte di questa revisione.
+>
+> **Obiettivo:** descrivere capacità, maturità e confini delle due piattaforme senza trasformare LOC, nomi dei moduli o feature dichiarate in prove di superiorità scientifica.
 
----
+## 1. Conclusione esecutiva
 
-## TL;DR Strategico
+La precedente lettura “GAIA = core/imaging, PRISM = basin/AI” coglie una parte della specializzazione, ma sottostima nettamente PRISM.
 
-| Principio | Raccomandazione |
+**PRISM è oggi la piattaforma più avanzata nel workflow geoscientifico end-to-end.** Il vantaggio non riguarda soltanto PINN o scala di bacino: comprende acquisizione multi-sorgente, armonizzazione e provenance, modellazione 3D/4D, inversione geofisica, InSAR/TomoSAR, rischi concatenati, modellazione di reservoir, assimilazione e scenari, ranking scientifico, gestione dei checkpoint, incertezza, GUI integrata, numerosi comandi headless ed export tecnici. Queste capacità sono collegate nello stesso workspace, non sono soltanto solver isolati.
+
+**GAIA conserva un vantaggio netto in un insieme più ristretto ma importante di workflow sperimentali e core/pore-scale:** CT/µCT, segmentazione assistita da modelli ONNX, PNM e dual-PNM, NMR, omogeneizzazione termica da voxel, simulazioni acustiche su volumi CT, petrografia/texture, fotogrammetria e un DSL generalista (GeoScript). GAIA è anche più estensibile come piattaforma di dataset eterogenei e add-in.
+
+La strategia corretta non è una divisione simmetrica né la migrazione automatica di moduli in base al numero di righe:
+
+- **PRISM deve essere il sistema principale** per costruzione del modello di sottosuolo, geofisica/inversione, remote sensing, geohazard, reservoir/geotermia field-scale, AI physics-informed, scenari e decision support.
+- **GAIA deve essere il sistema specializzato** per imaging e caratterizzazione di laboratorio/core/pore-scale, estrazione di proprietà da CT, simulazioni voxel-based e automazione GeoScript.
+- L'integrazione deve avvenire mediante contratti versionati e formati standard; non copiando interi solver tra repository.
+
+## 2. Metodo e significato dei giudizi
+
+Ogni capacità è valutata su evidenze distinte:
+
+| Livello | Significato |
 |---|---|
-| **GAIA** = piattaforma **core-scale / pore-scale / imaging** | Pore networking, CT segmentation, NMR, thermal conductivity, photogrammetry, geochemistry, GeoScript |
-| **PRISM** = piattaforma **basin-scale / reservoir-scale / AI-driven** | PINN/TorchSharp, InSAR, FWI, limit analysis, reservoir flow, cascade hazards, BRIDGE orchestration |
-| **Moduli sovrapposti** | 8 aree con duplicazione significativa (vedi §2) |
-| **Regola d'oro** | Dove PRISM ha un'implementazione più matura e testata, **migrare**. Dove GAIA è unico o superiore, **conservare**. Dove entrambi aggiungono valore a scale diverse, **mantenere entrambi** con interfaccia condivisa. |
+| **P** — presente | Esiste codice sostanziale, non soltanto documentazione o una voce UI. |
+| **I** — integrato | La capacità è raggiungibile dal workflow principale, dalla GUI o da CLI/API. |
+| **T** — testato | Esistono test automatici pertinenti nel repository. Non implica che siano stati eseguiti in questo audit. |
+| **V** — validato | Esiste confronto esplicito con soluzione analitica, benchmark pubblicato o dataset di riferimento con tolleranza. |
+| **O** — operativo | Sono gestiti persistenza, errori, fallback, cancellazione, export e riproducibilità. |
 
----
+Un modulo può essere matematicamente sofisticato ma non operativo; un workflow molto integrato può non essere ancora validato scientificamente. Per questo il documento evita aggettivi non misurabili come “eccellente”.
 
-## 1. Matrice delle Capacità
+### Evidenza quantitativa riproducibile
 
-### 1.1 Capacità presenti in GAIA ma NON in PRISM
+| Indicatore statico | GAIA | PRISM | Interpretazione corretta |
+|---|---:|---:|---|
+| Progetti nella solution | 9 | 17 | PRISM ha una scomposizione funzionale più ampia; il dato non misura da solo la qualità. |
+| File C# nel repository | 728 | 1.280 | Misura approssimativa della superficie implementata, non della correttezza. |
+| Metodi marcati `[Fact]`/`[Theory]` nelle suite principali | 24 | 1.327 | Vantaggio ingegneristico molto forte di PRISM; il numero non equivale a 1.327 validazioni indipendenti. |
+| Runtime principale | .NET 10, ImGui.NET/Veldrid | .NET 8, ImGui.NET/OpenTK/Mapsui | GAIA ha runtime più recente; PRISM ha uno stack cartografico e AI più ricco. |
+| Automazione | GeoScript, API, NodeEndpoint, CLI test/diagnostic | Ampia CLI headless, scheduler, action engine, adapter in-process | Approcci diversi; PRISM è più completo per pipeline operative, GAIA ha il DSL più generale. |
 
-| Capacità | Modulo GAIA | Note |
-|---|---|---|
-| **CT Imaging & Segmentation** | `Data/CtImageStack/`, `Tools/CtImageStack/AISegmentation/` | SAM2/MicroSAM/Grounding DINO, brush/lasso/magic wand, streaming volume. Unico in GAIA. |
-| **Pore Network Modeling (PNM)** | `Analysis/PNM/` | Estrazione rete pori da CT, permeabilità, trasporto reattivo. Unico in GAIA. |
-| **Dual PNM** | `Analysis/PNM/DualPNMGenerator.cs` | Macro-micro pore coupling. Unico. |
-| **NMR Simulation** | `Analysis/NMR/` | T2 relaxation random walk, T1-T2 maps. Unico. |
-| **Thermal Conductivity (homogenisation)** | `Analysis/ThermalConductivity/` | FEM + OpenCL da volumi CT. Unico. |
-| **Acoustic FDTD Simulation** | `Analysis/AcousticSimulation/` | Velocity-stress staggered grid su CT. Unico. |
-| **Texture Classification** | `Analysis/TextureClassification/` | GLCM + OpenCL su thin sections. Unico. |
-| **Ambient Occlusion Segmentation** | `Analysis/AmbientOcclusionSegmentation/` | Unico. |
-| **GeoScript (DSL)** | `Scripting/GeoScript/`, `Business/GeoScript*.cs` | Linguaggio di scripting completo con pipeline `|>`. Unico. |
-| **Stratigraphy Manager (8 sistemi)** | `Business/Stratigraphies/` | Internazionale + 7 nazionali. Unico. |
-| **Petrology (igneous)** | `Business/Petrology/` | Cristallizzazione frazionata, diagrammi di fase. Unico. |
-| **2D Geological Cross-Sections** | `Data/TwoDGeology/` | Editor interattivo, restoration strutturale. Unico. |
-| **NeRF (Instant-NGP)** | `Data/Nerf/` | Sperimentale, CPU-only. Unico ma immaturo. |
-| **GeoScript Pipeline DSL** | `Scripting/` | Pipeline `|>` con ~150 comandi. Unico. |
+I conteggi sono riferiti agli snapshot sopra indicati e devono essere rigenerati quando i repository cambiano.
 
-### 1.2 Capacità presenti in PRISM ma NON in GAIA
+## 3. Dove PRISM è sostanzialmente più avanti
 
-| Capacità | Modulo PRISM | Note |
-|---|---|---|
-| **PINN / TorchSharp (tutti i moduli)** | `Aquifer`, `Geothermal`, `CASCADE`, `FORGE`, `QUAKE`, `DELVE` | Physics-informed neural networks con autograd. Unico in PRISM. |
-| **InSAR / TomoSAR (ECHO)** | `Prism/Services/Echo/` | Pipeline InSAR completa (PSInSAR, SBAS, TomoSAR). Unico. |
-| **FWI (Full-Waveform Inversion)** | `PINNACLE` / `Prism/Services/Fwi/` | Adjoint-state FWI. Unico. |
-| **Limit Analysis (FORGE)** | `Prism.FORGE/Stability/` | Upper-bound 2D/3D, log-spiral, Newmark. Unico. |
-| **BRIDGE (multi-physics orchestrator)** | `Prism.BRIDGE/` | What-if, counterfactual, sweep, calibration. Unico. |
-| **ReservoirFluxEngine** | `Prism.ReservoirFluxEngine/` | TOUGH2-class Newton solver, IAPWS-97, BHE. Unico. |
-| **CASCADE (geohazards)** | `Prism.CASCADE/` | Flood, landslide runout, coastal erosion, meteo. Unico. |
-| **FDSN / miniSEED / QuakeML** | `Prism.QUAKE/Fdsn/` | Web services sismologici. Unico. |
-| **DELVE (section balancing)** | `Prism.DELVE/` | Balancing strutturale con PINN. Unico. |
-| **Borehole Digitizer (PDF→LAS)** | `Prism.BoreholeDigitizer/` | Unico. |
-| **PDFSEGY (raster→SEG-Y)** | `Prism.PDFSEGY/` | Unico. |
-| **Geothermal PINN** | `Prism.Geothermal/` | Natural-state hydrothermal PINN. Unico. |
-| **Weather / Meteo PINN** | `Prism.CASCADE/Meteo/` | Unico. |
-| **XPINN Ensemble Coordinator** | Servizi app | Ensemble di PINN con TOPSIS ranking. Unico. |
-| **TerraYield (techno-economic)** | `Prism.TerraYield/` | LCOE/LCOH, drilling costs, BTES. Unico. |
-| **Geotech Explicit FEM** | `Prism.Geotech/` | Dynamic relaxation tet FEM con CPU/GPU parity. Unico. |
+### 3.1 Piattaforma integrata e ciclo di vita del modello
 
-### 1.3 Capacità presenti in ENTRAMBE (sovraposizioni)
+Il maggiore vantaggio di PRISM è architetturale e operativo:
 
----
+- costruisce dataset da sorgenti geologiche, sismiche, idrogeologiche, termiche e SAR;
+- armonizza litologie, priorità delle fonti, AOI, cache e provenance;
+- addestra e interroga modelli in-process attraverso facade di modulo e adapter comuni;
+- gestisce checkpoint, metadata, resume, warm-start, merge, distillazione teacher-student e rollback;
+- applica un contratto condiviso alle boundary conditions: richiesta utente ∩ dati di scena ∩ metadata del checkpoint;
+- valuta modelli con indici scientifici e ranking entropy-weighted TOPSIS;
+- coordina ensemble XPINN e propagazione dell'incertezza;
+- registra output diversi nello stesso viewport 3D e nell'Export Center;
+- espone molti workflow anche da CLI headless, con cultura numerica invariabile.
 
-## 2. Analisi Dettagliata delle Sovrapposizioni
+GAIA possiede buoni componenti di progetto, dataset, scripting e calcolo distribuito, ma non presenta un ciclo altrettanto coerente per training, ranking, selezione, assimilazione e riuso dei modelli scientifici.
 
-### 2.1 Geomechanics / Slope Stability
+**Verdetto:** PRISM è avanti come prodotto geoscientifico integrato, non soltanto come collezione di algoritmi.
 
-| Aspetto | GAIA | PRISM | Raccomandazione |
+### 3.2 Geofisica, sismologia e inversione
+
+| Capacità | GAIA | PRISM | Verdetto |
 |---|---|---|---|
-| **Slope stability 3D** | `Analysis/SlopeStability/` — DEM con GJK+EPA, ~5,500 LOC, CPU only, SIMD dichiarato ma non implementato. 2 test. | `Prism.FORGE/Stability/` — limit analysis (upper-bound log-spiral), ~2,000 LOC, CPU + PINN. 14 test. `Prism.Geotech/` — explicit FEM tet, ~3,000 LOC, CPU+OpenCL, 8 test. | **Approcci complementari**. GAIA fa DEM (discrete element), PRISM fa limit analysis + explicit FEM. Metodologie diverse per domande diverse. **Mantenere entrambi.** |
-| **Triaxial simulation** | `Analysis/Geomechanics/TriaxialSimulation.cs` — mesh cilindrico, Mohr circle, OpenCL. 1 test. | Non presente direttamente, ma `Prism.Geotech` ha servo-controlled platens. | **GAIA** (più specializzato per triaxial lab test). |
-| **FEM damage/plasticity** | `GeomechanicalSimulationCPU` (4 partials) — PCG, Mazars damage, radial return. CPU+GPU. | `Prism.Geotech/GeotechExplicitSolver` — FLAC-style local damping, strain softening, ubiquitous joints. **CPU↔GPU parity garantita**. | **PRISM superiore** per ingegneria geotecnica (più test, GPU parity, mesh quality, VTK export). GAIA migliore per **accoppiamento CT→FEM** (working directly on voxellated data). |
-| **Bearing capacity** | `Data/TwoDGeology/Geomechanics/GeometricPrimitives2D.cs` — Terzaghi Nc/Nq/Nγ. 2 test. | `Prism.FORGE/Stability/LimitAnalysisSlope2D.cs` — log-spiral upper bound. | **Complementari**. GAIA fa Terzaghi factors (classico), PRISM fa upper-bound plasticity. |
-| **Earthquake loading** | `Analysis/SlopeStability/EarthquakeLoad.cs` — seismic coefficient. | `Prism.FORGE/ForgeSeismicNewmark.cs` — Newmark sliding block. | **PRISM superiore** (Newmark è lo standard). |
+| Acquisizione sismologica | Loader e processing locali | FDSN event/station/dataselect, miniSEED, QuakeML, ITACA, inventory e waveform | **PRISM nettamente avanti** |
+| Tomografia passiva | Non comparabile | PULSE: ray tracing, LSQR smorzato, smoothing, coverage e resolution diagnostics | **PRISM unico** |
+| FWI | Non presente come pipeline completa | PINNACLE/FWI con workflow, artifact e diagnostica | **PRISM unico** |
+| InSAR/TomoSAR | Non presente | ECHO: ingest SAR, coregistrazione, interferogrammi, filtering, unwrap, APS, PS/SBAS, focusing TomoSAR, geocoding | **PRISM unico** |
+| Modellazione d'onda | FDTD e post-processing damage/fracture | SHAKE, wavefield global roadmap, mesh/voxel workflow, coupling con modelli di velocità | **Complementari**, ma PRISM ha il workflow più integrato |
+| SEG-Y | Processing/visualizzazione e synthetic tie | Reader, synthetic output, PDFSEGY, raster→SEG-Y, integrazione PULSE/QUAKE | **PRISM più ampio end-to-end**; GAIA conserva processing specialistico |
+| Rock physics | Relazioni distribuite tra comandi/moduli | Contratti e servizi condivisi nei workflow QUAKE/PULSE/SubNeRF | **PRISM più strutturato** |
 
-#### Raccomandazione Geomechanics
-- **DEM (GAIA)**: conservare in GAIA — è unico per simulazione di blocchi discreti
-- **Limit analysis (PRISM)**: conservare in PRISM — è più testato e maturo
-- **Explicit FEM (PRISM)**: conservare in PRISM — CPU↔GPU parity è best-in-class
-- **CT-voxellated FEM (GAIA)**: conservare in GAIA — unico per accoppiamento CT→stress
-- **Triaxial lab test (GAIA)**: conservare in GAIA — più specializzato
-- **⚠️ Bug noto GAIA**: `EstimateContactArea()` ritorna sempre `1.0f` nel DEM. Il pattern `lock(A) lock(B)` può deadlockare se l'ordine degli ID si inverte. Verificare se PRISM ha risoluzioni applicabili.
+Il supporto FDSN non è una semplice feature accessoria: usa interfacce standard per eventi, stazioni e serie temporali, con miniSEED/StationXML/QuakeML come formati interoperabili. La specifica ufficiale è mantenuta dalla [FDSN](https://www.fdsn.org/webservices/).
 
----
+### 3.3 AI physics-informed e gestione del training
 
-### 2.2 Thermodynamics & Geochemistry
+PRISM è molto più avanti nell'AI scientifica:
 
-| Aspetto | GAIA | PRISM | Raccomandazione |
+- PINN 3D/4D per crosta/sismica, acquiferi, geotermia e geohazard;
+- autograd TorchSharp per residui PDE, incluse derivate di secondo ordine;
+- SubNeRF per rappresentazioni implicite continue del sottosuolo;
+- loss geologiche, petrofisiche, strutturali e di boundary compliance;
+- training studio, scheduler, cancellazione, log live e checkpoint discovery;
+- ranking multi-criterio, ensemble XPINN, distillazione e uncertainty quantification;
+- query cross-model e warm-start tra domini.
+
+GAIA usa ONNX in modo valido e utile per inferenza di modelli di visione (SAM2, MicroSAM, Grounding DINO), ma non offre un'infrastruttura equivalente per addestramento scientifico, inversione o assimilazione physics-informed.
+
+**Correzione rispetto al documento precedente:** NeRF non è esclusivo di GAIA. PRISM contiene SubNeRF e lo integra nel modello di sottosuolo; la cartella `Prism.SubNeRF` non è un progetto della solution, ma la capacità è ospitata e orchestrata dall'app principale. GAIA conserva invece un'implementazione Instant-NGP orientata alla ricostruzione visuale, con finalità diversa.
+
+### 3.4 Geohazard e osservazione della Terra
+
+CASCADE ed ECHO danno a PRISM una copertura che GAIA non possiede:
+
+- catena meteo → pioggia/vento → alluvione → instabilità/runout → costa;
+- DEM e batimetria, routing pluviale, infiltrazione, Voellmy-Salm, slope failure e jointed-rock kinematics;
+- strutture costiere, trasporto litoraneo, arretramento e danno catastale;
+- SAR multi-provider e deformazione del suolo;
+- scenari dataset-free su DEM/mesh, oltre ai progetti completi;
+- visualizzazione e animazione dei risultati nello stesso workspace.
+
+Sentinel-1 è concepito da ESA per osservazione radar all-weather/day-night e applicazioni che includono deformazioni, alluvioni e terremoti; l'integrazione di queste osservazioni nei workflow di rischio è quindi un vantaggio sostanziale, non solo UI ([ESA Sentinel-1](https://www.esa.int/Applications/Observing_the_Earth/Copernicus/Sentinel-1/Introducing_Sentinel-1)).
+
+### 3.5 BRIDGE: scenari, assimilazione e decision support
+
+La precedente descrizione di BRIDGE come semplice “orchestrator what-if/sweep” è incompleta. Il codice include:
+
+- scenari e interventi con provenance e livelli di confidenza;
+- baseline cache e confronti controfattuali;
+- Latin Hypercube, algoritmi genetici e simulated annealing;
+- ensemble smoother, particle filter e una procedura 4D-Var;
+- osservazioni multi-anchor, misfit, posteriori e ranking di plausibilità;
+- adapter verso motori scientifici e controlli di validità dello scenario.
+
+GAIA non ha un equivalente. GeoScript può concatenare operazioni, ma un DSL di pipeline non sostituisce assimilazione, posterior estimation o ranking controfattuale.
+
+### 3.6 Reservoir, geotermia field-scale e techno-economics
+
+| Area | GAIA | PRISM | Verdetto |
 |---|---|---|---|
-| **Thermodynamic solver** | `Analysis/Thermodynamic/` — Gibbs minimization, Debye-Hückel/Davies/Pitzer, ~5,000 LOC, CPU+SIMD+OpenCL. | `Prism.GeoGenesis/Thermodynamics/` — stessi metodi, ~2,500 LOC, CPU+SIMD+OpenCL. | **GAIA più completo** (più LOC, Pitzer model, phase diagrams). **Ma PRISM ha fix importante**: density IAPWS-97 Region-1 corretto con Kell (1975) polynomial — GAIA potrebbe avere lo stesso bug. **Verificare.** |
-| **Compound library** | `Business/CompoundLibrary.cs` + 4 extensions — 100+ compounds, ~4,000 LOC. | `Prism.GeoGenesis/Materials/CompoundLibrary.cs` + extensions — simile, ~1,500 LOC. | **GAIA più esteso** (più composti, più estensioni). Ma verificare che GAIA includa il **fix Kell density**. |
-| **Reactive transport** | `Analysis/Thermodynamic/ReactiveTransportSolver.cs` — SIA operator splitting. | `Prism.GeoGenesis/Thermodynamics/ReactiveTransportSolver.cs` — stesso approccio. Entrambi documentano limitazioni (Forward Euler, no full kinetics). | **Equivalenti**. Mantenere GAIA (più integrato con PNM e CT dissolution). |
-| **CT dissolution** | `CTDissolutionSimulator.cs` — dissoluzione minerale su voxel CT. | `Prism.GeoGenesis/Thermodynamics/CTDissolutionSimulator.cs` — stesso concetto. | **GAIA** (più integrato con il modulo CT). |
-| **Multiphase flow** | `Analysis/Multiphase/MultiphaseFlowSolver.cs` — IMPES, EOS1-4. ~1,200 LOC. | `Prism.GeoGenesis/Multiphase/MultiphaseFlowSolver.cs` — simile. ~400 LOC. | **GAIA più completo** ma PRISM ha accoppiamento con ReservoirFluxEngine. |
+| Reservoir flow | Multiphase e reactive transport soprattutto core/pore-scale | ReservoirFlux: mesh, bilanci di massa/energia, EOS acqua-energia, Newton solve, pozzi/BHE, snapshot e coupling | **PRISM avanti a scala reservoir** |
+| Geotermia | THM classico, dual continuum, ORC, BTES, HVAC | natural-state PINN, ReservoirFlux, CRAFT, BHE, TerraYield e integrazione con tomography | **PRISM avanti nel workflow field-to-economics** |
+| Techno-economics | Modello economico integrato nel modulo GAIA | TerraYield: impianto, reservoir, well field, drilling correlations, LCOE/LCOH e coupling | **PRISM avanti** |
+| Proprietà da CT | Dirette da imaging/PNM | Riceve proprietà voxel/mesh, ma non ha la stessa pipeline CT | **GAIA avanti come sorgente core-scale** |
 
-#### Raccomandazione Thermodynamics
-- **Conservare GAIA come implementazione principale** (più estesa, più integrata con CT/PNM)
-- **⚠️ Azione critica**: verificare se GAIA ha il bug IAPWS-97 density che PRISM ha corretto (Kell 1975 polynomial in `WaterProperties.cs`). Se sì, applicare il fix da PRISM.
-- **Reactive transport**: mantenere entrambi — GAIA per CT-scale, PRISM per reservoir-scale (via ReservoirFluxEngine)
+La formulazione acqua/vapore deve essere confrontata con le release ufficiali IAPWS e con punti di controllo pubblicati, non sostituita genericamente con una correlazione di densità. IAPWS-IF97 è la formulazione industriale ufficiale ([IAPWS R7-97](https://www.iapws.org/relguide/IF97-Rev.pdf)).
 
----
+### 3.7 Geotecnica e stabilità
 
-### 2.3 Geothermal Simulation
+PRISM non offre solo limit analysis:
 
-| Aspetto | GAIA | PRISM | Raccomandazione |
+- FORGE include stabilità 2D/3D, cinematismi, Newmark e integrazione con osservazioni/campi;
+- Prism.Geotech include FEM esplicito tetraedrico, import mesh, materiali non lineari, giunti, strain softening, CPU/OpenCL e output tecnici;
+- CASCADE include infinite slope transiente, runout e cinematica di roccia fratturata;
+- BRIDGE può esplorare e assimilare scenari geotecnici;
+- ECHO fornisce osservazioni di deformazione utilizzabili nei workflow di stabilità.
+
+GAIA conserva due nicchie reali: DEM a blocchi e simulazione triassiale/CT-voxel. Tuttavia, come piattaforma per analisi geotecnica territoriale e integrazione observation-to-model, **PRISM è molto più avanti**.
+
+## 4. Dove GAIA conserva un vantaggio reale
+
+### 4.1 Imaging CT/µCT e caratterizzazione digitale della roccia
+
+GAIA ha una pipeline specializzata non replicata da PRISM:
+
+- stack CT e gestione di volumi grandi/streaming;
+- strumenti manuali e assistiti di segmentazione 2D/3D;
+- inferenza ONNX con modelli di visione generalisti e microscopy-oriented;
+- estrazione geometrica e quantitativa dal volume;
+- passaggio CT → PNM/dual-PNM → permeabilità/trasporto;
+- NMR random walk e mappe di rilassamento;
+- omogeneizzazione della conducibilità termica;
+- acustica su geometrie derivate dalla CT;
+- dissoluzione/trasporto reattivo voxel-based.
+
+PRISM dispone di segmentazione volumetrica per modelli di reservoir e di `CTDissolutionSimulator` in GeoGenesis, quindi “segmentazione” e “CT dissolution” non devono essere dichiarate genericamente esclusive di GAIA. Il vantaggio GAIA è la **profondità del workflow digital-rock**, dalla sorgente immagine alle proprietà pore-scale.
+
+### 4.2 PNM, dual-PNM e NMR
+
+Non sono stati individuati equivalenti sostanziali in PRISM per:
+
+- estrazione di pore network da immagini;
+- accoppiamento macro/microporosità dual-PNM;
+- simulazione NMR T1/T2 mediante random walk;
+- upscaling diretto di proprietà petrofisiche dalla microstruttura.
+
+Questi moduli devono restare in GAIA e diventare la sorgente certificata di priors/upscaled properties per CRAFT, ReservoirFlux, SubNeRF e QUAKE.
+
+### 4.3 GeoScript e automazione dataset-centrica
+
+GeoScript rimane una capacità distintiva: consente pipeline uniformi su immagini, tabelle, GIS, CT, borehole, seismic, mesh, PNM, termodinamica e petrologia. PRISM ha una CLI molto più ampia per workflow applicativi e training, ma non un DSL embeddable equivalente.
+
+La convergenza corretta è:
+
+- GeoScript per trasformazioni riproducibili e preprocessing in GAIA;
+- CLI/API PRISM per training, inversione, scenari e simulazioni field-scale;
+- un adapter esplicito, con manifest degli input/output, invece di comandi shell non tipizzati.
+
+### 4.4 Fotogrammetria e ricostruzione da immagini
+
+GAIA conserva il vantaggio su SfM real-time/offline, feature matching, mesh, orthomosaic e DEM da immagini. SubNeRF di PRISM non è un sostituto: ricostruisce implicitamente proprietà del sottosuolo da investigazioni sparse, non una scena fotogrammetrica con lo stesso obiettivo metrico.
+
+### 4.5 Petrologia, stratigrafie multiple e laboratorio virtuale
+
+GAIA offre capacità più specialistiche in:
+
+- petrologia ignea e cristallizzazione frazionata;
+- cataloghi stratigrafici internazionali/nazionali espliciti;
+- triaxial lab simulation;
+- texture analysis di sezioni sottili;
+- simulazioni nucleari/PhysicoChem non centrali al modello di sottosuolo PRISM.
+
+PRISM è comunque più avanzato nella gestione operativa di litologie, correlazioni, strutture e consistenza geologica del modello 3D. “Stratigrafia presente in GAIA” non implica superiorità generale nell'interpretazione geologica.
+
+## 5. Matrice corretta delle responsabilità
+
+| Dominio | Sistema principale | Sistema complementare | Motivazione |
 |---|---|---|---|
-| **Geothermal solver (classico)** | `Analysis/Geothermal/` — coupled THM, dual-continuum (Warren-Root/MINC), ORC, BTES, HVAC, economics. ~7,000 LOC. CPU+GPU+SIMD. 25+ citazioni. 1 test. | Non ha solver classico equivalente (usa PINN per geothermal). | **GAIA superiore** per simulazione classica. Il modulo geotermico è il più completo di GAIA. |
-| **Geothermal PINN** | Non presente. | `Prism.Geothermal/` — natural-state hydrothermal PINN, LayerNorm + residual connections, Fourier PDE residual (2nd-order autograd). ~2,800 LOC. 7 test. | **PRISM unico** per AI-driven geothermal. |
-| **Reservoir flow** | Non presente (multiphase flow solo per pore-scale). | `Prism.ReservoirFluxEngine/` — TOUGH2-class Newton solver, IAPWS-97, BHE (coaxial/U-tube/open-loop). ~4,500 LOC. CPU+OpenCL. 4 test. | **PRISM superiore** per reservoir-scale. |
-| **BTES** | `Analysis/Geothermal/BTESOpenCLSolver.cs` — GPU. | `Prism.TerraYield/BTES/` — g-function superposition, seasonal profiles. | **Complementari**. GAIA per GPU compute, PRISM per techno-economic. |
-| **ORC** | `Analysis/Geothermal/ORCSimulation.cs` — SIMD, `ORCFluidLibrary`. | Non presente direttamente. | **GAIA unico**. |
-| **Economics** | `Analysis/Geothermal/GeothermalEconomics.cs`. | `Prism.TerraYield/Economics/` — LCOE/LCOH/LCOC, NPV/IRR, 17 drilling cost correlations. | **PRISM superiore** per economics (più dettagliato). |
+| CT/µCT, digital rock, PNM, NMR | **GAIA** | PRISM come consumatore | GAIA estrae proprietà dalla microstruttura. |
+| Segmentazione di reservoir 3D | **PRISM** | GAIA per segmentazione CT specialistica | PRISM integra label, CRAFT, viewport ed export reservoir. |
+| Dataset territoriali e provenance | **PRISM** | GAIA per loader scientifici specialistici | PRISM ha acquisizione e harmonisation multi-provider. |
+| GIS operativo e mappe di progetto | **PRISM** | GAIA per analisi GIS dataset-centrica | PRISM combina Mapsui, AOI, fonti e modelli; GAIA ha tool GIS generici. |
+| Borehole e correlazione | **PRISM** | GAIA per editing/visualizzazione specialistica | PRISM copre ingest→correlation→model→export. |
+| Sismologia, tomography, FWI | **PRISM** | GAIA per alcuni filtri e seismic cube | PRISM ha la catena di inversione e dati standard. |
+| InSAR/TomoSAR | **PRISM** | — | ECHO non ha equivalente GAIA. |
+| PINN/implicit subsurface AI | **PRISM** | GAIA per inference vision ONNX | Training e physics losses sono capacità PRISM. |
+| Geohazard e costa | **PRISM** | GAIA per DEM/visualizzazioni specifiche | CASCADE unifica forcing, hazard e impatti. |
+| Geotecnica territoriale | **PRISM** | GAIA per DEM/triassiale/voxel | FORGE + Geotech + CASCADE + ECHO + BRIDGE. |
+| Reservoir/geotermia field-scale | **PRISM** | GAIA per proprietà core-scale e ORC specifico | ReservoirFlux/TerraYield/CRAFT danno continuità operativa. |
+| Geochimica core/voxel | **GAIA** | PRISM GeoGenesis per coupling field-scale | La scelta dipende dalla scala, non dalla duplicazione nominale. |
+| Scenari, assimilazione, ranking | **PRISM** | — | BRIDGE e ranking scientifico non hanno equivalente. |
+| Fotogrammetria/SfM | **GAIA** | — | Pipeline metrica da immagini non presente in PRISM. |
+| Scripting di trasformazione | **GAIA** | PRISM CLI per workflow applicativi | GeoScript e CLI risolvono problemi diversi. |
+| Visualizzazione integrata 3D/4D | **PRISM** | GAIA per viewer per-dataset | PRISM registra modelli e simulazioni nello stesso spazio interrogabile. |
 
-#### Raccomandazione Geothermal
-- **Solver classico (GAIA)**: conservare — è il miglior modulo di GAIA
-- **PINN geothermal (PRISM)**: conservare — unico
-- **ReservoirFlux (PRISM)**: conservare — più completo per reservoir-scale
-- **ORC (GAIA)**: conservare — unico
-- **Economics (PRISM)**: conservare — più dettagliato
+## 6. Correzioni di affermazioni precedenti
 
----
-
-### 2.4 Photogrammetry & 3D Reconstruction
-
-| Aspetto | GAIA | PRISM | Raccomandazione |
-|---|---|---|---|
-| **Real-time SfM** | `Analysis/Photogrammetry/` — MiDaS + SuperPoint + LightGlue + depth-aware RANSAC. OpenCvSharp. ~3,000 LOC. 1 test. | Non presente. | **GAIA unico**. |
-| **Offline SfM** | `UI/Utils/Panorama/` — SIFT SIMD, reconstruction engine, mesh generator, orthomosaic, DEM. ~5,000+ LOC. | Non presente. | **GAIA unico**. |
-| **NeRF** | `Data/Nerf/` — Instant-NGP hash grid, CPU only. ~2,500 LOC. Sperimentale. | Non presente. | **GAIA unico ma sperimentale**. Richiede GPU acceleration per essere praticabile. |
-
-#### Raccomandazione Photogrammetry
-- **Tutto in GAIA** — PRISM non ha equivalenti. È un punto di forza unico di GAIA.
-
----
-
-### 2.5 Seismic Data Processing & Earthquake Simulation
-
-| Aspetto | GAIA | PRISM | Raccomandazione |
-|---|---|---|---|
-| **SEG-Y processing** | `Data/Seismic/` — parser, 6 denoising methods, seismic cube, GIS export. ~3,500 LOC. | `Prism.QUAKE/` — SEG-Y reader, FDSN, miniSEED. `Prism.PDFSEGY/` — raster→SEG-Y. | **Complementari**. GAIA per processing chain (filter/deconv/stack), PRISM per data acquisition (FDSN/miniSEED). |
-| **Earthquake simulation** | `Analysis/Seismology/` — staggered-grid FD, damage mapping, fracture analysis. ~2,500 LOC. 1 test. GPU non implementato. | `SHAKE` (in app) — deterministico wave modelling. Non contiene la stessa catena damage/fracture. | **GAIA** per damage/fracture post-processing. **Verificare** se PRISM SHAKE ha implementazioni più recenti dello stesso solver. |
-| **Seismic inversion** | Non presente. | `PINNACLE/FWI/` — adjoint-state FWI completo. | **PRISM unico**. |
-| **Rock physics** | Empirical relations nei comandi GeoScript (Gardner, Castagna, Gassmann). | `Prism.QUAKE/RockPhysics/` — stessa suite + acoustic/elastic impedance. | **PRISM più strutturato**. GAIA dovrebbe allinearsi. |
-| **Borehole-seismic** | Synthetic seismogram, well-to-seismic tie. | Non presente direttamente. | **GAIA unico**. |
-
-#### Raccomandazione Seismic
-- **Processing chain (GAIA)**: conservare
-- **Earthquake simulation (GAIA)**: conservare, ma **implementare GPU** (il flag `useGpu` esiste ma non è wired)
-- **FDSN/miniSEED (PRISM)**: conservare — unico
-- **FWI (PRISM)**: conservare — unico
-- **Rock physics**: **allineare GAIA a PRISM** (strutturare meglio le relazioni empiriche)
-
----
-
-### 2.6 PhysicoChem / Multiphysics Reactors
-
-| Aspetto | GAIA | PRISM | Raccomandazione |
-|---|---|---|---|
-| **Reactor simulation** | `Analysis/PhysicoChem/` — Darcy/NS flow, heat, reactive transport, nucleation, force fields. + `NuclearReactorSolver` (neutron diffusion, point kinetics, Xe/Sm poisoning). ~2,000 LOC. 2 test. | `Prism.GeoGenesis/Reactor/` — virtual 3D reactor, speciation, precipitation. ~1,200 LOC. | **Complementari**. GAIA più fisica (NS flow, nuclear), PRISM più geochemica. |
-| **Parameter sweep** | `Data/PhysicoChem/ParameterSweep.cs` + `ParameterSweepManager.cs`. | `Prism.BRIDGE/BridgeSweepRunner.cs` — più maturo (calibration, hypothesis ranking). | **PRISM superiore** per orchestration. |
-
-#### Raccomandazione PhysicoChem
-- **Reactor core (GAIA)**: conservare — unico per NS flow + nuclear
-- **Reactor geochemistry (PRISM GeoGenesis)**: conservare
-- **Sweep/orchestration**: usare BRIDGE (PRISM)
-
----
-
-### 2.7 Borehole & Well Data
-
-| Aspetto | GAIA | PRISM | Raccomandazione |
-|---|---|---|---|
-| **LAS parsing** | `Data/Loaders/LASLoader.cs`. | `Prism.Core/LasParser.cs`. | Equivalenti. Allineare a uno solo. |
-| **Well log analysis** | `Data/Borehole/` — lithology editing, correlation, synthetic seismic, porosity/saturation. | `Prism.Core/` — extraction multi-source, lithology, kriging. | **Complementari**. GAIA per editing/correlation, PRISM per data extraction. |
-| **Borehole correlation** | `Data/Borehole/BoreholeLogCorrelation.cs`, `ProfileCorrelationSystem.cs`, 3D viewers. | `Prism.Core/Correlation/` — kriging, Delaunay, isosurface. | **Complementari**. GAIA per well-to-well correlation visuale, PRISM per spatial interpolation. |
-| **Digitizer** | Non presente. | `Prism.BoreholeDigitizer/` — raster→LAS. | **PRISM unico**. |
-
----
-
-### 2.8 GIS & Geological Mapping
-
-| Aspetto | GAIA | PRISM | Raccomandazione |
-|---|---|---|---|
-| **GIS dataset** | `Data/GIS/` — vector/raster, basemaps, geological mapping, subsurface GIS, hydrological analysis, satellite tools. | Non presente come modulo GIS dedicato. | **GAIA unico**. |
-| **Cross-section editor** | `Data/TwoDGeology/` — editor interattivo, structural restoration, animation export. | `Prism.DELVE/` — section building con PINN. | **Complementari**. GAIA per editing interattivo, PRISM per AI-assisted balancing. |
-| **Stratigraphy** | `Business/Stratigraphies/` — 8 sistemi (Int, FR, DE, ES, IT, UK, US, Mammal Ages). | Non presente. | **GAIA unico**. |
-
----
-
-## 3. Sintesi: Cosa Conservare Dove
-
-### 3.1 Moduli da conservare in GAIA (unico o superiore)
-
-| Modulo | Motivo |
+| Affermazione precedente | Correzione |
 |---|---|
-| **CT Imaging & AI Segmentation** | Unico. SAM2/MicroSAM/Grounding DINO + segmentation tools. |
-| **Pore Network Modeling** | Unico. Estrazione da CT, permeabilità, trasporto reattivo. |
-| **NMR Simulation** | Unico. T2 relaxation, T1-T2 maps. |
-| **Thermal Conductivity** | Unico. Homogenisation FEM da CT. |
-| **Acoustic FDTD** | Unico. Velocity-stress su CT. |
-| **Photogrammetry (real-time + offline)** | Unico. SfM completo. |
-| **GeoScript DSL** | Unico. Linguaggio scripting con pipeline `|>`. |
-| **Stratigraphy Manager** | Unico. 8 sistemi nazionali. |
-| **Geothermal classical solver** | Superiore. Modulo più completo (~7,000 LOC, THM, ORC, BTES). |
-| **Thermodynamic solver** | Più esteso. Pitzer, phase diagrams, CT dissolution. |
-| **Compound Library** | Più esteso. 100+ composti con estensioni. |
-| **Petrology (igneous)** | Unico. Cristallizzazione frazionata, Kd library. |
-| **Seismic processing chain** | Unico. 6 denoising methods, seismic cube. |
-| **2D Geological editor** | Unico. Editor interattivo con restoration. |
-| **Borehole correlation** | Superiore per visual correlation e 3D fence diagrams. |
-| **Triaxial lab simulation** | Unico per lab test. |
-| **DEM slope stability** | Unico per discrete element blocks. |
-| **PhysicoChem reactor** | Unico per NS flow + nuclear reactor physics. |
-| **GIS module** | Unico. Vector/raster/subsurface/hydrological. |
+| PRISM ha circa 200 test, GAIA circa 12 | Gli snapshot contengono rispettivamente **1.327** e **24** metodi `[Fact]/[Theory]` nelle suite principali. Sono conteggi statici, non esiti di esecuzione. |
+| PRISM non ha NeRF | PRISM ha **SubNeRF** integrato nell'app; non è un progetto autonomo incluso nella solution. Il suo scopo differisce dall'Instant-NGP di GAIA. |
+| PRISM non ha GIS dedicato | PRISM ha una forte piattaforma cartografica e di acquisizione (Mapsui/SkiaSharp, AOI, basemap, dataset builder, provider geologici). GAIA ha un modello `Dataset` GIS più generalista; non è corretto dedurne che PRISM sia privo di GIS. |
+| Segmentazione è esclusiva GAIA | PRISM ha segmentazione 3D di volumi/reservoir; GAIA è avanti nella segmentazione CT e nell'inferenza ONNX. |
+| Geothermal classico: GAIA superiore in generale | GAIA ha solver classici e componenti core/system-scale validi; PRISM è superiore nel workflow field-scale integrato con reservoir, tomography, PINN, BHE e economics. |
+| PRISM fa solo upper-bound in geotecnica | PRISM combina FORGE, FEM esplicito, CASCADE, Newmark, jointed rock, InSAR e assimilazione BRIDGE. |
+| GAIA è superiore in borehole correlation | GAIA ha buoni strumenti specialistici; PRISM copre una catena più ampia da estrazione/digitizzazione a interpolazione, modello e viewport. |
+| PRISM dovrebbe migrare da TorchSharp a ONNX | Non come sostituzione generale: ONNX Runtime è adatto all'inferenza portabile; TorchSharp è necessario per training/autograd dei PINN. Ha senso esportare modelli compatibili, non eliminare il backend di training. |
+| Il fix corretto per IAPWS-97 è “usare Kell” | Una correlazione Kell può essere valida nel proprio intervallo per acqua liquida, ma non sostituisce IAPWS-IF97 nell'intero dominio termodinamico. Servono regione, unità e benchmark ufficiali. |
 
-### 3.2 Moduli da conservare in PRISM (unico o superiore)
+## 7. Problemi tecnici da trattare con cautela
 
-| Modulo | Motivo |
-|---|---|
-| **Tutti i PINN (6 moduli)** | Unico. TorchSharp autograd, physics losses. |
-| **InSAR/TomoSAR (ECHO)** | Unico. Pipeline completa. |
-| **FWI (PINNACLE)** | Unico. Adjoint-state inversion. |
-| **Limit Analysis (FORGE)** | Superiore. 14 test, upper-bound 2D/3D, Newmark. |
-| **Explicit FEM Geotech** | Superiore. CPU↔GPU parity, VTK export, Gmsh import. |
-| **BRIDGE orchestrator** | Unico. What-if, counterfactual, sweep, calibration. |
-| **ReservoirFluxEngine** | Unico. TOUGH2-class Newton, IAPWS-97. |
-| **CASCADE geohazards** | Unico. Flood, landslide, coastal, meteo. |
-| **WaveEngines** | Unico. SWE spectral + HydroFlux con GPU. |
-| **FDSN/miniSEED/QuakeML** | Unico. Web services sismologici. |
-| **DELVE section balancing** | Unico. PINN-assisted structural balancing. |
-| **TerraYield economics** | Superiore. LCOE/LCOH, 17 drilling cost models. |
-| **Borehole Digitizer** | Unico. Raster→LAS. |
-| **PDFSEGY** | Unico. Raster→SEG-Y. |
-| **Data extraction (Core)** | Superiore. Multi-source (ISPRA/SGI/EGDI/USGS). |
+### 7.1 GAIA
 
-### 3.3 Moduli con valore in entrambi (complementari a scale diverse)
+- `EstimateContactArea()` nel DEM e lock ordering richiedono un audit dedicato prima di dichiarare affidabilità ingegneristica.
+- Flag SIMD/GPU non collegati non devono essere presentati come accelerazione disponibile.
+- La copertura di test è troppo ridotta rispetto alla superficie numerica del prodotto.
+- Le feature uniche devono essere accompagnate da benchmark quantitativi, non solo da presenza nel codice.
+- Nullable e warning soppressi riducono la capacità del build di evidenziare difetti.
 
-| Capacità | GAIA ruolo | PRISM ruolo |
-|---|---|---|
-| **Slope stability** | DEM (pore/block scale) | Limit analysis + FEM (engineering scale) |
-| **Geothermal** | Classical solver + ORC (system design) | PINN + ReservoirFlux (field-scale inversion) |
-| **Thermodynamics** | Equilibrium + reactive transport (CT/pore scale) | Reservoir-scale reactive transport (TOUGHREACT-style) |
-| **Seismic** | Processing chain + earthquake simulation | FWI + FDSN + tomography |
-| **Borehole** | Editing + correlation + synthetic seismic | Data extraction + digitizing + kriging |
-| **Photogrammetry/NeRF** | Reconstruction pipeline | — |
-| **Multiphase flow** | Core-scale EOS | Reservoir-scale (ReservoirFluxEngine) |
+### 7.2 PRISM
 
----
+- L'ampiezza della suite non dimostra automaticamente validazione peer-reviewed di ogni modulo.
+- Alcuni percorsi GPU/OpenCL hanno fallback CPU, ma la parity va documentata per singolo kernel e device.
+- La grande `PrismApp` partial e la costruzione diretta dei servizi aumentano accoppiamento e costo di manutenzione.
+- `Prism.SubNeRF` e `Prism.Orchestrator` presenti nell'albero ma fuori solution possono creare ambiguità documentale.
+- Feature definite come roadmap o prepared interface non devono apparire nelle matrici come complete.
+- L'uso di numerosi provider esterni richiede test periodici di endpoint, schema, licenza e provenance.
 
-## 4. Bug e Fix da Trasferire da PRISM a GAIA
+## 8. Roadmap di convergenza aggiornata
 
-Questi sono problemi identificati in GAIA che PRISM ha già risolto:
+### Priorità 0 — Contratto e inventario
 
-| # | Bug in GAIA | Fix in PRISM | File PRISM di riferimento |
-|---|---|---|---|
-| 1 | **IAPWS-97 density (Region 1)** — può ritornare ~5 kg/m³ invece di ~997 kg/m³ | Sostituito con Kell (1975) polynomial validato | `Prism.GeoGenesis/Thermodynamics/WaterProperties.cs` |
-| 2 | **SlopeStability `EstimateContactArea()`** ritorna sempre `1.0f` | PRISM non ha DEM, ma il pattern di contatto in `GeotechExplicitSolver` gestisce area correttamente via tet mesh | `Prism.Geotech/Physics/GeotechExplicitSolver.cs` |
-| 3 | **SlopeStability lock ordering** — `lock(A) lock(B)` può deadlockare se gli ID si invertono | PRISM Geotech non usa lock espliciti (parallelismo a livello elementale) | — |
-| 4 | **SIMD dichiarato ma non usato** in SlopeStability (`UseSIMD` flag non wired) | PRISM usa `System.Runtime.Intrinsics` effettivamente in GeoGenesis Thermodynamics | `Prism.GeoGenesis/Thermodynamics/ThermodynamicsSIMD.cs` |
-| 5 | **Seismology GPU non implementato** (`useGpu` flag esiste ma non wired) | PRISM HydroFlux GPU self-validates contro CPU prima di usare | `Prism.CASCADE.WaveEngines/HydroFlux/HydroFluxOpenCL.cs` |
-| 6 | **Multiphase flow semplificato** — enthalpy-based quality invece di flash completo | `ReservoirFluxEngine` ha phase transition handling completo con root finder lungo curva di saturazione | `Prism.ReservoirFluxEngine/EOS/EosWaterEnergy.cs` |
+1. Generare automaticamente un capability manifest per entrambi i repository: modulo, entry point, input, output, backend, test, benchmark, stato sperimentale.
+2. Definire una tassonomia comune delle scale: voxel/pore, plug/core, well, reservoir, field/basin, regional.
+3. Vietare nei documenti i giudizi “superiore/eccellente” privi di criterio, evidenza e snapshot.
 
----
+### Priorità 1 — Ponte GAIA digital-rock → PRISM subsurface
 
-## 5. Raccomandazioni Architetturali
+4. Esportare da GAIA porosità, permeabilità tensoriale, tortuosità, saturazione, conducibilità, Vp/Vs e incertezza.
+5. Importare tali proprietà in PRISM come priors versionati per CRAFT, SubNeRF, QUAKE e ReservoirFlux.
+6. Conservare nel manifest provenienza CT, voxel size, segmentazione, REV, metodo di upscaling e unità.
 
-### 5.1 Divisione del lavoro tra piattaforme
+### Priorità 2 — Interoperabilità
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        UTENTE FINALE                             │
-│  (geoscienziato, ingegnere, ricercatore)                         │
-└──────────────┬──────────────────────────┬────────────────────────┘
-               │                          │
-     ┌─────────▼──────────┐    ┌─────────▼──────────┐
-     │       GAIA         │    │       PRISM        │
-     │  (Core & Imaging)  │    │  (Basin & AI)      │
-     │                    │    │                    │
-     │  • CT/μCT imaging  │    │  • PINN (6 moduli) │
-     │  • AI segmentation │    │  • InSAR (ECHO)    │
-     │  • PNM/NMR         │    │  • FWI             │
-     │  • Acoustic FDTD   │    │  • BRIDGE          │
-     │  • Thermal cond.   │    │  • CASCADE         │
-     │  • Photogrammetry  │    │  • ReservoirFlux   │
-     │  • Geochemistry    │    │  • FORGE           │
-     │  • GeoScript DSL   │    │  • QUAKE/FDSN      │
-     │  • Seismic proc.   │    │  • DELVE           │
-     │  • 2D geology      │    │  • TerraYield      │
-     └────────┬───────────┘    └────────┬───────────┘
-              │                         │
-              └──────────┬──────────────┘
-                         │
-              ┌──────────▼──────────┐
-              │   INTERFACCIA       │
-              │   (API/NodeEndpoint │
-              │    / file exchange) │
-              └─────────────────────┘
-```
+7. Preferire VTK/VTI/VTU, NetCDF/CF, GeoTIFF, SEG-Y, LAS, QuakeML/StationXML/miniSEED e JSON schema versionati.
+8. Non usare `.gtp` come formato comune primario: è un contenitore applicativo GAIA, meno interoperabile di standard espliciti.
+9. Definire CRS, asse verticale, datum, convenzione di profondità, ordine degli assi, unità e NoData in ogni scambio.
 
-### 5.2 Condivisione di dati tra piattaforme
+### Priorità 3 — Riutilizzo senza duplicazione
 
-- **GAIA → PRISM**: GAIA può esportare proprietà di roccia (porosità, permeabilità, conductività termica, Vp/Vs) derivate da CT/PNM come **tabelle di lookup** o **volumi voxelizzati** che PRISM può usare come prior nei PINN o come input mesh per ReservoirFlux.
-- **PRISM → GAIA**: PRISM può esportare modelli 3D invertiti (velocity models, stress fields, temperature fields) come **volumi** che GAIA può visualizzare nel suo viewer 3D.
-- **Formato comune**: usare formato binario GAIA (`.gtp` project + dataset DTO) o NetCDF/VTK come ponte.
+10. Esporre GeoScript come producer/preprocessor e PRISM CLI/API come consumer tipizzato.
+11. Evitare copie manuali di termodinamica e geochimica: estrarre librerie condivise soltanto dopo test di equivalenza e analisi delle dipendenze.
+12. Usare PRISM BRIDGE per scenari multi-scala richiamando adapter GAIA headless, con cancellazione e manifest degli artifact.
 
-### 5.3 Standard scientifici condivisi
+### Priorità 4 — Certificazione scientifica
 
-Entrambe le piattaforme dovrebbero adottare:
-- **ONNX Runtime** come unico backend AI (GAIA già lo usa, PRISM usa TorchSharp — considerare migrazione o bridge)
-- **OpenCL via Silk.NET** (già condiviso)
-- **xUnit verification tests** con citazioni peer-reviewed (PRISM è il gold standard qui — ~200 test vs ~12 di GAIA)
-- **AGENTS.md multi-agent system** (già condiviso, allineare gli agent)
+13. Portare in GAIA il pattern di test analitici/benchmark con DOI e tolleranza, iniziando dai moduli unici.
+14. Classificare anche i test PRISM in unit, integration, parity, analytic benchmark e published-data validation.
+15. Creare benchmark congiunti CT→PNM→upscaling→ReservoirFlux e seismic acquisition→PULSE/QUAKE→geological consistency.
 
----
+## 9. Decisione finale
 
-## 6. Roadmap di Consolidamento (priorità)
+La convergenza non deve essere presentata come un equilibrio tra due piattaforme di maturità generale equivalente.
 
-### Priorità 1 — Fix critici (immediato)
-1. **Trasferire fix IAPWS-97 density** da PRISM a GAIA (`WaterProperties.cs`)
-2. **Fix lock ordering** in GAIA SlopeStability DEM
-3. **Implementare GPU path** in GAIA Seismology (`useGpu` flag è già presente)
+**PRISM è il candidato naturale a piattaforma principale per il modello geoscientifico integrato e operativo.** È più avanti per ampiezza dei workflow, integrazione tra osservazioni e modelli, AI scientifica, inversione, scenari, ranking, geohazard, reservoir, automazione e copertura di test.
 
-### Priorità 2 — Allineamento (breve termine)
-4. **Aggiungere verification tests** a GAIA moduli senza test: ThermalConductivity, NMR, TextureClassification, Seismic processing (seguire il pattern PRISM con citazioni DOI)
-5. **Wire up SIMD** effettivo in GAIA SlopeStability o rimuovere il flag `UseSIMD`
-6. **Strutturare rock physics** in GAIA come classe dedicata (allineare a `Prism.QUAKE/RockPhysics.cs`)
+**GAIA non va ridotta né assorbita:** ha una specializzazione preziosa e difficilmente sostituibile nel digital rock, nell'imaging, nel PNM/NMR, nelle simulazioni voxel-based, nella fotogrammetria e nell'automazione GeoScript. Il suo valore cresce se diventa il laboratorio/core-scale engine che produce proprietà e vincoli con provenance per PRISM.
 
-### Priorità 3 — Integrazione (medio termine)
-7. **Definire API contract** tra GAIA e PRISM per scambio volumi/proprietà
-8. **Ponte CT→Reservoir**: GAIA estrae PNM properties → PRISM le usa come prior in ReservoirFlux
-9. **Ponte PINN→Visualizer**: PRISM addestra PINN → GAIA visualizza i risultati 3D
-10. **GeoScript come orchestrator**: estendere GeoScript per lanciare comandi PRISM via NodeEndpoint
+La direzione raccomandata è quindi:
 
-### Priorità 4 — Innovazione congiunta (lungo termine)
-11. **PINN su CT data**: usare PINN PRISM come metodo alternativo alla FDTD GAIA per acoustic/thermal simulation su volumi CT
-12. **BRIDGE per multi-scale**: estendere BRIDGE (PRISM) per orchestrare workflow GAIA (CT→PNM→upscaling→reservoir)
-13. **Foundation model congiunto**: pre-training su dataset CT (GAIA) + inversione geofisica (PRISM)
+> **GAIA misura, segmenta, simula e fa upscaling dalla microstruttura; PRISM acquisisce, integra, inverte, assimila, valuta scenari e costruisce il modello 3D/4D del sottosuolo.**
 
----
-
-## 7. Tabella Riassuntiva Finale
-
-| Area | GAIA | PRISM | Conservare in | Note |
-|---|---|---|---|---|
-| CT Imaging & Segmentation | ✅ eccellente | ❌ | **GAIA** | Unico |
-| PNM | ✅ eccellente | ❌ | **GAIA** | Unico |
-| NMR | ✅ buono | ❌ | **GAIA** | Unico |
-| Thermal Conductivity | ✅ buono | ❌ | **GAIA** | Unico |
-| Acoustic FDTD | ✅ buono | ❌ | **GAIA** | Unico |
-| Photogrammetry | ✅ buono | ❌ | **GAIA** | Unico |
-| GeoScript | ✅ eccellente | ❌ | **GAIA** | Unico |
-| Stratigraphy | ✅ buono | ❌ | **GAIA** | Unico |
-| Petrology | ✅ buono | ❌ | **GAIA** | Unico |
-| Geothermal (classical) | ✅ eccellente | ❌ | **GAIA** | Miglior modulo |
-| Thermodynamics | ✅ esteso | ✅ simile | **GAIA** (fix da PRISM) | Verificare bug density |
-| Compound Library | ✅ esteso | ✅ simile | **GAIA** | Più completo |
-| Seismic processing | ✅ buono | — | **GAIA** | PRISM ha FDSN separato |
-| 2D Geology editor | ✅ buono | ❌ | **GAIA** | Unico |
-| GIS | ✅ buono | ❌ | **GAIA** | Unico |
-| DEM slope stability | ✅ buono | ❌ | **GAIA** | Unico (DEM) |
-| Triaxial simulation | ✅ buono | ❌ | **GAIA** | Unico |
-| PhysicoChem reactor | ✅ buono | ✅ simile | **GAIA** (nuclear unico) | |
-| PINN (tutti) | ❌ | ✅ eccellente | **PRISM** | Unico |
-| InSAR/TomoSAR | ❌ | ✅ eccellente | **PRISM** | Unico |
-| FWI | ❌ | ✅ buono | **PRISM** | Unico |
-| Limit Analysis | ❌ | ✅ eccellente | **PRISM** | 14 test |
-| Explicit FEM Geotech | ❌ | ✅ eccellente | **PRISM** | GPU parity |
-| BRIDGE | ❌ | ✅ eccellente | **PRISM** | Unico |
-| ReservoirFlux | ❌ | ✅ eccellente | **PRISM** | Unico |
-| CASCADE hazards | ❌ | ✅ eccellente | **PRISM** | Unico |
-| WaveEngines | ❌ | ✅ eccellente | **PRISM** | Unico |
-| FDSN/miniSEED | ❌ | ✅ buono | **PRISM** | Unico |
-| DELVE balancing | ❌ | ✅ buono | **PRISM** | Unico |
-| TerraYield | ❌ | ✅ buono | **PRISM** | Unico |
-| Borehole Digitizer | ❌ | ✅ buono | **PRISM** | Unico |
-| Data extraction | ❌ | ✅ eccellente | **PRISM** | Unico |
-| NeRF | ⚠️ sperimentale | ❌ | **GAIA** (da maturare) | CPU-only, lento |
-| Texture Classification | ⚠️ sperimentale | ❌ | **GAIA** (da maturare) | Simplistic features |
+Questa separazione riconosce correttamente che, per molti aspetti cruciali, PRISM è già molto più avanti, senza cancellare le aree in cui GAIA rimane realmente unica.
