@@ -2286,33 +2286,17 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         {
             try
             {
-                // Try to get GraphicsDevice from VeldridManager
-                var graphicsDevice = VeldridManager.GraphicsDevice;
-
-                if (graphicsDevice != null)
-                {
-                    _orcVisualization = new ORCVisualization(graphicsDevice);
+                _orcVisualization = new ORCVisualization();
 
                     // Extract temperature range from results
-                    float[] temps = new float[_orcResults.Length];
-                    for (int i = 0; i < _orcResults.Length; i++)
-                    {
-                        temps[i] = _orcResults[i].GeothermalFluidInletTemp;
-                    }
+                float[] temps = new float[_orcResults.Length];
+                for (int i = 0; i < _orcResults.Length; i++)
+                    temps[i] = _orcResults[i].GeothermalFluidInletTemp;
 
-                    _orcVisualization.UpdateResults(_orcResults, temps);
+                _orcVisualization.UpdateResults(_orcResults, temps);
 
-                    if (_economicResults != null)
-                    {
-                        _orcVisualization.UpdateEconomics(_economicResults);
-                    }
-                }
-                else
-                {
-                    // Fallback handled by null _orcVisualization in Render logic below
-                    Logger.LogWarning("GraphicsDevice not available for ORC visualization. Using text fallback.");
-                    _orcVisualization = null;
-                }
+                if (_economicResults != null)
+                    _orcVisualization.UpdateEconomics(_economicResults);
             }
             catch (Exception ex)
             {

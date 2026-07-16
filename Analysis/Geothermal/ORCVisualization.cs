@@ -1,7 +1,6 @@
 using System;
 using System.Numerics;
 using ImGuiNET;
-using Veldrid;
 
 namespace GAIA.Analysis.Geothermal
 {
@@ -11,7 +10,6 @@ namespace GAIA.Analysis.Geothermal
     /// </summary>
     public class ORCVisualization : IDisposable
     {
-        private GraphicsDevice _graphicsDevice;
         private ORCSimulation.ORCCycleResults[] _results;
         private float[] _temperatureRange;
         private EconomicResults _economics;
@@ -27,10 +25,7 @@ namespace GAIA.Analysis.Geothermal
         private float _maxValue;
         private float[] _plotData;
 
-        public ORCVisualization(GraphicsDevice graphicsDevice)
-        {
-            _graphicsDevice = graphicsDevice;
-        }
+        public ORCVisualization() { }
 
         #region Data Update
 

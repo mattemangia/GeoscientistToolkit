@@ -5,7 +5,6 @@ using GAIA.Data.TwoDGeology;
 using GAIA.Business.GIS;
 using GAIA.Util;
 using ImGuiNET;
-using Veldrid;
 using static GAIA.Business.GIS.GeologicalMapping;
 using static GAIA.Business.GIS.GeologicalMapping.CrossSectionGenerator;
 using static GAIA.Business.GIS.GeologicalMapping.ProfileGenerator;
