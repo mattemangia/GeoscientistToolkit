@@ -495,6 +495,17 @@ layout(set = 0, binding = 0) uniform Constants
     mat4 ViewProj;
     mat4 InvView;
     vec4 CameraPosition;
+    vec4 VolumeSize;
+    vec4 ThresholdParams;
+    vec4 SliceParams;
+    vec4 RenderParams;
+    vec4 CutPlaneX;
+    vec4 CutPlaneY;
+    vec4 CutPlaneZ;
+    vec4 ClippingPlanesData[8];
+    vec4 ClippingPlanesInfo;
+    vec4 PreviewParams;
+    vec4 PreviewAlpha;
 };
 
 layout(location = 0) out vec3 out_ModelPos;

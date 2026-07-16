@@ -37,15 +37,13 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         YZOnly
     }
 
-    private static readonly ProgressBarDialog _progressDialog = new("Loading 3D Viewer");
-
     // ADDED: Colormap data for 2D slices
     private static Vector3[,] _colormapData;
     private readonly List<(Vector2, Vector2)> _cachedIsocontoursXY = new();
     private readonly List<(Vector2, Vector2)> _cachedIsocontoursXZ = new();
     private readonly List<(Vector2, Vector2)> _cachedIsocontoursYZ = new();
     private readonly CtImageStackDataset _dataset;
-    private readonly CtSegmentationIntegration _interactiveSegmentation;
+    private CtSegmentationIntegration _interactiveSegmentation;
     private readonly Dictionary<byte, float> _materialOpacity = new();
     private readonly Dictionary<byte, bool> _materialVisibility = new();
     private readonly CtRenderingPanel _renderingPanel;
@@ -53,6 +51,12 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private (int slice, int numContours) _cachedKeyXZ = (-1, -1);
     private (int slice, int numContours) _cachedKeyYZ = (-1, -1);
     private bool _isInitialized;
+    private bool _renderThreadInitializationStarted;
+    private Task _loadingTask;
+    private volatile float _loadingProgress;
+    private volatile string _loadingStatus = "Preparing CT stack...";
+    private string _loadingError;
+    private string _volumeRenderError;
     private bool _isPoppedOut;
     private bool _needsUpdateXY = true;
     private bool _needsUpdateXZ = true;
@@ -77,30 +81,11 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     public CtCombinedViewer(CtImageStackDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
-        _dataset.Load();
 
         InitializeColormaps();
 
-        CtSegmentationIntegration.Initialize(_dataset);
-        _interactiveSegmentation = CtSegmentationIntegration.GetInstance(_dataset);
-
         _renderingPanel = new CtRenderingPanel(this, _dataset);
         _renderingPanelOpen = true;
-
-        if (_dataset.VolumeData == null)
-            Logger.LogWarning("[CtCombinedViewer] VolumeData not ready yet; viewer will update once loaded.");
-        else
-            Logger.Log($"[CtCombinedViewer] Dataset dimensions: {_dataset.Width}×{_dataset.Height}×{_dataset.Depth}");
-
-        _sliceX = _dataset.Width / 2;
-        _sliceY = _dataset.Height / 2;
-        _sliceZ = _dataset.Depth / 2;
-
-        foreach (var material in _dataset.Materials)
-        {
-            _materialVisibility[material.ID] = material.IsVisible;
-            _materialOpacity[material.ID] = 1.0f;
-        }
 
         ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
         CalibrationIntegration.PreviewChanged += _ => { _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true; };
@@ -108,7 +93,10 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         CtImageStackTools.PreviewChanged += OnGenericPreviewChanged;
         AcousticIntegration.OnPositionsChanged += OnAcousticPositionsChanged;
 
-        _ = InitializeAsync();
+        // ProjectManager collections belong to the UI thread; capture the partner here,
+        // then perform only dataset I/O/decompression in the worker.
+        _streamingDataset = FindStreamingDataset();
+        _loadingTask = Task.Run(LoadDatasetResources);
     }
 
     public SliceDisplayMode CurrentSliceDisplayMode { get; set; } = SliceDisplayMode.Grayscale;
@@ -225,8 +213,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
         if (!_isInitialized)
         {
-            _progressDialog.Submit();
-            ImGui.Text("Loading 3D viewer...");
+            AdvanceViewerInitializationOnRenderThread();
+            DrawLoadingState();
             return;
         }
 
@@ -283,9 +271,11 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 break;
             case ViewModeEnum.VolumeOnly:
                 if (VolumeViewer != null)
-                    VolumeViewer.DrawContent(ref zoom, ref pan);
+                    DrawVolumeSafely(ref zoom, ref pan);
                 else
-                    ImGui.Text("No 3D volume dataset available.");
+                    ImGui.TextWrapped(string.IsNullOrWhiteSpace(_volumeRenderError)
+                        ? "No 3D volume dataset available."
+                        : "3D rendering was disabled: " + _volumeRenderError);
                 break;
             case ViewModeEnum.XYOnly:
                 DrawSliceView(0, "XY (Axial)", ref _zoomXY, ref _panXY, ref _needsUpdateXY, ref _textureXY);
@@ -482,34 +472,85 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         _isPoppedOut = isPoppedOut;
     }
 
-    private async Task InitializeAsync()
+    private void LoadDatasetResources()
     {
-        await Task.Run(() =>
+        try
         {
-            _progressDialog.Update(0.1f, "Finding streaming dataset...");
-            _streamingDataset = FindStreamingDataset();
+            _loadingProgress = 0.08f;
+            _loadingStatus = "Loading CT volume and labels...";
+            _dataset.Load();
+            _loadingProgress = 0.45f;
+            _loadingStatus = "Loading the multiresolution volume...";
+            if (_streamingDataset != null) _streamingDataset.Load();
+            _loadingProgress = 0.7f;
+            _loadingStatus = "Volume data ready; initializing the viewer...";
+        }
+        catch (Exception ex)
+        {
+            _loadingError = ex.Message;
+            Logger.LogError($"[CtCombinedViewer] CT loading failed: {ex}");
+        }
+    }
+
+    private void AdvanceViewerInitializationOnRenderThread()
+    {
+        if (_renderThreadInitializationStarted || _loadingTask == null || !_loadingTask.IsCompleted) return;
+        _renderThreadInitializationStarted = true;
+        if (!string.IsNullOrWhiteSpace(_loadingError)) return;
+        try
+        {
+            _loadingProgress = 0.78f;
+            _loadingStatus = "Initializing segmentation and slice views...";
+            CtSegmentationIntegration.Initialize(_dataset);
+            _interactiveSegmentation = CtSegmentationIntegration.GetInstance(_dataset);
+            _sliceX = _dataset.Width / 2;
+            _sliceY = _dataset.Height / 2;
+            _sliceZ = _dataset.Depth / 2;
+            foreach (var material in _dataset.Materials)
+            {
+                _materialVisibility[material.ID] = material.IsVisible;
+                _materialOpacity[material.ID] = 1.0f;
+            }
 
             if (_streamingDataset != null)
             {
-                _progressDialog.Update(0.5f, "Creating 3D volume viewer...");
-                VolumeViewer = new CtVolume3DViewer(_streamingDataset);
-
-                if (VolumeViewer != null)
+                _loadingProgress = 0.88f;
+                _loadingStatus = "Creating GPU volume resources...";
+                // Veldrid/OpenGL resources must be created on the render thread.
+                VolumeViewer = new CtVolume3DViewer(_streamingDataset)
                 {
-                    _progressDialog.Update(0.8f, "Configuring volume renderer...");
-                    VolumeViewer.ShowGrayscale = ShowVolumeData;
-                    VolumeViewer.StepSize = 2.0f;
-                    VolumeViewer.MinThreshold = 0.05f;
-                    VolumeViewer.MaxThreshold = 0.8f;
-                    UpdateVolumeViewerSlices();
-                }
+                    ShowGrayscale = ShowVolumeData,
+                    StepSize = 2.0f,
+                    MinThreshold = 0.05f,
+                    MaxThreshold = 0.8f
+                };
+                UpdateVolumeViewerSlices();
             }
+            _loadingProgress = 1.0f;
+            _loadingStatus = "Viewer ready";
+            _isInitialized = true;
+            Logger.Log($"[CtCombinedViewer] Dataset ready: {_dataset.Width}×{_dataset.Height}×{_dataset.Depth}");
+        }
+        catch (Exception ex)
+        {
+            _loadingError = ex.Message;
+            Logger.LogError($"[CtCombinedViewer] Viewer initialization failed: {ex}");
+        }
+    }
 
-            _progressDialog.Update(1.0f, "Complete!");
-        });
-
-        _isInitialized = true;
-        _progressDialog.Close();
+    private void DrawLoadingState()
+    {
+        var available = ImGui.GetContentRegionAvail();
+        var width = Math.Clamp(available.X - 80f, 260f, 620f);
+        ImGui.SetCursorPosY(Math.Max(ImGui.GetCursorPosY() + 30f, available.Y * 0.25f));
+        ImGui.SetCursorPosX(Math.Max(20f, (available.X - width) * 0.5f));
+        ImGui.BeginGroup();
+        ImGui.TextUnformatted("Opening CT stack");
+        ImGui.TextWrapped(string.IsNullOrWhiteSpace(_loadingError) ? _loadingStatus : "Unable to open the CT viewer");
+        ImGui.ProgressBar(_loadingProgress, new Vector2(width, 22f), $"{_loadingProgress * 100:0}%");
+        if (!string.IsNullOrWhiteSpace(_loadingError))
+            ImGui.TextColored(new Vector4(1f, 0.35f, 0.3f, 1f), _loadingError);
+        ImGui.EndGroup();
     }
 
     private StreamingCtVolumeDataset FindStreamingDataset()
@@ -635,7 +676,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
             VolumeViewer.ShowGrayscale = ShowVolumeData;
 
-            VolumeViewer.DrawContent(ref dummyZoom, ref dummyPan);
+            DrawVolumeSafely(ref dummyZoom, ref dummyPan);
             ImGui.EndChild();
         }
         else
@@ -646,6 +687,29 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         }
 
         ImGui.EndChild();
+    }
+
+    private void DrawVolumeSafely(ref float zoom, ref Vector2 pan)
+    {
+        if (!string.IsNullOrWhiteSpace(_volumeRenderError))
+        {
+            ImGui.TextColored(new Vector4(1f, 0.45f, 0.25f, 1f), "3D renderer unavailable");
+            ImGui.TextWrapped(_volumeRenderError);
+            return;
+        }
+        try
+        {
+            VolumeViewer?.DrawContent(ref zoom, ref pan);
+        }
+        catch (Exception ex)
+        {
+            _volumeRenderError = ex.InnerException?.Message ?? ex.Message;
+            Logger.LogError($"[CtCombinedViewer] 3D rendering disabled after a recoverable graphics error: {ex}");
+            try { VolumeViewer?.Dispose(); } catch { /* graphics device may already be faulted */ }
+            VolumeViewer = null;
+            ImGui.TextColored(new Vector4(1f, 0.45f, 0.25f, 1f), "3D renderer unavailable");
+            ImGui.TextWrapped(_volumeRenderError);
+        }
     }
 
     private void DrawSlicesOnlyView()
