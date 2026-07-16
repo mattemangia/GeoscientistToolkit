@@ -18,9 +18,46 @@ La precedente lettura “GAIA = core/imaging, PRISM = basin/AI” coglie una par
 
 La strategia corretta non è una divisione simmetrica né la migrazione automatica di moduli in base al numero di righe:
 
-- **PRISM deve essere il sistema principale** per costruzione del modello di sottosuolo, geofisica/inversione, remote sensing, geohazard, reservoir/geotermia field-scale, AI physics-informed, scenari e decision support.
-- **GAIA deve essere il sistema specializzato** per imaging e caratterizzazione di laboratorio/core/pore-scale, estrazione di proprietà da CT, simulazioni voxel-based e automazione GeoScript.
-- L'integrazione deve avvenire mediante contratti versionati e formati standard; non copiando interi solver tra repository.
+- **GAIA deve operare intenzionalmente alla piccola scala**: immagine/voxel, poro, rete di pori, campione e carota (*pore-to-core scale*). Deve ricavare da CT/µCT e dati di laboratorio proprietà fisiche, petrofisiche, termiche, acustiche e geochimiche con relativa incertezza.
+- **PRISM deve operare intenzionalmente alla grande scala**: pozzo, reservoir, campo/bacino e regione (*well-to-regional scale*). Deve usare osservazioni territoriali e proprietà efficaci per costruire, invertire e simulare il modello 3D/4D del sottosuolo.
+- **Un bridge/adapter GAIA–PRISM deve collegare le due scale**: esegue upscaling delle proprietà prodotte da GAIA, le converte in priors/material laws/parametri per PRISM e, quando utile, riporta verso GAIA condizioni al contorno e regioni critiche per simulazioni small-scale più dettagliate.
+- L'integrazione deve avvenire mediante contratti versionati e formati standard, non copiando interi solver tra repository.
+
+### 1.1 Visione multi-scala vincolante
+
+La separazione per scala è una scelta di prodotto e deve guidare le future implementazioni:
+
+```text
+CT/µCT e laboratorio
+        │
+        ▼
+GAIA — voxel / pore / plug / core
+  segmentazione → PNM/NMR → simulazioni → proprietà efficaci + incertezza
+        │
+        ▼
+GAIA–PRISM Bridge
+  REV check → upscaling → unità/CRS → provenance → mapping su mesh/voxel
+        │
+        ▼
+PRISM — well / reservoir / field / basin / region
+  priors → inversione/assimilazione → simulazioni accoppiate → scenari 3D/4D
+        │
+        └──────── condizioni al contorno / zone critiche ────────┐
+                                                                  ▼
+                                                    raffinamento in GAIA
+```
+
+Il bridge non è quindi un semplice convertitore di file. È il componente scientifico che rende coerente il passaggio di scala e deve:
+
+- verificare l'esistenza di un Representative Elementary Volume (REV) o dichiarare che l'upscaling non è rappresentativo;
+- trasformare proprietà scalari e tensoriali preservando unità, anisotropia e orientazione;
+- propagare distribuzioni, intervalli di confidenza e sensibilità, non soltanto valori medi;
+- associare ogni parametro a campione, litologia, facies, profondità, metodo e versione;
+- mappare le proprietà GAIA sulle celle/mesh/materiali di CRAFT, ReservoirFlux, SubNeRF, QUAKE, FORGE e altri moduli PRISM;
+- supportare il percorso inverso PRISM → GAIA per boundary conditions, stress, pressione, temperatura, saturazione e composizione locale;
+- produrre un report di conservazione e mismatch per massa, energia, porosità e proprietà trasportate.
+
+Una simulazione complessa può così usare PRISM per il contesto regionale/reservoir e richiamare GAIA solo nelle zone dove microstruttura e processi pore-scale controllano la risposta macroscopica.
 
 ## 2. Metodo e significato dei giudizi
 
@@ -223,6 +260,31 @@ PRISM è comunque più avanzato nella gestione operativa di litologie, correlazi
 | Scripting di trasformazione | **GAIA** | PRISM CLI per workflow applicativi | GeoScript e CLI risolvono problemi diversi. |
 | Visualizzazione integrata 3D/4D | **PRISM** | GAIA per viewer per-dataset | PRISM registra modelli e simulazioni nello stesso spazio interrogabile. |
 
+### 5.1 Contratto minimo del bridge/adapter
+
+Ogni trasferimento GAIA → PRISM deve contenere almeno:
+
+| Gruppo | Campi minimi |
+|---|---|
+| Identità | ID campione, dataset sorgente, litologia/facies, versione del workflow e timestamp. |
+| Geometria | Voxel size, dimensioni, REV utilizzato, scala di supporto, CRS/datum quando georiferito. |
+| Proprietà | Porosità, permeabilità scalare/tensoriale, tortuosità, saturazione, densità, conducibilità termica, capacità termica, Vp/Vs e proprietà geochimiche disponibili. |
+| Statistica | Media/mediana, varianza o intervallo, numero di campioni/realizzazioni, metodo di upscaling e quality flags. |
+| Orientazione | Sistema di assi, tensori, direzione di bedding/fratture e convenzione verticale. |
+| Provenance | CT e preprocessing, segmentazione/modello, soglie, solver, parametri, commit e riferimenti di validazione. |
+| Destinazione | Modulo PRISM, dominio/celle target, regola di mapping e comportamento fuori dal supporto osservato. |
+
+L'output non deve essere considerato valido se mancano unità, scala di supporto, metodo di upscaling o indicazione dell'incertezza. Il bridge deve rifiutare mapping dimensionalmente incompatibili anziché applicare default silenziosi.
+
+### 5.2 Modalità operative previste
+
+1. **One-way upscaling:** GAIA produce proprietà efficaci; PRISM le usa come input o prior.
+2. **Iterative coupling:** PRISM invia boundary conditions a GAIA; GAIA ricalcola la risposta locale; PRISM aggiorna il modello grande-scala fino a convergenza.
+3. **Adaptive refinement:** PRISM identifica celle ad alta incertezza o forte non linearità e richiede nuove simulazioni GAIA soltanto per quelle facies/condizioni.
+4. **Surrogate generation:** GAIA campiona lo spazio locale di pressione, temperatura, saturazione, stress e composizione; il bridge costruisce una material law o surrogate utilizzabile efficientemente da PRISM.
+
+La prima implementazione dovrebbe essere one-way e file/API-based. Il coupling iterativo va introdotto soltanto dopo aver definito criteri di convergenza, conservazione, caching e riproducibilità.
+
 ## 6. Correzioni di affermazioni precedenti
 
 | Affermazione precedente | Correzione |
@@ -266,27 +328,31 @@ PRISM è comunque più avanzato nella gestione operativa di litologie, correlazi
 
 ### Priorità 1 — Ponte GAIA digital-rock → PRISM subsurface
 
-4. Esportare da GAIA porosità, permeabilità tensoriale, tortuosità, saturazione, conducibilità, Vp/Vs e incertezza.
-5. Importare tali proprietà in PRISM come priors versionati per CRAFT, SubNeRF, QUAKE e ReservoirFlux.
-6. Conservare nel manifest provenienza CT, voxel size, segmentazione, REV, metodo di upscaling e unità.
+4. Creare un progetto/libreria **GAIA–PRISM Bridge** con schema versionato, validatore dimensionale e adapter separati per i moduli PRISM.
+5. Esportare da GAIA porosità, permeabilità tensoriale, tortuosità, saturazione, conducibilità, Vp/Vs, proprietà geochimiche e incertezza.
+6. Implementare REV analysis e metodi di upscaling espliciti per proprietà di flusso, elastiche, termiche e reattive.
+7. Importare tali proprietà in PRISM come priors/material laws versionati per CRAFT, SubNeRF, QUAKE, FORGE e ReservoirFlux.
+8. Conservare nel manifest provenance CT, voxel size, segmentazione, REV, metodo di upscaling, unità, assi e limiti di validità.
+9. Aggiungere un adapter inverso PRISM → GAIA per boundary conditions e raffinamento locale.
 
 ### Priorità 2 — Interoperabilità
 
-7. Preferire VTK/VTI/VTU, NetCDF/CF, GeoTIFF, SEG-Y, LAS, QuakeML/StationXML/miniSEED e JSON schema versionati.
-8. Non usare `.gtp` come formato comune primario: è un contenitore applicativo GAIA, meno interoperabile di standard espliciti.
-9. Definire CRS, asse verticale, datum, convenzione di profondità, ordine degli assi, unità e NoData in ogni scambio.
+10. Preferire VTK/VTI/VTU, NetCDF/CF, GeoTIFF, SEG-Y, LAS, QuakeML/StationXML/miniSEED e JSON schema versionati.
+11. Non usare `.gtp` come formato comune primario: è un contenitore applicativo GAIA, meno interoperabile di standard espliciti.
+12. Definire CRS, asse verticale, datum, convenzione di profondità, ordine degli assi, unità e NoData in ogni scambio.
 
 ### Priorità 3 — Riutilizzo senza duplicazione
 
-10. Esporre GeoScript come producer/preprocessor e PRISM CLI/API come consumer tipizzato.
-11. Evitare copie manuali di termodinamica e geochimica: estrarre librerie condivise soltanto dopo test di equivalenza e analisi delle dipendenze.
-12. Usare PRISM BRIDGE per scenari multi-scala richiamando adapter GAIA headless, con cancellazione e manifest degli artifact.
+13. Esporre GeoScript come producer/preprocessor e PRISM CLI/API come consumer tipizzato.
+14. Evitare copie manuali di termodinamica e geochimica: estrarre librerie condivise soltanto dopo test di equivalenza e analisi delle dipendenze.
+15. Usare PRISM BRIDGE per scenari multi-scala richiamando adapter GAIA headless, con cancellazione e manifest degli artifact.
 
 ### Priorità 4 — Certificazione scientifica
 
-13. Portare in GAIA il pattern di test analitici/benchmark con DOI e tolleranza, iniziando dai moduli unici.
-14. Classificare anche i test PRISM in unit, integration, parity, analytic benchmark e published-data validation.
-15. Creare benchmark congiunti CT→PNM→upscaling→ReservoirFlux e seismic acquisition→PULSE/QUAKE→geological consistency.
+16. Portare in GAIA il pattern di test analitici/benchmark con DOI e tolleranza, iniziando dai moduli unici.
+17. Classificare anche i test PRISM in unit, integration, parity, analytic benchmark e published-data validation.
+18. Creare benchmark congiunti CT→PNM→upscaling→ReservoirFlux e seismic acquisition→PULSE/QUAKE→geological consistency.
+19. Validare il bridge con casi in cui la soluzione fine e quella upscaled siano entrambe disponibili, misurando errore e conservazione.
 
 ## 9. Decisione finale
 
@@ -294,10 +360,14 @@ La convergenza non deve essere presentata come un equilibrio tra due piattaforme
 
 **PRISM è il candidato naturale a piattaforma principale per il modello geoscientifico integrato e operativo.** È più avanti per ampiezza dei workflow, integrazione tra osservazioni e modelli, AI scientifica, inversione, scenari, ranking, geohazard, reservoir, automazione e copertura di test.
 
-**GAIA non va ridotta né assorbita:** ha una specializzazione preziosa e difficilmente sostituibile nel digital rock, nell'imaging, nel PNM/NMR, nelle simulazioni voxel-based, nella fotogrammetria e nell'automazione GeoScript. Il suo valore cresce se diventa il laboratorio/core-scale engine che produce proprietà e vincoli con provenance per PRISM.
+**GAIA non va ridotta né assorbita:** deve diventare intenzionalmente il motore small-scale del sistema, specializzato nel digital rock, nell'imaging, nel PNM/NMR, nelle simulazioni voxel-based, nella fotogrammetria e nell'automazione GeoScript. Il suo valore cresce se produce proprietà efficaci e vincoli con provenance per PRISM.
+
+**PRISM deve essere il motore large-scale**, dal pozzo al reservoir e fino alla scala regionale, responsabile di integrare dati territoriali, inversioni, modelli physics-informed, simulazioni accoppiate e scenari.
+
+**Il GAIA–PRISM Bridge è il componente centrale della convergenza:** traduce la fisica dalla piccola alla grande scala mediante upscaling verificabile e consente il ritorno di condizioni al contorno e richieste di raffinamento. Senza questo livello, i due prodotti resterebbero complementari ma separati; con esso diventano un unico workflow multi-scala per simulazioni complesse.
 
 La direzione raccomandata è quindi:
 
-> **GAIA misura, segmenta, simula e fa upscaling dalla microstruttura; PRISM acquisisce, integra, inverte, assimila, valuta scenari e costruisce il modello 3D/4D del sottosuolo.**
+> **GAIA risolve la piccola scala; il bridge ne trasferisce proprietà, leggi costitutive e incertezza; PRISM risolve la scala reservoir/regionale e rimanda a GAIA le condizioni locali che richiedono maggiore dettaglio.**
 
 Questa separazione riconosce correttamente che, per molti aspetti cruciali, PRISM è già molto più avanti, senza cancellare le aree in cui GAIA rimane realmente unica.
