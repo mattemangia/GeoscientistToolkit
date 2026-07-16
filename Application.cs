@@ -72,15 +72,15 @@ public class Application
                 preferStandardClipSpaceYDirection: true,
                 preferDepthRangeZeroToOne: true);
         else
-            // Linux defaults to Vulkan so detached windows can share one device and
-            // create independent swapchains. OpenGL remains the compatibility fallback.
+            // OpenGL is the safe Linux default. A broken Vulkan ICD can terminate the
+            // process with SIGSEGV (139) before managed fallback code can run.
             basicGraphicsOptions = new GraphicsDeviceOptions(
                 false,
                 null,
                 true,
-                ResourceBindingModel.Improved,
-                preferStandardClipSpaceYDirection: true,
-                preferDepthRangeZeroToOne: true);
+                ResourceBindingModel.Default,
+                preferStandardClipSpaceYDirection: false,
+                preferDepthRangeZeroToOne: false);
 
         try
         {
@@ -173,6 +173,12 @@ public class Application
 
         // Check if we need to recreate graphics device with user preferences
         var hardwareSettings = appSettings.Hardware;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
+            hardwareSettings.PreferredGraphicsBackend.Equals("Vulkan", StringComparison.OrdinalIgnoreCase))
+        {
+            Logger.LogWarning("Vulkan preference ignored on Linux because the installed driver terminates during device creation (SIGSEGV 139). Using OpenGL.");
+            hardwareSettings.PreferredGraphicsBackend = "OpenGL";
+        }
         GraphicsBackend preferredBackend;
         if (hardwareSettings.PreferredGraphicsBackend != "Auto")
             Enum.TryParse(hardwareSettings.PreferredGraphicsBackend, out preferredBackend);
@@ -450,9 +456,7 @@ public class Application
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return GraphicsBackend.Direct3D11;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return GraphicsBackend.Metal;
-        // Vulkan supports multiple swapchains on the shared Veldrid device, required
-        // by GAIA's real detached viewer windows. OpenGL is retained as fallback.
-        return GraphicsBackend.Vulkan;
+        return GraphicsBackend.OpenGL;
     }
 
     private void TryCreateWithWindowsFallbacks(

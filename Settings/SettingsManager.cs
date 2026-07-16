@@ -139,6 +139,10 @@ public class SettingsManager
 
     public static string[] GetAvailableBackends()
     {
+        if (OperatingSystem.IsLinux())
+            // Vulkan device creation happens in native code and known-bad ICDs can
+            // SIGSEGV before GAIA can apply its managed fallback.
+            return new[] { "Auto", "OpenGL" };
         return new[] { "Auto", "Direct3D11", "Vulkan", "Metal", "OpenGL" };
     }
 }
