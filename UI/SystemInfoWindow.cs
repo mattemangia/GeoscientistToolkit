@@ -1,10 +1,9 @@
 ﻿// GAIA/UI/SystemInfoWindow.cs
 
-using System.Diagnostics;
-using System.Management;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 
@@ -156,17 +155,17 @@ public class SystemInfoWindow
 
         _cpuInfo = new[]
         {
-            ("Processor Name", RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? GetCpuNameWindows() : "N/A"),
+            ("Processor Name", SystemDiagnostics.GetCpuName()),
             ("Architecture", RuntimeInformation.ProcessArchitecture.ToString()),
             ("Logical Cores", Environment.ProcessorCount.ToString())
         };
 
         _ramInfo = new[]
         {
-            ("Total Physical Memory", GetTotalRam())
+            ("Total Physical Memory", SystemDiagnostics.GetTotalRam())
         };
 
-        _gpuInfo = GetGpuList().ToArray();
+        _gpuInfo = GraphicsAdapterUtil.GetGpuList().ToArray();
 
         _veldridInfo = new[]
         {
@@ -174,124 +173,6 @@ public class SystemInfoWindow
             ("Active Device", gd.DeviceName)
         };
     }
-
-    #region Data Gathering Methods
-
-    private string GetCpuNameWindows()
-    {
-        try
-        {
-            var searcher = new ManagementObjectSearcher("select Name from Win32_Processor");
-            return searcher.Get().Cast<ManagementObject>().FirstOrDefault()?["Name"]?.ToString() ?? "N/A";
-        }
-        catch
-        {
-            return "N/A (Requires WMI permissions)";
-        }
-    }
-
-    private string GetTotalRam()
-    {
-        try
-        {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                var searcher = new ManagementObjectSearcher("SELECT TotalPhysicalMemory FROM Win32_ComputerSystem");
-                var totalRamBytes =
-                    Convert.ToUInt64(searcher.Get().Cast<ManagementObject>().FirstOrDefault()?["TotalPhysicalMemory"]);
-                return $"{totalRamBytes / (1024.0 * 1024.0 * 1024.0):F2} GB";
-            }
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            {
-                var meminfo = File.ReadAllLines("/proc/meminfo").FirstOrDefault(line => line.StartsWith("MemTotal:"));
-                var parts = meminfo?.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts?.Length >= 2 && long.TryParse(parts[1], out var ramKiB))
-                    return $"{ramKiB / (1024.0 * 1024.0):F2} GB";
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                var output = ExecuteCommand("sysctl", "-n hw.memsize");
-                if (long.TryParse(output.Trim(), out var ramBytes))
-                    return $"{ramBytes / (1024.0 * 1024.0 * 1024.0):F2} GB";
-            }
-        }
-        catch
-        {
-            return "N/A";
-        }
-
-        return "N/A";
-    }
-
-    private List<string> GetGpuList()
-    {
-        var gpuList = new List<string>();
-        try
-        {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_VideoController");
-                foreach (ManagementObject mo in searcher.Get())
-                    gpuList.Add(mo["Name"]?.ToString() ?? "Unknown Video Controller");
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            {
-                var output = ExecuteCommand("lspci", "| grep -i 'vga\\|3d\\|2d'");
-                gpuList.AddRange(output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                    .Select(line => line.Split(':').Length > 2 ? line.Split(':')[2].Trim() : line.Trim()));
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                var output = ExecuteCommand("system_profiler", "SPDisplaysDataType");
-                gpuList.AddRange(output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                    .Where(line => line.Trim().StartsWith("Chipset Model:"))
-                    .Select(line => line.Split(':').Length > 1 ? line.Split(':')[1].Trim() : line.Trim()));
-            }
-        }
-        catch
-        {
-            /* Fallback */
-        }
-
-        if (!gpuList.Any()) gpuList.Add("Could not enumerate GPUs.");
-        return gpuList;
-    }
-
-    private string ExecuteCommand(string command, string args)
-    {
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = command,
-                Arguments = args,
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8
-            }
-        };
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && args.Contains('|'))
-        {
-            process.StartInfo.FileName = "/bin/bash";
-            process.StartInfo.Arguments = $"-c \"{command} {args}\"";
-        }
-
-        try
-        {
-            process.Start();
-            var result = process.StandardOutput.ReadToEnd();
-            process.WaitForExit();
-            return result;
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
-
-    #endregion
 
     #region Export Logic
 

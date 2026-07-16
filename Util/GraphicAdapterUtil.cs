@@ -33,16 +33,13 @@ public static class GraphicsAdapterUtil
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                // Use -E for extended regex and proper quoting
-                var output = ExecuteCommand("lspci", "-v | grep -E -i \"(vga|3d|display)\"");
+                // Plain `lspci`, filtered here rather than piped through grep: the output is small,
+                // and it avoids quoting a regex through `bash -c`. Matching on the device class is
+                // also what keeps hex addresses (e3d00000 contains "3d") from being read as GPUs.
+                var output = ExecuteCommand("lspci", string.Empty);
                 gpuList.AddRange(output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                    .Select(line =>
-                    {
-                        // lspci format: "00:02.0 VGA compatible controller: Intel Corporation HD Graphics 620 (rev 02)"
-                        // Extract the device description after the last colon
-                        var colonIndex = line.LastIndexOf(':');
-                        return colonIndex > 0 ? line.Substring(colonIndex + 1).Trim() : line.Trim();
-                    })
+                    .Where(IsDisplayController)
+                    .Select(ExtractPciDeviceName)
                     .Where(name => !string.IsNullOrWhiteSpace(name)));
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
@@ -63,6 +60,25 @@ public static class GraphicsAdapterUtil
             gpuList.Add("Default GPU");
 
         return gpuList;
+    }
+
+    /// <summary>
+    ///     True for an lspci line describing a graphics adapter, e.g.
+    ///     "05:00.0 VGA compatible controller: Advanced Micro Devices, Inc. [AMD/ATI] Navi 14".
+    /// </summary>
+    private static bool IsDisplayController(string line) =>
+        line.Contains("VGA compatible controller", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("3D controller", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("Display controller", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    ///     Pulls the device name out of an lspci line, which reads "SLOT CLASS: DEVICE".
+    ///     The slot ("05:00.0") has no space after its colons, so the first ": " is the class separator.
+    /// </summary>
+    private static string ExtractPciDeviceName(string line)
+    {
+        var separator = line.IndexOf(": ", StringComparison.Ordinal);
+        return separator > 0 ? line[(separator + 2)..].Trim() : line.Trim();
     }
 
     private static List<string> GetWindowsGpusViaWmi()

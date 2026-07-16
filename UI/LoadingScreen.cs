@@ -2,6 +2,7 @@
 
 using System.Diagnostics;
 using System.Numerics;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 using Veldrid.Sdl2;
@@ -30,6 +31,10 @@ public class LoadingScreen
         _imGuiController = imGuiController;
         _window = window;
         _animationTimer.Start();
+
+        // Probing the host machine can shell out to WMI/lspci, so start it off-thread now and
+        // let the panel fill in once the results land.
+        SystemDiagnostics.BeginGather(graphicsDevice);
     }
 
     public void UpdateStatus(string status, float progress)
@@ -129,6 +134,8 @@ public class LoadingScreen
             ImGui.Text(dots);
             ImGui.PopStyleColor();
 
+            DrawDiagnostics(windowSize, progressBarWidth, windowSize.Y * 0.55f + progressBarHeight + 60);
+
             ImGui.End();
         }
 
@@ -143,5 +150,52 @@ public class LoadingScreen
 
         _graphicsDevice.SubmitCommands(_commandList);
         _graphicsDevice.SwapBuffers(_graphicsDevice.MainSwapchain);
+    }
+
+    /// <summary>
+    ///     Renders the host machine facts as a key/value block centred under the progress bar.
+    ///     Stays blank until the background probe finishes, so startup is never held up.
+    /// </summary>
+    private void DrawDiagnostics(Vector2 windowSize, float blockWidth, float topY)
+    {
+        var facts = SystemDiagnostics.Snapshot;
+        if (facts.Count == 0) return;
+
+        var left = (windowSize.X - blockWidth) * 0.5f;
+        var lineHeight = ImGui.GetTextLineHeightWithSpacing();
+
+        // Right-align the labels against a fixed gutter so the values line up in a column.
+        var labelWidth = facts.Max(f => ImGui.CalcTextSize(f.Key).X) + 12f;
+
+        for (var i = 0; i < facts.Count; i++)
+        {
+            var (key, value) = facts[i];
+            var y = topY + i * lineHeight;
+
+            ImGui.SetCursorPos(new Vector2(left + labelWidth - ImGui.CalcTextSize(key).X, y));
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.45f, 0.45f, 0.5f, 1.0f));
+            ImGui.Text(key);
+            ImGui.PopStyleColor();
+
+            ImGui.SetCursorPos(new Vector2(left + labelWidth + 10f, y));
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.72f, 0.74f, 0.78f, 1.0f));
+            ImGui.Text(Truncate(value, blockWidth - labelWidth - 10f));
+            ImGui.PopStyleColor();
+        }
+    }
+
+    /// <summary>
+    ///     Clips over-long values (GPU names in particular) with an ellipsis so they cannot
+    ///     overflow the centred block.
+    /// </summary>
+    private static string Truncate(string value, float maxWidth)
+    {
+        if (ImGui.CalcTextSize(value).X <= maxWidth) return value;
+
+        var trimmed = value;
+        while (trimmed.Length > 1 && ImGui.CalcTextSize(trimmed + "...").X > maxWidth)
+            trimmed = trimmed[..^1];
+
+        return trimmed + "...";
     }
 }

@@ -414,6 +414,7 @@ public class Application
         // SCREENSHOT FIX: Cleanup screenshot resources
         ScreenshotUtility.Cleanup();
 
+        _mainWindow?.Dispose();
         _imGuiController.Dispose();
         _commandList.Dispose();
         _graphicsDevice.Dispose();

@@ -24,7 +24,7 @@ using Veldrid;
 
 namespace GAIA.UI;
 
-public class MainWindow
+public class MainWindow : IDisposable
 {
     // ----------------------------------------------------------------------
     // Events
@@ -81,11 +81,12 @@ public class MainWindow
     private readonly List<ThumbnailViewerPanel> _thumbnailViewers = new();
     private readonly ShapefileCreationDialog _shapefileCreationDialog = new();
     private bool _layoutBuilt;
+    private bool _forceLayoutRebuild;
     private bool _showDatasets = true;
     private bool _showProperties = true;
     private bool _showLog = true;
     private bool _showTools = true;
-    private bool _showWelcome = true;
+    private bool _showWelcome; // Disabled - welcome popup no longer used
     private bool _saveAsMode;
     private bool _showAboutPopup;
     private bool _showUnsavedChangesPopup;
@@ -106,9 +107,12 @@ public class MainWindow
     // Logo texture for About window
     private IntPtr _logoTextureId;
     private Vector2 _logoSize;
+    private readonly IconFactory _icons;
 
     public MainWindow()
     {
+        _icons = new IconFactory(VeldridManager.GraphicsDevice, VeldridManager.ImGuiController);
+
         // Subscribe to dataset removal events
         ProjectManager.Instance.DatasetRemoved += OnDatasetRemoved;
         // Subscribe to Create GIS Shapefile events
@@ -129,6 +133,14 @@ public class MainWindow
         _createMeshDialog.SetExtensions(
             new ImGuiExportFileDialog.ExtensionOption(".obj", "Wavefront OBJ")
         );
+    }
+
+    /// <summary>
+    ///     Releases the GPU resources owned by the window. Must run before the GraphicsDevice is disposed.
+    /// </summary>
+    public void Dispose()
+    {
+        _icons.Dispose();
     }
 
     private void LoadLogoTexture()
@@ -262,20 +274,35 @@ public class MainWindow
         ImGui.PopStyleVar(3);
 
         SubmitMainMenu();
+        SubmitToolbar();
 
         var dockspaceId = ImGui.GetID("RootDockSpace");
+
+        // Probe before DockSpace(), which creates the node on demand and would always report a hit.
+        var hasRestoredLayout = _layoutBuilt || ImGuiDockBuilder.HasNode(dockspaceId);
+
+        // The area actually left to the dockspace, i.e. below the menu bar and toolbar.
+        var dockspaceSize = ImGui.GetContentRegionAvail();
+
         ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.None);
 
         if (!_layoutBuilt)
         {
-            _showDatasets = true;
-            _showProperties = true;
-            _showLog = true;
-            _showTools = true;
-            _showWelcome = false; // Disabled - welcome popup no longer used
-
-            TryBuildDockLayout(dockspaceId, vp.WorkSize);
             _layoutBuilt = true;
+
+            // Only impose the default arrangement when there is nothing to restore (fresh install,
+            // or an ini whose layout predates the current dockspace id) or on an explicit reset.
+            if (_forceLayoutRebuild || !hasRestoredLayout)
+            {
+                _showDatasets = true;
+                _showProperties = true;
+                _showLog = true;
+                _showTools = true;
+
+                TryBuildDockLayout(dockspaceId, dockspaceSize);
+            }
+
+            _forceLayoutRebuild = false;
         }
 
         // Panels
@@ -368,45 +395,178 @@ public class MainWindow
         if ((io.ConfigFlags & ImGuiConfigFlags.DockingEnable) == 0)
             io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 
-        /*#if IMGUI_HAS_DOCK_BUILDER
-                    ImGui.DockBuilderRemoveNode(rootId);
-                    ImGui.DockBuilderAddNode(rootId, ImGuiDockNodeFlags.DockSpace);
-                    ImGui.DockBuilderSetNodeSize(rootId, size);
-
-                    uint left   = ImGui.DockBuilderSplitNode(rootId,       ImGuiDir.Left,  0.20f, out uint rem1);
-                    uint right  = ImGui.DockBuilderSplitNode(rem1,         ImGuiDir.Right, 0.25f, out uint rem2);
-                    uint bottom = ImGui.DockBuilderSplitNode(rem2,         ImGuiDir.Down,  0.25f, out uint center);
-                    uint right_top = ImGui.DockBuilderSplitNode(right, ImGuiDir.Up, 0.6f, out uint right_bottom);
-
-                    ImGui.DockBuilderDockWindow("Datasets",   left);
-                    ImGui.DockBuilderDockWindow("Properties", right_top);
-                    ImGui.DockBuilderDockWindow("Tools",      right_bottom);
-                    ImGui.DockBuilderDockWindow("Log",        bottom);
-                    ImGui.DockBuilderDockWindow("Thumbnails:*", center);
-
-                    ImGui.DockBuilderFinish(rootId);
-        #else
-                    DockBuilderStub.WarnOnce();
-        #endif*/
-    }
-
-#if !IMGUI_HAS_DOCK_BUILDER
-    private static class DockBuilderStub
-    {
-        private static bool _warned;
-        public static void WarnOnce()
+        if (!ImGuiDockBuilder.IsAvailable)
         {
-            if (_warned) return;
-            _warned = true;
-            System.Diagnostics.Debug.WriteLine("[MainWindow] DockBuilder API not available. " +
-                                              "Panels will float — upgrade to a docking build and define IMGUI_HAS_DOCK_BUILDER.");
+            Logger.LogWarning("DockBuilder API unavailable in the native ImGui library - panels will float.");
+            return;
         }
+
+        // Start from a clean root so a rebuild ("Reset Layout") cannot inherit stale splits.
+        ImGuiDockBuilder.RemoveNode(rootId);
+        ImGuiDockBuilder.AddNode(rootId, ImGuiDockBuilder.DockSpaceFlag);
+        ImGuiDockBuilder.SetNodeSize(rootId, size);
+
+        // Split the bottom off the root first so the Log spans the full window width,
+        // then carve the side panels out of the remaining area above it.
+        var bottom = ImGuiDockBuilder.SplitNode(rootId, ImGuiDir.Down, 0.25f, out _, out var upper);
+        var left = ImGuiDockBuilder.SplitNode(upper, ImGuiDir.Left, 0.20f, out _, out var centerAndRight);
+        var right = ImGuiDockBuilder.SplitNode(centerAndRight, ImGuiDir.Right, 0.25f, out _, out var center);
+
+        ImGuiDockBuilder.DockWindow("Datasets", left);
+        // Docking both into the same node makes them tabs sharing one panel.
+        ImGuiDockBuilder.DockWindow("Properties", right);
+        ImGuiDockBuilder.DockWindow("Tools", right);
+        ImGuiDockBuilder.DockWindow("Log", bottom);
+
+        ImGuiDockBuilder.Finish(rootId);
+
+        // Properties is docked first, but ImGui focuses the last-docked tab; select it explicitly.
+        ImGui.SetWindowFocus("Properties");
+
+        Logger.Log("Default dock layout applied.");
     }
-#endif
+
+
+    // ----------------------------------------------------------------------
+    // Toolbar
+    // ----------------------------------------------------------------------
+
+    /// <summary>
+    ///     Icon strip under the menu bar holding only the highest-traffic actions.
+    ///     Everything else stays in the menus, where the same icons label each entry.
+    /// </summary>
+    private void SubmitToolbar()
+    {
+        var hasProject = !string.IsNullOrEmpty(ProjectManager.Instance.ProjectPath)
+                         || !string.IsNullOrEmpty(ProjectManager.Instance.ProjectName);
+        var undoManager = GlobalPerformanceManager.Instance.UndoManager;
+
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 4));
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(4, 4));
+        ImGui.PushStyleColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.MenuBarBg));
+
+        var height = ToolbarButtonSize + ImGui.GetStyle().WindowPadding.Y * 2;
+        if (ImGui.BeginChild("##Toolbar", new Vector2(0, height), ImGuiChildFlags.None,
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (ToolbarButton(GaiaIcon.NewProject, "New Project")) TryOnNewProject();
+            if (ToolbarButton(GaiaIcon.OpenProject, "Load Project...")) TryOnLoadProject();
+            if (ToolbarButton(GaiaIcon.SaveProject, "Save Project", hasProject)) OnSaveProject();
+
+            ToolbarSeparator();
+            if (ToolbarButton(GaiaIcon.ImportData, "Import Data...")) _import.Open();
+
+            ToolbarSeparator();
+            if (ToolbarButton(GaiaIcon.Undo, "Undo (Ctrl+Z)", undoManager.CanUndo)) undoManager.Undo();
+            if (ToolbarButton(GaiaIcon.Redo, "Redo (Ctrl+Y)", undoManager.CanRedo)) undoManager.Redo();
+
+            ToolbarSeparator();
+            ToolbarToggle(GaiaIcon.PanelDatasets, "Datasets panel", ref _showDatasets);
+            ToolbarToggle(GaiaIcon.PanelProperties, "Properties panel", ref _showProperties);
+            ToolbarToggle(GaiaIcon.PanelTools, "Tools panel", ref _showTools);
+            ToolbarToggle(GaiaIcon.PanelLog, "Log panel", ref _showLog);
+
+            ToolbarSeparator();
+            if (ToolbarButton(GaiaIcon.ScriptTerminal, "GeoScript Terminal")) _geoScriptTerminalWindow.Show();
+            if (ToolbarButton(GaiaIcon.Screenshot, "Screenshot Window...")) _screenshotTool.StartSelection();
+
+            ToolbarSeparator();
+            if (ToolbarButton(GaiaIcon.Settings, "Settings (Ctrl+,)")) _settingsWindow.Open();
+        }
+
+        ImGui.EndChild();
+        ImGui.PopStyleColor();
+        ImGui.PopStyleVar(2);
+    }
+
+    private const float ToolbarButtonSize = 26f;
+
+    /// <summary>
+    ///     Draws one toolbar button, falling back to a text button if its icon could not be built.
+    /// </summary>
+    private bool ToolbarButton(GaiaIcon icon, string tooltip, bool enabled = true)
+    {
+        ImGui.SameLine();
+
+        ImGui.BeginDisabled(!enabled);
+        var texture = _icons.Get(icon);
+        var clicked = texture != IntPtr.Zero
+            ? ImGui.ImageButton($"##tb{icon}", texture, new Vector2(ToolbarButtonSize, ToolbarButtonSize))
+            : ImGui.Button(icon.ToString(), new Vector2(0, ToolbarButtonSize));
+        ImGui.EndDisabled();
+
+        // Tooltips must still appear while the button is disabled, so ask for hover explicitly.
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(tooltip);
+
+        return clicked;
+    }
+
+    /// <summary>
+    ///     Toolbar button that reflects and flips a panel visibility flag.
+    /// </summary>
+    private void ToolbarToggle(GaiaIcon icon, string tooltip, ref bool value)
+    {
+        // Tint the active state so open panels are readable at a glance.
+        if (value) ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetColorU32(ImGuiCol.ButtonActive));
+
+        var clicked = ToolbarButton(icon, tooltip);
+
+        if (value) ImGui.PopStyleColor();
+        if (clicked) value = !value;
+    }
+
+    private static void ToolbarSeparator()
+    {
+        ImGui.SameLine();
+        ImGui.Dummy(new Vector2(3, 0));
+        ImGui.SameLine();
+
+        var draw = ImGui.GetWindowDrawList();
+        var x = ImGui.GetCursorScreenPos().X;
+        var y = ImGui.GetCursorScreenPos().Y;
+        draw.AddLine(new Vector2(x, y + 2), new Vector2(x, y + ToolbarButtonSize + 4),
+            ImGui.GetColorU32(ImGuiCol.Separator));
+
+        ImGui.Dummy(new Vector2(3, 0));
+    }
 
     // ----------------------------------------------------------------------
     // Menu-bar
     // ----------------------------------------------------------------------
+
+    /// <summary>
+    ///     Draws an icon inline at text height, so the following menu entry lines up beside it.
+    ///     No-op when the icon is unavailable, leaving a plain text entry.
+    /// </summary>
+    private void MenuIcon(GaiaIcon icon)
+    {
+        var texture = _icons.Get(icon);
+        if (texture == IntPtr.Zero) return;
+
+        var size = ImGui.GetTextLineHeight();
+        ImGui.Image(texture, new Vector2(size, size));
+        ImGui.SameLine();
+    }
+
+    /// <summary>
+    ///     Menu entry prefixed with its icon, so the toolbar and menus share one visual language.
+    /// </summary>
+    private bool IconMenuItem(GaiaIcon icon, string label, string shortcut = "", bool enabled = true,
+        bool selected = false)
+    {
+        MenuIcon(icon);
+        return ImGui.MenuItem(label, shortcut, selected, enabled);
+    }
+
+    /// <summary>
+    ///     Icon-prefixed menu entry bound to a toggle flag.
+    /// </summary>
+    private void IconMenuToggle(GaiaIcon icon, string label, ref bool value)
+    {
+        MenuIcon(icon);
+        ImGui.MenuItem(label, string.Empty, ref value);
+    }
+
     private void SubmitMainMenu()
     {
         if (!ImGui.BeginMenuBar()) return;
@@ -425,10 +585,10 @@ public class MainWindow
 
         if (ImGui.BeginMenu("File"))
         {
-            if (ImGui.MenuItem("New Project")) TryOnNewProject();
-            if (ImGui.MenuItem("Load Project...")) TryOnLoadProject();
-            if (ImGui.MenuItem("Save Project")) OnSaveProject();
-            if (ImGui.MenuItem("Save Project As...")) OnSaveProjectAs();
+            if (IconMenuItem(GaiaIcon.NewProject, "New Project")) TryOnNewProject();
+            if (IconMenuItem(GaiaIcon.OpenProject, "Load Project...")) TryOnLoadProject();
+            if (IconMenuItem(GaiaIcon.SaveProject, "Save Project")) OnSaveProject();
+            if (IconMenuItem(GaiaIcon.SaveProjectAs, "Save Project As...")) OnSaveProjectAs();
             ImGui.Separator();
 
             // Recent Projects submenu
@@ -463,15 +623,15 @@ public class MainWindow
             }
 
             ImGui.Separator();
-            if (ImGui.MenuItem("Import Data...")) _import.Open();
+            if (IconMenuItem(GaiaIcon.ImportData, "Import Data...")) _import.Open();
             ImGui.Separator();
 
             // NEW: Add empty mesh creation
-            if (ImGui.MenuItem("New 3D Model...")) OnCreateEmptyMesh();
+            if (IconMenuItem(GaiaIcon.Mesh3D, "New 3D Model...")) OnCreateEmptyMesh();
 
-            if (ImGui.MenuItem("New Borehole/Well Log...")) OnCreateEmptyBorehole();
+            if (IconMenuItem(GaiaIcon.Borehole, "New Borehole/Well Log...")) OnCreateEmptyBorehole();
 
-            if (ImGui.MenuItem("New GIS Map..."))
+            if (IconMenuItem(GaiaIcon.GisMap, "New GIS Map..."))
             {
                 var emptyGIS = new GISDataset("New Map", "")
                 {
@@ -481,7 +641,7 @@ public class MainWindow
                 Logger.Log("Created new empty GIS map");
             }
 
-            if (ImGui.MenuItem("New 2D Geology Profile..."))
+            if (IconMenuItem(GaiaIcon.TwoDGeology, "New 2D Geology Profile..."))
             {
                 // Generate a unique name with timestamp
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -499,9 +659,9 @@ public class MainWindow
                 OnDatasetSelected(emptyProfile);
             }
 
-            if (ImGui.MenuItem("New PHYSICOCHEM Reactor...")) OnCreateEmptyPhysicoChem();
+            if (IconMenuItem(GaiaIcon.Reactor, "New PHYSICOCHEM Reactor...")) OnCreateEmptyPhysicoChem();
 
-            if (ImGui.MenuItem("New Empty Table..."))
+            if (IconMenuItem(GaiaIcon.Table, "New Empty Table..."))
             {
                 // Create a new empty DataTable
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -523,7 +683,7 @@ public class MainWindow
                 OnDatasetSelected(newTableDataset);
             }
 
-            if (ImGui.MenuItem("New Text Document..."))
+            if (IconMenuItem(GaiaIcon.Text, "New Text Document..."))
             {
                 // Generate a unique name with timestamp
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -552,93 +712,100 @@ public class MainWindow
                 OnDatasetSelected(newTextDataset);
             }
 
-            if (ImGui.MenuItem("GeoScript Editor..."))
+            if (IconMenuItem(GaiaIcon.ScriptEditor, "GeoScript Editor..."))
             {
                 _geoScriptEditorWindow.Show();
             }
 
             ImGui.Separator();
-            if (ImGui.MenuItem("Exit")) TryExit();
+            if (IconMenuItem(GaiaIcon.Exit, "Exit")) TryExit();
             ImGui.EndMenu();
         }
 
         if (ImGui.BeginMenu("Edit"))
         {
             var canUndo = GlobalPerformanceManager.Instance.UndoManager.CanUndo;
-            if (ImGui.MenuItem("Undo", "Ctrl+Z", false, canUndo)) GlobalPerformanceManager.Instance.UndoManager.Undo();
+            if (IconMenuItem(GaiaIcon.Undo, "Undo", "Ctrl+Z", canUndo))
+                GlobalPerformanceManager.Instance.UndoManager.Undo();
 
             var canRedo = GlobalPerformanceManager.Instance.UndoManager.CanRedo;
-            if (ImGui.MenuItem("Redo", "Ctrl+Y", false, canRedo)) GlobalPerformanceManager.Instance.UndoManager.Redo();
+            if (IconMenuItem(GaiaIcon.Redo, "Redo", "Ctrl+Y", canRedo))
+                GlobalPerformanceManager.Instance.UndoManager.Redo();
 
             ImGui.Separator();
-            if (ImGui.MenuItem("Settings...", "Ctrl+,")) _settingsWindow.Open();
+            if (IconMenuItem(GaiaIcon.Settings, "Settings...", "Ctrl+,")) _settingsWindow.Open();
             ImGui.Separator();
-            if (ImGui.MenuItem("Material Library...")) _materialLibraryWindow.Open();
+            if (IconMenuItem(GaiaIcon.MaterialLibrary, "Material Library...")) _materialLibraryWindow.Open();
             // ADDED: Menu item to open the Compound Library Editor
-            if (ImGui.MenuItem("Compound Library...")) _compoundLibraryEditorWindow.Show();
-            if (ImGui.MenuItem("ORC Fluid Library...")) _orcFluidEditorWindow.Show();
+            if (IconMenuItem(GaiaIcon.CompoundLibrary, "Compound Library...")) _compoundLibraryEditorWindow.Show();
+            if (IconMenuItem(GaiaIcon.FluidLibrary, "ORC Fluid Library...")) _orcFluidEditorWindow.Show();
             ImGui.EndMenu();
         }
 
         if (ImGui.BeginMenu("View"))
         {
-            ImGui.MenuItem("Datasets Panel", string.Empty, ref _showDatasets);
-            ImGui.MenuItem("Properties Panel", string.Empty, ref _showProperties);
-            ImGui.MenuItem("Log Panel", string.Empty, ref _showLog);
-            ImGui.MenuItem("Tools Panel", string.Empty, ref _showTools);
+            IconMenuToggle(GaiaIcon.PanelDatasets, "Datasets Panel", ref _showDatasets);
+            IconMenuToggle(GaiaIcon.PanelProperties, "Properties Panel", ref _showProperties);
+            IconMenuToggle(GaiaIcon.PanelLog, "Log Panel", ref _showLog);
+            IconMenuToggle(GaiaIcon.PanelTools, "Tools Panel", ref _showTools);
             ImGui.Separator();
 
             // Full Screen toggle (disabled on macOS)
             var fsSupported = VeldridManager.IsFullScreenSupported;
             var isFs = VeldridManager.IsFullScreen;
-            if (ImGui.MenuItem("Full Screen (F11)", string.Empty, isFs, fsSupported)) VeldridManager.ToggleFullScreen();
+            if (IconMenuItem(GaiaIcon.FullScreen, "Full Screen (F11)", string.Empty, fsSupported, isFs))
+                VeldridManager.ToggleFullScreen();
 
-            if (ImGui.MenuItem("Reset Layout")) _layoutBuilt = false;
+            if (IconMenuItem(GaiaIcon.ResetLayout, "Reset Layout"))
+            {
+                _layoutBuilt = false;
+                _forceLayoutRebuild = true;
+            }
             ImGui.EndMenu();
         }
 
         if (ImGui.BeginMenu("Tools"))
         {
-            if (ImGui.MenuItem("GeoScript Terminal")) _geoScriptTerminalWindow.Show();
-            if (ImGui.MenuItem("Stratigraphy Correlation Viewer")) _stratigraphyViewer.Show();
+            if (IconMenuItem(GaiaIcon.ScriptTerminal, "GeoScript Terminal")) _geoScriptTerminalWindow.Show();
+            if (IconMenuItem(GaiaIcon.Stratigraphy, "Stratigraphy Correlation Viewer")) _stratigraphyViewer.Show();
             ImGui.Separator();
-            if (ImGui.MenuItem("Triaxial Simulation")) _triaxialSimulationTool.Show();
-            if (ImGui.MenuItem("Slope Stability Model Wizard")) _slopeStabilityMeshWizard.Show();
+            if (IconMenuItem(GaiaIcon.Triaxial, "Triaxial Simulation")) _triaxialSimulationTool.Show();
+            if (IconMenuItem(GaiaIcon.SlopeStability, "Slope Stability Model Wizard")) _slopeStabilityMeshWizard.Show();
             ImGui.Separator();
-            if (ImGui.MenuItem("Real-time Photogrammetry")) _realtimePhotogrammetryWindow.Show();
+            if (IconMenuItem(GaiaIcon.Photogrammetry, "Real-time Photogrammetry")) _realtimePhotogrammetryWindow.Show();
             ImGui.Separator();
-            if (ImGui.MenuItem("Node Manager")) _nodeManagerWindow.Show();
+            if (IconMenuItem(GaiaIcon.NodeManager, "Node Manager")) _nodeManagerWindow.Show();
             ImGui.Separator();
-            if (ImGui.MenuItem("Screenshot Fullscreen")) _screenshotTool.TakeFullScreenshot();
-            if (ImGui.MenuItem("Screenshot Window...")) _screenshotTool.StartSelection();
+            if (IconMenuItem(GaiaIcon.Screenshot, "Screenshot Fullscreen")) _screenshotTool.TakeFullScreenshot();
+            if (IconMenuItem(GaiaIcon.Screenshot, "Screenshot Window...")) _screenshotTool.StartSelection();
             ImGui.EndMenu();
         }
 
         if (ImGui.BeginMenu("Metadata"))
         {
-            if (ImGui.MenuItem("Edit Project Metadata...")) _projectMetadataEditor.Open();
+            if (IconMenuItem(GaiaIcon.Metadata, "Edit Project Metadata...")) _projectMetadataEditor.Open();
 
             ImGui.Separator();
 
-            if (ImGui.MenuItem("View All Dataset Metadata...")) _metadataTableViewer.Open();
+            if (IconMenuItem(GaiaIcon.MetadataTable, "View All Dataset Metadata...")) _metadataTableViewer.Open();
 
             ImGui.Separator();
 
-            if (ImGui.MenuItem("Export Metadata to CSV...")) _metadataTableViewer.Open();
-            if (ImGui.MenuItem("Export Metadata to Excel...")) _metadataTableViewer.Open();
+            if (IconMenuItem(GaiaIcon.Export, "Export Metadata to CSV...")) _metadataTableViewer.Open();
+            if (IconMenuItem(GaiaIcon.Export, "Export Metadata to Excel...")) _metadataTableViewer.Open();
             ImGui.EndMenu();
         }
 
         if (ImGui.BeginMenu("Help"))
         {
-            if (ImGui.MenuItem("About")) _showAboutPopup = true;
-            if (ImGui.MenuItem("System Info...")) _systemInfoWindow.Open(VeldridManager.GraphicsDevice);
+            if (IconMenuItem(GaiaIcon.About, "About")) _showAboutPopup = true;
+            if (IconMenuItem(GaiaIcon.SystemInfo, "System Info...")) _systemInfoWindow.Open(VeldridManager.GraphicsDevice);
 
             ImGui.Separator();
-            if (ImGui.MenuItem("3D Volume Debug...")) _volume3DDebugWindow.Show();
+            if (IconMenuItem(GaiaIcon.VolumeDebug, "3D Volume Debug...")) _volume3DDebugWindow.Show();
             
             ImGui.Separator();
-            if (ImGui.MenuItem("Create Debug Geothermal Boreholes")) OnCreateDebugGeothermalBoreholes();
+            if (IconMenuItem(GaiaIcon.Borehole, "Create Debug Geothermal Boreholes")) OnCreateDebugGeothermalBoreholes();
 
             ImGui.EndMenu();
         }
