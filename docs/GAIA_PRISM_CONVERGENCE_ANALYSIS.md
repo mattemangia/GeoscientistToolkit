@@ -8,6 +8,17 @@
 >
 > **Obiettivo:** descrivere capacità, maturità e confini delle due piattaforme senza trasformare LOC, nomi dei moduli o feature dichiarate in prove di superiorità scientifica.
 
+## Stato di implementazione del ponte (16 luglio 2026)
+
+La convergenza è ora implementata con un contratto `.gpex` ZIP versionato (`org.gaia-prism.exchange`, schema 1.0.0), manifest JSON, checksum SHA-256, limiti di estrazione e protezione dal path traversal. Il manifest trasporta direzione, dominio, supporto di scala, REV, proprietà scalari/tensoriali, unità, qualificazione, incertezza, provenance e controllo del ciclo iterativo.
+
+- GAIA esporta card geomeccaniche CT/core e può validare, ispezionare, estrarre e inviare pacchetti a PRISM dalla CLI.
+- PRISM valida e importa le proprietà efficaci in TerraTest; il materiale risultante alimenta realmente FEM 2D/3D, DEM e THM, con override esplorativo esplicito per dati non qualificati o privi di REV rappresentativo.
+- Il percorso inverso e il closed loop sono supportati dal coupler con under-relaxation, tolleranze e convergenza su due iterazioni consecutive.
+- TerraTest persiste la scena macro 3D, FEM 2D, DEM, THM e il riferimento alla card GAIA in uno schema migrabile; i vecchi file contenenti il solo `GeotechRequest` restano leggibili.
+- Le esecuzioni macro slope/2D sono ritirate dagli entry point GAIA (UI, GeoScript e API), mentre CT/core/laboratorio e i reader legacy restano in GAIA.
+- FORGE non è stato modificato e non è una dipendenza del nuovo bridge: eventuali consumi futuri delle proprietà `.gpex` richiederanno un'integrazione separata e deliberata.
+
 ## 1. Conclusione esecutiva
 
 La precedente lettura “GAIA = core/imaging, PRISM = basin/AI” coglie una parte della specializzazione, ma sottostima nettamente PRISM.
@@ -53,7 +64,7 @@ Il bridge non è quindi un semplice convertitore di file. È il componente scien
 - trasformare proprietà scalari e tensoriali preservando unità, anisotropia e orientazione;
 - propagare distribuzioni, intervalli di confidenza e sensibilità, non soltanto valori medi;
 - associare ogni parametro a campione, litologia, facies, profondità, metodo e versione;
-- mappare le proprietà GAIA sulle celle/mesh/materiali di CRAFT, ReservoirFlux, SubNeRF, QUAKE, FORGE e altri moduli PRISM;
+- mappare progressivamente le proprietà GAIA sulle celle/mesh/materiali dei moduli PRISM autorizzati; la prima implementazione riguarda TerraTest e non modifica FORGE;
 - supportare il percorso inverso PRISM → GAIA per boundary conditions, stress, pressione, temperatura, saturazione e composizione locale;
 - produrre un report di conservazione e mismatch per massa, energia, porosità e proprietà trasportate.
 

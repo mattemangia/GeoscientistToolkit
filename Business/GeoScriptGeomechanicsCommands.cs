@@ -471,33 +471,10 @@ public class GeomechRunCommand : IGeoScriptCommand
 
     public async Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
-        if (context.InputDataset is not TwoDGeologyDataset geoDs)
+        if (context.InputDataset is not TwoDGeologyDataset)
             throw new NotSupportedException("GEOMECH_RUN requires a TwoDGeologyDataset");
-
-        var cmd = (CommandNode)node;
-        string analysis = ParseStringParameter(cmd.FullText, "analysis", "static");
-        int steps = ParseIntParameter(cmd.FullText, "steps", 10);
-        string solver = ParseStringParameter(cmd.FullText, "solver", "PCG");
-        double tolerance = ParseDoubleParameter(cmd.FullText, "tolerance", 1e-6);
-
-        var sim = geoDs.GeomechanicalSimulator;
-
-        sim.AnalysisType = Enum.TryParse<AnalysisType2D>(analysis, true, out var at) ? at : AnalysisType2D.Static;
-        sim.SolverType = Enum.TryParse<SolverType2D>(solver, true, out var st) ? st : SolverType2D.ConjugateGradient;
-        sim.NumLoadSteps = steps;
-        sim.ConvergenceTolerance = tolerance;
-
-        Logger.Log($"Starting {analysis} simulation with {steps} steps...");
-
-        await sim.RunAsync();
-
-        var state = sim.State;
-        Logger.Log($"Simulation completed:");
-        Logger.Log($"  Max displacement: {state.MaxDisplacement:E3} m");
-        Logger.Log($"  Plastic elements: {state.NumPlasticElements}");
-        Logger.Log($"  Failed elements: {state.NumFailedElements}");
-
-        return geoDs;
+        await Task.CompletedTask;
+        throw GAIA.Business.MacroGeomechanicsRetirement.CreateException();
     }
 
     private int ParseIntParameter(string fullText, string paramName, int defaultValue)

@@ -256,8 +256,8 @@ public class GeomechanicalExportManager : IDisposable
             ComputationTime = results.ComputationTime.TotalSeconds,
             Iterations = results.IterationsPerformed,
             results.Converged,
-            MeanStress_MPa = results.MeanStress / 1e6f,
-            MaxShearStress_MPa = results.MaxShearStress / 1e6f,
+            MeanStress_MPa = results.MeanStress,
+            MaxShearStress_MPa = results.MaxShearStress,
             results.TotalVoxels,
             results.FailedVoxels,
             FailurePercentage = results.FailedVoxelPercentage,
@@ -288,10 +288,10 @@ public class GeomechanicalExportManager : IDisposable
         sb.AppendLine($"Computation Time,{results.ComputationTime.TotalSeconds:F2},seconds");
         sb.AppendLine($"Iterations,{results.IterationsPerformed},");
         sb.AppendLine($"Converged,{results.Converged},");
-        sb.AppendLine($"Mean Stress,{results.MeanStress / 1e6f:F4},MPa");
-        sb.AppendLine($"Max Shear Stress,{results.MaxShearStress / 1e6f:F4},MPa");
-        sb.AppendLine($"Von Mises Stress (Mean),{results.VonMisesStress_Mean / 1e6f:F4},MPa");
-        sb.AppendLine($"Von Mises Stress (Max),{results.VonMisesStress_Max / 1e6f:F4},MPa");
+        sb.AppendLine($"Mean Stress,{results.MeanStress:F4},MPa");
+        sb.AppendLine($"Max Shear Stress,{results.MaxShearStress:F4},MPa");
+        sb.AppendLine($"Von Mises Stress (Mean),{results.VonMisesStress_Mean:F4},MPa");
+        sb.AppendLine($"Von Mises Stress (Max),{results.VonMisesStress_Max:F4},MPa");
         sb.AppendLine($"Volumetric Strain,{results.VolumetricStrain:E4},");
         sb.AppendLine($"Total Voxels,{results.TotalVoxels},");
         sb.AppendLine($"Failed Voxels,{results.FailedVoxels},");

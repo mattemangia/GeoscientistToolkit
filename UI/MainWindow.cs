@@ -1390,20 +1390,6 @@ public class MainWindow : IDisposable
             ImGui.Separator();
             ImGui.Spacing();
 
-            // Contributors
-            ImGui.Text("Contributors");
-            ImGui.Spacing();
-            ImGui.BulletText("Francesco Ottaviani");
-            ImGui.Indent();
-            ImGui.TextDisabled("Slope Stability Mesh Generation from Point Clouds");
-            ImGui.TextDisabled("f.ottaviani5@campus.uniurb.it");
-            ImGui.TextDisabled("Universita degli Studi di Urbino Carlo Bo");
-            ImGui.Unindent();
-            ImGui.Spacing();
-
-            ImGui.Separator();
-            ImGui.Spacing();
-
             // Citation information
             ImGui.Text("Citation");
             ImGui.Spacing();

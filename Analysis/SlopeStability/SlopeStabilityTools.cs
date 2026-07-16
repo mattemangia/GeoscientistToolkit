@@ -1159,34 +1159,10 @@ namespace GAIA.Analysis.SlopeStability
 
         private void RunSimulation()
         {
-            _isSimulationRunning = true;
+            _isSimulationRunning = false;
             _simulationProgress = 0.0f;
-            _simulationStatus = "Starting simulation...";
-
-            _simulationTask = Task.Run(() =>
-            {
-                try
-                {
-                    var simulator = new SlopeStabilitySimulator(_dataset, _dataset.Parameters);
-
-                    var results = simulator.RunSimulation(
-                        progress => _simulationProgress = progress,
-                        status => _simulationStatus = status);
-
-                    _dataset.Results = results;
-                    _dataset.HasResults = true;
-
-                    _simulationStatus = "Simulation completed successfully.";
-                }
-                catch (Exception ex)
-                {
-                    _simulationStatus = $"Simulation error: {ex.Message}";
-                }
-                finally
-                {
-                    _isSimulationRunning = false;
-                }
-            });
+            _simulationStatus = GAIA.Business.MacroGeomechanicsRetirement.Message;
+            Logger.LogWarning(_simulationStatus);
         }
 
         private void ValidateSetup()

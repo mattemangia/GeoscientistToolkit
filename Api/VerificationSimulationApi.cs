@@ -8,6 +8,7 @@ using GAIA.Analysis.Seismology;
 using GAIA.Analysis.SlopeStability;
 using GAIA.Analysis.Thermodynamic;
 using GAIA.Business.GIS;
+using GAIA.Business;
 using GAIA.Data.Borehole;
 using GAIA.Data.Materials;
 using GAIA.Data.PhysicoChem;
@@ -148,6 +149,8 @@ public class VerificationSimulationApi
     /// </summary>
     public SlopeGravityDropResult RunSlopeStabilityGravityVerification()
     {
+        throw MacroGeomechanicsRetirement.CreateException();
+#pragma warning disable CS0162
         var dataset = new SlopeStabilityDataset();
 
         var floor = new Block { Id = 1, IsFixed = true, Mass = 1000f, MaterialId = 1, Volume = 1000f };
@@ -193,6 +196,7 @@ public class VerificationSimulationApi
         var error = Math.Abs(displacement - expected);
 
         return new SlopeGravityDropResult(expected, displacement, error, error < 0.5f);
+#pragma warning restore CS0162
     }
 
     /// <summary>
@@ -200,6 +204,8 @@ public class VerificationSimulationApi
     /// </summary>
     public SlopeSlidingResult RunSlopeStabilitySlidingVerification()
     {
+        throw MacroGeomechanicsRetirement.CreateException();
+#pragma warning disable CS0162
         var dataset = new SlopeStabilityDataset();
 
         var floor = new Block { Id = 1, IsFixed = true, Mass = 10000f, MaterialId = 1, Volume = 1000f };
@@ -265,6 +271,7 @@ public class VerificationSimulationApi
         var error = Math.Abs(actualDist - expectedDist);
 
         return new SlopeSlidingResult(expectedDist, actualDist, error, !float.IsNaN(actualDist) && error < 1.2f);
+#pragma warning restore CS0162
     }
 
     /// <summary>

@@ -6,7 +6,7 @@ namespace GAIA.Analysis.Geomechanics;
 
 public partial class GeomechanicalResults
 {
-    // Stress field (Pa)
+    // Stress field (MPa, compression positive)
     public float[,,] StressXX { get; set; }
     public float[,,] StressYY { get; set; }
     public float[,,] StressZZ { get; set; }
@@ -22,7 +22,7 @@ public partial class GeomechanicalResults
     public float[,,] StrainXZ { get; set; }
     public float[,,] StrainYZ { get; set; }
 
-    // Principal stresses (Pa)
+    // Principal stresses (MPa, compression positive)
     public float[,,] Sigma1 { get; set; }
     public float[,,] Sigma2 { get; set; }
     public float[,,] Sigma3 { get; set; }

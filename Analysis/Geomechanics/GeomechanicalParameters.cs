@@ -30,6 +30,12 @@ public partial class GeomechanicalParameters
     public BoundingBox SimulationExtent { get; set; }
     public HashSet<byte> SelectedMaterialIDs { get; set; } = new();
 
+    /// <summary>
+    /// Optional phase-specific properties keyed by CT label. Missing entries use the
+    /// global material properties below. Label zero is always treated as void.
+    /// </summary>
+    public Dictionary<byte, VoxelMaterialProperties> MaterialsByLabel { get; set; } = new();
+
     // Material properties (base values)
     public float YoungModulus { get; set; } = 30000f; // MPa
     public float PoissonRatio { get; set; } = 0.25f;
@@ -67,7 +73,7 @@ public partial class GeomechanicalParameters
     public float HoekBrown_a { get; set; } = 0.5f;
 
     // Computational settings
-    public bool UseGPU { get; set; } = true;
+    public bool UseGPU { get; set; } = false;
     public int MaxIterations { get; set; } = 1000;
     public float Tolerance { get; set; } = 1e-4f;
 
@@ -92,6 +98,13 @@ public partial class GeomechanicalParameters
     // Real-time visualization
     public bool EnableRealTimeVisualization { get; set; } = true;
     public float VisualizationUpdateInterval { get; set; } = 0.5f; // seconds
+}
+
+public sealed class VoxelMaterialProperties
+{
+    public float YoungModulus { get; set; } = 30000f; // MPa
+    public float PoissonRatio { get; set; } = 0.25f;
+    public float Density { get; set; } = 2700f; // kg/m³
 }
 
 public class BoundingBox

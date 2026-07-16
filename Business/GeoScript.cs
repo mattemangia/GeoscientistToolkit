@@ -511,12 +511,10 @@ public static class CommandRegistry
             new GAIA.Business.GeoScript.Commands.Slope.SlopeSetWaterCommand(),
             new GAIA.Business.GeoScript.Commands.Slope.SlopeFilterBlocksCommand(),
             new GAIA.Business.GeoScript.Commands.Slope.SlopeTrackBlocksCommand(),
-            new GAIA.Business.GeoScript.Commands.Slope.SlopeCalculateFOSCommand(),
-            new GAIA.Business.GeoScript.Commands.Slope.SlopeSimulateCommand(),
+            // Execution and strength reduction moved to PRISM.
             new GAIA.Business.GeoScript.Commands.Slope.SlopeExportCommand(),
 
-            // Geomechanics parameter sweeps
-            new GAIA.Business.GeoScriptParameterSweepCommands.GeomechSweepCommand()
+            // 2D macro-geomechanics parameter sweeps moved to PRISM.
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }

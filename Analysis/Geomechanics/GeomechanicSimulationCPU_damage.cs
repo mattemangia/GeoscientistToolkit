@@ -47,7 +47,7 @@ public partial class GeomechanicalSimulatorCPU
         // Initialize on first call
         if (_damageVariable == null) InitializeDamageTracking(w, h, d);
 
-        var E = _params.YoungModulus * 1e6f; // Pa
+        var E = _params.YoungModulus; // MPa, consistent with the stress result fields
         var nu = _params.PoissonRatio;
 
         // Damage parameters
@@ -149,34 +149,9 @@ public partial class GeomechanicalSimulatorCPU
                     // Update damage field for visualization (0-255)
                     results.DamageField[x, y, z] = (byte)(D_new * 255f);
 
-                    // Degrade material properties based on damage
-                    // Effective modulus: E_eff = (1-D) * E
-                    // This affects future iterations
-                    if (_params.ApplyDamageToStiffness && D_new > 0.01f)
-                    {
-                        var stiffnessFactor = 1f - D_new;
-
-                        // Degrade stresses proportionally
-                        results.StressXX[x, y, z] *= stiffnessFactor;
-                        results.StressYY[x, y, z] *= stiffnessFactor;
-                        results.StressZZ[x, y, z] *= stiffnessFactor;
-                        results.StressXY[x, y, z] *= stiffnessFactor;
-                        results.StressXZ[x, y, z] *= stiffnessFactor;
-                        results.StressYZ[x, y, z] *= stiffnessFactor;
-
-                        // Update principal stresses
-                        var (s1, s2, s3) = CalculatePrincipalStresses(
-                            results.StressXX[x, y, z],
-                            results.StressYY[x, y, z],
-                            results.StressZZ[x, y, z],
-                            results.StressXY[x, y, z],
-                            results.StressXZ[x, y, z],
-                            results.StressYZ[x, y, z]);
-
-                        results.Sigma1[x, y, z] = s1;
-                        results.Sigma2[x, y, z] = s2;
-                        results.Sigma3[x, y, z] = s3;
-                    }
+                    // Damage remains an explicitly reported state variable. Stiffness
+                    // degradation must be assembled in a subsequent nonlinear solve;
+                    // scaling stresses here would be a non-equilibrated post-hoc correction.
                 }
             }
 

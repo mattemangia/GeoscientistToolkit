@@ -1948,22 +1948,9 @@ public class TwoDGeomechanicsTools
 
     private async void RunSimulation()
     {
-        _isSimulating = true;
-        _simCts = new CancellationTokenSource();
-
-        try
-        {
-            _renderer.Results = _simulator.Results;
-            await _simulator.RunAsync(_simCts.Token);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError($"Simulation error: {ex.Message}");
-        }
-        finally
-        {
-            _isSimulating = false;
-        }
+        _isSimulating = false;
+        Logger.LogWarning(GAIA.Business.MacroGeomechanicsRetirement.Message);
+        await Task.CompletedTask;
     }
 
     private void StopSimulation()

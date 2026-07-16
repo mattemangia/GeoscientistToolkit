@@ -10,6 +10,12 @@ public static class Program
 
     public static void Main(string[] args)
     {
+        if (Interop.GaiaPrism.GaiaPrismBridgeCli.TryRun(args, out var bridgeExitCode))
+        {
+            Environment.ExitCode = bridgeExitCode;
+            return;
+        }
+
         if (args.Any(arg => arg.Equals("--help", StringComparison.OrdinalIgnoreCase)
                             || arg.Equals("-h", StringComparison.OrdinalIgnoreCase)))
         {
@@ -40,6 +46,10 @@ public static class Program
         Console.WriteLine("  --ai-diagnostic           Run AI diagnostics.");
         Console.WriteLine("  --gui-diagnostic          Run GUI diagnostics.");
         Console.WriteLine("  --test[=filters]          Run tests (optional comma-separated filters).");
+        Console.WriteLine("  --bridge-validate <gpex> Validate a GAIA–PRISM exchange package.");
+        Console.WriteLine("  --bridge-inspect <gpex>  Validate and print an exchange manifest.");
+        Console.WriteLine("  --bridge-extract <gpex> <dir>  Safely extract validated payloads.");
+        Console.WriteLine("  --bridge-send-prism <gpex> [--allow-exploratory]  Send a material card to installed PRISM.");
         Console.WriteLine("  <path>.gtp                Open a project file on launch.");
     }
 

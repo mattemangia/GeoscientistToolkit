@@ -18,6 +18,7 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
     private ArrayWrapper<float> _dirichletValue;
     private ArrayWrapper<float> _displacement;
     private ArrayWrapper<float> _elementE, _elementNu;
+    private float[] _elementDensity;
     private ArrayWrapper<int> _elementNodes;
     private ArrayWrapper<float> _force;
     private ArrayWrapper<bool> _isDirichlet;
@@ -95,7 +96,7 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
             Logger.Log("\n[2/10] Generating FEM mesh...");
             progress?.Report(0.10f);
             sw.Restart();
-            GenerateMesh(labels);
+            GenerateMesh(labels, density);
             Logger.Log($"[2/10] Mesh generated in {sw.ElapsedMilliseconds} ms");
             token.ThrowIfCancellationRequested();
 
@@ -215,6 +216,23 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
             throw new ArgumentException("Poisson's ratio must be in (0, 0.5)");
         if (_params.YoungModulus <= 0)
             throw new ArgumentException("Young's modulus must be positive");
+        if (_params.PixelSize <= 0)
+            throw new ArgumentException("Pixel size must be positive and expressed in micrometres");
+        if (_params.MaxIterations <= 0)
+            throw new ArgumentException("Maximum solver iterations must be positive");
+        if (_params.Tolerance <= 0 || !float.IsFinite(_params.Tolerance))
+            throw new ArgumentException("Solver tolerance must be finite and positive");
+
+        foreach (var (label, material) in _params.MaterialsByLabel)
+        {
+            if (label == 0) throw new ArgumentException("CT label zero is reserved for void");
+            if (material.YoungModulus <= 0)
+                throw new ArgumentException($"Young's modulus for label {label} must be positive");
+            if (material.PoissonRatio <= 0 || material.PoissonRatio >= 0.5f)
+                throw new ArgumentException($"Poisson's ratio for label {label} must be in (0, 0.5)");
+            if (material.Density <= 0)
+                throw new ArgumentException($"Density for label {label} must be positive");
+        }
 
         Logger.Log("[GeomechCPU] All parameters validated successfully");
     }
@@ -233,7 +251,7 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
         for (var z = 0; z < extent.Depth; z++)
         for (var y = 0; y < extent.Height; y++)
         for (var x = 0; x < extent.Width; x++)
-            if (labels[x, y, z] != 0)
+            if (IsSelectedMaterial(labels[x, y, z]))
             {
                 materialVoxels++;
                 if (x < _minX) _minX = x;
@@ -247,7 +265,10 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
         Logger.Log($"[GeomechCPU] Bounding box: X=[{_minX},{_maxX}], Y=[{_minY},{_maxY}], Z=[{_minZ},{_maxZ}]");
     }
 
-    private void GenerateMesh(byte[,,] labels)
+    private bool IsSelectedMaterial(byte label) =>
+        label != 0 && (_params.SelectedMaterialIDs.Count == 0 || _params.SelectedMaterialIDs.Contains(label));
+
+    private void GenerateMesh(byte[,,] labels, float[,,] density)
     {
         var sw = Stopwatch.StartNew();
 
@@ -296,11 +317,14 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
         }
 
         var elementList = new List<int[]>();
+        var elementLabels = new List<byte>();
+        var elementDensities = new List<float>();
         for (var z = _minZ; z <= _maxZ; z++)
         for (var y = _minY; y <= _maxY; y++)
         for (var x = _minX; x <= _maxX; x++)
         {
-            if (labels[x, y, z] == 0) continue;
+            var label = labels[x, y, z];
+            if (!IsSelectedMaterial(label)) continue;
 
             var lx = x - _minX;
             var ly = y - _minY;
@@ -312,9 +336,17 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
                 n0, n0 + 1, n0 + w + 1, n0 + w,
                 n0 + w * h, n0 + w * h + 1, n0 + w * h + w + 1, n0 + w * h + w
             });
+            elementLabels.Add(label);
+            var fieldDensity = density != null ? density[x, y, z] : 0f;
+            var fallbackDensity = _params.MaterialsByLabel.TryGetValue(label, out var phase)
+                ? phase.Density
+                : _params.Density;
+            elementDensities.Add(float.IsFinite(fieldDensity) && fieldDensity > 0 ? fieldDensity : fallbackDensity);
         }
 
         _numElements = elementList.Count;
+        if (_numElements == 0)
+            throw new ArgumentException("The simulation extent contains no selected material voxels");
         var elementNodes_init = new int[_numElements * 8];
         Parallel.For(0, _numElements, e =>
         {
@@ -326,20 +358,29 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
             _elementNodes = new DiskBackedArray<int>(_numElements * 8, offloadDir);
             _elementNodes.WriteChunk(0, elementNodes_init);
             _elementE = new DiskBackedArray<float>(_numElements, offloadDir);
-            _elementE.WriteChunk(0, Enumerable.Repeat(_params.YoungModulus, _numElements).ToArray());
+            _elementE.WriteChunk(0, elementLabels.Select(GetYoungModulus).ToArray());
             _elementNu = new DiskBackedArray<float>(_numElements, offloadDir);
-            _elementNu.WriteChunk(0, Enumerable.Repeat(_params.PoissonRatio, _numElements).ToArray());
+            _elementNu.WriteChunk(0, elementLabels.Select(GetPoissonRatio).ToArray());
         }
         else
         {
             _elementNodes = new MemoryBackedArray<int>(elementNodes_init);
-            _elementE = new MemoryBackedArray<float>(Enumerable.Repeat(_params.YoungModulus, _numElements).ToArray());
-            _elementNu = new MemoryBackedArray<float>(Enumerable.Repeat(_params.PoissonRatio, _numElements).ToArray());
+            _elementE = new MemoryBackedArray<float>(elementLabels.Select(GetYoungModulus).ToArray());
+            _elementNu = new MemoryBackedArray<float>(elementLabels.Select(GetPoissonRatio).ToArray());
         }
+        _elementDensity = elementDensities.ToArray();
 
         Logger.Log($"[GeomechCPU] Mesh Stats: {_numNodes:N0} nodes, {_numElements:N0} elements, {_numDOFs:N0}.");
         Logger.Log($"[GeomechCPU] Mesh generation completed in {sw.ElapsedMilliseconds} ms");
     }
+
+    private float GetYoungModulus(byte label) => _params.MaterialsByLabel.TryGetValue(label, out var material)
+        ? material.YoungModulus
+        : _params.YoungModulus;
+
+    private float GetPoissonRatio(byte label) => _params.MaterialsByLabel.TryGetValue(label, out var material)
+        ? material.PoissonRatio
+        : _params.PoissonRatio;
 
     private void ApplyBoundaryConditions()
     {
@@ -367,17 +408,20 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
         var d = _maxZ - _minZ + 2;
         var dx = _params.PixelSize / 1e3f; // mm
 
-        var height_mm = (d - 2) * dx;
-        var width_mm = (w - 2) * dx;
-        var depth_mm = (h - 2) * dx;
+        // A run of N voxel elements has N+1 nodal planes.
+        var height_mm = (d - 1) * dx;
+        var width_mm = (w - 1) * dx;
+        var depth_mm = (h - 1) * dx;
 
         var eps_z = (_params.Sigma1 - _params.PoissonRatio * (_params.Sigma2 + _params.Sigma3)) / _params.YoungModulus;
         var eps_y = (_params.Sigma2 - _params.PoissonRatio * (_params.Sigma1 + _params.Sigma3)) / _params.YoungModulus;
         var eps_x = (_params.Sigma3 - _params.PoissonRatio * (_params.Sigma1 + _params.Sigma2)) / _params.YoungModulus;
 
-        var delta_z = eps_z * height_mm;
-        var delta_y = eps_y * depth_mm;
-        var delta_x = eps_x * width_mm;
+        // Input principal stresses use the geomechanics convention (compression positive).
+        // FEM displacement/stress uses the continuum convention (tension positive).
+        var delta_z = -eps_z * height_mm;
+        var delta_y = -eps_y * depth_mm;
+        var delta_x = -eps_x * width_mm;
 
         Logger.Log(
             $"[GeomechCPU] Target displacements: δx={delta_x * 1000:F2}μm, δy={delta_y * 1000:F2}μm, δz={delta_z * 1000:F2}μm");
@@ -407,25 +451,20 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
 
                 var localIdx = (int)(dof - startDof);
 
-                if (z == 0)
-                {
-                    isDirBatch[localIdx] = true;
-                    dirValBatch[localIdx] = 0;
-                }
-                else if (z == d - 2 && comp == 2)
-                {
-                    isDirBatch[localIdx] = true;
-                    dirValBatch[localIdx] = delta_z;
-                }
-                else if ((x == 0 || x == w - 2) && comp == 0)
+                if (comp == 0 && (x == 0 || x == w - 1))
                 {
                     isDirBatch[localIdx] = true;
                     dirValBatch[localIdx] = x == 0 ? 0 : delta_x;
                 }
-                else if ((y == 0 || y == h - 2) && comp == 1)
+                else if (comp == 1 && (y == 0 || y == h - 1))
                 {
                     isDirBatch[localIdx] = true;
                     dirValBatch[localIdx] = y == 0 ? 0 : delta_y;
+                }
+                else if (comp == 2 && (z == 0 || z == d - 1))
+                {
+                    isDirBatch[localIdx] = true;
+                    dirValBatch[localIdx] = z == 0 ? 0 : delta_z;
                 }
             }
 
@@ -464,47 +503,22 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
             return;
 
         var dxMeters = _params.PixelSize / 1e6f;
-        var nodeVolume = dxMeters * dxMeters * dxMeters;
-        var nodeMass = _params.Density * nodeVolume;
-
-        var fx = nodeMass * gravity.X;
-        var fy = nodeMass * gravity.Y;
-        var fz = nodeMass * gravity.Z;
-
-        const int batchSize = 1_048_576;
-        var forceBuffer = new float[batchSize];
-        var dirBuffer = new bool[batchSize];
-
-        for (long i = 0; i < _numDOFs; i += batchSize)
+        var elementVolume = dxMeters * dxMeters * dxMeters;
+        var assembled = new float[_numDOFs];
+        for (var element = 0; element < _numElements; element++)
         {
-            var chunkSize = (int)Math.Min(batchSize, _numDOFs - i);
-            if (forceBuffer.Length != chunkSize)
+            var nodalForce = _elementDensity[element] * elementVolume / 8f * gravity;
+            for (var localNode = 0; localNode < 8; localNode++)
             {
-                forceBuffer = new float[chunkSize];
-                dirBuffer = new bool[chunkSize];
+                var node = _elementNodes[element * 8 + localNode];
+                assembled[node * 3] += nodalForce.X;
+                assembled[node * 3 + 1] += nodalForce.Y;
+                assembled[node * 3 + 2] += nodalForce.Z;
             }
-
-            _isDirichlet.ReadChunk(i, dirBuffer);
-
-            for (var j = 0; j < chunkSize; j++)
-            {
-                if (dirBuffer[j])
-                {
-                    forceBuffer[j] = 0;
-                    continue;
-                }
-
-                var comp = (int)((i + j) % 3);
-                forceBuffer[j] = comp switch
-                {
-                    0 => fx,
-                    1 => fy,
-                    _ => fz
-                };
-            }
-
-            _force.WriteChunk(i, forceBuffer);
         }
+        for (var dof = 0; dof < assembled.Length; dof++)
+            if (_isDirichlet[dof]) assembled[dof] = 0;
+        _force.WriteChunk(0, assembled);
 
         Logger.Log($"[GeomechCPU] Applied gravity body forces: ({gravity.X:F3}, {gravity.Y:F3}, {gravity.Z:F3}) m/s²");
     }
@@ -527,8 +541,8 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
         }
 
         Logger.Log($"[GeomechCPU] Cached {_isDirichletCache.Count(b => b):N0} Dirichlet DOFs");
-        const int maxIter = 2000;
-        const float tol = 1e-6f;
+        var maxIter = _params.MaxIterations;
+        var tol = _params.Tolerance;
 
         var offload = _params.EnableOffloading;
         var offloadDir = _params.OffloadDirectory;
@@ -1587,7 +1601,8 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
         var results = new GeomechanicalResults
         {
             MaterialLabels = labels,
-            Parameters = _params
+            Parameters = _params,
+            TotalVoxels = _numElements
         };
 
         if (useOffload)
@@ -1720,12 +1735,13 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
                     var trace = strain[0] + strain[1] + strain[2];
 
                     var stress = new float[6];
-                    stress[0] = lambda * trace + 2.0f * mu * strain[0];
-                    stress[1] = lambda * trace + 2.0f * mu * strain[1];
-                    stress[2] = lambda * trace + 2.0f * mu * strain[2];
-                    stress[3] = mu * strain[3];
-                    stress[4] = mu * strain[4];
-                    stress[5] = mu * strain[5];
+                    // Expose stress using compression-positive geomechanics convention.
+                    stress[0] = -(lambda * trace + 2.0f * mu * strain[0]);
+                    stress[1] = -(lambda * trace + 2.0f * mu * strain[1]);
+                    stress[2] = -(lambda * trace + 2.0f * mu * strain[2]);
+                    stress[3] = -mu * strain[3];
+                    stress[4] = -mu * strain[4];
+                    stress[5] = -mu * strain[5];
 
                     var cx = (node0.x + node6.x) / 2.0f;
                     var cy = (node0.y + node6.y) / 2.0f;
@@ -1764,9 +1780,9 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
         results.DamageField = new byte[w, h, d];
         results.FractureField = new bool[w, h, d];
 
-        var cohesion_Pa = _params.Cohesion * 1e6f;
+        var cohesion_MPa = _params.Cohesion;
         var phi = _params.FrictionAngle * MathF.PI / 180f;
-        var tensile_Pa = _params.TensileStrength * 1e6f;
+        var tensile_MPa = _params.TensileStrength;
 
         const int CHUNK_SIZE = 16;
         var numChunksX = (w + CHUNK_SIZE - 1) / CHUNK_SIZE;
@@ -1801,45 +1817,16 @@ public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposab
                 var sxz = results.StressXZ[x, y, z];
                 var syz = results.StressYZ[x, y, z];
 
-                if (_params.EnablePlasticity)
-                {
-                    var mean = (sxx + syy + szz) / 3.0f;
-                    var s_dev_xx = sxx - mean;
-                    var s_dev_yy = syy - mean;
-                    var s_dev_zz = szz - mean;
-                    var J2 = 0.5f * (s_dev_xx * s_dev_xx + s_dev_yy * s_dev_yy + s_dev_zz * s_dev_zz)
-                             + sxy * sxy + sxz * sxz + syz * syz;
-                    var vonMises = MathF.Sqrt(3.0f * J2);
-                    var yieldStress = _params.Cohesion * 1e6f * 2.0f;
-
-                    if (vonMises > yieldStress)
-                    {
-                        var scale = yieldStress / vonMises;
-                        sxx = mean + s_dev_xx * scale;
-                        syy = mean + s_dev_yy * scale;
-                        szz = mean + s_dev_zz * scale;
-                        sxy *= scale;
-                        sxz *= scale;
-                        syz *= scale;
-
-                        results.StressXX[x, y, z] = sxx;
-                        results.StressYY[x, y, z] = syy;
-                        results.StressZZ[x, y, z] = szz;
-                        results.StressXY[x, y, z] = sxy;
-                        results.StressXZ[x, y, z] = sxz;
-                        results.StressYZ[x, y, z] = syz;
-                    }
-                }
-
                 var (s1, s2, s3) = CalculatePrincipalStresses(sxx, syy, szz, sxy, sxz, syz);
                 results.Sigma1[x, y, z] = s1;
                 results.Sigma2[x, y, z] = s2;
                 results.Sigma3[x, y, z] = s3;
 
-                var fi = CalculateFailureIndex(s1, s2, s3, cohesion_Pa, phi, tensile_Pa);
+                var fi = CalculateFailureIndex(s1, s2, s3, cohesion_MPa, phi, tensile_MPa);
                 results.FailureIndex[x, y, z] = fi;
                 results.FractureField[x, y, z] = fi >= 1.0f;
-                results.DamageField[x, y, z] = (byte)Math.Clamp(fi * 200.0f, 0.0f, 255.0f);
+                if (!_params.EnableDamageEvolution)
+                    results.DamageField[x, y, z] = (byte)Math.Clamp(fi * 200.0f, 0.0f, 255.0f);
             }
         });
     }

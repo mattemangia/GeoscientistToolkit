@@ -33,7 +33,7 @@ public partial class GeomechanicalSimulatorCPU
             _yieldStress = new float[w, h, d];
 
             // Initialize yield stress from cohesion
-            var initialYield = _params.Cohesion * 1e6f * 2f; // von Mises ~ 2*c for Mohr-Coulomb
+            var initialYield = _params.Cohesion * 2f; // MPa; von Mises ~ 2*c for Mohr-Coulomb
             Parallel.For(0, d, z =>
             {
                 for (var y = 0; y < h; y++)
@@ -43,13 +43,13 @@ public partial class GeomechanicalSimulatorCPU
             });
         }
 
-        var E = _params.YoungModulus * 1e6f; // Pa
+        var E = _params.YoungModulus; // MPa
         var nu = _params.PoissonRatio;
         var mu = E / (2f * (1f + nu)); // Shear modulus
         var K = E / (3f * (1f - 2f * nu)); // Bulk modulus
 
         // Hardening parameters
-        var H_iso = _params.PlasticHardeningModulus * 1e6f; // Isotropic hardening modulus (Pa)
+        var H_iso = _params.PlasticHardeningModulus; // MPa
 
         var yieldedVoxels = 0;
         double totalPlasticStrain = 0;

@@ -10,6 +10,7 @@ using GAIA.Data.Pnm;
 using GAIA.UI;
 using GAIA.UI.Utils;
 using GAIA.Util;
+using GAIA.Interop.GaiaPrism;
 using ImGuiNET;
 
 namespace GAIA.Analysis.Geomechanics;
@@ -25,6 +26,7 @@ public class GeomechanicalSimulationUI : IDisposable
     private readonly ImGuiExportFileDialog _offloadDirectoryDialog;
     private readonly ImGuiExportFileDialog _permeabilityFileDialog;
     private readonly ImGuiExportFileDialog _pnmFileDialog;
+    private readonly ImGuiExportFileDialog _gpexFileDialog;
     private readonly ProgressBarDialog _progressDialog;
 
     // Material selection
@@ -129,7 +131,8 @@ public class GeomechanicalSimulationUI : IDisposable
     private float _tolerance = 1e-4f;
 
     // Computational settings
-    private bool _useGPU = true;
+    private bool _useGPU;
+    private bool _pendingGpexExport;
 
     // Pore pressure
     private bool _usePorePressure;
@@ -149,6 +152,9 @@ public class GeomechanicalSimulationUI : IDisposable
 
         _pnmFileDialog = new ImGuiExportFileDialog("PNMFile", "Select PNM Dataset");
         _pnmFileDialog.SetExtensions((".pnm", "PNM Dataset"));
+
+        _gpexFileDialog = new ImGuiExportFileDialog("GpexFile", "Export GAIA–PRISM Geomechanics Card");
+        _gpexFileDialog.SetExtensions((".gpex", "GAIA–PRISM Exchange"));
 
         _permeabilityFileDialog = new ImGuiExportFileDialog("PermFile", "Select Permeability CSV");
         _permeabilityFileDialog.SetExtensions((".csv", "CSV File"));
@@ -260,6 +266,11 @@ public class GeomechanicalSimulationUI : IDisposable
             _permeabilityCsvPath = _permeabilityFileDialog.SelectedPath;
         if (_acousticFileDialog.Submit())
             _acousticDatasetPath = _acousticFileDialog.SelectedPath;
+        if (_gpexFileDialog.Submit() && _pendingGpexExport)
+        {
+            _pendingGpexExport = false;
+            ExportGpex(_gpexFileDialog.SelectedPath);
+        }
 
         // For directory selection, use CurrentDirectory when dialog is submitted
         if (_offloadDirectoryDialog.Submit())
@@ -891,7 +902,10 @@ public class GeomechanicalSimulationUI : IDisposable
 
     private void DrawComputationalSettings()
     {
+        ImGui.BeginDisabled();
         ImGui.Checkbox("Use GPU Acceleration (OpenCL)", ref _useGPU);
+        ImGui.EndDisabled();
+        ImGui.TextDisabled("GPU path quarantined until field-level parity with the requalified CPU solver is certified.");
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Significant speedup for large volumes");
 
@@ -1193,8 +1207,8 @@ public class GeomechanicalSimulationUI : IDisposable
 
             ImGui.Text("Stress Statistics:");
             ImGui.Indent();
-            ImGui.Text($"Mean Stress: {_lastResults.MeanStress / 1e6f:F2} MPa");
-            ImGui.Text($"Max Shear Stress: {_lastResults.MaxShearStress / 1e6f:F2} MPa");
+            ImGui.Text($"Mean Stress: {_lastResults.MeanStress:F2} MPa");
+            ImGui.Text($"Max Shear Stress: {_lastResults.MaxShearStress:F2} MPa");
             ImGui.Unindent();
 
             ImGui.Spacing();
@@ -1256,7 +1270,27 @@ public class GeomechanicalSimulationUI : IDisposable
 
             ImGui.Spacing();
             _exportManager.DrawExportControls(_lastResults, _currentDataset);
+            ImGui.Spacing();
+            ImGui.SeparatorText("GAIA–PRISM multiscale bridge");
+            ImGui.TextWrapped("Exports a reviewable core-scale material card. Mechanical priors remain UNVERIFIED-FORBIDDEN until REV and same-sample laboratory validation gates pass.");
+            if (ImGui.Button("Export .gpex material card", new Vector2(-1, 0)))
+            {
+                _pendingGpexExport = true;
+                _gpexFileDialog.Open();
+            }
         }
+    }
+
+    private void ExportGpex(string path)
+    {
+        try
+        {
+            var sample = _currentDataset?.Name ?? Path.GetFileNameWithoutExtension(_currentDataset?.FilePath ?? "ct-core");
+            var manifest = GeomechanicsGpexExporter.CreateManifest("GAIA-project", sample, _params, _lastResults);
+            GpexArchive.Write(path, manifest);
+            Logger.Log($"[GAIA–PRISM] Exported geomechanics material card: {path}");
+        }
+        catch (Exception ex) { Logger.LogError($"[GAIA–PRISM] Export failed: {ex.Message}"); }
     }
 
     private void DrawMohrCircleWindow()
