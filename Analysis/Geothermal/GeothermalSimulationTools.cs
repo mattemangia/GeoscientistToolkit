@@ -2460,15 +2460,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private void InitializeMeshPreview(BoreholeDataset borehole)
     {
         Logger.Log("=== InitializeMeshPreview START ===");
-        Logger.Log($"VeldridManager.GraphicsDevice: {(VeldridManager.GraphicsDevice != null ? "OK" : "NULL")}");
+        Logger.Log($"OpenTK initialized: {OpenTkManager.IsInitialized}");
         Logger.Log($"BoreholeDataset: {(borehole != null ? "OK" : "NULL")}");
 
-        // Check if GraphicsDevice is available in VeldridManager
-        if (VeldridManager.GraphicsDevice == null)
+        if (!OpenTkManager.IsInitialized)
         {
-            Logger.LogWarning("VeldridManager.GraphicsDevice not available. Mesh preview cannot be generated.");
-            // DON'T reset the flag - let the window show the error
-            _meshPreviewInitError = "Graphics device not available. Check if GPU is initialized.";
+            Logger.LogWarning("OpenTK context not available. Mesh preview cannot be generated.");
+            _meshPreviewInitError = "OpenGL context not available. Check if graphics initialization completed.";
             return;
         }
 
@@ -2491,7 +2489,6 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 Logger.Log("Mesh preview recreated");
             }
 
-            // Generate preview using VeldridManager graphics device
             Logger.Log("Calling GeneratePreview...");
             _meshPreview.GeneratePreview(borehole, _options);
             Logger.Log("GeneratePreview completed successfully");
@@ -2663,10 +2660,9 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
     private void InitializeVisualization()
     {
-        var graphicsDevice = VeldridManager.GraphicsDevice;
-        if (_visualization3D == null && graphicsDevice != null)
+        if (_visualization3D == null)
         {
-            _visualization3D = new GeothermalVisualization3D(graphicsDevice);
+            _visualization3D = new GeothermalVisualization3D();
 
             if (_results != null && _mesh != null)
             {

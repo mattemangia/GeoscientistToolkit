@@ -62,18 +62,10 @@ public class GeothermalMeshPreview : IDisposable
             return;
         _lastBorehole = borehole;
         _lastOptions = options;
-        var graphicsDevice = VeldridManager.GraphicsDevice;
-        if (graphicsDevice == null)
-        {
-            var errorMsg = "GeothermalMeshPreview: VeldridManager.GraphicsDevice is null. Cannot generate preview.";
-            Console.WriteLine($"ERROR: {errorMsg}");
-            throw new InvalidOperationException(errorMsg);
-        }
-
         try
         {
             _visualization3D?.Dispose();
-            _visualization3D = new GeothermalVisualization3D(graphicsDevice);
+            _visualization3D = new GeothermalVisualization3D();
 
             // Let the visualizer know the scene extents (if you have a setter, keep it; otherwise optional)
             _visualization3D.SetPreviewOptions(options, borehole.TotalDepth);

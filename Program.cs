@@ -35,7 +35,8 @@ public static class Program
         if (args.Length > 0 && args[0].EndsWith(".gtp", StringComparison.OrdinalIgnoreCase))
             StartingProjectPath = args[0];
 
-        using var app = new OpenTkApplication();
+        var openTkSelfTest = args.Any(arg => arg.Equals("--opentk-self-test", StringComparison.OrdinalIgnoreCase));
+        using var app = new OpenTkApplication(openTkSelfTest);
         app.Run();
     }
 
@@ -46,6 +47,7 @@ public static class Program
         Console.WriteLine("  --ai-diagnostic           Run AI diagnostics.");
         Console.WriteLine("  --gui-diagnostic          Run GUI diagnostics.");
         Console.WriteLine("  --test[=filters]          Run tests (optional comma-separated filters).");
+        Console.WriteLine("  --opentk-self-test        Validate OpenGL renderers, FBOs and shaders, then exit.");
         Console.WriteLine("  --bridge-validate <gpex> Validate a GAIA–PRISM exchange package.");
         Console.WriteLine("  --bridge-inspect <gpex>  Validate and print an exchange manifest.");
         Console.WriteLine("  --bridge-extract <gpex> <dir>  Safely extract validated payloads.");

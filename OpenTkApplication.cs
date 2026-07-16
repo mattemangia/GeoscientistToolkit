@@ -22,8 +22,9 @@ internal sealed class OpenTkApplication : GameWindow
     private bool _exitConfirmed;
     private bool _closeRequested;
     private bool _shutdown;
+    private readonly bool _graphicsSelfTest;
 
-    public OpenTkApplication()
+    public OpenTkApplication(bool graphicsSelfTest = false)
         : base(GameWindowSettings.Default, new NativeWindowSettings
         {
             ClientSize = new Vector2i(1700, 950),
@@ -35,6 +36,7 @@ internal sealed class OpenTkApplication : GameWindow
             StartVisible = true
         })
     {
+        _graphicsSelfTest = graphicsSelfTest;
     }
 
     protected override void OnLoad()
@@ -61,6 +63,12 @@ internal sealed class OpenTkApplication : GameWindow
 
         TextInput += OnTextInput;
         Logger.Log("GAIA OpenTK host initialized.");
+        if (_graphicsSelfTest)
+        {
+            UI.Diagnostics.OpenTkGraphicsSelfTest.RunOrThrow();
+            Logger.Log("GAIA OpenTK graphics self-test passed.");
+            _exitConfirmed = true;
+        }
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)

@@ -7,8 +7,11 @@ using GAIA.Analysis.Geothermal;
 using GAIA.Data.Mesh3D;
 using GAIA.Util;
 using ImGuiNET;
+using OpenTK.Graphics.OpenGL;
 using Veldrid;
 using Veldrid.SPIRV;
+using PixelFormat = Veldrid.PixelFormat;
+using FramebufferAttachment = OpenTK.Graphics.OpenGL.FramebufferAttachment;
 
 /// <summary>
 ///     3D visualization system for geothermal simulation results with advanced rendering capabilities.
@@ -44,6 +47,7 @@ public class GeothermalVisualization3D : IDisposable
     private readonly ResourceFactory _factory;
     private readonly GraphicsDevice _graphicsDevice;
     private readonly float _velocityMax = 0.001f;
+    private int _glFramebuffer, _glRenderTarget, _glDepth, _glProgram, _glTemperature3D, _glVelocity3D;
 
     // GPU resources for meshes
     private GpuMesh _boreholeGpuMesh;
@@ -118,17 +122,10 @@ public class GeothermalVisualization3D : IDisposable
     private Matrix4x4 _viewMatrix;
     private Pipeline _wireframePipeline; // Add wireframe pipeline for lines
 
-    public GeothermalVisualization3D(GraphicsDevice graphicsDevice)
+    public GeothermalVisualization3D()
     {
         Logger.Log("[GeothermalVisualization3D] Constructor starting...");
-        _graphicsDevice = graphicsDevice;
-        _factory = graphicsDevice.ResourceFactory;
-
-        Logger.Log("[GeothermalVisualization3D] Calling InitializeColorMaps...");
-        InitializeColorMaps(); // Must be called BEFORE InitializeResources
-
-        Logger.Log("[GeothermalVisualization3D] Calling InitializeResources...");
-        InitializeResources();
+        InitializeOpenGlResources();
 
         Logger.Log("[GeothermalVisualization3D] Calling UpdateCamera...");
         UpdateCamera();
@@ -169,6 +166,39 @@ public class GeothermalVisualization3D : IDisposable
         _renderTarget?.Dispose();
         _renderTargetView?.Dispose();
         _framebuffer?.Dispose();
+        if (_glProgram != 0) GL.DeleteProgram(_glProgram);
+        if (_glTemperature3D != 0) GL.DeleteTexture(_glTemperature3D);
+        if (_glVelocity3D != 0) GL.DeleteTexture(_glVelocity3D);
+        if (_glRenderTarget != 0) GL.DeleteTexture(_glRenderTarget);
+        if (_glDepth != 0) GL.DeleteRenderbuffer(_glDepth);
+        if (_glFramebuffer != 0) GL.DeleteFramebuffer(_glFramebuffer);
+    }
+
+    private void InitializeOpenGlResources()
+    {
+        _glProgram = CreateOpenGlProgram(OpenGlVertexShader, OpenGlFragmentShader);
+        CreateOpenGlRenderTarget(_renderWidth, _renderHeight);
+    }
+
+    private void CreateOpenGlRenderTarget(uint width, uint height)
+    {
+        _renderWidth = Math.Max(1, width); _renderHeight = Math.Max(1, height);
+        if (_glFramebuffer == 0) _glFramebuffer = GL.GenFramebuffer();
+        if (_glRenderTarget != 0) GL.DeleteTexture(_glRenderTarget);
+        if (_glDepth != 0) GL.DeleteRenderbuffer(_glDepth);
+        _glRenderTarget = GL.GenTexture(); GL.BindTexture(TextureTarget.Texture2D, _glRenderTarget);
+        GL.TexImage2D(TextureTarget.Texture2D,0,PixelInternalFormat.Rgba8,(int)_renderWidth,(int)_renderHeight,0,
+            OpenTK.Graphics.OpenGL.PixelFormat.Rgba,PixelType.UnsignedByte,IntPtr.Zero);
+        GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureMinFilter,(int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureMagFilter,(int)TextureMagFilter.Linear);
+        _glDepth=GL.GenRenderbuffer();GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer,_glDepth);
+        GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer,RenderbufferStorage.DepthComponent24,(int)_renderWidth,(int)_renderHeight);
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer,_glFramebuffer);
+        GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,FramebufferAttachment.ColorAttachment0,TextureTarget.Texture2D,_glRenderTarget,0);
+        GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,FramebufferAttachment.DepthAttachment,RenderbufferTarget.Renderbuffer,_glDepth);
+        if(GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer)!=FramebufferErrorCode.FramebufferComplete)
+            throw new InvalidOperationException("Geothermal OpenGL framebuffer is incomplete.");
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer,0);
     }
 
     private void InitializeResources()
@@ -448,7 +478,6 @@ public class GeothermalVisualization3D : IDisposable
 
         CreateDataTextures();
         CreateSliceQuad();
-        UpdateResourceSet();
 
         Logger.Log("[LoadResults] Visualization setup complete");
     }
@@ -507,16 +536,16 @@ public class GeothermalVisualization3D : IDisposable
 
         if (vertices.Count == 0 || indices.Count == 0) return default;
 
-        var vb = _factory.CreateBuffer(new BufferDescription((uint)(vertices.Count * Marshal.SizeOf<VertexData>()),
-            BufferUsage.VertexBuffer));
-        _graphicsDevice.UpdateBuffer(vb, 0, vertices.ToArray());
-
-        var ib = _factory.CreateBuffer(new BufferDescription((uint)(indices.Count * sizeof(uint)),
-            BufferUsage.IndexBuffer));
-        _graphicsDevice.UpdateBuffer(ib, 0, indices.ToArray());
+        var vao = GL.GenVertexArray(); var vb = GL.GenBuffer(); var ib = GL.GenBuffer();
+        GL.BindVertexArray(vao); GL.BindBuffer(BufferTarget.ArrayBuffer,vb);
+        GL.BufferData(BufferTarget.ArrayBuffer,vertices.Count*Marshal.SizeOf<VertexData>(),vertices.ToArray(),BufferUsageHint.StaticDraw);
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer,ib);
+        GL.BufferData(BufferTarget.ElementArrayBuffer,indices.Count*sizeof(uint),indices.ToArray(),BufferUsageHint.StaticDraw);
+        ConfigureOpenGlVertexLayout(); GL.BindVertexArray(0);
 
         return new GpuMesh
         {
+            VertexArray = vao,
             VertexBuffer = vb,
             IndexBuffer = ib,
             IndexCount = (uint)indices.Count,
@@ -626,14 +655,13 @@ public class GeothermalVisualization3D : IDisposable
         }
 
         _domainGpuMesh.Dispose();
-        var vb = _factory.CreateBuffer(new BufferDescription((uint)(vertices.Count * Marshal.SizeOf<VertexData>()),
-            BufferUsage.VertexBuffer));
-        _graphicsDevice.UpdateBuffer(vb, 0, vertices.ToArray());
-
-        var ib = _factory.CreateBuffer(new BufferDescription((uint)(indices.Count * sizeof(uint)),
-            BufferUsage.IndexBuffer));
-        _graphicsDevice.UpdateBuffer(ib, 0, indices.ToArray());
-        _domainGpuMesh = new GpuMesh { VertexBuffer = vb, IndexBuffer = ib, IndexCount = (uint)indices.Count };
+        var vao = GL.GenVertexArray(); var vb = GL.GenBuffer(); var ib = GL.GenBuffer();
+        GL.BindVertexArray(vao); GL.BindBuffer(BufferTarget.ArrayBuffer,vb);
+        GL.BufferData(BufferTarget.ArrayBuffer,vertices.Count*Marshal.SizeOf<VertexData>(),vertices.ToArray(),BufferUsageHint.StaticDraw);
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer,ib);
+        GL.BufferData(BufferTarget.ElementArrayBuffer,indices.Count*sizeof(uint),indices.ToArray(),BufferUsageHint.StaticDraw);
+        ConfigureOpenGlVertexLayout(); GL.BindVertexArray(0);
+        _domainGpuMesh = new GpuMesh { VertexArray=vao, VertexBuffer = vb, IndexBuffer = ib, IndexCount = (uint)indices.Count };
 
         // Calculate mesh center and update camera target for proper centering
         if (vertices.Count > 0)
@@ -690,7 +718,7 @@ public class GeothermalVisualization3D : IDisposable
         {
             // Create GPU mesh for heat exchanger
             var hxGpuMesh = CreateGpuMesh(heatExchangerMesh);
-            if (hxGpuMesh.VertexBuffer != null)
+            if (hxGpuMesh.VertexBuffer != 0)
             {
                 _dynamicGpuMeshes.Add(hxGpuMesh);
                 Logger.Log($"Heat exchanger geometry generated: {heatExchangerMesh.Vertices.Count} vertices");
@@ -958,7 +986,7 @@ public class GeothermalVisualization3D : IDisposable
         if (vectorMesh.Vertices.Count > 0)
         {
             var gpuMesh = CreateGpuMesh(vectorMesh);
-            if (gpuMesh.VertexBuffer != null) _dynamicGpuMeshes.Add(gpuMesh);
+            if (gpuMesh.VertexBuffer != 0) _dynamicGpuMeshes.Add(gpuMesh);
         }
     }
 
@@ -1035,6 +1063,10 @@ public class GeothermalVisualization3D : IDisposable
     private void CreateDataTextures()
     {
         if (_results?.FinalTemperatureField == null || _mesh == null) return;
+        UploadOpenGlDataTextures();
+        return;
+
+#pragma warning disable CS0162
 
         var nr = (uint)_mesh.RadialPoints;
         var nth = (uint)_mesh.AngularPoints;
@@ -1097,7 +1129,28 @@ public class GeothermalVisualization3D : IDisposable
         }
 
         Logger.Log("[CreateDataTextures] Complete");
+#pragma warning restore CS0162
     }
+
+    private void UploadOpenGlDataTextures()
+    {
+        var nr=_mesh.RadialPoints;var nth=_mesh.AngularPoints;var nz=_mesh.VerticalPoints;
+        var max3D=GL.GetInteger(GetPName.Max3DTextureSize);
+        if(nr>max3D||nth>max3D||nz>max3D)throw new InvalidOperationException($"Geothermal volume {nr}×{nth}×{nz} exceeds GL_MAX_3D_TEXTURE_SIZE={max3D}.");
+        var temperatures=new float[checked(nr*nth*nz)];
+        for(var k=0;k<nz;k++)for(var j=0;j<nth;j++)for(var i=0;i<nr;i++)temperatures[(k*nth+j)*nr+i]=_results.FinalTemperatureField[i,j,k];
+        if(_glTemperature3D!=0)GL.DeleteTexture(_glTemperature3D);_glTemperature3D=GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture3D,_glTemperature3D);GL.PixelStore(PixelStoreParameter.UnpackAlignment,1);
+        GL.TexImage3D(TextureTarget.Texture3D,0,PixelInternalFormat.R32f,nr,nth,nz,0,OpenTK.Graphics.OpenGL.PixelFormat.Red,PixelType.Float,temperatures);
+        ConfigureVolumeTexture();
+        if(_results.DarcyVelocityField==null)return;
+        var velocity=new Vector4[temperatures.Length];
+        for(var k=0;k<nz;k++)for(var j=0;j<nth;j++)for(var i=0;i<nr;i++)velocity[(k*nth+j)*nr+i]=new Vector4(_results.DarcyVelocityField[i,j,k,0],_results.DarcyVelocityField[i,j,k,1],_results.DarcyVelocityField[i,j,k,2],0);
+        if(_glVelocity3D!=0)GL.DeleteTexture(_glVelocity3D);_glVelocity3D=GL.GenTexture();GL.BindTexture(TextureTarget.Texture3D,_glVelocity3D);
+        GL.TexImage3D(TextureTarget.Texture3D,0,PixelInternalFormat.Rgba32f,nr,nth,nz,0,OpenTK.Graphics.OpenGL.PixelFormat.Rgba,PixelType.Float,velocity);ConfigureVolumeTexture();
+    }
+
+    private static void ConfigureVolumeTexture(){GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMinFilter,(int)TextureMinFilter.Linear);GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMagFilter,(int)TextureMagFilter.Linear);GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapS,(int)TextureWrapMode.ClampToEdge);GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapT,(int)TextureWrapMode.ClampToEdge);GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapR,(int)TextureWrapMode.ClampToEdge);}
 
     private void CreateSliceQuad()
     {
@@ -1113,13 +1166,11 @@ public class GeothermalVisualization3D : IDisposable
         var indices = new uint[] { 0, 1, 2, 1, 3, 2 };
 
         _sliceQuad.Dispose();
-        var vb = _factory.CreateBuffer(new BufferDescription((uint)(vertices.Length * Marshal.SizeOf<VertexData>()),
-            BufferUsage.VertexBuffer));
-        _graphicsDevice.UpdateBuffer(vb, 0, vertices);
-        var ib = _factory.CreateBuffer(new BufferDescription((uint)(indices.Length * sizeof(uint)),
-            BufferUsage.IndexBuffer));
-        _graphicsDevice.UpdateBuffer(ib, 0, indices);
-        _sliceQuad = new GpuMesh { VertexBuffer = vb, IndexBuffer = ib, IndexCount = (uint)indices.Length };
+        var vao=GL.GenVertexArray();var vb=GL.GenBuffer();var ib=GL.GenBuffer();GL.BindVertexArray(vao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer,vb);GL.BufferData(BufferTarget.ArrayBuffer,vertices.Length*Marshal.SizeOf<VertexData>(),vertices,BufferUsageHint.StaticDraw);
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer,ib);GL.BufferData(BufferTarget.ElementArrayBuffer,indices.Length*sizeof(uint),indices,BufferUsageHint.StaticDraw);
+        ConfigureOpenGlVertexLayout();GL.BindVertexArray(0);
+        _sliceQuad = new GpuMesh { VertexArray=vao, VertexBuffer = vb, IndexBuffer = ib, IndexCount = (uint)indices.Length };
     }
 
     private void UpdateResourceSet()
@@ -1131,7 +1182,8 @@ public class GeothermalVisualization3D : IDisposable
         InitializeResourceSet();
     }
 
-    public void Render()
+#if false
+    private void RenderVeldrid()
     {
         // Allow rendering in preview mode (without simulation results)
         var isPreviewMode = _results == null;
@@ -1287,6 +1339,35 @@ public class GeothermalVisualization3D : IDisposable
         commandList.End();
         _graphicsDevice.SubmitCommands(commandList);
         commandList.Dispose();
+    }
+#endif
+
+    public void Render()
+    {
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer,_glFramebuffer);GL.Viewport(0,0,(int)_renderWidth,(int)_renderHeight);
+        GL.Enable(EnableCap.DepthTest);GL.Enable(EnableCap.Blend);GL.BlendFunc(BlendingFactor.SrcAlpha,BlendingFactor.OneMinusSrcAlpha);
+        GL.ClearColor(.025f,.03f,.045f,1);GL.Clear(ClearBufferMask.ColorBufferBit|ClearBufferMask.DepthBufferBit);
+        GL.UseProgram(_glProgram);SetOpenGlMatrix("uMvp",_viewMatrix*_projectionMatrix);
+        GL.Uniform3(GL.GetUniformLocation(_glProgram,"uCamera"),_cameraPosition.X,_cameraPosition.Y,_cameraPosition.Z);
+        GL.Uniform2(GL.GetUniformLocation(_glProgram,"uRange"),_temperatureMin,_temperatureMax);
+        GL.Uniform1(GL.GetUniformLocation(_glProgram,"uOpacity"),_opacity);
+        GL.Uniform1(GL.GetUniformLocation(_glProgram,"uMode"),(int)_renderMode);
+        GL.Uniform1(GL.GetUniformLocation(_glProgram,"uColorMap"),(int)_currentColorMap);
+        GL.Uniform4(GL.GetUniformLocation(_glProgram,"uClip"),_enableClipping?_clipAxis:-1,_clipPosition,_clipNegativeSide?1:0,0);
+        GL.ActiveTexture(TextureUnit.Texture0);GL.BindTexture(TextureTarget.Texture3D,_glTemperature3D);GL.Uniform1(GL.GetUniformLocation(_glProgram,"uTemperature"),0);
+        GL.ActiveTexture(TextureUnit.Texture1);GL.BindTexture(TextureTarget.Texture3D,_glVelocity3D);GL.Uniform1(GL.GetUniformLocation(_glProgram,"uVelocity"),1);
+        if(_results!=null&&_showDomainMesh&&_renderMode is not RenderMode.Isosurface and not RenderMode.Streamlines)DrawOpenGlMesh(_domainGpuMesh,true);
+        foreach(var mesh in _dynamicGpuMeshes)DrawOpenGlMesh(mesh,false);
+        if(_results!=null&&_showBorehole&&!_focusOnBoreholeView)DrawOpenGlMesh(_boreholeGpuMesh,false);
+        if(_results!=null&&_renderMode==RenderMode.Slices)DrawOpenGlMesh(_sliceQuad,true);
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer,0);
+    }
+
+    private void DrawOpenGlMesh(GpuMesh mesh, bool useVolume)
+    {
+        if(mesh.VertexArray==0||mesh.IndexCount==0)return;GL.Uniform1(GL.GetUniformLocation(_glProgram,"uUseVolume"),useVolume?1:0);GL.BindVertexArray(mesh.VertexArray);
+        if(mesh.IsWireframe)GL.LineWidth(2f);
+        GL.DrawElements(mesh.IsWireframe?PrimitiveType.Lines:PrimitiveType.Triangles,checked((int)mesh.IndexCount),DrawElementsType.UnsignedInt,0);
     }
 
     private void UpdateUniforms()
@@ -1473,8 +1554,6 @@ public class GeothermalVisualization3D : IDisposable
                 if (ImGui.Selectable(map.ToString(), _currentColorMap == map))
                 {
                     _currentColorMap = map;
-                    InitializeColorMaps();
-                    UpdateResourceSet(); // FIX: Re-create the resource set with the new colormap texture
                     UpdateBoreholeFocusView(); // Regenerate fluid colors if in focus mode
                 }
 
@@ -1724,14 +1803,14 @@ public class GeothermalVisualization3D : IDisposable
 
     public IntPtr GetRenderTargetImGuiBinding()
     {
-        return VeldridManager.ImGuiController.GetOrCreateImGuiBinding(_factory, _renderTargetView);
+        return (IntPtr)_glRenderTarget;
     }
 
     public void Resize(uint width, uint height)
     {
         if (width > 0 && height > 0 && (width != _renderWidth || height != _renderHeight))
         {
-            CreateRenderTarget(width, height);
+            CreateOpenGlRenderTarget(width, height);
             UpdateCamera();
         }
     }
@@ -1760,7 +1839,7 @@ public class GeothermalVisualization3D : IDisposable
     {
         var isStreamline = mesh.Name == "Streamlines";
         var gpuMesh = CreateGpuMesh(mesh, isStreamline);
-        if (gpuMesh.VertexBuffer != null) _dynamicGpuMeshes.Add(gpuMesh);
+        if (gpuMesh.VertexBuffer != 0) _dynamicGpuMeshes.Add(gpuMesh);
     }
 
     public void AddMeshes(IEnumerable<Mesh3DDataset> meshes)
@@ -1984,7 +2063,7 @@ public class GeothermalVisualization3D : IDisposable
         if (fluidMesh.Vertices.Count > 0)
         {
             var gpuMesh = CreateGpuMesh(fluidMesh);
-            if (gpuMesh.VertexBuffer != null) _dynamicGpuMeshes.Add(gpuMesh);
+            if (gpuMesh.VertexBuffer != 0) _dynamicGpuMeshes.Add(gpuMesh);
         }
     }
 
@@ -2043,7 +2122,7 @@ public class GeothermalVisualization3D : IDisposable
         if (wireframeMesh.Vertices.Count > 0)
         {
             var gpuMesh = CreateGpuMesh(wireframeMesh);
-            if (gpuMesh.VertexBuffer != null) _dynamicGpuMeshes.Add(gpuMesh);
+            if (gpuMesh.VertexBuffer != 0) _dynamicGpuMeshes.Add(gpuMesh);
         }
     }
 
@@ -2425,18 +2504,38 @@ void main() {
 }";
     }
 
+    private static void ConfigureOpenGlVertexLayout()
+    {
+        var stride=Marshal.SizeOf<VertexData>();
+        GL.EnableVertexAttribArray(0);GL.VertexAttribPointer(0,3,VertexAttribPointerType.Float,false,stride,0);
+        GL.EnableVertexAttribArray(1);GL.VertexAttribPointer(1,4,VertexAttribPointerType.Float,false,stride,12);
+        GL.EnableVertexAttribArray(2);GL.VertexAttribPointer(2,3,VertexAttribPointerType.Float,false,stride,28);
+        GL.EnableVertexAttribArray(3);GL.VertexAttribPointer(3,3,VertexAttribPointerType.Float,false,stride,52);
+    }
+
+    private void SetOpenGlMatrix(string name,Matrix4x4 m){var a=new[]{m.M11,m.M12,m.M13,m.M14,m.M21,m.M22,m.M23,m.M24,m.M31,m.M32,m.M33,m.M34,m.M41,m.M42,m.M43,m.M44};GL.UniformMatrix4(GL.GetUniformLocation(_glProgram,name),1,true,a);}
+    private static int CreateOpenGlProgram(string vs,string fs){static int C(ShaderType t,string s){var x=GL.CreateShader(t);GL.ShaderSource(x,s);GL.CompileShader(x);GL.GetShader(x,ShaderParameter.CompileStatus,out var ok);if(ok==0)throw new InvalidOperationException(GL.GetShaderInfoLog(x));return x;}var v=C(ShaderType.VertexShader,vs);var f=C(ShaderType.FragmentShader,fs);var p=GL.CreateProgram();GL.AttachShader(p,v);GL.AttachShader(p,f);GL.LinkProgram(p);GL.GetProgram(p,GetProgramParameterName.LinkStatus,out var ok);GL.DeleteShader(v);GL.DeleteShader(f);if(ok==0)throw new InvalidOperationException(GL.GetProgramInfoLog(p));return p;}
+    private const string OpenGlVertexShader=@"#version 330 core
+layout(location=0)in vec3 p;layout(location=1)in vec4 c;layout(location=2)in vec3 n;layout(location=3)in vec3 uvw;uniform mat4 uMvp;out vec4 C;out vec3 N;out vec3 P;out vec3 U;void main(){C=c;N=n;P=p;U=uvw;gl_Position=uMvp*vec4(p,1);}";
+    private const string OpenGlFragmentShader=@"#version 330 core
+in vec4 C;in vec3 N;in vec3 P;in vec3 U;uniform sampler3D uTemperature;uniform sampler3D uVelocity;uniform vec3 uCamera;uniform vec2 uRange;uniform float uOpacity;uniform int uMode;uniform int uUseVolume;uniform int uColorMap;uniform vec4 uClip;out vec4 o;
+vec3 turbo(float t){return clamp(vec3(1.5-abs(4.*t-3.),1.5-abs(4.*t-2.),1.5-abs(4.*t-1.)),0.,1.);}vec3 ramp(float t){t=clamp(t,0.,1.);if(uColorMap==1)return mix(vec3(.267,.005,.329),vec3(.993,.906,.144),t);if(uColorMap==2)return mix(vec3(.05,.03,.528),vec3(.94,.975,.131),t);if(uColorMap==3)return mix(vec3(.001,0,.014),vec3(.988,.998,.645),t);if(uColorMap==4)return mix(vec3(.001,0,.014),vec3(.987,.991,.75),t);if(uColorMap==5)return vec3(clamp(1.5-abs(4.*t-3.),0.,1.),clamp(1.5-abs(4.*t-2.),0.,1.),clamp(1.5-abs(4.*t-1.),0.,1.));if(uColorMap==6)return .5+.5*cos(6.283*(t+vec3(0,.33,.67)));if(uColorMap==7)return mix(vec3(0,.05,.25),vec3(1,.05,0),t);if(uColorMap==8)return mix(vec3(0,.2,1),vec3(1,.1,0),t);return turbo(t);}
+void main(){if(uUseVolume==1&&uClip.x>=0.){float q=uClip.x<.5?U.x:(uClip.x<1.5?U.y:U.z);if((uClip.z>.5&&q<uClip.y)||(uClip.z<.5&&q>uClip.y))discard;}vec3 base=C.rgb;if(uUseVolume==1&&(uMode==0||uMode==2||uMode==5)){float temp=texture(uTemperature,U).r-273.15;base=ramp((temp-uRange.x)/max(.001,uRange.y-uRange.x));}else if(uUseVolume==1&&uMode==1){float v=length(texture(uVelocity,U).xyz);base=ramp(v/.001);}float d=.3+.7*abs(dot(normalize(N),normalize(vec3(.4,.7,1))));o=vec4(base*d,C.a*uOpacity);}";
+
     private struct GpuMesh : IDisposable
     {
-        public DeviceBuffer VertexBuffer;
-        public DeviceBuffer IndexBuffer;
+        public int VertexArray;
+        public int VertexBuffer;
+        public int IndexBuffer;
         public uint IndexCount;
         public Mesh3DDataset Source;
         public bool IsWireframe;
 
         public void Dispose()
         {
-            VertexBuffer?.Dispose();
-            IndexBuffer?.Dispose();
+            if (VertexBuffer != 0) GL.DeleteBuffer(VertexBuffer);
+            if (IndexBuffer != 0) GL.DeleteBuffer(IndexBuffer);
+            if (VertexArray != 0) GL.DeleteVertexArray(VertexArray);
         }
     }
 
