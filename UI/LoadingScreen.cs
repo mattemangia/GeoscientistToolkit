@@ -15,11 +15,13 @@ namespace GAIA.UI;
 public sealed class LoadingScreen
 {
     private readonly Stopwatch _animationTimer = new();
+    private readonly StartupLogo _logo;
     private string _currentStatus = "Initializing...";
     private float _progress;
 
-    public LoadingScreen()
+    public LoadingScreen(StartupLogo logo)
     {
+        _logo = logo;
         _animationTimer.Start();
 
         // Probing the host machine can shell out to WMI/lspci, so start it off-thread now and
@@ -57,22 +59,27 @@ public sealed class LoadingScreen
 
             var windowSize = ImGui.GetWindowSize();
             var textSize = ImGui.CalcTextSize("GAIA (Geoscience Analysis, Imaging & Automation)");
+            var titleY = windowSize.Y * 0.35f;
+
+            // Logo, filling the band above the title so it stays on screen while the bar fills.
+            // Sizing it off the band rather than the window keeps it clear of the title on short
+            // windows instead of overlapping or running off the top.
+            const float logoTopMargin = 24f;
+            const float logoBottomGap = 24f;
+            var logoBand = titleY - logoBottomGap - logoTopMargin;
+            var logoSize = _logo.Measure(Math.Min(logoBand, windowSize.X * 0.5f));
+            _logo.DrawAt(
+                new Vector2(
+                    (windowSize.X - logoSize.X) * 0.5f,
+                    logoTopMargin + (logoBand - logoSize.Y) * 0.5f),
+                logoSize);
 
             // Title
-            ImGui.SetCursorPos(new Vector2((windowSize.X - textSize.X * 2f) * 0.5f, windowSize.Y * 0.35f));
+            ImGui.SetCursorPos(new Vector2((windowSize.X - textSize.X * 2f) * 0.5f, titleY));
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.9f, 0.9f, 0.9f, 1.0f));
             ImGui.SetWindowFontScale(2.0f);
             ImGui.Text("GAIA (Geoscience Analysis, Imaging & Automation)");
             ImGui.SetWindowFontScale(1.0f);
-            ImGui.PopStyleColor();
-
-            // Subtitle
-            var subtitleText = "The Swiss Army Knife for Geosciences";
-            var subtitleSize = ImGui.CalcTextSize(subtitleText);
-            ImGui.SetCursorPos(new Vector2((windowSize.X - subtitleSize.X) * 0.5f,
-                windowSize.Y * 0.35f + textSize.Y * 2f + 10));
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.6f, 0.6f, 0.65f, 1.0f));
-            ImGui.Text(subtitleText);
             ImGui.PopStyleColor();
 
             // Progress bar

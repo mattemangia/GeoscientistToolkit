@@ -9,8 +9,6 @@ namespace GAIA.UI.Utils;
 
 public class ImGuiFileDialog
 {
-    private readonly List<VolumeInfo> _availableVolumes = new();
-
     private readonly FileDialogType _dialogType;
     private readonly float _drivePanelWidth = 180f;
     private readonly string _id;
@@ -40,141 +38,10 @@ public class ImGuiFileDialog
             _ => "File Dialog"
         };
         CurrentDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        RefreshDrives();
     }
 
     public string SelectedPath { get; private set; } = "";
     public string CurrentDirectory { get; private set; }
-
-    private void RefreshDrives()
-    {
-        _availableVolumes.Clear();
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            // Windows: Use DriveInfo
-            foreach (var drive in DriveInfo.GetDrives())
-                try
-                {
-                    var volume = new VolumeInfo
-                    {
-                        Path = drive.RootDirectory.FullName,
-                        DisplayName = drive.Name.TrimEnd('\\'),
-                        DriveType = drive.DriveType,
-                        IsReady = drive.IsReady
-                    };
-
-                    if (drive.IsReady)
-                    {
-                        volume.VolumeLabel = string.IsNullOrEmpty(drive.VolumeLabel) ? "Local Disk" : drive.VolumeLabel;
-                        volume.TotalBytes = drive.TotalSize;
-                        volume.AvailableBytes = drive.AvailableFreeSpace;
-                    }
-                    else
-                    {
-                        volume.VolumeLabel = GetDriveTypeLabel(drive.DriveType);
-                    }
-
-                    _availableVolumes.Add(volume);
-                }
-                catch
-                {
-                }
-        }
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            // macOS: Common mount points
-            AddUnixVolume("/", "Root");
-            AddUnixVolume(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Home");
-
-            // Check for mounted volumes
-            if (Directory.Exists("/Volumes"))
-                foreach (var dir in Directory.GetDirectories("/Volumes"))
-                    AddUnixVolume(dir, Path.GetFileName(dir));
-        }
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            // Linux: Common mount points
-            AddUnixVolume("/", "Root");
-            AddUnixVolume(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Home");
-
-            // Check common mount directories
-            string[] mountDirs = { "/media", "/mnt", "/run/media" };
-            foreach (var mountDir in mountDirs)
-                if (Directory.Exists(mountDir))
-                    try
-                    {
-                        foreach (var dir in Directory.GetDirectories(mountDir))
-                            AddUnixVolume(dir, Path.GetFileName(dir));
-                    }
-                    catch
-                    {
-                    }
-        }
-    }
-
-    private void AddUnixVolume(string path, string name)
-    {
-        if (!Directory.Exists(path)) return;
-
-        try
-        {
-            var volume = new VolumeInfo
-            {
-                Path = path,
-                DisplayName = name,
-                VolumeLabel = name,
-                DriveType = DriveType.Fixed,
-                IsReady = true
-            };
-
-            // Try to get disk space info (may not work on all systems)
-            try
-            {
-                var driveInfo = new DriveInfo(path);
-                if (driveInfo.IsReady)
-                {
-                    volume.TotalBytes = driveInfo.TotalSize;
-                    volume.AvailableBytes = driveInfo.AvailableFreeSpace;
-                }
-            }
-            catch
-            {
-            }
-
-            _availableVolumes.Add(volume);
-        }
-        catch
-        {
-        }
-    }
-
-    private string GetDriveTypeLabel(DriveType type)
-    {
-        return type switch
-        {
-            DriveType.Removable => "Removable",
-            DriveType.Fixed => "Local Disk",
-            DriveType.Network => "Network Drive",
-            DriveType.CDRom => "CD/DVD",
-            DriveType.Ram => "RAM Disk",
-            _ => "Unknown"
-        };
-    }
-
-    private string FormatBytes(long bytes)
-    {
-        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
-        var order = 0;
-        double size = bytes;
-        while (size >= 1024 && order < sizes.Length - 1)
-        {
-            order++;
-            size /= 1024;
-        }
-
-        return $"{size:0.##} {sizes[order]}";
-    }
 
     public void Open(string startingPath = null, string[] allowedExtensions = null, string defaultFileName = null)
     {
@@ -211,7 +78,7 @@ public class ImGuiFileDialog
             CurrentDirectory = Directory.GetCurrentDirectory();
         }
 
-        RefreshDrives();
+        FileDialogVolumes.Refresh();
         _fileListDirty = true;
     }
 
@@ -325,7 +192,7 @@ public class ImGuiFileDialog
             ImGui.Text("Drives");
             ImGui.Separator();
 
-            foreach (var volume in _availableVolumes)
+            foreach (var volume in FileDialogVolumes.Current)
             {
                 var isCurrentDrive = CurrentDirectory.StartsWith(volume.Path,
                     RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
@@ -351,13 +218,17 @@ public class ImGuiFileDialog
                     ImGui.PopStyleColor();
 
                 // Show space info if available
-                if (volume.IsReady && volume.TotalBytes > 0)
+                if (volume.Probing)
+                {
+                    ImGui.TextDisabled("Checking...");
+                }
+                else if (volume.IsReady && volume.TotalBytes > 0)
                 {
                     var ratio = 1.0f - (float)volume.AvailableBytes / volume.TotalBytes;
                     ImGui.ProgressBar(ratio, new Vector2(-1, 4), "");
 
-                    ImGui.Text($"{FormatBytes(volume.AvailableBytes)} free");
-                    ImGui.Text($"of {FormatBytes(volume.TotalBytes)}");
+                    ImGui.Text($"{FileDialogVolumes.FormatBytes(volume.AvailableBytes)} free");
+                    ImGui.Text($"of {FileDialogVolumes.FormatBytes(volume.TotalBytes)}");
                 }
                 else if (!volume.IsReady)
                 {
@@ -371,7 +242,7 @@ public class ImGuiFileDialog
             ImGui.Separator();
             if (ImGui.Button("Refresh", new Vector2(-1, 0)))
             {
-                RefreshDrives();
+                FileDialogVolumes.Refresh(true);
                 _fileListDirty = true;
             }
 
@@ -631,16 +502,5 @@ public class ImGuiFileDialog
         }
 
         return false;
-    }
-
-    private class VolumeInfo
-    {
-        public string Path { get; set; }
-        public string DisplayName { get; set; }
-        public string VolumeLabel { get; set; }
-        public DriveType DriveType { get; set; }
-        public long TotalBytes { get; set; }
-        public long AvailableBytes { get; set; }
-        public bool IsReady { get; set; }
     }
 }

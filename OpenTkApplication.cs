@@ -49,12 +49,14 @@ internal sealed class OpenTkApplication : GameWindow
         OpenTkManager.MainWindow = this;
         OpenTkManager.ImGuiController = _imGui;
 
-        // Splash screen with logo (2 s)
-        using (var splash = new SplashScreen())
-            splash.Show(2000, RenderStartupFrame);
+        // Shared by the splash and loading screens, released once startup is done.
+        using var logo = new StartupLogo();
 
-        // Loading screen with progress + host diagnostics
-        var loading = new LoadingScreen();
+        // Splash screen with logo (2 s)
+        new SplashScreen(logo).Show(2000, RenderStartupFrame);
+
+        // Loading screen with logo, progress + host diagnostics
+        var loading = new LoadingScreen(logo);
         ShowLoading(loading, "Starting GAIA...", 0.0f);
 
         ShowLoading(loading, "Loading settings...", 0.1f);

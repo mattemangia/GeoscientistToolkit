@@ -1,63 +1,22 @@
-// GAIA/UI/SplashScreen.cs
+﻿// GAIA/UI/SplashScreen.cs
 
 using System.Numerics;
-using System.Reflection;
-using GAIA.Util;
 using ImGuiNET;
-using OpenTK.Graphics.OpenGL;
-using StbImageSharp;
 
 namespace GAIA.UI;
 
 /// <summary>
 ///     A splash screen that displays the application logo during startup.
-///     Pure ImGui drawing — the host (OpenTkApplication) pumps events,
+///     Pure ImGui drawing - the host (OpenTkApplication) pumps events,
 ///     clears the framebuffer and swaps buffers via RenderStartupFrame.
 /// </summary>
-public sealed class SplashScreen : IDisposable
+public sealed class SplashScreen
 {
-    private IntPtr _logoTextureId;
-    private Vector2 _logoSize;
-    private bool _disposed;
+    private readonly StartupLogo _logo;
 
-    public SplashScreen()
+    public SplashScreen(StartupLogo logo)
     {
-        LoadLogoTexture();
-    }
-
-    private void LoadLogoTexture()
-    {
-        try
-        {
-            var assembly = Assembly.GetExecutingAssembly();
-            var resourceName = "GAIA.image.png";
-
-            using var stream = assembly.GetManifestResourceStream(resourceName);
-            if (stream == null)
-            {
-                Logger.LogWarning($"Could not find embedded resource '{resourceName}'");
-                return;
-            }
-
-            var image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
-
-            var logoTexture = GL.GenTexture();
-            GL.BindTexture(TextureTarget.Texture2D, logoTexture);
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8,
-                image.Width, image.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, image.Data);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter,
-                (int)TextureMinFilter.Linear);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter,
-                (int)TextureMagFilter.Linear);
-            GL.BindTexture(TextureTarget.Texture2D, 0);
-
-            _logoTextureId = (IntPtr)logoTexture;
-            _logoSize = new Vector2(image.Width, image.Height);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError($"Error loading splash screen logo: {ex.Message}");
-        }
+        _logo = logo;
     }
 
     /// <summary>
@@ -98,19 +57,12 @@ public sealed class SplashScreen : IDisposable
 
             var windowSize = ImGui.GetWindowSize();
 
-            if (_logoTextureId != IntPtr.Zero)
-            {
-                var maxSize = Math.Min(windowSize.X, windowSize.Y) * 0.5f;
-                var scale = Math.Min(maxSize / _logoSize.X, maxSize / _logoSize.Y);
-                var displaySize = _logoSize * scale;
-
-                var logoPos = new Vector2(
+            var displaySize = _logo.Measure(Math.Min(windowSize.X, windowSize.Y) * 0.5f);
+            _logo.DrawAt(
+                new Vector2(
                     (windowSize.X - displaySize.X) * 0.5f,
-                    (windowSize.Y - displaySize.Y) * 0.5f - 50f);
-
-                ImGui.SetCursorPos(logoPos);
-                ImGui.Image(_logoTextureId, displaySize);
-            }
+                    (windowSize.Y - displaySize.Y) * 0.5f - 50f),
+                displaySize);
 
             var titleText = "GAIA (Geoscience Analysis, Imaging & Automation)";
             var titleSize = ImGui.CalcTextSize(titleText);
@@ -141,24 +93,5 @@ public sealed class SplashScreen : IDisposable
         }
 
         ImGui.PopStyleVar(3);
-    }
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-
-        try
-        {
-            if (_logoTextureId != IntPtr.Zero)
-            {
-                GL.DeleteTexture((int)_logoTextureId);
-                _logoTextureId = IntPtr.Zero;
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning($"Could not dispose splash logo texture: {ex.Message}");
-        }
     }
 }
