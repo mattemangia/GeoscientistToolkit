@@ -34,7 +34,7 @@ public class LoadingScreen
 
         // Probing the host machine can shell out to WMI/lspci, so start it off-thread now and
         // let the panel fill in once the results land.
-        SystemDiagnostics.BeginGather(graphicsDevice);
+        SystemDiagnostics.BeginGather();
     }
 
     public void UpdateStatus(string status, float progress)

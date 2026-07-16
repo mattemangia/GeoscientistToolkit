@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Text;
-using Veldrid;
 
 namespace GAIA.Util;
 
@@ -22,11 +21,11 @@ public static class SystemDiagnostics
     /// <summary>
     ///     Starts collecting in the background. Safe to call more than once; only the first call gathers.
     /// </summary>
-    public static void BeginGather(GraphicsDevice gd = null)
+    public static void BeginGather()
     {
         lock (_gate)
         {
-            _gather ??= Task.Run(() => Collect(gd));
+            _gather ??= Task.Run(Collect);
         }
     }
 
@@ -45,7 +44,7 @@ public static class SystemDiagnostics
         }
     }
 
-    private static IReadOnlyList<(string Key, string Value)> Collect(GraphicsDevice gd)
+    private static IReadOnlyList<(string Key, string Value)> Collect()
     {
         var facts = new List<(string, string)>
         {
@@ -56,8 +55,6 @@ public static class SystemDiagnostics
             ("OS", RuntimeInformation.OSDescription.Trim()),
             ("Runtime", RuntimeInformation.FrameworkDescription)
         };
-
-        if (gd != null) facts.Add(("Renderer", $"{gd.BackendType} - {gd.DeviceName}"));
 
         return facts;
     }

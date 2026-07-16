@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using GAIA.Util;
 using ImGuiNET;
-using Veldrid;
 using OpenTK.Graphics.OpenGL;
 
 // Ensure you have added the System.Management NuGet package to your project.
@@ -25,17 +24,6 @@ public class SystemInfoWindow
     private (string key, string value)[] _systemInfo;
     private (string key, string value)[] _veldridInfo;
 
-
-    /// <summary>
-    ///     Opens the System Info window and gathers the required information.
-    /// </summary>
-    /// <param name="gd">The active GraphicsDevice to query GPU info from.</param>
-    public void Open(GraphicsDevice gd)
-    {
-        _isOpen = true;
-        GatherAllInfo(gd);
-        _exportMessage = string.Empty;
-    }
 
     public void OpenOpenTk()
     {
@@ -157,17 +145,6 @@ public class SystemInfoWindow
         }
 
         ImGui.Spacing();
-    }
-
-    private void GatherAllInfo(GraphicsDevice gd)
-    {
-        GatherCommonInfo();
-
-        _veldridInfo = new[]
-        {
-            ("Veldrid Backend", gd.BackendType.ToString()),
-            ("Active Device", gd.DeviceName)
-        };
     }
 
     private void GatherCommonInfo()
