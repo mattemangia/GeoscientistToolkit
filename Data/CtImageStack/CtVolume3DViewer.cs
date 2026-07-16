@@ -134,7 +134,6 @@ public class CtVolume3DViewer : IDatasetViewer, IDisposable
         _editableDataset.Load();
         VolumeScale = CalculateNormalizedPhysicalScale(_editableDataset.Width, _editableDataset.Height,
             _editableDataset.Depth, _editableDataset.PixelSize, _editableDataset.SliceThickness);
-        ResetCamera();
 
         Logger.Log(
             $"[CtVolume3DViewer] Streaming dataset LOD dimensions: {_streamingDataset.BaseLod.Width}x{_streamingDataset.BaseLod.Height}x{_streamingDataset.BaseLod.Depth}");
@@ -152,6 +151,8 @@ public class CtVolume3DViewer : IDatasetViewer, IDisposable
             _metalRenderer = new MetalVolumeRenderer(this);
 
         InitializeVeldridResources();
+        // Projection setup needs the render target dimensions created above.
+        ResetCamera();
 
         ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
         CtImageStackTools.Preview3DChanged += OnPreview3DChanged;

@@ -7,6 +7,7 @@ using System.Text;
 using GAIA.Business;
 using GAIA.Data;
 using GAIA.Data.Borehole;
+using GAIA.Data.CtImageStack;
 using GAIA.Data.GIS;
 using GAIA.Data.Mesh3D;
 using GAIA.Data.Table;
@@ -1186,8 +1187,12 @@ public class MainWindow : IDisposable
     {
         _selectedDataset = ds;
 
-        // Force load the dataset to ensure histogram data is available
-        _selectedDataset?.Load();
+        // CT stacks can be several gigabytes. Their combined viewer owns an
+        // asynchronous loading pipeline and must be allowed to draw its progress UI
+        // before any volume I/O starts. Other lightweight viewers still expect their
+        // dataset to be loaded before construction.
+        if (ds is not CtImageStackDataset && ds is not StreamingCtVolumeDataset)
+            ds.Load();
 
         if (ds is DatasetGroup group)
         {

@@ -402,6 +402,12 @@ public class Application
             }
         }
 
+        // Some native OpenGL/Veldrid drivers can block indefinitely while disposing
+        // resources after the SDL main window has gone away. Keep the graceful cleanup
+        // path, but guarantee that closing GAIA cannot leave an orphan process.
+        using var shutdownWatchdog = new System.Threading.Timer(
+            _ => Environment.Exit(0), null, TimeSpan.FromSeconds(10), Timeout.InfiniteTimeSpan);
+
         // Cleanup
         if (appSettings.Backup.BackupOnProjectClose && !string.IsNullOrEmpty(ProjectManager.Instance.ProjectPath))
             ProjectManager.Instance.BackupProject();
@@ -429,6 +435,9 @@ public class Application
         _imGuiController?.Dispose();
         _commandList?.Dispose();
         _graphicsDevice?.Dispose();
+
+        shutdownWatchdog.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        Environment.Exit(0);
     }
 
     private void HandleDpiChange()
