@@ -161,7 +161,24 @@ public class SettingsWindow
         }
 
         var uiScale = appearance.UIScale;
-        if (ImGui.SliderFloat("UI Scale", ref uiScale, 0.5f, 2.0f, "%.2f")) appearance.UIScale = uiScale;
+        if (ImGui.SliderFloat("UI Scale", ref uiScale, 0.5f, 2.0f, "%.2f"))
+        {
+            appearance.UIScale = uiScale;
+            _restartRequired = true;
+        }
+
+        HelpMarker("Scales the whole interface: fonts, padding and spacing.\n" +
+                   "Multiplied by your display's DPI scaling.");
+
+        var fontSize = appearance.FontSize;
+        if (ImGui.SliderInt("Font Size", ref fontSize, 10, 24, "%d px"))
+        {
+            appearance.FontSize = fontSize;
+            _restartRequired = true;
+        }
+
+        HelpMarker("Base UI font size, in pixels per em.\n" +
+                   "Measured the same way on every platform, so it looks the same on Windows and Linux.");
 
         var showWelcome = appearance.ShowWelcomeOnStartup;
         if (ImGui.Checkbox("Show Welcome on Startup", ref showWelcome)) appearance.ShowWelcomeOnStartup = showWelcome;

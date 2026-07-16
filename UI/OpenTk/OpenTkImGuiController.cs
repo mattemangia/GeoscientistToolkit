@@ -11,8 +11,6 @@ namespace GAIA.UI.OpenTk;
 
 public sealed class ImGuiController : IDisposable
 {
-    private const float UiFontSizePixels = 14f;
-    private const float PanelTitleFontSizePixels = 21f;
     private static readonly Keys[] AllKeys = (Keys[])Enum.GetValues(typeof(Keys));
 
     // Fonts belong to the atlas of the context that built them, and each pop-out window runs
@@ -95,6 +93,11 @@ public sealed class ImGuiController : IDisposable
         io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
         io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
         ConfigureFonts(io);
+
+        // Padding, rounding and the rest are in pixels too, so they have to follow the font.
+        // ThemeManager only ever writes style colours, so this survives ApplyTheme.
+        if (Math.Abs(UiScaling.Scale - 1f) > 0.001f) ImGui.GetStyle().ScaleAllSizes(UiScaling.Scale);
+
         ByContext[_context] = this;
 
         CreateDeviceResources();
@@ -309,9 +312,15 @@ public sealed class ImGuiController : IDisposable
         {
             try
             {
+                // size_pixels is an ascent-descent span rather than the em, and that span is
+                // face-specific, so convert to keep one setting meaning one apparent size on
+                // every platform. See TrueTypeMetrics.
+                var spanPerEm = TrueTypeMetrics.SpanPerEm(fontPath);
+
                 // The first font added stays the default for the rest of the UI.
-                io.Fonts.AddFontFromFileTTF(fontPath, UiFontSizePixels, null, UiGlyphRangesHandle.AddrOfPinnedObject());
-                _titleFont = io.Fonts.AddFontFromFileTTF(fontPath, PanelTitleFontSizePixels, null,
+                io.Fonts.AddFontFromFileTTF(fontPath, UiScaling.UiFontEmPixels * spanPerEm, null,
+                    UiGlyphRangesHandle.AddrOfPinnedObject());
+                _titleFont = io.Fonts.AddFontFromFileTTF(fontPath, UiScaling.TitleFontEmPixels * spanPerEm, null,
                     UiGlyphRangesHandle.AddrOfPinnedObject());
                 HasTitleFont = true;
                 return;
@@ -321,7 +330,10 @@ public sealed class ImGuiController : IDisposable
             }
         }
 
+        // Fallback face: bitmap-only, so it cannot be rasterised larger. Scale it instead, or the
+        // UI would come back tiny on the very machines that already failed to find a font.
         io.Fonts.AddFontDefault();
+        io.FontGlobalScale = Math.Max(1f, UiScaling.Scale);
         HasTitleFont = false;
     }
 

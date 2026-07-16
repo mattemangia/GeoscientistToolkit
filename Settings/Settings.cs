@@ -48,7 +48,9 @@ public class AppearanceSettings
     public string Theme { get; set; } = "Dark";
     public float UIScale { get; set; } = 1.0f;
     public string FontFamily { get; set; } = "Default";
-    public int FontSize { get; set; } = 13;
+
+    /// <summary>UI font size in em pixels. Applied at startup; see UiScaling.</summary>
+    public int FontSize { get; set; } = 14;
     public bool ShowToolTips { get; set; } = true;
     public bool AnimateWindows { get; set; } = true;
     public float AnimationSpeed { get; set; } = 1.0f;

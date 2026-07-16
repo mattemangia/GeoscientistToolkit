@@ -45,6 +45,13 @@ internal sealed class OpenTkApplication : GameWindow
         base.OnLoad();
         EnsureRequiredOpenGlVersion();
 
+        // Settings first: the controller bakes its font atlas as it is constructed, so the font
+        // size and UI scale have to be known before that. This is why there is no "Loading
+        // settings..." step below - it has to happen before anything can be drawn at all.
+        SettingsManager.Instance.LoadSettings();
+        var settings = SettingsManager.Instance.Settings;
+        UiScaling.Configure(settings.Appearance, GetMonitorContentScale());
+
         _imGui = new OpenTkImGuiController(ClientSize.X, ClientSize.Y, FramebufferSize.X, FramebufferSize.Y);
         OpenTkManager.MainWindow = this;
         OpenTkManager.ImGuiController = _imGui;
@@ -58,10 +65,6 @@ internal sealed class OpenTkApplication : GameWindow
         // Loading screen with logo, progress + host diagnostics
         var loading = new LoadingScreen(logo);
         ShowLoading(loading, "Starting GAIA...", 0.0f);
-
-        ShowLoading(loading, "Loading settings...", 0.1f);
-        SettingsManager.Instance.LoadSettings();
-        var settings = SettingsManager.Instance.Settings;
 
         ShowLoading(loading, "Initializing logger...", 0.15f);
         Logger.Initialize(settings.Logging);
@@ -179,6 +182,24 @@ internal sealed class OpenTkApplication : GameWindow
     }
 
     private void OnTextInput(TextInputEventArgs e) => _imGui?.PressChar((char)e.Unicode);
+
+    /// <summary>
+    ///     The monitor's DPI content scale, 1.0 at 96 DPI. ImGui rasterises its atlas in physical
+    ///     pixels, so without this the whole UI shrinks as the display scaling grows. Falls back to
+    ///     1.0 rather than guessing when the monitor cannot be queried.
+    /// </summary>
+    private float GetMonitorContentScale()
+    {
+        try
+        {
+            if (TryGetCurrentMonitorScale(out var horizontal, out _) && horizontal > 0f) return horizontal;
+        }
+        catch
+        {
+        }
+
+        return 1f;
+    }
 
     private static void EnsureRequiredOpenGlVersion()
     {
