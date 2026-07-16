@@ -763,7 +763,6 @@ public class DatasetPanel : BasePanel
 
                     _boreholeCorrelation3DViewer?.Dispose();
                     _boreholeCorrelation3DViewer = new BoreholeCorrelation3DViewer(
-                        VeldridManager.GraphicsDevice,
                         correlationData,
                         boreholes);
                 }

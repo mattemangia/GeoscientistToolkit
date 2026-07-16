@@ -2,7 +2,6 @@
 
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Text;
 using GAIA.Data;
 using GAIA.Data.Borehole;
 using GAIA.Data.GIS;
@@ -10,8 +9,7 @@ using GAIA.Data.Mesh3D;
 using GAIA.Business;
 using GAIA.Util;
 using ImGuiNET;
-using Veldrid;
-using Veldrid.SPIRV;
+using OpenTK.Graphics.OpenGL;
 
 namespace GAIA.UI.Borehole;
 
@@ -62,15 +60,17 @@ public class BoreholeCorrelation3DViewer : IDisposable
 
     private struct GpuMesh : IDisposable
     {
-        public DeviceBuffer VertexBuffer;
-        public DeviceBuffer IndexBuffer;
+        public int VertexArray;
+        public int VertexBuffer;
+        public int IndexBuffer;
         public uint IndexCount;
         public bool IsLineList;
 
         public void Dispose()
         {
-            VertexBuffer?.Dispose();
-            IndexBuffer?.Dispose();
+            if (VertexBuffer != 0) GL.DeleteBuffer(VertexBuffer);
+            if (IndexBuffer != 0) GL.DeleteBuffer(IndexBuffer);
+            if (VertexArray != 0) GL.DeleteVertexArray(VertexArray);
         }
     }
 
@@ -82,20 +82,13 @@ public class BoreholeCorrelation3DViewer : IDisposable
     private readonly Dictionary<string, BoreholeDataset> _boreholeMap = new();
 
     // GPU Resources
-    private readonly GraphicsDevice _graphicsDevice;
-    private readonly ResourceFactory _factory;
-    private Framebuffer _framebuffer;
-    private Texture _renderTarget;
-    private TextureView _renderTargetView;
-    private Texture _depthTexture;
+    private int _framebuffer;
+    private int _renderTarget;
+    private int _depthTexture;
     private uint _renderWidth = 800;
     private uint _renderHeight = 600;
 
-    private Pipeline _solidPipeline;
-    private Pipeline _wireframePipeline;
-    private ResourceLayout _resourceLayout;
-    private ResourceSet _resourceSet;
-    private DeviceBuffer _uniformBuffer;
+    private int _shaderProgram;
 
     // Meshes
     private GpuMesh _topographyMesh;
@@ -150,12 +143,9 @@ public class BoreholeCorrelation3DViewer : IDisposable
     public event Action OnClose;
 
     public BoreholeCorrelation3DViewer(
-        GraphicsDevice graphicsDevice,
         BoreholeLogCorrelationDataset correlationData,
         List<BoreholeDataset> boreholes)
     {
-        _graphicsDevice = graphicsDevice;
-        _factory = graphicsDevice.ResourceFactory;
         _correlationData = correlationData;
 
         foreach (var borehole in boreholes)
@@ -176,98 +166,42 @@ public class BoreholeCorrelation3DViewer : IDisposable
     {
         CreateRenderTarget(_renderWidth, _renderHeight);
         CreatePipelines();
-        CreateUniformBuffer();
-        CreateResourceSet();
     }
 
     private void CreateRenderTarget(uint width, uint height)
     {
-        _renderTarget?.Dispose();
-        _renderTargetView?.Dispose();
-        _depthTexture?.Dispose();
-        _framebuffer?.Dispose();
+        if (_renderTarget != 0) GL.DeleteTexture(_renderTarget);
+        if (_depthTexture != 0) GL.DeleteRenderbuffer(_depthTexture);
+        if (_framebuffer != 0) GL.DeleteFramebuffer(_framebuffer);
 
         _renderWidth = width;
         _renderHeight = height;
 
-        _renderTarget = _factory.CreateTexture(TextureDescription.Texture2D(
-            width, height, 1, 1, PixelFormat.R8_G8_B8_A8_UNorm,
-            TextureUsage.RenderTarget | TextureUsage.Sampled));
-        _renderTargetView = _factory.CreateTextureView(_renderTarget);
-
-        var depthFormat = _graphicsDevice.BackendType == GraphicsBackend.Direct3D11
-            ? PixelFormat.D24_UNorm_S8_UInt
-            : PixelFormat.D32_Float_S8_UInt;
-
-        _depthTexture = _factory.CreateTexture(TextureDescription.Texture2D(
-            width, height, 1, 1, depthFormat, TextureUsage.DepthStencil));
-
-        _framebuffer = _factory.CreateFramebuffer(new FramebufferDescription(_depthTexture, _renderTarget));
+        _framebuffer = GL.GenFramebuffer();
+        _renderTarget = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, _renderTarget);
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, (int)width, (int)height,
+            0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        _depthTexture = GL.GenRenderbuffer();
+        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _depthTexture);
+        GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.DepthComponent24,
+            (int)width, (int)height);
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _framebuffer);
+        GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
+            TextureTarget.Texture2D, _renderTarget, 0);
+        GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
+            RenderbufferTarget.Renderbuffer, _depthTexture);
+        if (GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer) != FramebufferErrorCode.FramebufferComplete)
+            throw new InvalidOperationException("Borehole OpenGL framebuffer is incomplete.");
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 
     private void CreatePipelines()
     {
-        // Create shaders
-        var vertexCode = GetVertexShaderCode();
-        var fragmentCode = GetFragmentShaderCode();
-
-        var vertexShaderDesc = new ShaderDescription(ShaderStages.Vertex, Encoding.UTF8.GetBytes(vertexCode), "main");
-        var fragmentShaderDesc = new ShaderDescription(ShaderStages.Fragment, Encoding.UTF8.GetBytes(fragmentCode), "main");
-        var shaders = _factory.CreateFromSpirv(vertexShaderDesc, fragmentShaderDesc);
-
-        // Vertex layout
-        var vertexLayout = new VertexLayoutDescription(
-            new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
-            new VertexElementDescription("Color", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float4),
-            new VertexElementDescription("Normal", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
-            new VertexElementDescription("TexCoord", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float2),
-            new VertexElementDescription("Value", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1),
-            new VertexElementDescription("UVW", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3));
-
-        // Resource layout
-        _resourceLayout = _factory.CreateResourceLayout(new ResourceLayoutDescription(
-            new ResourceLayoutElementDescription("UniformData", ResourceKind.UniformBuffer,
-                ShaderStages.Vertex | ShaderStages.Fragment)));
-
-        // Solid pipeline
-        _solidPipeline = _factory.CreateGraphicsPipeline(new GraphicsPipelineDescription
-        {
-            BlendState = BlendStateDescription.SingleAlphaBlend,
-            DepthStencilState = DepthStencilStateDescription.DepthOnlyLessEqual,
-            RasterizerState = new RasterizerStateDescription(
-                FaceCullMode.Back, PolygonFillMode.Solid, FrontFace.CounterClockwise, true, false),
-            PrimitiveTopology = PrimitiveTopology.TriangleList,
-            ResourceLayouts = new[] { _resourceLayout },
-            ShaderSet = new ShaderSetDescription(new[] { vertexLayout }, new[] { shaders[0], shaders[1] }),
-            Outputs = _framebuffer.OutputDescription
-        });
-
-        // Wireframe pipeline (for lines)
-        _wireframePipeline = _factory.CreateGraphicsPipeline(new GraphicsPipelineDescription
-        {
-            BlendState = BlendStateDescription.SingleAlphaBlend,
-            DepthStencilState = DepthStencilStateDescription.DepthOnlyLessEqual,
-            RasterizerState = new RasterizerStateDescription(
-                FaceCullMode.None, PolygonFillMode.Solid, FrontFace.CounterClockwise, true, false),
-            PrimitiveTopology = PrimitiveTopology.LineList,
-            ResourceLayouts = new[] { _resourceLayout },
-            ShaderSet = new ShaderSetDescription(new[] { vertexLayout }, new[] { shaders[0], shaders[1] }),
-            Outputs = _framebuffer.OutputDescription
-        });
-    }
-
-    private void CreateUniformBuffer()
-    {
-        _uniformBuffer = _factory.CreateBuffer(new BufferDescription(
-            (uint)Marshal.SizeOf<UniformData>(),
-            BufferUsage.UniformBuffer | BufferUsage.Dynamic));
-    }
-
-    private void CreateResourceSet()
-    {
-        _resourceSet?.Dispose();
-        _resourceSet = _factory.CreateResourceSet(new ResourceSetDescription(
-            _resourceLayout, _uniformBuffer));
+        if (_shaderProgram != 0) return;
+        _shaderProgram = CreateProgram(OpenGlVertexShader, OpenGlFragmentShader);
     }
 
     #region Mesh Building
@@ -603,16 +537,28 @@ public class BoreholeCorrelation3DViewer : IDisposable
         if (vertices.Count == 0 || indices.Count == 0)
             return default;
 
-        var vb = _factory.CreateBuffer(new BufferDescription(
-            (uint)(vertices.Count * Marshal.SizeOf<VertexData>()), BufferUsage.VertexBuffer));
-        _graphicsDevice.UpdateBuffer(vb, 0, vertices.ToArray());
-
-        var ib = _factory.CreateBuffer(new BufferDescription(
-            (uint)(indices.Count * sizeof(uint)), BufferUsage.IndexBuffer));
-        _graphicsDevice.UpdateBuffer(ib, 0, indices.ToArray());
+        var vao = GL.GenVertexArray();
+        var vb = GL.GenBuffer();
+        var ib = GL.GenBuffer();
+        GL.BindVertexArray(vao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, vb);
+        GL.BufferData(BufferTarget.ArrayBuffer, vertices.Count * Marshal.SizeOf<VertexData>(),
+            vertices.ToArray(), BufferUsageHint.StaticDraw);
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, ib);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Count * sizeof(uint),
+            indices.ToArray(), BufferUsageHint.StaticDraw);
+        var stride = Marshal.SizeOf<VertexData>();
+        GL.EnableVertexAttribArray(0);
+        GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, 0);
+        GL.EnableVertexAttribArray(1);
+        GL.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, stride, 12);
+        GL.EnableVertexAttribArray(2);
+        GL.VertexAttribPointer(2, 3, VertexAttribPointerType.Float, false, stride, 28);
+        GL.BindVertexArray(0);
 
         return new GpuMesh
         {
+            VertexArray = vao,
             VertexBuffer = vb,
             IndexBuffer = ib,
             IndexCount = (uint)indices.Count,
@@ -645,90 +591,23 @@ public class BoreholeCorrelation3DViewer : IDisposable
 
     public void Render()
     {
-        var cl = _graphicsDevice.ResourceFactory.CreateCommandList();
-        cl.Begin();
-        cl.SetFramebuffer(_framebuffer);
-        cl.ClearColorTarget(0, new RgbaFloat(0.1f, 0.1f, 0.12f, 1f));
-        cl.ClearDepthStencil(1f);
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _framebuffer);
+        GL.Viewport(0, 0, (int)_renderWidth, (int)_renderHeight);
+        GL.Enable(EnableCap.DepthTest);
+        GL.Enable(EnableCap.Blend);
+        GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        GL.ClearColor(0.1f, 0.1f, 0.12f, 1f);
+        GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        GL.UseProgram(_shaderProgram);
+        SetMatrix(_shaderProgram, "uMvp", _viewMatrix * _projectionMatrix);
+        GL.Uniform3(GL.GetUniformLocation(_shaderProgram, "uLight"), 0f, 0f, 1000f);
 
-        // Update uniform buffer
-        var mvp = _viewMatrix * _projectionMatrix;
-        var uniforms = new UniformData
-        {
-            ModelViewProjection = mvp,
-            Model = Matrix4x4.Identity,
-            View = _viewMatrix,
-            Projection = _projectionMatrix,
-            LightPosition = new Vector4(0, 0, 1000, 1),
-            CameraPosition = new Vector4(_cameraTarget, 1),
-            Opacity = 1f,
-            Time = 0,
-            RenderMode = 0,
-            Padding = 0
-        };
-        _graphicsDevice.UpdateBuffer(_uniformBuffer, 0, ref uniforms);
-
-        // Render topography
-        if (_showTopography && _topographyMesh.IndexCount > 0)
-        {
-            cl.SetPipeline(_solidPipeline);
-            cl.SetGraphicsResourceSet(0, _resourceSet);
-            cl.SetVertexBuffer(0, _topographyMesh.VertexBuffer);
-            cl.SetIndexBuffer(_topographyMesh.IndexBuffer, IndexFormat.UInt32);
-            cl.DrawIndexed(_topographyMesh.IndexCount);
-        }
-
-        // Render borehole casings
-        if (_showBoreholes)
-        {
-            cl.SetPipeline(_solidPipeline);
-            cl.SetGraphicsResourceSet(0, _resourceSet);
-            foreach (var mesh in _boreholeMeshes)
-            {
-                if (mesh.IndexCount == 0) continue;
-                cl.SetVertexBuffer(0, mesh.VertexBuffer);
-                cl.SetIndexBuffer(mesh.IndexBuffer, IndexFormat.UInt32);
-                cl.DrawIndexed(mesh.IndexCount);
-            }
-        }
-
-        // Render lithology
-        if (_showLithology)
-        {
-            cl.SetPipeline(_solidPipeline);
-            cl.SetGraphicsResourceSet(0, _resourceSet);
-            foreach (var mesh in _lithologyMeshes)
-            {
-                if (mesh.IndexCount == 0) continue;
-                cl.SetVertexBuffer(0, mesh.VertexBuffer);
-                cl.SetIndexBuffer(mesh.IndexBuffer, IndexFormat.UInt32);
-                cl.DrawIndexed(mesh.IndexCount);
-            }
-        }
-
-        // Render horizon surfaces
-        if (_showHorizonSurfaces && _horizonSurfaceMesh.IndexCount > 0)
-        {
-            cl.SetPipeline(_solidPipeline);
-            cl.SetGraphicsResourceSet(0, _resourceSet);
-            cl.SetVertexBuffer(0, _horizonSurfaceMesh.VertexBuffer);
-            cl.SetIndexBuffer(_horizonSurfaceMesh.IndexBuffer, IndexFormat.UInt32);
-            cl.DrawIndexed(_horizonSurfaceMesh.IndexCount);
-        }
-
-        // Render correlation lines
-        if (_showCorrelationLines && _correlationLinesMesh.IndexCount > 0)
-        {
-            cl.SetPipeline(_solidPipeline);
-            cl.SetGraphicsResourceSet(0, _resourceSet);
-            cl.SetVertexBuffer(0, _correlationLinesMesh.VertexBuffer);
-            cl.SetIndexBuffer(_correlationLinesMesh.IndexBuffer, IndexFormat.UInt32);
-            cl.DrawIndexed(_correlationLinesMesh.IndexCount);
-        }
-
-        cl.End();
-        _graphicsDevice.SubmitCommands(cl);
-        cl.Dispose();
+        if (_showTopography) DrawMesh(_topographyMesh);
+        if (_showBoreholes) foreach (var mesh in _boreholeMeshes) DrawMesh(mesh);
+        if (_showLithology) foreach (var mesh in _lithologyMeshes) DrawMesh(mesh);
+        if (_showHorizonSurfaces) DrawMesh(_horizonSurfaceMesh);
+        if (_showCorrelationLines) DrawMesh(_correlationLinesMesh);
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 
     #endregion
@@ -896,7 +775,6 @@ public class BoreholeCorrelation3DViewer : IDisposable
             _renderWidth = (uint)viewportSize.X;
             _renderHeight = (uint)viewportSize.Y;
             CreateRenderTarget(_renderWidth, _renderHeight);
-            CreateResourceSet();
             UpdateCamera();
         }
 
@@ -907,7 +785,7 @@ public class BoreholeCorrelation3DViewer : IDisposable
         Render();
 
         // Display render target
-        ImGui.Image((IntPtr)_renderTargetView.GetHashCode(), viewportSize);
+        ImGui.Image((IntPtr)_renderTarget, viewportSize, new Vector2(0, 1), new Vector2(1, 0));
     }
 
     private void HandleInput()
@@ -1002,78 +880,59 @@ public class BoreholeCorrelation3DViewer : IDisposable
 
     #region Shaders
 
-    private string GetVertexShaderCode()
+    private void DrawMesh(GpuMesh mesh)
     {
-        return @"
-#version 450
-
-layout(set = 0, binding = 0) uniform UniformData {
-    mat4 ModelViewProjection;
-    mat4 Model;
-    mat4 View;
-    mat4 Projection;
-    vec4 LightPosition;
-    vec4 CameraPosition;
-    float Opacity;
-    float Time;
-    int RenderMode;
-    int Padding;
-};
-
-layout(location = 0) in vec3 Position;
-layout(location = 1) in vec4 Color;
-layout(location = 2) in vec3 Normal;
-layout(location = 3) in vec2 TexCoord;
-layout(location = 4) in float Value;
-layout(location = 5) in vec3 UVW;
-
-layout(location = 0) out vec4 fragColor;
-layout(location = 1) out vec3 fragNormal;
-layout(location = 2) out vec3 fragWorldPos;
-
-void main() {
-    gl_Position = ModelViewProjection * vec4(Position, 1.0);
-    fragColor = Color;
-    fragNormal = Normal;
-    fragWorldPos = Position;
-}
-";
+        if (mesh.IndexCount == 0 || mesh.VertexArray == 0) return;
+        GL.BindVertexArray(mesh.VertexArray);
+        if (mesh.IsLineList) GL.LineWidth(Math.Clamp(_correlationLineWidth, 1f, 10f));
+        GL.DrawElements(mesh.IsLineList ? PrimitiveType.Lines : PrimitiveType.Triangles,
+            checked((int)mesh.IndexCount), DrawElementsType.UnsignedInt, 0);
     }
 
-    private string GetFragmentShaderCode()
+    private static void SetMatrix(int program, string name, Matrix4x4 matrix)
     {
-        return @"
-#version 450
-
-layout(set = 0, binding = 0) uniform UniformData {
-    mat4 ModelViewProjection;
-    mat4 Model;
-    mat4 View;
-    mat4 Projection;
-    vec4 LightPosition;
-    vec4 CameraPosition;
-    float Opacity;
-    float Time;
-    int RenderMode;
-    int Padding;
-};
-
-layout(location = 0) in vec4 fragColor;
-layout(location = 1) in vec3 fragNormal;
-layout(location = 2) in vec3 fragWorldPos;
-
-layout(location = 0) out vec4 outColor;
-
-void main() {
-    vec3 lightDir = normalize(LightPosition.xyz - fragWorldPos);
-    float ambient = 0.3;
-    float diffuse = max(dot(normalize(fragNormal), lightDir), 0.0) * 0.7;
-    float lighting = ambient + diffuse;
-
-    outColor = vec4(fragColor.rgb * lighting, fragColor.a * Opacity);
-}
-";
+        var values = new[] { matrix.M11, matrix.M12, matrix.M13, matrix.M14, matrix.M21, matrix.M22,
+            matrix.M23, matrix.M24, matrix.M31, matrix.M32, matrix.M33, matrix.M34, matrix.M41,
+            matrix.M42, matrix.M43, matrix.M44 };
+        GL.UniformMatrix4(GL.GetUniformLocation(program, name), 1, true, values);
     }
+
+    private static int CreateProgram(string vertexSource, string fragmentSource)
+    {
+        static int Compile(ShaderType type, string source)
+        {
+            var shader = GL.CreateShader(type);
+            GL.ShaderSource(shader, source);
+            GL.CompileShader(shader);
+            GL.GetShader(shader, ShaderParameter.CompileStatus, out var success);
+            if (success == 0) throw new InvalidOperationException(GL.GetShaderInfoLog(shader));
+            return shader;
+        }
+        var vertex = Compile(ShaderType.VertexShader, vertexSource);
+        var fragment = Compile(ShaderType.FragmentShader, fragmentSource);
+        var program = GL.CreateProgram();
+        GL.AttachShader(program, vertex);
+        GL.AttachShader(program, fragment);
+        GL.LinkProgram(program);
+        GL.GetProgram(program, GetProgramParameterName.LinkStatus, out var linked);
+        GL.DeleteShader(vertex);
+        GL.DeleteShader(fragment);
+        if (linked == 0) throw new InvalidOperationException(GL.GetProgramInfoLog(program));
+        return program;
+    }
+
+    private const string OpenGlVertexShader = @"#version 330 core
+layout(location=0) in vec3 Position;
+layout(location=1) in vec4 Color;
+layout(location=2) in vec3 Normal;
+uniform mat4 uMvp;
+out vec4 fragColor; out vec3 fragNormal; out vec3 fragWorldPos;
+void main(){ gl_Position=uMvp*vec4(Position,1); fragColor=Color; fragNormal=Normal; fragWorldPos=Position; }";
+
+    private const string OpenGlFragmentShader = @"#version 330 core
+in vec4 fragColor; in vec3 fragNormal; in vec3 fragWorldPos;
+uniform vec3 uLight; out vec4 outColor;
+void main(){ vec3 n=normalize(fragNormal); float d=.3+.7*max(dot(n,normalize(uLight-fragWorldPos)),0); outColor=vec4(fragColor.rgb*d,fragColor.a); }";
 
     #endregion
 
@@ -1085,15 +944,10 @@ void main() {
         _correlationLinesMesh.Dispose();
         _horizonSurfaceMesh.Dispose();
 
-        _solidPipeline?.Dispose();
-        _wireframePipeline?.Dispose();
-        _resourceLayout?.Dispose();
-        _resourceSet?.Dispose();
-        _uniformBuffer?.Dispose();
-        _renderTarget?.Dispose();
-        _renderTargetView?.Dispose();
-        _depthTexture?.Dispose();
-        _framebuffer?.Dispose();
+        if (_shaderProgram != 0) GL.DeleteProgram(_shaderProgram);
+        if (_renderTarget != 0) GL.DeleteTexture(_renderTarget);
+        if (_depthTexture != 0) GL.DeleteRenderbuffer(_depthTexture);
+        if (_framebuffer != 0) GL.DeleteFramebuffer(_framebuffer);
 
         Logger.Log("[BoreholeCorrelation3DViewer] Disposed");
     }
