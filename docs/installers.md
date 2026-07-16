@@ -2,7 +2,7 @@
 
 The installer ecosystem is made of two projects:
 
-1. **InstallerPackager** (`net8.0` console) publishes self-contained builds, creates per-product archives (ImGui, GTK, Node Server, Node Endpoint) and generates the installer executable for each runtime. It updates `docs/installer-manifest.json` with package URLs, sizes, and SHA256 hashes.
+1. **InstallerPackager** (`net10.0` console) publishes self-contained builds, creates per-product archives (ImGui, GTK, Node Server, Node Endpoint) and generates the installer executable for each runtime. It updates `docs/installer-manifest.json` with package URLs, sizes, and SHA256 hashes.
 2. **InstallerWizard** (ImGui + Terminal.Gui) downloads or reads the archives, lets users pick a package, installation folder, optional ONNX installer bundle, and desktop shortcuts. It supports UAC elevation on Windows and automatic updates by reading the manifest.
 
 ## Prerequisites

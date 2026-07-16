@@ -40,7 +40,7 @@ await cubeApi.ExportAsync(cube, "/path/to/cube.seiscube");
 After building the solution, the API assembly is available at:
 
 ```
-Api/bin/<Configuration>/net8.0/GAIA.Api.dll
+Api/bin/<Configuration>/net10.0/GAIA.Api.dll
 ```
 
 To use it in another project, add a project or file reference:
@@ -59,7 +59,7 @@ To use it in another project, add a project or file reference:
 </ItemGroup>
 ```
 
-The API DLL targets .NET 8.0, so ensure your project targets `net8.0` (or a compatible framework).
+The API DLL targets .NET 10.0, so ensure your project targets `net10.0` (or a compatible framework).
 
 ## Documentation output
 

@@ -4,7 +4,7 @@
     <OutputType>Exe</OutputType>
         <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
         <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -68,9 +68,14 @@
   </ItemGroup>
   <ItemGroup>
     <!-- ASP.NET Core for REST API -->
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="8.0.0" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="10.0.10" />
+    <!--
+      Keep at 10.x: 6.x binds Microsoft.OpenApi 1.x, which collides with the 2.x that
+      Microsoft.AspNetCore.OpenApi now requires. 10.x also drags in a Microsoft.OpenApi past
+      CVE-2026-49451, which the framework package's own 2.0.0 dependency is still vulnerable to.
+    -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
 
     <!-- Math and Numerics -->
     <PackageReference Include="MathNet.Numerics" Version="6.0.0-beta2" />

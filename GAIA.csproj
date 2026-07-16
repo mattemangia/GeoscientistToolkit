@@ -4,7 +4,7 @@
         <OutputType>Exe</OutputType>
         <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
         <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>disable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -72,8 +72,7 @@
         <PackageReference Include="Silk.NET.OpenCL" Version="2.21.0" />
         <PackageReference Include="StbImageSharp" Version="2.30.15" />
         <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
-        <PackageReference Include="System.Drawing.Primitives" Version="4.3.0" />
-        <PackageReference Include="System.Management" Version="8.0.0" />
+        <PackageReference Include="System.Management" Version="10.0.10" />
         <PackageReference Include="TinyDialogsNet" Version="1.0.2" />
         <PackageReference Include="Veldrid" Version="4.9.0" />
         <PackageReference Include="Veldrid.ImGui" Version="5.72.0" />
@@ -167,8 +166,8 @@
         <MSBuild Projects="Tests\VerificationTests\VerificationTests.csproj" Targets="Build" Properties="Configuration=$(Configuration);BuildProjectReferences=false" />
         <MSBuild Projects="Tests\VerificationTestsRunner\VerificationTestsRunner.csproj" Targets="Publish" Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true" Condition="'$(RuntimeIdentifier)' != ''" />
         <ItemGroup>
-            <VerificationTestArtifacts Include="Tests\VerificationTests\bin\$(Configuration)\net8.0\**\*.*" />
-            <VerificationTestRunnerArtifacts Include="Tests\VerificationTestsRunner\bin\$(Configuration)\net8.0\$(RuntimeIdentifier)\publish\**\*.*" Condition="'$(RuntimeIdentifier)' != ''" />
+            <VerificationTestArtifacts Include="Tests\VerificationTests\bin\$(Configuration)\$(TargetFramework)\**\*.*" />
+            <VerificationTestRunnerArtifacts Include="Tests\VerificationTestsRunner\bin\$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\publish\**\*.*" Condition="'$(RuntimeIdentifier)' != ''" />
         </ItemGroup>
         <Copy SourceFiles="@(VerificationTestArtifacts)" DestinationFolder="$(OutputPath)VerificationTests\%(RecursiveDir)" SkipUnchangedFiles="true" />
         <Copy SourceFiles="@(VerificationTestRunnerArtifacts)" DestinationFolder="$(OutputPath)VerificationTests\Runner\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="'$(RuntimeIdentifier)' != ''" />
