@@ -1,10 +1,10 @@
-﻿// GeoscientistToolkit/Analysis/Geothermal/GeothermalSimulationResults.cs
+﻿// GAIA/Analysis/Geothermal/GeothermalSimulationResults.cs
 
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Data.Mesh3D;
+using GAIA.Data.Mesh3D;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 ///     Stores all outputs from a geothermal borehole simulation.

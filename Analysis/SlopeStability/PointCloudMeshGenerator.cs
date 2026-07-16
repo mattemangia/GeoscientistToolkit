@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Analysis/SlopeStability/PointCloudMeshGenerator.cs
+// GAIA/Analysis/SlopeStability/PointCloudMeshGenerator.cs
 // Point Cloud to Mesh Generation for Slope Stability Analysis
 // Based on MATLAB code by Francesco Ottaviani (Università degli Studi di Urbino Carlo Bo)
-// Translated and adapted for C# by the GeoscientistToolkit team.
+// Translated and adapted for C# by the GAIA team.
 
 using System.Globalization;
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability;
+namespace GAIA.Analysis.SlopeStability;
 
 /// <summary>
 /// Generates 3D meshes from point cloud data for slope stability analysis.

@@ -1,18 +1,18 @@
-﻿// GeoscientistToolkit/Analysis/Geothermal/GeothermalSimulationTools.cs
+﻿// GAIA/Analysis/Geothermal/GeothermalSimulationTools.cs
 
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.UI.Visualization;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.Mesh3D;
+using GAIA.UI;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.UI.Visualization;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 ///     ImGui tool for configuring and running geothermal simulations on borehole data.
@@ -1502,7 +1502,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
                     // Working Fluid Selection from ORCFluidLibrary
                     ImGui.Spacing();
-                    var fluids = GeoscientistToolkit.Business.ORCFluidLibrary.Instance.GetAllFluids();
+                    var fluids = GAIA.Business.ORCFluidLibrary.Instance.GetAllFluids();
                     var fluidNames = fluids.Select(f => $"{f.Name} ({f.MinimumTemperature_K - 273.15f:F0}-{f.MaximumTemperature_K - 273.15f:F0}°C)").ToArray();
                     var currentFluidIdx = -1;
                     for (int i = 0; i < fluids.Count; i++)

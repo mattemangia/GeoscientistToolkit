@@ -1,7 +1,7 @@
 # GEOSCRIPT Language Manual
 
 **Version 1.0**
-**Official Documentation for Geoscientist's Toolkit**
+**Official Documentation for GAIA (Geoscience Analysis, Imaging & Automation)**
 
 ---
 
@@ -24,7 +24,7 @@
 
 ### 1.1 What is GEOSCRIPT?
 
-GEOSCRIPT is a domain-specific scripting language (DSL) designed specifically for geoscientific data analysis and manipulation within the Geoscientist's Toolkit application. It provides a powerful, intuitive syntax for automating complex workflows involving CT scans, seismic data, well logs, GIS datasets, and more.
+GEOSCRIPT is a domain-specific scripting language (DSL) designed specifically for geoscientific data analysis and manipulation within the GAIA (Geoscience Analysis, Imaging & Automation) application. It provides a powerful, intuitive syntax for automating complex workflows involving CT scans, seismic data, well logs, GIS datasets, and more.
 
 ### 1.2 Key Features
 
@@ -67,7 +67,7 @@ Access GEOSCRIPT through two interfaces:
 
 #### 2.1.1 Datasets
 
-All GEOSCRIPT operations work on datasets. A dataset is any data structure loaded into the Geoscientist's Toolkit, including:
+All GEOSCRIPT operations work on datasets. A dataset is any data structure loaded into the GAIA (Geoscience Analysis, Imaging & Automation), including:
 
 - Images (2D raster data)
 - CT image stacks (3D volumetric data)
@@ -3187,7 +3187,7 @@ SEIS_FILTER type=bandpass low=10 high=80 |> SEIS_AGC window=500
 
 **AST** - Abstract Syntax Tree, the internal representation of parsed code
 
-**Dataset** - Any data structure loaded into Geoscientist's Toolkit
+**Dataset** - Any data structure loaded into GAIA (Geoscience Analysis, Imaging & Automation)
 
 **DSL** - Domain-Specific Language
 
@@ -3206,9 +3206,9 @@ SEIS_FILTER type=bandpass low=10 high=80 |> SEIS_AGC window=500
 ## License and Copyright
 
 GEOSCRIPT Language Manual
-Copyright (c) 2026 The Geoscientist's Toolkit Project
+Copyright (c) 2026 The GAIA (Geoscience Analysis, Imaging & Automation) Project
 
-This documentation is part of the Geoscientist's Toolkit application, licensed under the MIT License.
+This documentation is part of the GAIA (Geoscience Analysis, Imaging & Automation) application, licensed under the MIT License.
 
 ---
 

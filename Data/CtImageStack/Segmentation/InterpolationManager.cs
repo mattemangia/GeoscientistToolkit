@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/CtImageStack/Segmentation/InterpolationManager.cs
+// GAIA/Data/CtImageStack/Segmentation/InterpolationManager.cs
 
 using System.Collections.Concurrent;
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.CtImageStack.Segmentation;
+namespace GAIA.Data.CtImageStack.Segmentation;
 
 public class InterpolationManager
 {

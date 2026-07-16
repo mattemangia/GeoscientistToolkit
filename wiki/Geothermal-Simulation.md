@@ -1,6 +1,6 @@
 # Geothermal Simulation
 
-Comprehensive guide for geothermal system simulation and analysis in Geoscientist's Toolkit.
+Comprehensive guide for geothermal system simulation and analysis in GAIA (Geoscience Analysis, Imaging & Automation).
 
 ---
 

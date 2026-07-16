@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/TwoDGeology/Geomechanics/GeomechanicalVisualization2D.cs
+// GAIA/Data/TwoDGeology/Geomechanics/GeomechanicalVisualization2D.cs
 
 using System;
 using System.Collections.Generic;
@@ -6,7 +6,7 @@ using System.Linq;
 using System.Numerics;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
+namespace GAIA.Data.TwoDGeology.Geomechanics;
 
 /// <summary>
 /// Result field types for visualization

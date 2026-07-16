@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Analysis/NMR/FluidPresets.cs
+// GAIA/Analysis/NMR/FluidPresets.cs
 
-using GeoscientistToolkit.Data.CtImageStack;
+using GAIA.Data.CtImageStack;
 
-namespace GeoscientistToolkit.Analysis.NMR;
+namespace GAIA.Analysis.NMR;
 
 /// <summary>
 ///     Predefined fluid configurations for NMR simulations.

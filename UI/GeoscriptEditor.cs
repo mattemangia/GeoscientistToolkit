@@ -1,23 +1,23 @@
-// GeoscientistToolkit/UI/GeoScriptEditor.cs
+// GAIA/UI/GeoScriptEditor.cs
 
 using System.Data;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.Data.Table;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
 // Required for encoding
 
 // Required for Marshal
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     A reusable ImGui component for editing GeoScript with context-aware autocomplete.

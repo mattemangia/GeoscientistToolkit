@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Loaders/SubsurfaceGISLoader.cs
+// GAIA/Data/Loaders/SubsurfaceGISLoader.cs
 
 using System.Text.Json;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 /// <summary>
 /// Loader for Subsurface GIS Dataset files (.subgis format)

@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Seismic/SegyParser.cs
+// GAIA/Data/Seismic/SegyParser.cs
 
 using System.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Seismic;
+namespace GAIA.Data.Seismic;
 
 /// <summary>
 /// Parser for SEG-Y (SEG Y Rev 1) seismic data files.

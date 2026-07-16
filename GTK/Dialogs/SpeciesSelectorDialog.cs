@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.Materials;
+using GAIA.Business;
+using GAIA.Data.Materials;
 using Gtk;
 
-namespace GeoscientistToolkit.GtkUI.Dialogs;
+namespace GAIA.GtkUI.Dialogs;
 
 /// <summary>
 /// Species/Compound Selector Dialog

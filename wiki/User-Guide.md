@@ -1,6 +1,6 @@
 # User Guide
 
-Comprehensive documentation for the Geoscientist's Toolkit application.
+Comprehensive documentation for the GAIA (Geoscience Analysis, Imaging & Automation) application.
 
 ---
 
@@ -18,9 +18,9 @@ Comprehensive documentation for the Geoscientist's Toolkit application.
 
 ## Introduction
 
-### What is Geoscientist's Toolkit?
+### What is GAIA (Geoscience Analysis, Imaging & Automation)?
 
-Geoscientist's Toolkit is a comprehensive desktop application for advanced geoscientific data analysis and simulation. Built on .NET 8.0, it provides an integrated environment for working with diverse geophysical and geochemical datasets, from seismic surveys to microscale rock analysis.
+GAIA (Geoscience Analysis, Imaging & Automation) is a comprehensive desktop application for advanced geoscientific data analysis and simulation. Built on .NET 8.0, it provides an integrated environment for working with diverse geophysical and geochemical datasets, from seismic surveys to microscale rock analysis.
 
 ### Key Capabilities
 
@@ -57,7 +57,7 @@ Projects support auto-save functionality with configurable intervals.
 
 ### Datasets
 
-Everything in Geoscientist's Toolkit is a dataset. A dataset represents a discrete unit of geoscientific data with:
+Everything in GAIA (Geoscience Analysis, Imaging & Automation) is a dataset. A dataset represents a discrete unit of geoscientific data with:
 - **Type**: One of 27 supported types (CT volumes, images, tables, boreholes, etc.)
 - **Name**: User-defined identifier
 - **Metadata**: Creation date, source, location, sample information
@@ -360,7 +360,7 @@ Context-sensitive tools appear based on the selected dataset type:
 
 ## Analysis Modules
 
-Geoscientist's Toolkit includes 22 specialized analysis modules. Key modules are documented separately:
+GAIA (Geoscience Analysis, Imaging & Automation) includes 22 specialized analysis modules. Key modules are documented separately:
 
 | Module | Documentation |
 |--------|---------------|
@@ -418,7 +418,7 @@ Geoscientist's Toolkit includes 22 specialized analysis modules. Key modules are
 
 ### GPU Acceleration
 
-Geoscientist's Toolkit can leverage GPU compute for performance-critical simulations.
+GAIA (Geoscience Analysis, Imaging & Automation) can leverage GPU compute for performance-critical simulations.
 
 **Supported operations:**
 - Geothermal heat transport
@@ -473,7 +473,7 @@ Some simulations support distributed execution across multiple machines.
 ### System Architecture
 
 ```
-GeoscientistToolkit (Main Application)
+GAIA (Main Application)
 │
 ├── Graphics Layer (Veldrid + ImGui)
 │   ├── Window Management
@@ -544,7 +544,7 @@ project.gtp (ZIP)
 
 **Solution:**
 1. Delete `settings.json` to reset graphics backend
-2. Run with failsafe mode: `./GeoscientistToolkit --failsafe`
+2. Run with failsafe mode: `./GAIA --failsafe`
 3. Select compatible graphics backend
 
 ### Out of Memory

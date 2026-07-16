@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/Loaders/TwoDGeologyLoader.cs
+// GAIA/Data/Loaders/TwoDGeologyLoader.cs
 
-using GeoscientistToolkit.Data.TwoDGeology;
+using GAIA.Data.TwoDGeology;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class TwoDGeologyLoader : IDataLoader
 {

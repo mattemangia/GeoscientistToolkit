@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Business/Image/SatelliteBandComposer.cs
+// GAIA/Business/Image/SatelliteBandComposer.cs
 
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Image;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.Image;
+namespace GAIA.Business.Image;
 
 /// <summary>
 ///     Compose RGB images from satellite multispectral bands

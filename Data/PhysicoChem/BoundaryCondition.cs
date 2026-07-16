@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/PhysicoChem/BoundaryCondition.cs
+// GAIA/Data/PhysicoChem/BoundaryCondition.cs
 //
 // Boundary condition definitions for reactor simulations
 
@@ -8,7 +8,7 @@ using System.Globalization;
 using NCalc;
 using Newtonsoft.Json;
 
-namespace GeoscientistToolkit.Data.PhysicoChem;
+namespace GAIA.Data.PhysicoChem;
 
 /// <summary>
 /// Boundary condition definition for reactor simulations

@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/Petrology/PhaseDiagramCalculator.cs
+// GAIA/Business/Petrology/PhaseDiagramCalculator.cs
 //
 // Automatic phase diagram calculator for liquidus/solidus and metamorphic P-T diagrams.
 // Generates phase boundaries from thermodynamic data without hardcoded reactions.
@@ -30,10 +30,10 @@
 // - Holland & Powell, 2011. Thermodynamic dataset for phase equilibria.
 
 using System.Data;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.Petrology;
+namespace GAIA.Business.Petrology;
 
 /// <summary>
 ///     Point on a phase boundary curve.

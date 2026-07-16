@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Data/Mesh3D/Mesh3DTools.cs
+// GAIA/Data/Mesh3D/Mesh3DTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.Loaders;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.Loaders;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Mesh3D;
+namespace GAIA.Data.Mesh3D;
 
 /// <summary>
 ///     Provides transformation tools and voxelization for Mesh3DDataset in the Tools panel.

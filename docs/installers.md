@@ -23,7 +23,7 @@ The installer itself is self-contained, so target machines do **not** need the .
 ## Creating packages
 
 ```bash
-# From /workspace/GeoscientistToolkit
+# From /workspace/GAIA
 cd InstallerPackager
 # Optional: verify/update packager-settings.json
 cat packager-settings.json

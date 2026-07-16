@@ -1,14 +1,14 @@
-// GeoscientistToolkit/UI/AcousticVolume/WaveformViewer.cs
+// GAIA/UI/AcousticVolume/WaveformViewer.cs
 
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data.AcousticVolume;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using StbImageWriteSharp;
 
-namespace GeoscientistToolkit.UI.AcousticVolume;
+namespace GAIA.UI.AcousticVolume;
 
 /// <summary>
 ///     Enhanced waveform viewer with B-scan visualization, interactive analysis,

@@ -1,10 +1,10 @@
 using System;
 using System.Numerics;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Seismic;
+using GAIA.Data.GIS;
+using GAIA.Data.Seismic;
 
-namespace GeoscientistToolkit.Api;
+namespace GAIA.Api;
 
 /// <summary>
 ///     Provides automation helpers for building and exporting seismic cubes.

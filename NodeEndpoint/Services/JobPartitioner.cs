@@ -1,7 +1,7 @@
-using GeoscientistToolkit.Network;
+using GAIA.Network;
 using System.Collections.Concurrent;
 
-namespace GeoscientistToolkit.NodeEndpoint.Services;
+namespace GAIA.NodeEndpoint.Services;
 
 /// <summary>
 /// Partitions large jobs across multiple worker nodes for parallel processing

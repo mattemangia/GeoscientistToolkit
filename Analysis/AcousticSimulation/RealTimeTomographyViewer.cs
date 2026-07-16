@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Analysis/AcousticSimulation/RealTimeTomographyViewer.cs
+// GAIA/Analysis/AcousticSimulation/RealTimeTomographyViewer.cs
 
 using System.Numerics;
 using System.Linq;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 public class RealTimeTomographyViewer : IDisposable
 {

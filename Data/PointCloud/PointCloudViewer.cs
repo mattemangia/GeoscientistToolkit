@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Data/PointCloud/PointCloudViewer.cs
+// GAIA/Data/PointCloud/PointCloudViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Mesh3D;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 
-namespace GeoscientistToolkit.Data.PointCloud;
+namespace GAIA.Data.PointCloud;
 
 /// <summary>
 /// 3D point cloud viewer using mesh rendering infrastructure.

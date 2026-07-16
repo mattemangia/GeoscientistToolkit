@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Hydrological/HydrologicalOpenCLKernels.cs
+// GAIA/Analysis/Hydrological/HydrologicalOpenCLKernels.cs
 //
 // GPU-accelerated hydrological computations using OpenCL 1.2
 // Provides massive parallelization for water flow, accumulation, and temporal simulations
@@ -6,11 +6,11 @@
 
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.OpenCL;
-using GeoscientistToolkit.Util;
+using GAIA.OpenCL;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.Hydrological;
+namespace GAIA.Analysis.Hydrological;
 
 /// <summary>
 /// OpenCL-accelerated hydrological computations for large-scale water flow simulations

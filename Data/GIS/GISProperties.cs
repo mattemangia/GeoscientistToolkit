@@ -1,12 +1,12 @@
-// GeoscientistToolkit/UI/GIS/GISProperties.cs (Updated with Basemap Configuration)
+// GAIA/UI/GIS/GISProperties.cs (Updated with Basemap Configuration)
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 public class GISProperties : IDatasetPropertiesRenderer
 {

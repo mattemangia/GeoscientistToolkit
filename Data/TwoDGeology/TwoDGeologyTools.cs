@@ -1,15 +1,15 @@
-// GeoscientistToolkit/UI/GIS/TwoDGeologyTools.cs
+// GAIA/UI/GIS/TwoDGeologyTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.TwoDGeology;
+using GAIA.Business.GIS;
+using GAIA.Util;
 using ImGuiNET;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping.CrossSectionGenerator;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping.ProfileGenerator;
+using static GAIA.Business.GIS.GeologicalMapping;
+using static GAIA.Business.GIS.GeologicalMapping.CrossSectionGenerator;
+using static GAIA.Business.GIS.GeologicalMapping.ProfileGenerator;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 /// <summary>
 /// Tools for interacting with 2D geological cross-sections

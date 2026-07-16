@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Data/Dataset.cs (Modified)
+// GAIA/Data/Dataset.cs (Modified)
 
-namespace GeoscientistToolkit.Data;
+namespace GAIA.Data;
 
 public enum DatasetType
 {

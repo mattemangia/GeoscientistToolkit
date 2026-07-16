@@ -1,15 +1,15 @@
-﻿// GeoscientistToolkit/Util/Logger.cs
+﻿// GAIA/Util/Logger.cs
 
 using System.Collections.Concurrent;
 using System.Text;
-using GeoscientistToolkit.Settings;
+using GAIA.Settings;
 
 // Alias to avoid ambiguity with Microsoft.Extensions.Logging.LogLevel in ASP.NET Core projects
-using LogLevel = GeoscientistToolkit.Settings.LogLevel;
+using LogLevel = GAIA.Settings.LogLevel;
 
 // Using the shared LogLevel enum
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 // The LogEntry class is now defined here and uses the correct enum
 public class LogEntry

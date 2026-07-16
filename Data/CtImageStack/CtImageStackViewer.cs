@@ -1,16 +1,16 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackViewer.cs
+﻿// GAIA/Data/CtImageStack/CtImageStackViewer.cs
 // Multi-viewport CT viewer with synchronized crosshairs
 
 using System.Numerics;
-using GeoscientistToolkit.Analysis.RockCoreExtractor;
-using GeoscientistToolkit.Analysis.Transform;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.RockCoreExtractor;
+using GAIA.Analysis.Transform;
+using GAIA.Business;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 public class CtImageStackViewer : IDatasetViewer
 {

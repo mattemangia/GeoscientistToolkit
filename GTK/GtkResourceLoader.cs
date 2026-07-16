@@ -2,15 +2,15 @@ using System;
 using System.IO;
 using Gdk;
 
-namespace GeoscientistToolkit.GtkUI;
+namespace GAIA.GtkUI;
 
 internal static class GtkResourceLoader
 {
-    private const string LogoResourceName = "GeoscientistToolkit.image.png";
+    private const string LogoResourceName = "GAIA.image.png";
 
     public static Pixbuf LoadLogoPixbuf(int? width = null, int? height = null)
     {
-        var coreAssembly = typeof(global::GeoscientistToolkit.Application).Assembly;
+        var coreAssembly = typeof(global::GAIA.Application).Assembly;
         using var stream = coreAssembly.GetManifestResourceStream(LogoResourceName);
 
         if (stream != null)

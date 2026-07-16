@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace GeoscientistToolkit.Scripting.GeoScript
+namespace GAIA.Scripting.GeoScript
 {
     /// <summary>
     /// Lexical analyzer for GeoScript language

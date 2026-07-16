@@ -1,9 +1,9 @@
 using System;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-using GeoscientistToolkit.Analysis.Seismology;
+using GAIA.Analysis.Seismology;
 
-namespace GeoscientistToolkit.Analysis.Seismology
+namespace GAIA.Analysis.Seismology
 {
     public struct WaveField
     {

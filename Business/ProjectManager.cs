@@ -1,29 +1,29 @@
-// GeoscientistToolkit/Business/ProjectManager.cs
+// GAIA/Business/ProjectManager.cs
 
 using System.IO.Compression;
 using System.Numerics;
-using GeoscientistToolkit.Analysis.NMR;
-using GeoscientistToolkit.Analysis.ThermalConductivity;
-using GeoscientistToolkit.Analysis.SlopeStability;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Data.Media;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
-using GeoscientistToolkit.Business.GIS;
+using GAIA.Analysis.NMR;
+using GAIA.Analysis.ThermalConductivity;
+using GAIA.Analysis.SlopeStability;
+using GAIA.Data;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.Borehole;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.GIS;
+using GAIA.Data.Image;
+using GAIA.Data.Materials;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.Pnm;
+using GAIA.Data.Table;
+using GAIA.Data.Media;
+using GAIA.Settings;
+using GAIA.Util;
+using GAIA.Business.GIS;
 // ADDED: To access CompoundLibrary and ChemicalCompound
-using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
-using SubsurfaceGISDatasetDTO = GeoscientistToolkit.Data.GIS.SubsurfaceGISDatasetDTO;
+using AcousticVolumeDatasetDTO = GAIA.Data.AcousticVolumeDatasetDTO;
+using SubsurfaceGISDatasetDTO = GAIA.Data.GIS.SubsurfaceGISDatasetDTO;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 ///     Manages the current project state, including loading, saving, and handling datasets.

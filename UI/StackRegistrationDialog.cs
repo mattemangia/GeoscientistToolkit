@@ -1,15 +1,15 @@
-// GeoscientistToolkit/UI/StackRegistrationDialog.cs
+// GAIA/UI/StackRegistrationDialog.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     Dialog for registering two CT stacks into a single combined volume
@@ -509,7 +509,7 @@ public class StackRegistrationDialog
             var combinedName = $"{_dataset1.Name}+{_dataset2.Name}";
 
             // Create a temporary folder for the dataset
-            var tempFolder = Path.Combine(Path.GetTempPath(), "GeoscientistToolkit", $"Registered_{Guid.NewGuid():N}");
+            var tempFolder = Path.Combine(Path.GetTempPath(), "GAIA", $"Registered_{Guid.NewGuid():N}");
             Directory.CreateDirectory(tempFolder);
 
             // Save the volume

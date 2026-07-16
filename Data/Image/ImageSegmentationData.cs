@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/Image/ImageSegmentationData.cs
+// GAIA/Data/Image/ImageSegmentationData.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.Image;
+namespace GAIA.Data.Image;
 
 /// <summary>
 ///     Manages segmentation data (labels and materials) for a 2D image

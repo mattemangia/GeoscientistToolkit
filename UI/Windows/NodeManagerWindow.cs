@@ -1,12 +1,12 @@
-// GeoscientistToolkit/UI/Windows/NodeManagerWindow.cs
+// GAIA/UI/Windows/NodeManagerWindow.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Network;
+using GAIA.Settings;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Windows;
+namespace GAIA.UI.Windows;
 
 /// <summary>
 ///     Window for managing the distributed computing node manager

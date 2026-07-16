@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Analysis/PNM/DualPNMSimulations.cs
+// GAIA/Analysis/PNM/DualPNMSimulations.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Pnm;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Pnm;
+namespace GAIA.Analysis.Pnm;
 
 /// <summary>
 /// Simulation extensions for Dual PNM datasets.

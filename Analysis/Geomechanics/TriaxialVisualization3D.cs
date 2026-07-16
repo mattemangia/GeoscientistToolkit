@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geomechanics/TriaxialVisualization3D.cs
+// GAIA/Analysis/Geomechanics/TriaxialVisualization3D.cs
 // 3D visualization for triaxial simulation results
 //
 // FEATURES:
@@ -12,7 +12,7 @@
 using System.Numerics;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public enum VisualizationMode
 {

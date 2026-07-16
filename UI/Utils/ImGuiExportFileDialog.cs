@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/UI/Utils/ImGuiExportFileDialog.cs
+﻿// GAIA/UI/Utils/ImGuiExportFileDialog.cs
 
 using System.Numerics;
 using System.Runtime.InteropServices;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Utils;
+namespace GAIA.UI.Utils;
 
 public enum FileDialogType
 {

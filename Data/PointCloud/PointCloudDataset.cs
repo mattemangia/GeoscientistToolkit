@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/PointCloud/PointCloudDataset.cs
+// GAIA/Data/PointCloud/PointCloudDataset.cs
 
 using System.Globalization;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.PointCloud;
+namespace GAIA.Data.PointCloud;
 
 /// <summary>
 /// Dataset for 3D point cloud data (XYZ, TXT, CSV, PTS, ASC files)
@@ -231,7 +231,7 @@ public class PointCloudDataset : Dataset, ISerializableDataset
 
             var culture = CultureInfo.InvariantCulture;
             var sb = new StringBuilder();
-            sb.AppendLine($"# Point cloud exported by GeoscientistToolkit");
+            sb.AppendLine($"# Point cloud exported by GAIA");
             sb.AppendLine($"# Points: {PointCount}");
             sb.AppendLine($"# Format: X Y Z" + (HasColors ? " R G B" : ""));
 

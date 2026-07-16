@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Loaders/PNMLoader.cs
+// GAIA/Data/Loaders/PNMLoader.cs
 
 using System.Text.Json;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Pnm;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class PNMLoader : IDataLoader
 {

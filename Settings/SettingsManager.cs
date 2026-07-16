@@ -1,10 +1,10 @@
-﻿// GeoscientistToolkit/Settings/SettingsManager.cs
+﻿// GAIA/Settings/SettingsManager.cs
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Settings;
+namespace GAIA.Settings;
 
 public class SettingsManager
 {
@@ -26,7 +26,7 @@ public class SettingsManager
     private SettingsManager()
     {
         _settingsDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "GeoscientistToolkit");
+            "GAIA");
         _settingsFilePath = Path.Combine(_settingsDirectory, "settings.json");
     }
 
@@ -126,7 +126,7 @@ public class SettingsManager
         // Get OpenCL compute devices from the device manager
         try
         {
-            var openclDevices = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAvailableDevices();
+            var openclDevices = GAIA.OpenCL.OpenCLDeviceManager.GetAvailableDevices();
             gpus.AddRange(openclDevices.Select(d => d.Name));
         }
         catch (Exception ex)

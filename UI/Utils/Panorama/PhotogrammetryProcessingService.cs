@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/PhotogrammetryProcessingService.cs
+﻿// GAIA/Business/Photogrammetry/PhotogrammetryProcessingService.cs
 
 using System;
 using System.Collections.Concurrent;
@@ -7,14 +7,14 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.Panorama;
-using GeoscientistToolkit.Business.Photogrammetry;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Util;
+using GAIA.Business.Panorama;
+using GAIA.Business.Photogrammetry;
+using GAIA.Data;
+using GAIA.Data.Image;
+using GAIA.Data.Mesh3D;
+using GAIA.Util;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     /// <summary>
     /// Main service for photogrammetry processing pipeline

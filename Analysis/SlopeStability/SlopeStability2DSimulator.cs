@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Analysis/SlopeStability/SlopeStability2DSimulator.cs
+// GAIA/Analysis/SlopeStability/SlopeStability2DSimulator.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// 2D slope stability simulator adapted from 3D SlopeStabilitySimulator.

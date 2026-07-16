@@ -1,7 +1,7 @@
 using System.Text.Json;
-using GeoscientistToolkit.Installer.Models;
+using GAIA.Installer.Models;
 
-namespace GeoscientistToolkit.Installer.Utilities;
+namespace GAIA.Installer.Utilities;
 
 internal static class InstallerSettingsLoader
 {

@@ -1,15 +1,15 @@
-﻿// GeoscientistToolkit/AddIns/Development/RemoveSmallIslandsAddIn.cs
+﻿// GAIA/AddIns/Development/RemoveSmallIslandsAddIn.cs
 
 using System.Collections.Concurrent;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.AddIns.RemoveSmallIslands;
+namespace GAIA.AddIns.RemoveSmallIslands;
 
 /// <summary>
 ///     Main entry point for the "Remove Small Islands" add-in.
@@ -17,10 +17,10 @@ namespace GeoscientistToolkit.AddIns.RemoveSmallIslands;
 public class RemoveSmallIslandsAddIn : IAddIn
 {
     private static RemoveSmallIslandsTool _tool;
-    public string Id => "com.geoscientisttoolkit.removesmallislands";
+    public string Id => "com.gaia.removesmallislands";
     public string Name => "Remove Small Islands";
     public string Version => "1.0.0";
-    public string Author => "GeoscientistToolkit";
+    public string Author => "GAIA";
     public string Description => "Removes particles of a material smaller than a specified size threshold.";
 
     public void Initialize()

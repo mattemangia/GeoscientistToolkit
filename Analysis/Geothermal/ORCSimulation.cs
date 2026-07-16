@@ -2,11 +2,11 @@ using System;
 using System.Numerics;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Network;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geothermal
+namespace GAIA.Analysis.Geothermal
 {
     /// <summary>
     /// Organic Rankine Cycle (ORC) simulation for geothermal power generation

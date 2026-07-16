@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Seismic/SeismicCubeSerializer.cs
+// GAIA/Data/Seismic/SeismicCubeSerializer.cs
 
 using System.IO.Compression;
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Seismic;
+namespace GAIA.Data.Seismic;
 
 /// <summary>
 /// Serializes and deserializes SeismicCubeDataset to/from compressed binary format (.seiscube).

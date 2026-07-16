@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/TwoDGeology/Geomechanics/GeomechanicsEditingHelpers.cs
+// GAIA/Data/TwoDGeology/Geomechanics/GeomechanicsEditingHelpers.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
+namespace GAIA.Data.TwoDGeology.Geomechanics;
 
 #region Snapping System
 

@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Thermodynamic/PhaseTransitionHandler.cs
+// GAIA/Analysis/Thermodynamic/PhaseTransitionHandler.cs
 //
 // Phase transition detection and handling for water-steam systems
 // Handles boiling, condensation, and latent heat calculations
@@ -9,7 +9,7 @@
 
 using System;
 
-namespace GeoscientistToolkit.Analysis.Thermodynamic;
+namespace GAIA.Analysis.Thermodynamic;
 
 public enum WaterPhase
 {

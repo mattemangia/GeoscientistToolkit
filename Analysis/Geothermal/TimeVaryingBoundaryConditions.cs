@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geothermal/TimeVaryingBoundaryConditions.cs
+// GAIA/Analysis/Geothermal/TimeVaryingBoundaryConditions.cs
 //
 // ================================================================================================
 // Time-varying boundary conditions for realistic geothermal simulations
@@ -7,9 +7,9 @@
 
 using System;
 using System.Collections.Generic;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 /// Manages time-varying boundary conditions for geothermal simulations

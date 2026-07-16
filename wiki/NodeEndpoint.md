@@ -70,7 +70,7 @@ Create `/etc/systemd/system/nodeendpoint.service`:
 
 ```ini
 [Unit]
-Description=GeoscientistToolkit NodeEndpoint
+Description=GAIA NodeEndpoint
 After=network.target
 
 [Service]

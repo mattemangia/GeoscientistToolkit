@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace GeoscientistToolkit.Analysis.Geothermal
+namespace GAIA.Analysis.Geothermal
 {
     /// <summary>
     /// Economic analysis for geothermal power generation with ORC

@@ -1,6 +1,6 @@
 # Photogrammetry
 
-Guide for 3D reconstruction from images using the photogrammetry pipeline in Geoscientist's Toolkit.
+Guide for 3D reconstruction from images using the photogrammetry pipeline in GAIA (Geoscience Analysis, Imaging & Automation).
 
 ---
 

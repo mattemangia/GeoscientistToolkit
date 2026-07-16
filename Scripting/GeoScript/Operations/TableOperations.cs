@@ -1,13 +1,13 @@
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Table;
+using GAIA.Util;
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
 using System.Linq;
 
-namespace GeoscientistToolkit.Scripting.GeoScript.Operations
+namespace GAIA.Scripting.GeoScript.Operations
 {
     /// <summary>
     /// Filter rows in a table based on conditions

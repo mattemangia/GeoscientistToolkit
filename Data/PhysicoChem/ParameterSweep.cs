@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/PhysicoChem/ParameterSweep.cs
+// GAIA/Data/PhysicoChem/ParameterSweep.cs
 //
 // Parameter sweep configuration for sensitivity analysis and optimization
 
@@ -7,7 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json;
 
-namespace GeoscientistToolkit.Data.PhysicoChem;
+namespace GAIA.Data.PhysicoChem;
 
 /// <summary>
 /// Configuration for parameter sweep experiments

@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Business/GIS/StructuralRestoration.cs
+// GAIA/Business/GIS/StructuralRestoration.cs
 
 using System.Numerics;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping;
+using static GAIA.Business.GIS.GeologicalMapping;
 
-namespace GeoscientistToolkit.Business.GIS;
+namespace GAIA.Business.GIS;
 
 /// <summary>
 ///     Performs structural restoration (unfolding) and forward modeling (folding)

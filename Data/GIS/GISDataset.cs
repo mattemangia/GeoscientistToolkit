@@ -1,22 +1,22 @@
-// GeoscientistToolkit/Data/GIS/GISDataset.cs (Updated)
+// GAIA/Data/GIS/GISDataset.cs (Updated)
 
 using System.IO.Compression;
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
-using GeoscientistToolkit.UI.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.UI.GIS;
+using GAIA.Util;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 using ProjNet.CoordinateSystems;
-using GeoscientistToolkit.Business.GIS;
+using GAIA.Business.GIS;
 
 
 // Required for GISOperationsImpl
 // Required for BasemapManager
 
-namespace GeoscientistToolkit.Data.GIS;
+namespace GAIA.Data.GIS;
 
 public class GISDataset : Dataset, ISerializableDataset
 {

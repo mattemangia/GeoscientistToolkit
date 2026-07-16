@@ -1,11 +1,11 @@
 using System;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Analysis.SlopeStability;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.TwoDGeology;
+using GAIA.Analysis.SlopeStability;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.TwoDGeology;
 
-namespace GeoscientistToolkit.Business.GeoScript.Commands.Slope
+namespace GAIA.Business.GeoScript.Commands.Slope
 {
     /// <summary>
     /// SLOPE2D_FROM_GEOLOGY command.

@@ -1,11 +1,11 @@
-# Geoscientist's Toolkit
+# GAIA (Geoscience Analysis, Imaging & Automation)
 
 <div align="center">
-  <img src="image.png" alt="Geoscientist's Toolkit Logo" width="400"/>
+  <img src="image.png" alt="GAIA (Geoscience Analysis, Imaging & Automation) Logo" width="400"/>
 
   **A comprehensive desktop application for geoscientific data analysis, visualization, and simulation**
 
-  **Current GTK Version: 1.0.0**
+  **Current GAIA Version: 1.0.0**
 
   [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=.net)](https://dotnet.microsoft.com/)
   [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#installation)
@@ -16,7 +16,7 @@
 
 ## Overview
 
-Geoscientist's Toolkit is an advanced, cross-platform desktop application built with C# and .NET 8.0 that provides an integrated environment for working with diverse geophysical and geochemical datasets. From pore-scale (micrometers) to basin-scale (kilometers) analysis, it combines real-time 3D visualization, GPU-accelerated simulations, and a domain-specific scripting language (GeoScript) to enable sophisticated workflows across multiple geoscience disciplines.
+GAIA (Geoscience Analysis, Imaging & Automation) is an advanced, cross-platform desktop application built with C# and .NET 8.0 that provides an integrated environment for working with diverse geophysical and geochemical datasets. From pore-scale (micrometers) to basin-scale (kilometers) analysis, it combines real-time 3D visualization, GPU-accelerated simulations, and a domain-specific scripting language (GeoScript) to enable sophisticated workflows across multiple geoscience disciplines.
 
 ## Start Here
 
@@ -133,8 +133,8 @@ The `InstallerWizard` TUI binaries install and update the toolkit on Windows, Li
 
 #### Clone and Build
 ```bash
-git clone https://github.com/mattemangia/GeoscientistToolkit.git
-cd GeoscientistToolkit
+git clone https://github.com/mattemangia/GAIA.git
+cd GAIA
 dotnet build
 dotnet run
 ```
@@ -169,7 +169,7 @@ Diagnostics open a full-screen log window with **Cancel** and **Close** controls
 
 1. **Launch the application**
    ```bash
-   ./GeoscientistToolkit
+   ./GAIA
    ```
 
 2. **Create a new project**
@@ -243,7 +243,7 @@ Visualize temperature distribution and flow paths
 ### Project Structure
 
 ```
-GeoscientistToolkit/
+GAIA/
 ├── AddIns/                    # Plugin framework + sample add-ins
 ├── Analysis/                  # Simulation and analysis engines
 │   ├── AcousticSimulation/   # Wave propagation
@@ -392,8 +392,8 @@ GeoscientistToolkit/
 
 ## GeoScript Language
 
-Geoscientist's Toolkit includes **GeoScript**, a domain-specific scripting language for automating workflows:
-> **Note:** GeoScript in this project is an internal language for Geoscientist's Toolkit and is not affiliated with https://geoscript.net or any of its components.
+GAIA (Geoscience Analysis, Imaging & Automation) includes **GeoScript**, a domain-specific scripting language for automating workflows:
+> **Note:** GeoScript in this project is an internal language for GAIA (Geoscience Analysis, Imaging & Automation) and is not affiliated with https://geoscript.net or any of its components.
 
 ```geoscript
 // Load a CT stack and set it as the active dataset
@@ -479,14 +479,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Citation
 
-If you use Geoscientist's Toolkit in your research, please cite:
+If you use GAIA (Geoscience Analysis, Imaging & Automation) in your research, please cite:
 
 ```bibtex
 @software{geoscientist_toolkit,
-  title = {Geoscientist's Toolkit: Integrated Geoscientific Analysis Platform},
+  title = {GAIA (Geoscience Analysis, Imaging & Automation): Integrated Geoscientific Analysis Platform},
   author = {Mangiagalli, Matteo and Ottaviani, Francesco},
   year = {2026},
-  url = {https://github.com/mattemangia/GeoscientistToolkit}
+  url = {https://github.com/mattemangia/GAIA}
 }
 ```
 

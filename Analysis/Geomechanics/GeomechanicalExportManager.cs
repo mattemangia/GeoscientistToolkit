@@ -1,17 +1,17 @@
-// GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalExportManager.cs
+// GAIA/Analysis/Geomechanics/GeomechanicalExportManager.cs
 
 using System.Numerics;
 using System.Security;
 using System.Text;
 using System.Text.Json;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.UI;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using SkiaSharp;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public class GeomechanicalExportManager : IDisposable
 {

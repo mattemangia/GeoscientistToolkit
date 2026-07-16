@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Image/ImageLayerManager.cs
+// GAIA/Data/Image/ImageLayerManager.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace GeoscientistToolkit.Data.Image
+namespace GAIA.Data.Image
 {
     /// <summary>
     /// Manages layers for an ImageDataset

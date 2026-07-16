@@ -1,12 +1,12 @@
-﻿// GeoscientistToolkit/UI/PopOutWindow.cs (Enhanced with safer disposal)
+﻿// GAIA/UI/PopOutWindow.cs (Enhanced with safer disposal)
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 using Veldrid.Sdl2;
 using Veldrid.StartupUtilities;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     Represents a separate Veldrid window for popped-out panels

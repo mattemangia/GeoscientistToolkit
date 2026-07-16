@@ -1,8 +1,8 @@
-﻿// GeoscientistToolkit/AddIns/IAddIn.cs
+﻿// GAIA/AddIns/IAddIn.cs
 
-using GeoscientistToolkit.Data;
+using GAIA.Data;
 
-namespace GeoscientistToolkit.AddIns;
+namespace GAIA.AddIns;
 
 /// <summary>
 ///     Base interface for all add-ins

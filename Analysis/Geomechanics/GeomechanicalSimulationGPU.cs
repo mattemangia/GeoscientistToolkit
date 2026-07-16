@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalSimulatorGPU.cs
+// GAIA/Analysis/Geomechanics/GeomechanicalSimulatorGPU.cs
 // COMPLETE REWRITE - Production-ready with streaming, full physics, extensive logging
 //
 // ========== FEATURES ==========
@@ -39,10 +39,10 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public unsafe class GeomechanicalSimulatorGPU : IDisposable
 {
@@ -375,12 +375,12 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
             Logger.Log("[GeomechGPU] Initializing OpenCL...");
 
             // Check if multi-GPU mode is enabled
-            _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
+            _multiGPUMode = GAIA.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
 
             if (_multiGPUMode)
             {
                 // Multi-GPU mode: get all GPU devices
-                var deviceInfos = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
+                var deviceInfos = GAIA.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
 
                 if (deviceInfos == null || deviceInfos.Count == 0)
                 {
@@ -429,7 +429,7 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
             else
             {
                 // Single GPU mode
-                _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+                _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
                 if (_device == 0)
                 {
@@ -438,7 +438,7 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
                 }
 
                 // Get device info from the centralized manager
-                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
                 var deviceName = deviceInfo.Name;
                 var deviceVendor = deviceInfo.Vendor;
                 var deviceGlobalMemory = deviceInfo.GlobalMemory;

@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Image/ColorSpace.cs
+// GAIA/Data/Image/ColorSpace.cs
 
 using System;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.Image
+namespace GAIA.Data.Image
 {
     /// <summary>
     /// Comprehensive color space conversion utilities

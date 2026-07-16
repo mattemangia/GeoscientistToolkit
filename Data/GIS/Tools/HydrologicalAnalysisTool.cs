@@ -1,18 +1,18 @@
-// GeoscientistToolkit/UI/GIS/Tools/HydrologicalAnalysisTool.cs
+// GAIA/UI/GIS/Tools/HydrologicalAnalysisTool.cs
 
 using System.IO;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
-using GISOperations = GeoscientistToolkit.Business.GIS.GISOperationsImpl;
-using GeoscientistToolkit.Business.GIS;
+using GISOperations = GAIA.Business.GIS.GISOperationsImpl;
+using GAIA.Business.GIS;
 
-namespace GeoscientistToolkit.UI.GIS.Tools;
+namespace GAIA.UI.GIS.Tools;
 
 /// <summary>
 /// Hydrological analysis tool similar to River Runner - trace flow paths and simulate flooding

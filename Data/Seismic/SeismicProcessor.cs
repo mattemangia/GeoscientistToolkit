@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Seismic/SeismicProcessor.cs
+// GAIA/Data/Seismic/SeismicProcessor.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Seismic;
+namespace GAIA.Data.Seismic;
 
 /// <summary>
 /// Advanced seismic data processor for cleaning and preparing seismic lines

@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Data/CtImageStack/CtImageStackExportDialog.cs
+// GAIA/Data/CtImageStack/CtImageStackExportDialog.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data.VolumeData;
+using GAIA.UI;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using StbImageWriteSharp;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 public class CtImageStackExportDialog
 {

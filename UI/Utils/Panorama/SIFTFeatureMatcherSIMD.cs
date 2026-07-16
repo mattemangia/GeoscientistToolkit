@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/SiftFeatureMatcherSIMD.cs
+﻿// GAIA/Business/Photogrammetry/SiftFeatureMatcherSIMD.cs
 //
 // ==========================================================================================
 // IMPORTANT: THIS FILE HAS BEEN REWRITTEN TO USE A CPU-BASED, SIMD-ACCELERATED IMPLEMENTATION.
@@ -15,7 +15,7 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace GeoscientistToolkit;
+namespace GAIA;
 
 /// <summary>
 /// CPU-accelerated SIFT feature matcher using L2 distance, SIMD, and multi-threading.

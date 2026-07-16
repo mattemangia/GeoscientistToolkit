@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Data/Materials/Element.cs
+// GAIA/Data/Materials/Element.cs
 
-namespace GeoscientistToolkit.Data.Materials;
+namespace GAIA.Data.Materials;
 
 /// <summary>
 ///     Defines the type or category of a chemical element.

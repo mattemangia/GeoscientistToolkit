@@ -1,18 +1,18 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptGeomechanicsCommands.cs
+// GAIA/Business/GeoScript/GeoScriptGeomechanicsCommands.cs
 
 using System;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Numerics;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.Materials;
+using GAIA.Data.TwoDGeology;
+using GAIA.Data.TwoDGeology.Geomechanics;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptGeomechanicsCommands;
+namespace GAIA.Business.GeoScriptGeomechanicsCommands;
 
 /// <summary>
 /// GEOMECH_CREATE_MESH - Create a 2D FEM mesh for geomechanical analysis

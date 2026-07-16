@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Seismic/SeismicCubeGISExporter.cs
+// GAIA/Data/Seismic/SeismicCubeGISExporter.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.GIS;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Seismic;
+namespace GAIA.Data.Seismic;
 
 /// <summary>
 /// Exports seismic cube data to SubsurfaceGIS format for 3D mapping of segmented packages.

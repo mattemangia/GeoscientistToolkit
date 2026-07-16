@@ -1,17 +1,17 @@
-// GeoscientistToolkit/UI/AcousticVolume/AcousticToCtConverterDialog.cs
+// GAIA/UI/AcousticVolume/AcousticToCtConverterDialog.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
 // Assuming ProgressBarDialog is in this namespace
 
-namespace GeoscientistToolkit.UI.AcousticVolume;
+namespace GAIA.UI.AcousticVolume;
 
 /// <summary>
 ///     A dialog for converting an AcousticVolumeDataset to a new grayscale CtImageStackDataset.
@@ -96,7 +96,7 @@ public class AcousticToCtConverterDialog
             if (ImGui.Button("Choose Output Location & Convert...", new Vector2(-1, 0)))
             {
                 _exportDialog.SetExtensions(
-                    new ImGuiExportFileDialog.ExtensionOption("", "GeoscientistToolkit Dataset Folder"));
+                    new ImGuiExportFileDialog.ExtensionOption("", "GAIA Dataset Folder"));
                 _exportDialog.Open(_newDatasetName);
             }
 

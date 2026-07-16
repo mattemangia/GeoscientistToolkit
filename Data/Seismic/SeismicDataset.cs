@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Seismic/SeismicDataset.cs
+// GAIA/Data/Seismic/SeismicDataset.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Seismic;
+namespace GAIA.Data.Seismic;
 
 /// <summary>
 /// Dataset representing seismic reflection/refraction data loaded from SEG-Y files

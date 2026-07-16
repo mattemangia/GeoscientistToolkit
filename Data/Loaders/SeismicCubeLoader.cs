@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Loaders/SeismicCubeLoader.cs
+// GAIA/Data/Loaders/SeismicCubeLoader.cs
 
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Seismic;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 /// <summary>
 /// Loader for Seismic Cube datasets from .seiscube files

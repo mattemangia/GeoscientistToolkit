@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/SplashScreen.cs
+// GAIA/UI/SplashScreen.cs
 
 using System.Diagnostics;
 using System.Numerics;
@@ -8,7 +8,7 @@ using Veldrid;
 using Veldrid.Sdl2;
 using StbImageSharp;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     A splash screen that displays the application logo during startup
@@ -42,7 +42,7 @@ public class SplashScreen : IDisposable
         {
             // Load embedded image resource
             var assembly = Assembly.GetExecutingAssembly();
-            var resourceName = "GeoscientistToolkit.image.png";
+            var resourceName = "GAIA.image.png";
 
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null)
@@ -147,7 +147,7 @@ public class SplashScreen : IDisposable
             }
 
             // Application name
-            var titleText = "Geoscientist's Toolkit";
+            var titleText = "GAIA (Geoscience Analysis, Imaging & Automation)";
             var titleSize = ImGui.CalcTextSize(titleText);
             ImGui.SetCursorPos(new Vector2((windowSize.X - titleSize.X * 1.5f) * 0.5f, windowSize.Y * 0.7f));
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.9f, 0.9f, 0.9f, 1.0f));

@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/GIS/SubsurfaceGISDatasetExtensions.cs
+// GAIA/Data/GIS/SubsurfaceGISDatasetExtensions.cs
 
 using System.Text.Json;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.GIS;
+namespace GAIA.Data.GIS;
 
 /// <summary>
 /// Extension methods for saving and exporting SubsurfaceGISDataset

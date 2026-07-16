@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Data/PhysicoChem/ReactorMeshGenerator.cs
+// GAIA/Data/PhysicoChem/ReactorMeshGenerator.cs
 //
 // Mesh generation from reactor domains with 2D-to-3D interpolation
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Mesh3D;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.PhysicoChem;
+namespace GAIA.Data.PhysicoChem;
 
 /// <summary>
 /// Generates 3D meshes from reactor domain definitions

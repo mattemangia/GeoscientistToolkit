@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Util/Dialogs.cs
+// GAIA/Util/Dialogs.cs
 // This is the definitive version, rewritten based on the compiler error evidence.
 // It uses simple return types and direct arguments, not tuples or FileFilter objects.
 
 // This is the correct namespace.
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 public static class Dialogs
 {

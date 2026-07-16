@@ -1,10 +1,10 @@
-// GeoscientistToolkit/UI/Borehole/BoreholeDebugTools.cs
+// GAIA/UI/Borehole/BoreholeDebugTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Borehole;
+using GAIA.Data.Borehole;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Borehole;
+namespace GAIA.UI.Borehole;
 
 /// <summary>
 ///     Debug tools for creating test boreholes with realistic parameters

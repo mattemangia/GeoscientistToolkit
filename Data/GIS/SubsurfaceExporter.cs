@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/GIS/SubsurfaceExporter.cs
+// GAIA/Data/GIS/SubsurfaceExporter.cs
 
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using OSGeo.GDAL;
 
-namespace GeoscientistToolkit.Data.GIS;
+namespace GAIA.Data.GIS;
 
 /// <summary>
 /// Exports subsurface geothermal data to various formats for visualization and analysis

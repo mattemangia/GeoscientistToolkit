@@ -1,6 +1,6 @@
 # Real-time Photogrammetry Pipeline
 
-Complete real-time photogrammetry system for GeoscientistToolkit with automatic ONNX model management and advanced export.
+Complete real-time photogrammetry system for GAIA with automatic ONNX model management and advanced export.
 
 ## Key Features
 

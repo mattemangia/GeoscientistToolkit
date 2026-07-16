@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Analysis/NMR/MultiComponentFitting.cs
+// GAIA/Analysis/NMR/MultiComponentFitting.cs
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.NMR;
+namespace GAIA.Analysis.NMR;
 
 /// <summary>
 ///     Automatic multi-component peak fitting for T2 distributions.

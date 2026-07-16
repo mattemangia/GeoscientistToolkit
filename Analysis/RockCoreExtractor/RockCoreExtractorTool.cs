@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Analysis/RockCoreExtractor/RockCoreExtractorTool.cs
+// GAIA/Analysis/RockCoreExtractor/RockCoreExtractorTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.CtImageStack;
+using GAIA.Business;
+using GAIA.Data.CtImageStack;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.RockCoreExtractor;
+namespace GAIA.Analysis.RockCoreExtractor;
 
 /// <summary>
 ///     Tool for defining and extracting cylindrical rock cores from CT stacks.

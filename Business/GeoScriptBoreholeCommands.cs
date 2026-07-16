@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptBoreholeCommands.cs
+// GAIA/Business/GeoScript/GeoScriptBoreholeCommands.cs
 
 using System;
 using System.Collections.Generic;
@@ -6,12 +6,12 @@ using System.Linq;
 using System.Numerics;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptBoreholeCommands;
+namespace GAIA.Business.GeoScriptBoreholeCommands;
 
 /// <summary>
 /// BH_ADD_LITHOLOGY - Add lithology layer to borehole

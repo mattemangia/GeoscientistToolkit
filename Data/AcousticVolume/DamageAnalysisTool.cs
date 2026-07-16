@@ -1,13 +1,13 @@
-// GeoscientistToolkit/UI/AcousticVolume/DamageAnalysisTool.cs
+// GAIA/UI/AcousticVolume/DamageAnalysisTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.VolumeData;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.AcousticVolume;
+namespace GAIA.UI.AcousticVolume;
 
 /// <summary>
 ///     Provides analysis tools specifically for the DamageField in an AcousticVolumeDataset.

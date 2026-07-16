@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Analysis/AcousticSimulation/TransducerAutoPlacer.cs
+// GAIA/Analysis/AcousticSimulation/TransducerAutoPlacer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 /// <summary>
 ///     Provides advanced logic for automatically placing transducers

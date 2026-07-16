@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalParameters.cs
+// GAIA/Analysis/Geomechanics/GeomechanicalParameters.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public enum LoadingMode
 {

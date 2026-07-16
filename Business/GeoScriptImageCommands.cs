@@ -1,16 +1,16 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptImageCommands.cs
+// GAIA/Business/GeoScript/GeoScriptImageCommands.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.Image;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptImageCommands;
+namespace GAIA.Business.GeoScriptImageCommands;
 
 #region Image Processing Commands
 

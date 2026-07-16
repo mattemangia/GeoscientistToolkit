@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Image/Selection/ImageSelectionTools.cs
+// GAIA/Data/Image/Selection/ImageSelectionTools.cs
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.Image.Selection
+namespace GAIA.Data.Image.Selection
 {
     /// <summary>
     /// Advanced selection tools including magic wand, color range, and SAM integration

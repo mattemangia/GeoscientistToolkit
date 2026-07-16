@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Loaders/GISLoader.cs (Updated)
+// GAIA/Data/Loaders/GISLoader.cs (Updated)
 
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.GIS;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class GISLoader : IDataLoader
 {

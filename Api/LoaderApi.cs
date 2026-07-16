@@ -1,7 +1,7 @@
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Loaders;
+using GAIA.Data;
+using GAIA.Data.Loaders;
 
-namespace GeoscientistToolkit.Api;
+namespace GAIA.Api;
 
 /// <summary>
 ///     Provides access to dataset loaders used by the toolkit.

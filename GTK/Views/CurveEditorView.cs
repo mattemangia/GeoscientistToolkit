@@ -1,4 +1,4 @@
-// GeoscientistToolkit/GTK/Views/CurveEditorView.cs
+// GAIA/GTK/Views/CurveEditorView.cs
 
 using Cairo;
 using Gtk;
@@ -10,7 +10,7 @@ using System.Linq;
 using System.Numerics;
 using System.Text;
 
-namespace GeoscientistToolkit.GtkUI.Views
+namespace GAIA.GtkUI.Views
 {
     /// <summary>
     /// Represents a single point on the curve.

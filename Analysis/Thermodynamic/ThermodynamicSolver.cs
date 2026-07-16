@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/Thermodynamics/ThermodynamicSolver.cs
+// GAIA/Business/Thermodynamics/ThermodynamicSolver.cs
 //
 // Comprehensive thermodynamic equilibrium solver for geochemical systems
 // based on Gibbs energy minimization with automatic reaction identification.
@@ -14,12 +14,12 @@
 // - Dzombak, D.A. & Morel, F.M.M., 1990. Surface Complexation Modeling: Hydrous Ferric Oxide. Wiley.
 
 using System.Text.RegularExpressions;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Network;
+using GAIA.Util;
 using MathNet.Numerics.LinearAlgebra;
 
-namespace GeoscientistToolkit.Business.Thermodynamics;
+namespace GAIA.Business.Thermodynamics;
 
 /// <summary>
 ///     ENHANCEMENT: Represents a surface site for complexation modeling.

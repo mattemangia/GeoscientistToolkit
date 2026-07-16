@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Business/GIS/GISExporter.cs
+// GAIA/Business/GIS/GISExporter.cs
 
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.GIS;
+using GAIA.UI.GIS;
+using GAIA.Util;
 using NetTopologySuite.Features;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 using OSGeo.GDAL;
 
-namespace GeoscientistToolkit.Data.GIS;
+namespace GAIA.Data.GIS;
 
 /// <summary>
 ///     Provides functionality to export GIS datasets to various formats.

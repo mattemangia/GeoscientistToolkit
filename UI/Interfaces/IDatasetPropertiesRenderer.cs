@@ -1,8 +1,8 @@
-﻿// GeoscientistToolkit/UI/Interfaces/IDatasetPropertiesRenderer.cs
+﻿// GAIA/UI/Interfaces/IDatasetPropertiesRenderer.cs
 
-using GeoscientistToolkit.Data;
+using GAIA.Data;
 
-namespace GeoscientistToolkit.UI.Interfaces;
+namespace GAIA.UI.Interfaces;
 
 /// <summary>
 ///     Interface for rendering dataset-specific properties in the Properties panel.

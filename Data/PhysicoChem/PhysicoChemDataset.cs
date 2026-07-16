@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/PhysicoChem/PhysicoChemDataset.cs
+// GAIA/Data/PhysicoChem/PhysicoChemDataset.cs
 //
 // PHYSICOCHEM Dataset: Multiphysics reactor simulation with TOUGH-like capabilities
 // Supports 2D-to-3D geometry generation, multiple domains, boundary conditions,
@@ -7,10 +7,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using GeoscientistToolkit.Data.Mesh3D;
+using GAIA.Data.Mesh3D;
 using Newtonsoft.Json;
 
-namespace GeoscientistToolkit.Data.PhysicoChem;
+namespace GAIA.Data.PhysicoChem;
 
 /// <summary>
 /// Main dataset for physicochemical reactor simulations.

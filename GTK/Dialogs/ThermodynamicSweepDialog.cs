@@ -2,12 +2,12 @@ using System;
 using System.Data;
 using System.Globalization;
 using Gtk;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Business.Thermodynamics;
+using GAIA.Data.Table;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.GtkUI.Dialogs;
+namespace GAIA.GtkUI.Dialogs;
 
 public class ThermodynamicSweepDialog : Dialog
 {

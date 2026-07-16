@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Data/ImageStackOrganizerDialog.cs
+// GAIA/Data/ImageStackOrganizerDialog.cs
 
 using System.Numerics;
 using System.Text.RegularExpressions;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.Image;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class ImageStackOrganizerDialog
 {

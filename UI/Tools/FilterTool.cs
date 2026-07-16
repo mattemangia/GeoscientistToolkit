@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/Tools/FilterTool.cs
+// GAIA/UI/Tools/FilterTool.cs
 
-using GeoscientistToolkit.Analysis.Filtering;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Analysis.Filtering;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
 
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 /// <summary>
 ///     UI bridge for the Advanced Filtering toolset.

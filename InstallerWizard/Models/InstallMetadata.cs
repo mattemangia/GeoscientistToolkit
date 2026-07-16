@@ -1,4 +1,4 @@
-namespace GeoscientistToolkit.Installer.Models;
+namespace GAIA.Installer.Models;
 
 public sealed record InstallMetadata
 {

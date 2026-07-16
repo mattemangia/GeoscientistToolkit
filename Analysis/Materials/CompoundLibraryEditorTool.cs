@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/Windows/CompoundLibraryEditorWindow.cs
+// GAIA/UI/Windows/CompoundLibraryEditorWindow.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Windows;
+namespace GAIA.UI.Windows;
 
 /// <summary>
 ///     Window for browsing, searching, editing, and managing the thermodynamic compound library.

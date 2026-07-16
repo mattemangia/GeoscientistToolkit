@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Nerf/NerfImageCollection.cs
+// GAIA/Data/Nerf/NerfImageCollection.cs
 
 using System.Numerics;
 using FFMpegCore;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Nerf;
+namespace GAIA.Data.Nerf;
 
 /// <summary>
 /// Collection of image frames for NeRF training.

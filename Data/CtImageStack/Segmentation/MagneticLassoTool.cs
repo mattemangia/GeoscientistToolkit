@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/CtImageStack/Segmentation/MagneticLassoTool.cs
+// GAIA/Data/CtImageStack/Segmentation/MagneticLassoTool.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.CtImageStack.Segmentation;
+namespace GAIA.Data.CtImageStack.Segmentation;
 
 public class MagneticLassoTool : LassoTool, ISegmentationTool
 {

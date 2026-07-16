@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Analysis/Geothermal/GeothermalSimulationOptions.cs
+﻿// GAIA/Analysis/Geothermal/GeothermalSimulationOptions.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Borehole;
+using GAIA.Data.Borehole;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 ///     Defines the type of heat exchanger used in the borehole.

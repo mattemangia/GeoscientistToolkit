@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Image/ImageLayer.cs
+// GAIA/Data/Image/ImageLayer.cs
 
 using System;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.Image
+namespace GAIA.Data.Image
 {
     /// <summary>
     /// Represents a single layer in a layered image

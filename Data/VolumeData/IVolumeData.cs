@@ -1,6 +1,6 @@
-﻿// GeoscientistToolkit/Data/VolumeData/IVolumeData.cs
+﻿// GAIA/Data/VolumeData/IVolumeData.cs
 
-namespace GeoscientistToolkit.Data.VolumeData;
+namespace GAIA.Data.VolumeData;
 
 /// <summary>
 ///     Base interface for volume data

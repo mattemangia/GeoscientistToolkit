@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/CompoundLibraryMultiphaseExtensions.cs
+// GAIA/Business/CompoundLibraryMultiphaseExtensions.cs
 //
 // Extension to CompoundLibrary adding compounds for multiphase flow simulations
 // Includes gases (CO2, CH4, H2S, N2, O2), aqueous species, and dissolved gas species
@@ -10,10 +10,10 @@
 // - Duan & Sun (2003): CO2-water system thermodynamics
 // - Spycher et al. (2003): CO2-H2O-NaCl system phase equilibria
 
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 /// Extension methods to add multiphase flow compounds to CompoundLibrary

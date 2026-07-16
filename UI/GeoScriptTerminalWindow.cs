@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/Windows/GeoScriptTerminalWindow.cs
+// GAIA/UI/Windows/GeoScriptTerminalWindow.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
+using GAIA.Business;
+using GAIA.Data;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Windows;
+namespace GAIA.UI.Windows;
 
 /// <summary>
 ///     A window that hosts the GeoScript interpreter, providing a terminal-like interface.

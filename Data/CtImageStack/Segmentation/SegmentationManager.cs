@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/CtImageStack/Segmentation/SegmentationManager.cs
+// GAIA/Data/CtImageStack/Segmentation/SegmentationManager.cs
 
 using System.Collections.Concurrent;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.CtImageStack.Segmentation;
+namespace GAIA.Data.CtImageStack.Segmentation;
 
 public class SegmentationManager : IDisposable
 {

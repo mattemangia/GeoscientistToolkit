@@ -1,8 +1,8 @@
 using System.Numerics;
-using GeoscientistToolkit.Data;
+using GAIA.Data;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class PropertiesPanel : BasePanel
 {

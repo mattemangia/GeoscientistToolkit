@@ -1,9 +1,9 @@
-using GeoscientistToolkit.Data;
+using GAIA.Data;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace GeoscientistToolkit.Scripting.GeoScript.Operations
+namespace GAIA.Scripting.GeoScript.Operations
 {
     /// <summary>
     /// Registry of all available operations for each dataset type

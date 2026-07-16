@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Data/AcousticVolume/RockMaterialLibrary.cs
+// GAIA/Data/AcousticVolume/RockMaterialLibrary.cs
 
-namespace GeoscientistToolkit.Data.AcousticVolume;
+namespace GAIA.Data.AcousticVolume;
 
 public class RockMaterial
 {

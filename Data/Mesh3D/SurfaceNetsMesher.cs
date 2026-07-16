@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Mesh3D/SurfaceNetsMesher.cs
+// GAIA/Data/Mesh3D/SurfaceNetsMesher.cs
 
 using System.Collections.Concurrent;
 using System.Numerics;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Mesh3D;
+namespace GAIA.Data.Mesh3D;
 
 /// <summary>
 ///     Creates a 3D mesh from volumetric label data using a parallelized Surface Nets algorithm.

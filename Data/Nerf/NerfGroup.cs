@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Nerf/NerfGroup.cs
+// GAIA/Data/Nerf/NerfGroup.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Nerf;
+namespace GAIA.Data.Nerf;
 
 /// <summary>
 /// A specialized group for organizing multiple NeRF datasets.

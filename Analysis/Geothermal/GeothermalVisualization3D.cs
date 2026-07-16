@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/UI/Visualization/GeothermalVisualization3D.cs
+﻿// GAIA/UI/Visualization/GeothermalVisualization3D.cs
 
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Geothermal;
+using GAIA.Data.Mesh3D;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 using Veldrid.SPIRV;

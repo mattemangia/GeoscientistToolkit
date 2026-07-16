@@ -1,7 +1,7 @@
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
 
-namespace GeoscientistToolkit.Api;
+namespace GAIA.Api;
 
 /// <summary>
 ///     Provides access to GeoScript command execution.

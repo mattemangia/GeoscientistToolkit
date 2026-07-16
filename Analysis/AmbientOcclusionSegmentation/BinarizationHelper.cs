@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Analysis/AmbientOcclusionSegmentation/BinarizationHelper.cs
+// GAIA/Analysis/AmbientOcclusionSegmentation/BinarizationHelper.cs
 
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.AmbientOcclusionSegmentation;
+namespace GAIA.Analysis.AmbientOcclusionSegmentation;
 
 /// <summary>
 /// Utilities for automatic threshold detection and binarization of CT volumes

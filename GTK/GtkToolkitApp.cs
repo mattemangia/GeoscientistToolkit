@@ -1,14 +1,14 @@
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Network;
+using GAIA.Settings;
+using GAIA.Util;
 using Gtk;
 using GtkApplication = Gtk.Application;
 
-namespace GeoscientistToolkit.GtkUI;
+namespace GAIA.GtkUI;
 
 /// <summary>
-/// Boots the GTK front-end while reusing the core GeoscientistToolkit runtime
+/// Boots the GTK front-end while reusing the core GAIA runtime
 /// (datasets, simulations, node manager and settings) so that the mesh and
 /// distributed computing stacks behave identically to the ImGui edition.
 /// </summary>

@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Business/Panorama/PanoramaStitchingService.cs
+﻿// GAIA/Business/Panorama/PanoramaStitchingService.cs
 //
 // ==========================================================================================
 // FIXED VERSION: Corrects transformation direction and image ordering
@@ -13,15 +13,15 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Image;
+using GAIA.Util;
 using MathNet.Numerics.LinearAlgebra;
 using MathNet.Numerics.LinearAlgebra.Double;
 using SkiaSharp;
 using Vector = MathNet.Numerics.LinearAlgebra.Double.Vector;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     public class PanoramaStitchJob
     {

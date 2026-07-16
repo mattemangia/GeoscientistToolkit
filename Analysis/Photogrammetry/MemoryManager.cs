@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Analysis/Photogrammetry/MemoryManager.cs
+// GAIA/Analysis/Photogrammetry/MemoryManager.cs
 
 using System;
 using System.Diagnostics;
 using OpenCvSharp;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Photogrammetry;
+namespace GAIA.Analysis.Photogrammetry;
 
 /// <summary>
 /// Manages memory usage for the photogrammetry pipeline to prevent OOM errors.

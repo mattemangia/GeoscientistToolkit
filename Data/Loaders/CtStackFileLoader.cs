@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Loaders/CtStackFileLoader.cs
+// GAIA/Data/Loaders/CtStackFileLoader.cs
 
 using System.Text.Json;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class CtStackFileLoader : IDataLoader
 {

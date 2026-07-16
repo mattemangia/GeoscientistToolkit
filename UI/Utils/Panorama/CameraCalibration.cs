@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/CameraCalibration.cs
+﻿// GAIA/Business/Photogrammetry/CameraCalibration.cs
 
 using System;
 using System.Numerics;
-using GeoscientistToolkit.Business.Photogrammetry;
-using GeoscientistToolkit.Util;
+using GAIA.Business.Photogrammetry;
+using GAIA.Util;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     /// <summary>
     /// Handles camera calibration and intrinsic parameter computation

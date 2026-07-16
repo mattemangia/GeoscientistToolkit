@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Loaders/TableLoader.cs
+// GAIA/Data/Loaders/TableLoader.cs
 
 using System.Data;
 using System.Text;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Table;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class TableLoader : IDataLoader
 {

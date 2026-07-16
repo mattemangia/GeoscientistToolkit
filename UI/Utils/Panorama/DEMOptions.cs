@@ -1,6 +1,6 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/Options/DEMOptions.cs
+﻿// GAIA/Business/Photogrammetry/Options/DEMOptions.cs
 
-namespace GeoscientistToolkit.Business.Photogrammetry
+namespace GAIA.Business.Photogrammetry
 {
     /// <summary>
     /// Options for Digital Elevation Model generation

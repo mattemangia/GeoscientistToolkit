@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Image/ImageLayerToolsUI.cs
+// GAIA/Data/Image/ImageLayerToolsUI.cs
 
 using System;
 using System.Numerics;
-using GeoscientistToolkit.Data.Image.Selection;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data.Image.Selection;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Image
+namespace GAIA.Data.Image
 {
     /// <summary>
     /// UI tool for layer management, drawing, and selection

@@ -17,7 +17,7 @@
 
 ### What is GeoScript?
 
-GeoScript is a domain-specific scripting language designed for geoscientific data analysis and processing within the GeoscientistToolkit application. It provides a unified interface for manipulating diverse geoscientific datasets including images, CT scans, seismic data, GIS layers, tables, pore networks, and more.
+GeoScript is a domain-specific scripting language designed for geoscientific data analysis and processing within the GAIA application. It provides a unified interface for manipulating diverse geoscientific datasets including images, CT scans, seismic data, GIS layers, tables, pore networks, and more.
 
 ### Key Features
 
@@ -2220,8 +2220,8 @@ SEIS_FILTER type=bandpass low=10 high=80 |> SEIS_AGC window=500
 
 ## License and Attribution
 
-GeoscientistToolkit GeoScript Language
-Copyright (c) 2026 GeoscientistToolkit Project
+GAIA GeoScript Language
+Copyright (c) 2026 GAIA Project
 
 ---
 

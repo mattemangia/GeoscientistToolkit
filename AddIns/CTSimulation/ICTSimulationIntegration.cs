@@ -1,8 +1,8 @@
-// GeoscientistToolkit/AddIns/CtSimulation/ICtSimulationIntegration.cs
+// GAIA/AddIns/CtSimulation/ICtSimulationIntegration.cs
 
-using GeoscientistToolkit.Data.CtImageStack;
+using GAIA.Data.CtImageStack;
 
-namespace GeoscientistToolkit.AddIns.CtSimulation;
+namespace GAIA.AddIns.CtSimulation;
 
 /// <summary>
 ///     Interface for simulation integration - allows viewer to work without concrete implementations
@@ -23,7 +23,7 @@ public static class SimulationIntegrationFactory
     public static ICtSimulationIntegration CreateIntegration(CtCombinedViewer viewer, CtImageStackDataset dataset)
     {
         // Try to find implementation via reflection or service locator
-        var integrationType = Type.GetType("GeoscientistToolkit.AddIns.Development.SimulationIntegration");
+        var integrationType = Type.GetType("GAIA.AddIns.Development.SimulationIntegration");
 
         if (integrationType != null)
             return Activator.CreateInstance(integrationType, viewer, dataset) as ICtSimulationIntegration;

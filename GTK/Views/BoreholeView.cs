@@ -1,18 +1,18 @@
-// GeoscientistToolkit/GTK/Views/BoreholeView.cs
+// GAIA/GTK/Views/BoreholeView.cs
 
 using Cairo;
-using GeoscientistToolkit.Data.Borehole;
+using GAIA.Data.Borehole;
 using Gtk;
 using System;
 using System.Linq;
 using Gdk;
-using GeoscientistToolkit.GtkUI.Dialogs;
-using GeoscientistToolkit.GtkUI;
+using GAIA.GtkUI.Dialogs;
+using GAIA.GtkUI;
 using System.Collections.Generic;
 using Newtonsoft.Json;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.GtkUI.Views
+namespace GAIA.GtkUI.Views
 {
     public class BoreholeView : Box
     {
@@ -76,11 +76,11 @@ namespace GeoscientistToolkit.GtkUI.Views
             };
             _toolbar.ImportLasClicked += () =>
             {
-                global::GeoscientistToolkit.GtkUI.BoreholeLasTools.ImportFromLas(this.Toplevel as Gtk.Window, _dataset);
+                global::GAIA.GtkUI.BoreholeLasTools.ImportFromLas(this.Toplevel as Gtk.Window, _dataset);
                 SetDataset(_dataset);
             };
             _toolbar.ExportLasClicked += step =>
-                global::GeoscientistToolkit.GtkUI.BoreholeLasTools.ExportToLas(this.Toplevel as Gtk.Window, _dataset, step);
+                global::GAIA.GtkUI.BoreholeLasTools.ExportToLas(this.Toplevel as Gtk.Window, _dataset, step);
 
             SetDataset(dataset);
         }

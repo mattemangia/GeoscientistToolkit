@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Util/SimpleTiffWriter.cs
+// GAIA/Util/SimpleTiffWriter.cs
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 ///     A simple TIFF writer for 8-bit grayscale and RGBA images.

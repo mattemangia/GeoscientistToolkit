@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Util/UndoRedoManager.cs
+// GAIA/Util/UndoRedoManager.cs
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 /// Interface for commands that can be undone/redone

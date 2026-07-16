@@ -1,10 +1,10 @@
-using GeoscientistToolkit.Installer.Models;
-using GeoscientistToolkit.InstallerPackager.Models;
-using GeoscientistToolkit.InstallerPackager.Services;
-using GeoscientistToolkit.InstallerPackager.UI;
-using GeoscientistToolkit.InstallerPackager.Utilities;
+using GAIA.Installer.Models;
+using GAIA.InstallerPackager.Models;
+using GAIA.InstallerPackager.Services;
+using GAIA.InstallerPackager.UI;
+using GAIA.InstallerPackager.Utilities;
 
-namespace GeoscientistToolkit.InstallerPackager;
+namespace GAIA.InstallerPackager;
 
 internal sealed class PackagerApp
 {

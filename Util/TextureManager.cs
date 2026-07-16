@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Util/TextureManager.cs
+// GAIA/Util/TextureManager.cs
 
 using ImGuiNET;
 using Veldrid;
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 ///     Manages textures across multiple ImGui contexts, ensuring textures work correctly

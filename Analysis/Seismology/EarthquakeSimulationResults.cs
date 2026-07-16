@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace GeoscientistToolkit.Analysis.Seismology
+namespace GAIA.Analysis.Seismology
 {
     /// <summary>
     /// Results from earthquake simulation

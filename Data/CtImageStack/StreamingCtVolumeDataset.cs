@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/StreamingCtVolumeDataset.cs
+﻿// GAIA/Data/CtImageStack/StreamingCtVolumeDataset.cs
 
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 public class GvtLodInfo
 {

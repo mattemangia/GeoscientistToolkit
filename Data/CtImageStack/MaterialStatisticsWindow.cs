@@ -1,15 +1,15 @@
-// GeoscientistToolkit/Data/CtImageStack/MaterialStatisticsWindow.cs
+// GAIA/Data/CtImageStack/MaterialStatisticsWindow.cs
 
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.UI;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using StbImageWriteSharp;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 public class MaterialStatisticsWindow : BasePanel, IDisposable
 {

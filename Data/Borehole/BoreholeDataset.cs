@@ -1,16 +1,16 @@
-// GeoscientistToolkit/Data/Borehole/BoreholeDataset.cs
+// GAIA/Data/Borehole/BoreholeDataset.cs
 
 using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
-using GeoscientistToolkit.Analysis.NMR;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.NMR;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.Pnm;
+using GAIA.Data.Table;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Borehole;
+namespace GAIA.Data.Borehole;
 
 /// <summary>
 ///     Contact type between lithological units

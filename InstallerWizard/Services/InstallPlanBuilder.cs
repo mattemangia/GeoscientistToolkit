@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using GeoscientistToolkit.Installer.Models;
+using GAIA.Installer.Models;
 
-namespace GeoscientistToolkit.Installer.Services;
+namespace GAIA.Installer.Services;
 
 internal sealed class InstallPlanBuilder
 {

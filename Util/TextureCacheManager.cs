@@ -1,6 +1,6 @@
-﻿// GeoscientistToolkit/Util/TextureCacheManager.cs
+﻿// GAIA/Util/TextureCacheManager.cs
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 ///     Manages the lifecycle of textures to respect a global memory budget.

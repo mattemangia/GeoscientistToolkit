@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Data;
+using GAIA.UI.Interfaces;
+using GAIA.Data;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// 3D viewer for slope stability analysis with color mapping and animation.

@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Analysis/Hydrological/WaterBodyTracker.cs
+// GAIA/Analysis/Hydrological/WaterBodyTracker.cs
 //
 // Tracks water bodies (lakes, rivers, sea) over time during rainfall simulations
 //
 
 using System.Numerics;
-using GeoscientistToolkit.Data.GIS;
+using GAIA.Data.GIS;
 
-namespace GeoscientistToolkit.Analysis.Hydrological;
+namespace GAIA.Analysis.Hydrological;
 
 /// <summary>
 /// Represents a tracked water body (lake, river, or sea)

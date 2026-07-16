@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Loaders/AcousticVolumeLoader.cs
+// GAIA/Data/Loaders/AcousticVolumeLoader.cs
 
 using System.Text.Json;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 /// <summary>
 ///     Loader for acoustic volume datasets with time series data

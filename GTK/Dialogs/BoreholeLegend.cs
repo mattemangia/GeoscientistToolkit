@@ -1,10 +1,10 @@
-// GeoscientistToolkit/GTK/Dialogs/BoreholeLegend.cs
+// GAIA/GTK/Dialogs/BoreholeLegend.cs
 
-using GeoscientistToolkit.Data.Borehole;
+using GAIA.Data.Borehole;
 using Gtk;
 using System.Linq;
 
-namespace GeoscientistToolkit.GtkUI.Dialogs
+namespace GAIA.GtkUI.Dialogs
 {
     public class BoreholeLegend : Window
     {

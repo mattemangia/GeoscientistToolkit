@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Data/Table/TableDataset.cs
+// GAIA/Data/Table/TableDataset.cs
 
 using System;
 using System.Data;
 using System.Globalization;
 using System.Text;
 using ClosedXML.Excel;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Table;
+namespace GAIA.Data.Table;
 
 public class TableDataset : Dataset, ISerializableDataset
 {

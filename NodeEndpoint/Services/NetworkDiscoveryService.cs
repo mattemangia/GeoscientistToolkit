@@ -4,7 +4,7 @@ using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
 
-namespace GeoscientistToolkit.NodeEndpoint.Services;
+namespace GAIA.NodeEndpoint.Services;
 
 /// <summary>
 /// Cross-platform network discovery service for automatic node connection

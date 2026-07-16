@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptSeismicCommands.cs
+// GAIA/Business/GeoScript/GeoScriptSeismicCommands.cs
 
 using System;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.Seismic;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptSeismicCommands;
+namespace GAIA.Business.GeoScriptSeismicCommands;
 
 /// <summary>
 /// SEIS_FILTER - Apply seismic filters

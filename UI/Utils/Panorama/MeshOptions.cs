@@ -1,6 +1,6 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/Options/MeshOptions.cs
+﻿// GAIA/Business/Photogrammetry/Options/MeshOptions.cs
 
-namespace GeoscientistToolkit.Business.Photogrammetry
+namespace GAIA.Business.Photogrammetry
 {
     /// <summary>
     /// Options for mesh generation

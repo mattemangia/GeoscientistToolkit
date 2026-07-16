@@ -1,10 +1,10 @@
-﻿// GeoscientistToolkit/Util/CrossPlatformMessageBox.cs
+﻿// GAIA/Util/CrossPlatformMessageBox.cs
 
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 public static class CrossPlatformMessageBox
 {

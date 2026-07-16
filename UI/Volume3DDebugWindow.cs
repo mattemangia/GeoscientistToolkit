@@ -1,13 +1,13 @@
-﻿// GeoscientistToolkit/UI/Volume3DDebugWindow.cs
+﻿// GAIA/UI/Volume3DDebugWindow.cs
 
 using System.Diagnostics;
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI.Utils;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.UI.Utils;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 internal enum TestPattern
 {

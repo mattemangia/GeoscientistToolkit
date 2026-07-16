@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Analysis/ThermalConductivity/ThermalResults.cs
+// GAIA/Analysis/ThermalConductivity/ThermalResults.cs
 
-using GeoscientistToolkit.Data.Mesh3D;
+using GAIA.Data.Mesh3D;
 
-namespace GeoscientistToolkit.Analysis.ThermalConductivity;
+namespace GAIA.Analysis.ThermalConductivity;
 
 /// <summary>
 ///     Stores all outputs from a thermal conductivity simulation.

@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Data/CtImageStack/StackRegistration.cs
+// GAIA/Data/CtImageStack/StackRegistration.cs
 
 using System.Numerics;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 /// <summary>
 ///     Alignment direction for stack registration
@@ -611,7 +611,7 @@ public class StackRegistration
             _cl = CL.GetApi();
 
             // Use centralized device manager to get the device from settings
-            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+            _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
             if (_device == 0)
             {
@@ -620,7 +620,7 @@ public class StackRegistration
             }
 
             // Get device info from the centralized manager
-            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
             Logger.Log($"[StackRegistration] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
             // Create context

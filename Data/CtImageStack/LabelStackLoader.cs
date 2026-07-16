@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/LabelStackLoader.cs
+﻿// GAIA/Data/CtImageStack/LabelStackLoader.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 using StbImageSharp;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 /// <summary>
 ///     Handles loading of label stacks from exported images, reconstructing materials and labels

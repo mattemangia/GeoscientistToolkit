@@ -1,8 +1,8 @@
 <div align="center">
 
-![Geoscientist's Toolkit Logo](../image.png)
+![GAIA (Geoscience Analysis, Imaging & Automation) Logo](../image.png)
 
-# Geoscientist's Toolkit
+# GAIA (Geoscience Analysis, Imaging & Automation)
 
 **A comprehensive desktop application for geoscientific data analysis, visualization, and simulation**
 
@@ -18,7 +18,7 @@
 
 ## Welcome to the Wiki
 
-This wiki contains comprehensive documentation for the Geoscientist's Toolkit application. Whether you're a new user getting started or an experienced researcher looking for advanced features, you'll find the information you need here.
+This wiki contains comprehensive documentation for the GAIA (Geoscience Analysis, Imaging & Automation) application. Whether you're a new user getting started or an experienced researcher looking for advanced features, you'll find the information you need here.
 
 ### Quick Navigation
 
@@ -36,7 +36,7 @@ This wiki contains comprehensive documentation for the Geoscientist's Toolkit ap
 
 ## Overview
 
-Geoscientist's Toolkit is an advanced, cross-platform desktop application built with C# and .NET 8.0 that provides an integrated environment for working with diverse geophysical and geochemical datasets. From pore-scale (micrometers) to basin-scale (kilometers) analysis, it combines real-time 3D visualization, GPU-accelerated simulations, and a domain-specific scripting language (GeoScript) to enable sophisticated workflows across multiple geoscience disciplines.
+GAIA (Geoscience Analysis, Imaging & Automation) is an advanced, cross-platform desktop application built with C# and .NET 8.0 that provides an integrated environment for working with diverse geophysical and geochemical datasets. From pore-scale (micrometers) to basin-scale (kilometers) analysis, it combines real-time 3D visualization, GPU-accelerated simulations, and a domain-specific scripting language (GeoScript) to enable sophisticated workflows across multiple geoscience disciplines.
 
 ---
 
@@ -140,7 +140,7 @@ See [Getting Started](Getting-Started.md) for a complete walkthrough.
 
 ## GeoScript Language
 
-Geoscientist's Toolkit includes **GeoScript**, a domain-specific scripting language for automating workflows:
+GAIA (Geoscience Analysis, Imaging & Automation) includes **GeoScript**, a domain-specific scripting language for automating workflows:
 
 ```geoscript
 // Load a CT stack and set it as the active dataset
@@ -242,29 +242,29 @@ CT_ANALYZE_POROSITY void_material=1
 
 ## Contributing
 
-We welcome contributions! See the [Contributing Guidelines](https://github.com/mattemangia/GeoscientistToolkit#contributing) for details.
+We welcome contributions! See the [Contributing Guidelines](https://github.com/mattemangia/GAIA#contributing) for details.
 
 ---
 
 ## Support & Community
 
 - **Documentation**: Browse this wiki
-- **Bug Reports**: [GitHub Issues](https://github.com/mattemangia/GeoscientistToolkit/issues)
-- **Feature Requests**: [GitHub Discussions](https://github.com/mattemangia/GeoscientistToolkit/discussions)
+- **Bug Reports**: [GitHub Issues](https://github.com/mattemangia/GAIA/issues)
+- **Feature Requests**: [GitHub Discussions](https://github.com/mattemangia/GAIA/discussions)
 - **Contact**: m.mangiagalli@campus.uniurb.it
 
 ---
 
 ## Citation
 
-If you use Geoscientist's Toolkit in your research, please cite:
+If you use GAIA (Geoscience Analysis, Imaging & Automation) in your research, please cite:
 
 ```bibtex
 @software{geoscientist_toolkit,
-  title = {Geoscientist's Toolkit: Integrated Geoscientific Analysis Platform},
+  title = {GAIA (Geoscience Analysis, Imaging & Automation): Integrated Geoscientific Analysis Platform},
   author = {Mangiagalli, Matteo},
   year = {2026},
-  url = {https://github.com/mattemangia/GeoscientistToolkit}
+  url = {https://github.com/mattemangia/GAIA}
 }
 ```
 

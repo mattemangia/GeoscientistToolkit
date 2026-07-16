@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/UI/Photogrammetry/PhotogrammetryManager.cs
+﻿// GAIA/UI/Photogrammetry/PhotogrammetryManager.cs
 
-using GeoscientistToolkit.Data;
+using GAIA.Data;
 using Veldrid;
 
-namespace GeoscientistToolkit.UI.Photogrammetry;
+namespace GAIA.UI.Photogrammetry;
 
 /// <summary>
 /// Manages the lifecycle of the Photogrammetry Wizard UI panel.
@@ -21,7 +21,7 @@ public class PhotogrammetryManager
     /// </summary>
     /// <param name="imageGroup">The group of images to process.</param>
     /// <param name="graphicsDevice">The active Veldrid GraphicsDevice.</param>
-    /// <param name="imGuiController">The active GeoscientistToolkit ImGuiController.</param>
+    /// <param name="imGuiController">The active GAIA ImGuiController.</param>
     public void StartPhotogrammetry(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiController imGuiController)
     {
         // If a wizard is already open, bring its window to the front.

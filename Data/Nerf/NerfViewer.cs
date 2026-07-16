@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Nerf/NerfViewer.cs
+// GAIA/Data/Nerf/NerfViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 
-namespace GeoscientistToolkit.Data.Nerf;
+namespace GAIA.Data.Nerf;
 
 /// <summary>
 /// Viewer for NeRF datasets with interactive novel view rendering.

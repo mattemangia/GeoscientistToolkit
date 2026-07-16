@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/ORCFluidLibrary.cs
+// GAIA/Business/ORCFluidLibrary.cs
 //
 // Comprehensive library of ORC (Organic Rankine Cycle) working fluids
 // with complete thermodynamic properties for power generation simulations.
@@ -12,9 +12,9 @@
 //
 
 using System.Text.Json;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 /// Category of working fluid based on temperature range and application

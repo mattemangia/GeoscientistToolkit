@@ -1,15 +1,15 @@
-// GeoscientistToolkit/UI/GIS/ShapefileCreationDialog.cs
+// GAIA/UI/GIS/ShapefileCreationDialog.cs
 
 using System.Data;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.GIS;
+using GAIA.Data.Table;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 public class ShapefileCreationDialog
 {

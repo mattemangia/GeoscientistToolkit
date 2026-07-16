@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/Windows/ORCFluidEditorWindow.cs
+// GAIA/UI/Windows/ORCFluidEditorWindow.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Windows;
+namespace GAIA.UI.Windows;
 
 /// <summary>
 /// Window for browsing, editing, and managing ORC working fluids for power generation simulations

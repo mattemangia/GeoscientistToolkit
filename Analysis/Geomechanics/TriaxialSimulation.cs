@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geomechanics/TriaxialSimulation.cs
+// GAIA/Analysis/Geomechanics/TriaxialSimulation.cs
 // Complete triaxial compression/extension simulation with GPU acceleration
 //
 // FEATURES:
@@ -12,12 +12,12 @@
 
 using System.Numerics;
 using System.Runtime.InteropServices;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.OpenCL;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.OpenCL;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public class TriaxialLoadingParameters
 {

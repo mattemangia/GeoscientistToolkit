@@ -1,13 +1,13 @@
-// GeoscientistToolkit/GTK/BoreholeLasTools.cs
+// GAIA/GTK/BoreholeLasTools.cs
 
 using System.IO;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Loaders;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Borehole;
+using GAIA.Data.Loaders;
+using GAIA.Util;
 using Gtk;
 using System.Linq;
 
-namespace GeoscientistToolkit.GtkUI
+namespace GAIA.GtkUI
 {
     public static class BoreholeLasTools
     {

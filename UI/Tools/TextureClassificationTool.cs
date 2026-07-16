@@ -1,15 +1,15 @@
-// GeoscientistToolkit/UI/Tools/TextureClassificationTool.cs
+// GAIA/UI/Tools/TextureClassificationTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Analysis.TextureClassification;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.TextureClassification;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 public class TextureClassificationTool : IDatasetTools, IDisposable
 {

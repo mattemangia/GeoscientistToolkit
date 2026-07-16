@@ -1,27 +1,27 @@
-﻿// GeoscientistToolkit/Business/ProjectSerializer.cs
+﻿// GAIA/Business/ProjectSerializer.cs
 
 using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Data.Media;
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.Util;
-using GeoscientistToolkit.Analysis.SlopeStability;
-using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
-using SubsurfaceGISDatasetDTO = GeoscientistToolkit.Data.GIS.SubsurfaceGISDatasetDTO;
+using GAIA.Data;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.Borehole;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.GIS;
+using GAIA.Data.Image;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.PhysicoChem;
+using GAIA.Data.Pnm;
+using GAIA.Data.Table;
+using GAIA.Data.TwoDGeology;
+using GAIA.Data.Media;
+using GAIA.Data.Seismic;
+using GAIA.Util;
+using GAIA.Analysis.SlopeStability;
+using AcousticVolumeDatasetDTO = GAIA.Data.AcousticVolumeDatasetDTO;
+using SubsurfaceGISDatasetDTO = GAIA.Data.GIS.SubsurfaceGISDatasetDTO;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 public static class ProjectSerializer
 {

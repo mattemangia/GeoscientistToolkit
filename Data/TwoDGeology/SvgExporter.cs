@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/Utils/SvgExporter.cs
+// GAIA/UI/Utils/SvgExporter.cs
 
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GIS;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.UI.Utils;
+namespace GAIA.UI.Utils;
 
 /// <summary>
 ///     Exports 2D geological cross-sections to SVG (Scalable Vector Graphics) format.
@@ -48,7 +48,7 @@ public class SvgExporter
         _svg.AppendLine($"          {DateTime.Now:yyyy-MM-dd}");
         _svg.AppendLine("        </dc:date>");
         _svg.AppendLine("        <dc:creator xmlns:dc=\"http://purl.org/dc/elements/1.1/\">");
-        _svg.AppendLine("          Geoscientist Toolkit");
+        _svg.AppendLine("          GAIA (Geoscience Analysis, Imaging & Automation)");
         _svg.AppendLine("        </dc:creator>");
         _svg.AppendLine("      </rdf:Description>");
         _svg.AppendLine("    </rdf:RDF>");

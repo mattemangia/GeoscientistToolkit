@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geothermal/AdaptiveMeshRefinement.cs
+// GAIA/Analysis/Geothermal/AdaptiveMeshRefinement.cs
 //
 // ================================================================================================
 // REFERENCES (APA Format):
@@ -21,10 +21,10 @@
 
 using System;
 using System.Collections.Generic;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Mesh3D;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 /// Adaptive mesh refinement for geothermal simulations

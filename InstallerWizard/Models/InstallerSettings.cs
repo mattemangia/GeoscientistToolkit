@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace GeoscientistToolkit.Installer.Models;
+namespace GAIA.Installer.Models;
 
 public sealed record InstallerSettings(
     string ProductName,
@@ -11,10 +11,10 @@ public sealed record InstallerSettings(
     bool EnableLogs)
 {
     public static InstallerSettings Default => new(
-        ProductName: "Geoscientist's Toolkit",
+        ProductName: "GAIA (Geoscience Analysis, Imaging & Automation)",
         ManifestUrl: "installer-manifest.json",
-        DefaultInstallRoot: Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "GeoscientistToolkit"),
-        ProjectPath: "../GeoscientistToolkit.csproj",
+        DefaultInstallRoot: Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "GAIA"),
+        ProjectPath: "../GAIA.csproj",
         MetadataFileName: "install-info.json",
         EnableLogs: true);
 

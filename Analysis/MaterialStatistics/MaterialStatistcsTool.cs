@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Analysis/MaterialStatistics/MaterialStatisticsTool.cs
+// GAIA/Analysis/MaterialStatistics/MaterialStatisticsTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.MaterialStatistics;
+namespace GAIA.Analysis.MaterialStatistics;
 
 public class MaterialStatisticsTool : IDatasetTools, IDisposable
 {

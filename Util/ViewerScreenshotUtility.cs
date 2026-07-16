@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Util/ViewerScreenshotUtility.cs
+// GAIA/Util/ViewerScreenshotUtility.cs
 
 using System.Numerics;
 using StbImageWriteSharp;
 using Veldrid;
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 ///     Specialized screenshot utility for capturing viewer content including ImGui overlays

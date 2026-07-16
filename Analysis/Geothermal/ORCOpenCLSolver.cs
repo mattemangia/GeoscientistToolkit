@@ -2,10 +2,10 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 using Silk.NET.OpenCL;
-using GeoscientistToolkit.OpenCL;
-using GeoscientistToolkit.Business;
+using GAIA.OpenCL;
+using GAIA.Business;
 
-namespace GeoscientistToolkit.Analysis.Geothermal
+namespace GAIA.Analysis.Geothermal
 {
     /// <summary>
     /// GPU-accelerated ORC simulation using OpenCL 1.2 via Silk.NET
@@ -61,12 +61,12 @@ namespace GeoscientistToolkit.Analysis.Geothermal
                 Console.WriteLine("ORCOpenCLSolver: Initializing OpenCL...");
 
                 // Check if multi-GPU mode is enabled
-                _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
+                _multiGPUMode = GAIA.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
 
                 if (_multiGPUMode)
                 {
                     // Multi-GPU mode: get all GPU devices
-                    var deviceInfos = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
+                    var deviceInfos = GAIA.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
 
                     if (deviceInfos == null || deviceInfos.Count == 0)
                     {
@@ -123,7 +123,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
                         return false;
                     }
 
-                    var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                    var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
                     Console.WriteLine($"ORCOpenCLSolver: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
                     // Create context

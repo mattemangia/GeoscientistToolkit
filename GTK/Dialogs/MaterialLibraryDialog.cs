@@ -1,10 +1,10 @@
 using System;
 using System.Linq;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.Materials;
+using GAIA.Business;
+using GAIA.Data.Materials;
 using Gtk;
 
-namespace GeoscientistToolkit.GtkUI.Dialogs;
+namespace GAIA.GtkUI.Dialogs;
 
 /// <summary>
 /// Material Library Browser - Professional dialog for selecting materials from the library

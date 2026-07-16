@@ -1,7 +1,7 @@
-using GeoscientistToolkit.Network;
+using GAIA.Network;
 using System.Collections.Concurrent;
 
-namespace GeoscientistToolkit.NodeEndpoint;
+namespace GAIA.NodeEndpoint;
 
 /// <summary>
 /// Tracks job submissions and results for async retrieval

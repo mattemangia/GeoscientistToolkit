@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptArgumentParser.cs
+// GAIA/Business/GeoScript/GeoScriptArgumentParser.cs
 
 using System.Collections;
 using System.Globalization;
@@ -6,7 +6,7 @@ using System.Linq;
 using System.Numerics;
 using System.Text.RegularExpressions;
 
-namespace GeoscientistToolkit.Business.GeoScript;
+namespace GAIA.Business.GeoScript;
 
 public static class GeoScriptArgumentParser
 {

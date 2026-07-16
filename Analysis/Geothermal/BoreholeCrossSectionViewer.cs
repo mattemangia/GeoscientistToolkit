@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/UI/Visualization/BoreholeCrossSectionViewer.cs
+﻿// GAIA/UI/Visualization/BoreholeCrossSectionViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Geothermal;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Visualization;
+namespace GAIA.UI.Visualization;
 
 /// <summary>
 ///     Fixed 2D visualization of borehole cross-section and lateral-section with correct fluid temperature display using a

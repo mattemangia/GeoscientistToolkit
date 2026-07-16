@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geothermal/MultiBoreholeCoupledSimulation.cs
+// GAIA/Analysis/Geothermal/MultiBoreholeCoupledSimulation.cs
 //
 // ================================================================================================
 // REFERENCES FOR MULTI-BOREHOLE COUPLED SIMULATION (APA Format):
@@ -67,11 +67,11 @@ using System.Numerics;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Borehole;
+using GAIA.Data.GIS;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 ///     Configuration for multi-borehole coupled simulation

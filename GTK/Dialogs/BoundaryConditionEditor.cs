@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using Gtk;
-using GeoscientistToolkit.Data.PhysicoChem;
+using GAIA.Data.PhysicoChem;
 
-namespace GeoscientistToolkit.GtkUI.Dialogs
+namespace GAIA.GtkUI.Dialogs
 {
     public class BoundaryConditionEditor : Dialog
     {

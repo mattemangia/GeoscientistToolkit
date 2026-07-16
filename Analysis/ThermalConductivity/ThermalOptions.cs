@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Analysis/ThermalConductivity/ThermalOptions.cs
+// GAIA/Analysis/ThermalConductivity/ThermalOptions.cs
 
-using GeoscientistToolkit.Data.CtImageStack;
+using GAIA.Data.CtImageStack;
 
-namespace GeoscientistToolkit.Analysis.ThermalConductivity;
+namespace GAIA.Analysis.ThermalConductivity;
 
 /// <summary>
 ///     Defines the direction of the primary heat flux for the simulation.

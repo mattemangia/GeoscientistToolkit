@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Business/GIS/GISAnalysisStats.cs
+// GAIA/Business/GIS/GISAnalysisStats.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.GIS;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GIS;
+namespace GAIA.Business.GIS;
 
 /// <summary>
 ///     Statistical analysis and reporting for GIS datasets

@@ -1,7 +1,7 @@
 // NodeEndpoint/TableDatasetDTO.cs
 // Minimal DTO types needed for TableDataset.cs (headless server)
 
-namespace GeoscientistToolkit.Data;
+namespace GAIA.Data;
 
 // Base DTO
 public class DatasetDTO

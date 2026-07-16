@@ -1,13 +1,13 @@
-// GeoscientistToolkit/UI/Borehole/BoreholeViewer.cs
+// GAIA/UI/Borehole/BoreholeViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data.Borehole;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace GeoscientistToolkit.UI.Borehole;
+namespace GAIA.UI.Borehole;
 
 /// <summary>
 ///     Borehole/well log viewer:

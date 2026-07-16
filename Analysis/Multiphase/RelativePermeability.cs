@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Multiphase/RelativePermeability.cs
+// GAIA/Analysis/Multiphase/RelativePermeability.cs
 //
 // Relative permeability and capillary pressure functions for multiphase flow
 // Similar to TOUGH2/TOUGH3 kr and Pc models
@@ -11,7 +11,7 @@
 
 using System;
 
-namespace GeoscientistToolkit.Analysis.Multiphase;
+namespace GAIA.Analysis.Multiphase;
 
 /// <summary>
 /// Relative permeability models for multiphase flow in porous media.

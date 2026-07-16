@@ -1,8 +1,8 @@
-using GeoscientistToolkit.Installer.Models;
-using GeoscientistToolkit.Installer.Services;
-using GeoscientistToolkit.Installer.Utilities;
+using GAIA.Installer.Models;
+using GAIA.Installer.Services;
+using GAIA.Installer.Utilities;
 
-namespace GeoscientistToolkit.Installer;
+namespace GAIA.Installer;
 
 internal static class Program
 {

@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Analysis/ParticleSeparator/AcceleratedProcessor.cs
+// GAIA/Analysis/ParticleSeparator/AcceleratedProcessor.cs
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.ParticleSeparator;
+namespace GAIA.Analysis.ParticleSeparator;
 
 public enum AccelerationType
 {
@@ -529,13 +529,13 @@ public class AcceleratedProcessor : IDisposable
         int err;
 
         // Use centralized device manager to get the device from settings
-        var selectedDevice = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+        var selectedDevice = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
         if (selectedDevice == 0)
             throw new InvalidOperationException("No OpenCL device available from OpenCLDeviceManager.");
 
         // Get device info from the centralized manager
-        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
         Logger.Log($"[AcceleratedProcessor] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
         // Create Context and Command Queue

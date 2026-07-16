@@ -1,7 +1,7 @@
 using Gtk;
 using GtkApplication = Gtk.Application;
 
-namespace GeoscientistToolkit.GtkUI;
+namespace GAIA.GtkUI;
 
 public static class Program
 {

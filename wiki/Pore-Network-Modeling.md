@@ -1,6 +1,6 @@
 # Pore Network Modeling
 
-Guide for pore network extraction, analysis, and flow simulation in Geoscientist's Toolkit.
+Guide for pore network extraction, analysis, and flow simulation in GAIA (Geoscience Analysis, Imaging & Automation).
 
 ---
 

@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using Gtk;
 using Cairo;
-using GeoscientistToolkit.Data.PhysicoChem;
+using GAIA.Data.PhysicoChem;
 
-namespace GeoscientistToolkit.GTK.Dialogs
+namespace GAIA.GTK.Dialogs
 {
     /// <summary>
     /// GTK dialog for configuring and visualizing simulation probes.

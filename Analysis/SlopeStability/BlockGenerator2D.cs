@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Analysis/SlopeStability/BlockGenerator2D.cs
+// GAIA/Analysis/SlopeStability/BlockGenerator2D.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Borehole;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Generates 2D blocks from geological cross-sections and joint sets.

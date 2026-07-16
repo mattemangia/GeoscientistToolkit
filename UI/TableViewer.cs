@@ -1,18 +1,18 @@
-// GeoscientistToolkit/UI/TableViewer.cs
+// GAIA/UI/TableViewer.cs
 
 using System;
 using System.Data;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Table;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using System.Linq;
 using System.Collections.Generic;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class TableViewer : IDatasetViewer, IDisposable
 {

@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Nerf/NerfImageFrame.cs
+// GAIA/Data/Nerf/NerfImageFrame.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Nerf;
+namespace GAIA.Data.Nerf;
 
 /// <summary>
 /// Represents a single image frame with camera pose for NeRF training.

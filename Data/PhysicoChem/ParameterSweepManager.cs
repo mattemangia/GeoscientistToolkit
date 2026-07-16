@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/PhysicoChem/ParameterSweepManager.cs
+// GAIA/Data/PhysicoChem/ParameterSweepManager.cs
 //
 // Parameter sweep manager for running simulations with varying parameters
 
@@ -6,10 +6,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.UI;
+using GAIA.UI.Utils;
+using GAIA.UI;
 
-namespace GeoscientistToolkit.Data.PhysicoChem;
+namespace GAIA.Data.PhysicoChem;
 
 /// <summary>
 /// Manages parameter sweeps for PhysicoChem simulations

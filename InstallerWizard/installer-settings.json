@@ -1,8 +1,8 @@
 {
-  "ProductName": "Geoscientist's Toolkit",
+  "ProductName": "GAIA (Geoscience Analysis, Imaging & Automation)",
   "ManifestUrl": "installer-manifest.json",
-  "DefaultInstallRoot": "~/GeoscientistToolkit",
-  "ProjectPath": "../GeoscientistToolkit.csproj",
+  "DefaultInstallRoot": "~/GAIA",
+  "ProjectPath": "../GAIA.csproj",
   "MetadataFileName": "install-info.json",
   "EnableLogs": true
 }

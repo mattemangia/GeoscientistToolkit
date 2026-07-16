@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/TwoDGeology/Geomechanics/FaultPropagationEngine.cs
+// GAIA/Data/TwoDGeology/Geomechanics/FaultPropagationEngine.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
+namespace GAIA.Data.TwoDGeology.Geomechanics;
 
 /// <summary>
 /// Rupture mode classification for fault nucleation

@@ -3,13 +3,13 @@ using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using ClosedXML.Excel;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Borehole;
+using GAIA.Data.GIS;
+using GAIA.Util;
 using ProjNet.CoordinateSystems;
 using ProjNet.CoordinateSystems.Transformations;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class StratiFixDatasetFolderLoader : IDataLoader
 {

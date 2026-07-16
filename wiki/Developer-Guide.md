@@ -1,6 +1,6 @@
 # Developer Guide
 
-Guide for developers extending and contributing to Geoscientist's Toolkit.
+Guide for developers extending and contributing to GAIA (Geoscience Analysis, Imaging & Automation).
 
 ---
 
@@ -21,7 +21,7 @@ This guide covers:
 ### Project Structure
 
 ```
-GeoscientistToolkit/
+GAIA/
 ├── AddIns/                    # Plugin framework + sample add-ins
 ├── Analysis/                  # Simulation and analysis engines
 │   ├── AcousticSimulation/   # Wave propagation

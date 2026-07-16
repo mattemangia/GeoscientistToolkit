@@ -1,18 +1,18 @@
-// GeoscientistToolkit/UI/GIS/GISTools.cs
+// GAIA/UI/GIS/GISTools.cs
 
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.GIS.Tools;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Business.GIS;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.UI.GIS.Tools;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 /// <summary>
 ///     Categorized tool panel for GIS datasets.

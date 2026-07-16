@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/TextureBrickCache.cs
+﻿// GAIA/Data/CtImageStack/TextureBrickCache.cs
 
 using System.Collections.Concurrent;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 public class LoadedBrick
 {

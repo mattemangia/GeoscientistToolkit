@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Table/TableExporter.cs
+// GAIA/Data/Table/TableExporter.cs
 
 using System.Collections.Concurrent;
 using System.Data;
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Table;
+namespace GAIA.Data.Table;
 
 /// <summary>
 ///     Static helper class for exporting data to table formats

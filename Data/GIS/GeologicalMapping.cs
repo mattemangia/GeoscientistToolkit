@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Business/GIS/GeologicalMapping.cs
+// GAIA/Business/GIS/GeologicalMapping.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Util;
+using GAIA.Data.GIS;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GIS;
+namespace GAIA.Business.GIS;
 
 /// <summary>
 /// Comprehensive geological mapping system with structural geology features

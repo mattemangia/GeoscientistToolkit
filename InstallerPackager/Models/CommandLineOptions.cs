@@ -1,4 +1,4 @@
-namespace GeoscientistToolkit.InstallerPackager.Models;
+namespace GAIA.InstallerPackager.Models;
 
 public sealed record CommandLineOptions
 {

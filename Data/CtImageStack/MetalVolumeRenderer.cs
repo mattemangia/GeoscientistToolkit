@@ -1,13 +1,13 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/MetalVolumeRenderer.cs
+﻿// GAIA/Data/CtImageStack/MetalVolumeRenderer.cs
 
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Analysis.AcousticSimulation;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.AcousticSimulation;
+using GAIA.Util;
 using Veldrid;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 /// <summary>
 ///     Metal-specific volume renderer with enhanced acoustic simulation support

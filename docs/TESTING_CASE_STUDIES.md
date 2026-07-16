@@ -10,7 +10,7 @@ This document summarizes the automated verification demonstrations that are exer
 ## How to run the verification suite
 
 ```bash
-dotnet test GeoscientistToolkit.sln
+dotnet test GAIA.sln
 # or run the real-case suite directly
 # dotnet run --project VerificationTests/RealCaseVerifier -- all
 ```
@@ -101,11 +101,11 @@ Residuals are listed where the tests compare numeric expected values to observed
 dotnet test Tests/BenchmarkTests/BenchmarkTests.csproj
 ```
 
-> The benchmark suite is implemented in `Tests/BenchmarkTests/CommercialSoftwareBenchmarks.cs` and compares GeoscientistToolkit outputs to published reference results and professional software baselines.
+> The benchmark suite is implemented in `Tests/BenchmarkTests/CommercialSoftwareBenchmarks.cs` and compares GAIA outputs to published reference results and professional software baselines.
 
 ## Commercial-software benchmark case studies
 
-These benchmark tests validate GeoscientistToolkit against reference outputs from professional suites and published literature. They are designed to mirror common validation benchmarks used in TOUGH2, COMSOL, T2Well, PhreeqC, RocFall, and OpenGeoSys workflows.
+These benchmark tests validate GAIA against reference outputs from professional suites and published literature. They are designed to mirror common validation benchmarks used in TOUGH2, COMSOL, T2Well, PhreeqC, RocFall, and OpenGeoSys workflows.
 
 | # | Domain | Benchmark (Professional Suite) | Validation Reference |
 | --- | --- | --- | --- |

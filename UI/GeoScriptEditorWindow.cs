@@ -1,17 +1,17 @@
-// GeoscientistToolkit/UI/Windows/GeoScriptEditorWindow.cs
+// GAIA/UI/Windows/GeoScriptEditorWindow.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Windows;
+namespace GAIA.UI.Windows;
 
 /// <summary>
 /// A window for editing and executing GeoScript scripts with syntax highlighting and autocompletion

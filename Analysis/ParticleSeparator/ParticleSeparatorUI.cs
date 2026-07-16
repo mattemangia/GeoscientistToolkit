@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Analysis/ParticleSeparator/ParticleSeparatorUI.cs
+// GAIA/Analysis/ParticleSeparator/ParticleSeparatorUI.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.ParticleSeparator;
+namespace GAIA.Analysis.ParticleSeparator;
 
 /// <summary>
 ///     Provides the UI and logic for separating and analyzing particles in CT data.

@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Analysis/PhysicoChem/SubSolvers.cs
+// GAIA/Analysis/PhysicoChem/SubSolvers.cs
 //
 // Sub-solvers for flow, heat transfer, and nucleation in PhysicoChem simulations
 
 using System;
 using System.Collections.Generic;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Util;
+using GAIA.Data.PhysicoChem;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.PhysicoChem;
+namespace GAIA.Analysis.PhysicoChem;
 
 /// <summary>
 /// Heat transfer solver (conduction + convection) with heterogeneous thermal properties

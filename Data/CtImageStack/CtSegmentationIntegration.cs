@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/CtImageStack/CtSegmentationIntegration.cs
+// GAIA/Data/CtImageStack/CtSegmentationIntegration.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack.Segmentation;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack.Segmentation;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 public class CtSegmentationIntegration : IDisposable
 {

@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Data/Image/AISegmentation/ImageSam2InteractiveTool.cs
+// GAIA/Data/Image/AISegmentation/ImageSam2InteractiveTool.cs
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Tools.CtImageStack.AISegmentation;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data;
+using GAIA.Tools.CtImageStack.AISegmentation;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Image.AISegmentation
+namespace GAIA.Data.Image.AISegmentation
 {
     /// <summary>
     /// Interactive SAM2/MicroSAM tool for ImageDataset

@@ -1,8 +1,8 @@
-﻿// GeoscientistToolkit/Settings/Settings.cs
+﻿// GAIA/Settings/Settings.cs
 
 using System.Text.Json;
 
-namespace GeoscientistToolkit.Settings;
+namespace GAIA.Settings;
 
 /// <summary>
 ///     Main settings container that holds all application settings
@@ -82,7 +82,7 @@ public class LoggingSettings
 {
     public string LogFilePath { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "GeoscientistToolkit", "Logs");
+        "GAIA", "Logs");
 
     public LogLevel MinimumLogLevel { get; set; } = LogLevel.Information;
     public bool EnableFileLogging { get; set; } = true;
@@ -115,7 +115,7 @@ public class AddInSettings
 
     public string AddInDirectory { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "GeoscientistToolkit", "AddIns");
+        "GAIA", "AddIns");
 }
 
 public class AddInInfo
@@ -184,7 +184,7 @@ public class BackupSettings
 
     public string BackupDirectory { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "GeoscientistToolkit", "Backups");
+        "GAIA", "Backups");
 
     public int MaxBackupCount { get; set; } = 10;
     public bool CompressBackups { get; set; } = true;
@@ -205,7 +205,7 @@ public class PhotogrammetrySettings
     // Model directory
     public string ModelsDirectory { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "GeoscientistToolkit", "Models", "Photogrammetry");
+        "GAIA", "Models", "Photogrammetry");
 
     // Pipeline settings
     public bool UseGpuAcceleration { get; set; } = false;
@@ -263,7 +263,7 @@ public class GISSettings
     // Tile cache directory
     public string TileCacheDirectory { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "GeoscientistToolkit", "TileCache");
+        "GAIA", "TileCache");
 
     // Display settings
     public bool ShowAttribution { get; set; } = true;

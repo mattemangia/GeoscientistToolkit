@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Borehole/BoreholeLogCorrelation.cs
+// GAIA/Data/Borehole/BoreholeLogCorrelation.cs
 
 using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Borehole;
+namespace GAIA.Data.Borehole;
 
 /// <summary>
 /// Represents a correlation between lithology units in adjacent boreholes.

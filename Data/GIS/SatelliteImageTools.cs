@@ -1,15 +1,15 @@
-// GeoscientistToolkit/UI/Image/SatelliteImageTools.cs
+// GAIA/UI/Image/SatelliteImageTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.Image;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Business.Image;
+using GAIA.Data;
+using GAIA.Data.Image;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Image;
+namespace GAIA.UI.Image;
 
 public class SatelliteImageTools : IDatasetTools
 {

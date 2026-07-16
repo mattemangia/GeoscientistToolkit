@@ -1,17 +1,17 @@
-// GeoscientistToolkit/Analysis/ThermalConductivity/ThermalConductivitySolver.cs
+// GAIA/Analysis/ThermalConductivity/ThermalConductivitySolver.cs
 
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Analysis.ThermalConductivity;
+namespace GAIA.Analysis.ThermalConductivity;
 
 /// <summary>
 ///     Solves thermal conductivity using Fourier's law and homogenization theory.
@@ -614,7 +614,7 @@ __kernel void thermal_diffusion(
             unsafe
             {
                 // Use centralized device manager to get the device from settings
-                nint device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+                nint device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
                 if (device == 0)
                 {
@@ -623,7 +623,7 @@ __kernel void thermal_diffusion(
                 }
 
                 // Get device info from the centralized manager
-                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
                 var DeviceName = deviceInfo.Name;
                 var DeviceVendor = deviceInfo.Vendor;
                 var DeviceGlobalMemory = deviceInfo.GlobalMemory;

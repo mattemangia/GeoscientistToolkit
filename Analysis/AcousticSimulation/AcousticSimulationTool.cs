@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/Tools/AcousticSimulationTool.cs
+// GAIA/UI/Tools/AcousticSimulationTool.cs
 
-using GeoscientistToolkit.Analysis.AcousticSimulation;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Analysis.AcousticSimulation;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
 
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 /// <summary>
 ///     A tool that hosts the Acoustic Simulation UI panel within the main application's tool section.

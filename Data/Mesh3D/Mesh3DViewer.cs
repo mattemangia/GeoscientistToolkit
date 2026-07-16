@@ -1,10 +1,10 @@
 using System.Numerics;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 using Veldrid;
 
-namespace GeoscientistToolkit.Data.Mesh3D;
+namespace GAIA.Data.Mesh3D;
 
 /// <summary>
 ///     3D model viewer for Mesh3DDataset, with editor and view presets support.

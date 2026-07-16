@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/AcousticVolume/AcousticVolumeProperties.cs
+// GAIA/UI/AcousticVolume/AcousticVolumeProperties.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Data.VolumeData;
+using GAIA.UI.Interfaces;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.AcousticVolume;
+namespace GAIA.Data.AcousticVolume;
 
 /// <summary>
 ///     Properties renderer for acoustic volume datasets

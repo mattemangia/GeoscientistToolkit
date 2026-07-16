@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Analysis/Geomechanics/ArrayWrapper.cs
+// GAIA/Analysis/Geomechanics/ArrayWrapper.cs
 
 using System.Runtime.InteropServices;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 /// <summary>
 ///     Abstract base class to provide array-like access to data that could be in memory or on disk.

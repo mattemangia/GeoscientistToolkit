@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Mesh3D/GridMesh3D.cs
+// GAIA/Data/Mesh3D/GridMesh3D.cs
 //
 // Simple uniform grid mesh for PhysicoChem and other grid-based simulations
 
 using System;
 
-namespace GeoscientistToolkit.Data.Mesh3D;
+namespace GAIA.Data.Mesh3D;
 
 /// <summary>
 /// Uniform 3D grid mesh for structured simulations

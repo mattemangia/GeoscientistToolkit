@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Business/Image/ImageStitcher.cs
+// GAIA/Business/Image/ImageStitcher.cs
 
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Image;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.Image;
+namespace GAIA.Business.Image;
 
 /// <summary>
 ///     Stitch multiple satellite images together into a mosaic

@@ -1,6 +1,6 @@
 # Installation
 
-This page covers system requirements, installation methods, and configuration for Geoscientist's Toolkit.
+This page covers system requirements, installation methods, and configuration for GAIA (Geoscience Analysis, Imaging & Automation).
 
 ---
 
@@ -45,7 +45,7 @@ The `InstallerWizard` TUI provides the easiest installation experience.
 
 #### Windows
 
-1. Download `InstallerWizard.exe` from [Releases](https://github.com/mattemangia/GeoscientistToolkit/releases)
+1. Download `InstallerWizard.exe` from [Releases](https://github.com/mattemangia/GAIA/releases)
 2. Run the installer
 3. Follow the on-screen prompts
 4. Launch from Start Menu or desktop shortcut
@@ -54,7 +54,7 @@ The `InstallerWizard` TUI provides the easiest installation experience.
 
 ```bash
 # Download the installer
-wget https://github.com/mattemangia/GeoscientistToolkit/releases/latest/download/InstallerWizard-linux-x64
+wget https://github.com/mattemangia/GAIA/releases/latest/download/InstallerWizard-linux-x64
 
 # Make executable
 chmod +x InstallerWizard-linux-x64
@@ -67,7 +67,7 @@ chmod +x InstallerWizard-linux-x64
 
 ```bash
 # Download the installer (Intel or Apple Silicon)
-curl -LO https://github.com/mattemangia/GeoscientistToolkit/releases/latest/download/InstallerWizard-osx-arm64
+curl -LO https://github.com/mattemangia/GAIA/releases/latest/download/InstallerWizard-osx-arm64
 
 # Make executable
 chmod +x InstallerWizard-osx-arm64
@@ -80,7 +80,7 @@ chmod +x InstallerWizard-osx-arm64
 
 ### Method 2: Pre-Built Releases
 
-Download platform-specific releases from the [Releases](https://github.com/mattemangia/GeoscientistToolkit/releases) page.
+Download platform-specific releases from the [Releases](https://github.com/mattemangia/GAIA/releases) page.
 
 1. Download the archive for your platform
 2. Extract to a folder of your choice
@@ -92,8 +92,8 @@ For development or customization:
 
 ```bash
 # Clone the repository
-git clone https://github.com/mattemangia/GeoscientistToolkit.git
-cd GeoscientistToolkit
+git clone https://github.com/mattemangia/GAIA.git
+cd GAIA
 
 # Build
 dotnet build
@@ -169,7 +169,7 @@ See [CT Imaging and Segmentation](CT-Imaging-and-Segmentation.md) for detailed A
 - **OpenCL**: Support varies by macOS version
 - Unsigned binary may require security exception:
   ```bash
-  xattr -d com.apple.quarantine ./GeoscientistToolkit
+  xattr -d com.apple.quarantine ./GAIA
   ```
 
 ### Linux
@@ -217,7 +217,7 @@ Diagnostics open a full-screen log window with error highlighting.
 1. Delete `settings.json` to reset graphics backend
 2. Run with failsafe mode:
    ```bash
-   ./GeoscientistToolkit --failsafe
+   ./GAIA --failsafe
    ```
 3. Update graphics drivers
 
@@ -246,7 +246,7 @@ Diagnostics open a full-screen log window with error highlighting.
 
 **Solution:**
 ```bash
-chmod +x ./GeoscientistToolkit
+chmod +x ./GAIA
 ```
 
 ### macOS Security Block
@@ -256,7 +256,7 @@ chmod +x ./GeoscientistToolkit
 **Solution:**
 1. Open `System Preferences → Security & Privacy`
 2. Click "Open Anyway" for the application
-3. Or run: `xattr -d com.apple.quarantine ./GeoscientistToolkit`
+3. Or run: `xattr -d com.apple.quarantine ./GAIA`
 
 ---
 

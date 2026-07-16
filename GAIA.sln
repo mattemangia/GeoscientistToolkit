@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # 
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GeoscientistToolkit", "GeoscientistToolkit.csproj", "{ED9B1460-D027-4455-A901-A04805158467}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GAIA", "GAIA.csproj", "{ED9B1460-D027-4455-A901-A04805158467}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NodeEndpoint", "NodeEndpoint\NodeEndpoint.csproj", "{A1B2C3D4-E5F6-4789-A012-B3C4D5E6F789}"
 EndProject
@@ -9,9 +9,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InstallerWizard", "Installe
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InstallerPackager", "InstallerPackager\InstallerPackager.csproj", "{076001D3-FA3C-43FE-90AF-620CE5408A9F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GeoscientistToolkit.Gtk", "GTK\GeoscientistToolkit.Gtk.csproj", "{12F61B56-B636-4A08-9518-F03B02291E79}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GAIA.Gtk", "GTK\GAIA.Gtk.csproj", "{12F61B56-B636-4A08-9518-F03B02291E79}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GeoscientistToolkit.Api", "Api\GeoscientistToolkit.Api.csproj", "{59838B89-83BF-4AF8-B12F-5C4F67AA1FA2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GAIA.Api", "Api\GAIA.Api.csproj", "{59838B89-83BF-4AF8-B12F-5C4F67AA1FA2}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{AE1CE582-36F1-47A0-B64C-28E9B7309902}"
 EndProject

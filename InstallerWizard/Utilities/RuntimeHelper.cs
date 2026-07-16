@@ -1,4 +1,4 @@
-namespace GeoscientistToolkit.Installer.Utilities;
+namespace GAIA.Installer.Utilities;
 
 internal static class RuntimeHelper
 {

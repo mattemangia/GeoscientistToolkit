@@ -1,11 +1,11 @@
-﻿// GeoscientistToolkit/UI/LogPanel.cs (Updated with selectable text)
+﻿// GAIA/UI/LogPanel.cs (Updated with selectable text)
 
 using System.Numerics;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Settings;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class LogPanel : BasePanel
 {

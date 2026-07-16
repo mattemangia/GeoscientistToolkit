@@ -1,11 +1,11 @@
-// GeoscientistToolkit/AddIns/CtSimulation/CtSimulationManager.cs
+// GAIA/AddIns/CtSimulation/CtSimulationManager.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.AddIns.CtSimulation;
+namespace GAIA.AddIns.CtSimulation;
 
 /// <summary>
 ///     Manages CT simulation add-ins and their integration with viewers

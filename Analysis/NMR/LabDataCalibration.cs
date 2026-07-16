@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Analysis/NMR/LabDataCalibration.cs
+// GAIA/Analysis/NMR/LabDataCalibration.cs
 
 using System.Globalization;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.NMR;
+namespace GAIA.Analysis.NMR;
 
 /// <summary>
 ///     Imports and calibrates simulation results against laboratory NMR measurements.

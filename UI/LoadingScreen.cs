@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/UI/LoadingScreen.cs
+﻿// GAIA/UI/LoadingScreen.cs
 
 using System.Diagnostics;
 using System.Numerics;
@@ -6,7 +6,7 @@ using ImGuiNET;
 using Veldrid;
 using Veldrid.Sdl2;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     A simple loading screen that displays progress during application initialization
@@ -75,14 +75,14 @@ public class LoadingScreen
 
             // Center content
             var windowSize = ImGui.GetWindowSize();
-            var textSize = ImGui.CalcTextSize("Geoscientist's Toolkit");
+            var textSize = ImGui.CalcTextSize("GAIA (Geoscience Analysis, Imaging & Automation)");
 
             // Logo/Title
             ImGui.SetCursorPos(new Vector2((windowSize.X - textSize.X * 2f) * 0.5f, windowSize.Y * 0.35f));
             ImGui.PushFont(ImGui.GetIO().Fonts.Fonts[0]); // Use default font
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.9f, 0.9f, 0.9f, 1.0f));
             ImGui.SetWindowFontScale(2.0f);
-            ImGui.Text("Geoscientist's Toolkit");
+            ImGui.Text("GAIA (Geoscience Analysis, Imaging & Automation)");
             ImGui.SetWindowFontScale(1.0f);
             ImGui.PopStyleColor();
             ImGui.PopFont();

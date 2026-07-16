@@ -1,14 +1,14 @@
-// GeoscientistToolkit/UI/ImportDataModal.cs
+// GAIA/UI/ImportDataModal.cs
 
 using System.Data;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Loaders;
-using GeoscientistToolkit.UI.Utils;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.Loaders;
+using GAIA.UI.Utils;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class ImportDataModal
 {

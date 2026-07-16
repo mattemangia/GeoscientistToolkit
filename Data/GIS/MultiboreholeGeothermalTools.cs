@@ -1,17 +1,17 @@
-﻿// GeoscientistToolkit/Analysis/Geothermal/MultiBoreholeGeothermalTools.cs
+﻿// GAIA/Analysis/Geothermal/MultiBoreholeGeothermalTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.GIS;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using System.Linq;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 /// Tools for running geothermal simulations on multiple boreholes and creating subsurface models
@@ -1276,7 +1276,7 @@ private async void ExportGeothermalMaps()
         // Create output directory in user's Documents folder
         var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var outputDir = Path.Combine(documentsPath, "GeoscientistToolkit", "GeothermalMaps", timestamp);
+        var outputDir = Path.Combine(documentsPath, "GAIA", "GeothermalMaps", timestamp);
         Directory.CreateDirectory(outputDir);
 
         // Export each map
@@ -1345,7 +1345,7 @@ private async void ExportToCSV()
     {
         // Create output directory in user's Documents folder
         var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        var outputDir = Path.Combine(documentsPath, "GeoscientistToolkit", "Exports");
+        var outputDir = Path.Combine(documentsPath, "GAIA", "Exports");
         Directory.CreateDirectory(outputDir);
 
         // Generate filename with timestamp to avoid overwriting

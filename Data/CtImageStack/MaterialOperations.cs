@@ -1,10 +1,10 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/MaterialOperations.cs
+﻿// GAIA/Data/CtImageStack/MaterialOperations.cs
 
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 /// <summary>
 ///     Provides high-performance, parallelized operations for material and voxel management in 3D volumes.

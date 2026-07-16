@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Business/GIS/TwoDGeologySerializer.cs
+// GAIA/Business/GIS/TwoDGeologySerializer.cs
 
 using System.Numerics;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping.ProfileGenerator;
+using static GAIA.Business.GIS.GeologicalMapping.ProfileGenerator;
 
-namespace GeoscientistToolkit.Business.GIS;
+namespace GAIA.Business.GIS;
 
 /// <summary>
 ///     Handles binary serialization for 2D geological profiles.

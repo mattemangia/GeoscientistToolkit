@@ -1,6 +1,6 @@
-using GeoscientistToolkit.InstallerPackager.Models;
+using GAIA.InstallerPackager.Models;
 
-namespace GeoscientistToolkit.InstallerPackager.Utilities;
+namespace GAIA.InstallerPackager.Utilities;
 
 internal static class CommandLineParser
 {
@@ -111,7 +111,7 @@ internal static class CommandLineParser
 
     public static void PrintHelp()
     {
-        Console.WriteLine("GeoscientistToolkit InstallerPackager");
+        Console.WriteLine("GAIA InstallerPackager");
         Console.WriteLine();
         Console.WriteLine("USAGE:");
         Console.WriteLine("  dotnet run [options]");

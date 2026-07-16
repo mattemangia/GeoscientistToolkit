@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/MeshGenerator.cs
+﻿// GAIA/Business/Photogrammetry/MeshGenerator.cs
 
 using System;
 using System.Collections.Generic;
@@ -6,11 +6,11 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.Photogrammetry;
-using GeoscientistToolkit.Data.Mesh3D;
+using GAIA.Business.Photogrammetry;
+using GAIA.Data.Mesh3D;
 using SkiaSharp;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     /// <summary>
     /// Handles mesh generation and texturing

@@ -1,4 +1,4 @@
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 public partial class CtImageStackCompositeTool
 {

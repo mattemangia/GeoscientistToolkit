@@ -1,10 +1,10 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using Veldrid;
 
-namespace GeoscientistToolkit.Data.Mesh3D;
+namespace GAIA.Data.Mesh3D;
 
 /// <summary>
 ///     Metal-specific mesh renderer implementation.

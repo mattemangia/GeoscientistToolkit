@@ -1,12 +1,12 @@
-// GeoscientistToolkit/UI/AcousticVolume/DensityCalibrationTool.cs
+// GAIA/UI/AcousticVolume/DensityCalibrationTool.cs
 
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.AcousticVolume;
+namespace GAIA.Data.AcousticVolume;
 
 public class DensityCalibrationTool
 {

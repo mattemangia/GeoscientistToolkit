@@ -1,4 +1,4 @@
-using GeoscientistToolkit.Analysis.Photogrammetry;
+using GAIA.Analysis.Photogrammetry;
 using OpenCvSharp;
 using Xunit;
 using System.IO;

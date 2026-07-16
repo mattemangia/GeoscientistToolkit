@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Analysis/Photogrammetry/DepthAwareRansac.cs
+// GAIA/Analysis/Photogrammetry/DepthAwareRansac.cs
 
 using OpenCvSharp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Photogrammetry;
+namespace GAIA.Analysis.Photogrammetry;
 
 /// <summary>
 /// RANSAC with depth constraints for pose estimation.

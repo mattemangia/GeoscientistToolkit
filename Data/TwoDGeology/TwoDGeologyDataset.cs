@@ -1,17 +1,17 @@
-// GeoscientistToolkit/Data/TwoDGeology/TwoDGeologyDataset.cs
+// GAIA/Data/TwoDGeology/TwoDGeologyDataset.cs
 
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
-using GeoscientistToolkit.UI.GIS;
-using GeoscientistToolkit.Util;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping.CrossSectionGenerator;
+using GAIA.Business;
+using GAIA.Business.GIS;
+using GAIA.Data.Materials;
+using GAIA.Data.TwoDGeology.Geomechanics;
+using GAIA.UI.GIS;
+using GAIA.Util;
+using static GAIA.Business.GIS.GeologicalMapping.CrossSectionGenerator;
 
-namespace GeoscientistToolkit.Data.TwoDGeology;
+namespace GAIA.Data.TwoDGeology;
 
 /// <summary>
 ///     Represents a 2D geological profile dataset with integrated geomechanical simulation capabilities.
@@ -705,7 +705,7 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
         }
 
         // Find the physical material in the library
-        var physMat = GeoscientistToolkit.Business.MaterialLibrary.Instance.Find(materialName);
+        var physMat = GAIA.Business.MaterialLibrary.Instance.Find(materialName);
         if (physMat == null)
         {
             Logger.LogWarning($"Material '{materialName}' not found in MaterialLibrary");
@@ -794,7 +794,7 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
         }
 
         int assigned = 0;
-        var library = GeoscientistToolkit.Business.MaterialLibrary.Instance.Materials;
+        var library = GAIA.Business.MaterialLibrary.Instance.Materials;
 
         foreach (var formation in ProfileData.Formations)
         {
@@ -856,7 +856,7 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
     /// <returns>List of suitable PhysicalMaterial names</returns>
     public List<string> GetAvailableLibraryMaterials()
     {
-        return GeoscientistToolkit.Business.MaterialLibrary.Instance.Materials
+        return GAIA.Business.MaterialLibrary.Instance.Materials
             .Where(m => m.Phase == PhaseType.Solid &&
                        (m.YoungModulus_GPa.HasValue || m.Density_kg_m3.HasValue))
             .Select(m => m.Name)
@@ -871,7 +871,7 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
     /// <returns>The PhysicalMaterial if found, null otherwise</returns>
     public PhysicalMaterial GetLibraryMaterial(string materialName)
     {
-        return GeoscientistToolkit.Business.MaterialLibrary.Instance.Find(materialName);
+        return GAIA.Business.MaterialLibrary.Instance.Find(materialName);
     }
 
     /// <summary>

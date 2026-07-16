@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Data/Loaders/SegmentationLoader.cs
+// GAIA/Data/Loaders/SegmentationLoader.cs
 
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Image;
+using GAIA.Util;
 
 // <-- Dataset base type (namespace per Dataset.cs)
 // ImageDataset
 
 // Logger
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 /// <summary>
 ///     Loader for standalone segmentation/label images without background.

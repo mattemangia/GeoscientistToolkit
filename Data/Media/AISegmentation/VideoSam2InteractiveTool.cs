@@ -1,17 +1,17 @@
-// GeoscientistToolkit/Data/Media/AISegmentation/VideoSam2InteractiveTool.cs
+// GAIA/Data/Media/AISegmentation/VideoSam2InteractiveTool.cs
 
 using System;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Tools.CtImageStack.AISegmentation;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Tools.CtImageStack.AISegmentation;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.Media.AISegmentation
+namespace GAIA.Data.Media.AISegmentation
 {
     /// <summary>
     /// Interactive SAM2 tool for VideoDataset

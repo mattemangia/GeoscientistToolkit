@@ -1,13 +1,13 @@
-// GeoscientistToolkit/UI/Borehole/BoreholeLogCorrelationViewer.cs
+// GAIA/UI/Borehole/BoreholeLogCorrelationViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Util;
 using ImGuiNET;
 using StbImageWriteSharp;
 
-namespace GeoscientistToolkit.UI.Borehole;
+namespace GAIA.UI.Borehole;
 
 /// <summary>
 /// Viewer for correlating lithology logs across multiple boreholes.

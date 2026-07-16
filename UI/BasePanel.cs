@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/UI/BasePanel.cs (Fixed pop-out window rendering)
+﻿// GAIA/UI/BasePanel.cs (Fixed pop-out window rendering)
 
 using System.Numerics;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     Base class for all panels that provides pop-out functionality

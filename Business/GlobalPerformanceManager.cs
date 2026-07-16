@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Business/GlobalPerformanceManager.cs
+﻿// GAIA/Business/GlobalPerformanceManager.cs
 
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Settings;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 public sealed class GlobalPerformanceManager
 {

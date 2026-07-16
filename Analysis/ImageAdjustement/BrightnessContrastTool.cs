@@ -1,15 +1,15 @@
-// GeoscientistToolkit/Analysis/ImageAdjustment/BrightnessContrastTool.cs
+// GAIA/Analysis/ImageAdjustment/BrightnessContrastTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.ImageAdjustment;
+namespace GAIA.Analysis.ImageAdjustment;
 
 /// <summary>
 ///     Tool for adjusting brightness and contrast of CT image stacks with real-time preview.

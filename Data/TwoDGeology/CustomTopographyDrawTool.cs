@@ -1,13 +1,13 @@
-// GeoscientistToolkit/UI/GIS/CustomTopographyDrawTool.cs
+// GAIA/UI/GIS/CustomTopographyDrawTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GIS;
+using GAIA.Data.TwoDGeology;
+using GAIA.Util;
 using ImGuiNET;
-using static GeoscientistToolkit.Business.GIS.GeologicalMapping.ProfileGenerator;
+using static GAIA.Business.GIS.GeologicalMapping.ProfileGenerator;
 
-namespace GeoscientistToolkit.UI.GIS;
+namespace GAIA.UI.GIS;
 
 /// <summary>
 /// Tool for drawing custom topography profiles interactively

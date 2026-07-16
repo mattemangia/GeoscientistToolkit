@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/GeoScriptPhysicoChemExtensions.cs
+// GAIA/Business/GeoScriptPhysicoChemExtensions.cs
 //
 // GeoScript extensions for PhysicoChem reactor simulations
 // Provides commands to create and configure reactive transport reactors programmatically
@@ -10,14 +10,14 @@ using System.Linq;
 using System.Numerics;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Analysis.PhysicoChem;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.PhysicoChem;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.Materials;
+using GAIA.Data.PhysicoChem;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 /// CREATE_REACTOR: Creates a new PhysicoChem reactor dataset

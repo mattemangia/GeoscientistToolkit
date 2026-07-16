@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using GeoscientistToolkit.Data.PhysicoChem;
+using GAIA.Data.PhysicoChem;
 
-namespace GeoscientistToolkit.Analysis.PhysicoChem
+namespace GAIA.Analysis.PhysicoChem
 {
     /// <summary>
     /// Nuclear reactor physics solver implementing:

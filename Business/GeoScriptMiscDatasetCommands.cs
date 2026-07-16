@@ -1,17 +1,17 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptMiscDatasetCommands.cs
+// GAIA/Business/GeoScript/GeoScriptMiscDatasetCommands.cs
 
 using System;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.Media;
-using GeoscientistToolkit.Data.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.Media;
+using GAIA.Data.Text;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptMiscDatasetCommands;
+namespace GAIA.Business.GeoScriptMiscDatasetCommands;
 
 #region AcousticVolume Commands
 

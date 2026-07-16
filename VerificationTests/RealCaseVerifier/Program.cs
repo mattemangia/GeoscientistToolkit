@@ -5,23 +5,23 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Analysis.Geomechanics;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Analysis.Seismology;
-using GeoscientistToolkit.Analysis.SlopeStability;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Analysis.PhysicoChem;
-using GeoscientistToolkit.Analysis.Multiphase;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Analysis.Thermodynamic;
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Analysis.AcousticSimulation;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Business.Petrology;
+using GAIA.Analysis.Geomechanics;
+using GAIA.Data.Materials;
+using GAIA.Analysis.Seismology;
+using GAIA.Analysis.SlopeStability;
+using GAIA.Data.PhysicoChem;
+using GAIA.Analysis.PhysicoChem;
+using GAIA.Analysis.Multiphase;
+using GAIA.Business.Thermodynamics;
+using GAIA.Analysis.Thermodynamic;
+using GAIA.Analysis.Pnm;
+using GAIA.Data.Pnm;
+using GAIA.Analysis.AcousticSimulation;
+using GAIA.Business.GIS;
+using GAIA.Analysis.Geothermal;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.Borehole;
+using GAIA.Business.Petrology;
 
 namespace RealCaseVerifier
 {
@@ -477,7 +477,7 @@ namespace RealCaseVerifier
                 FluidViscosity = 1.0f,
                 InletPressure = 200.0f,
                 OutletPressure = 100.0f,
-                Axis = (GeoscientistToolkit.Analysis.Pnm.FlowAxis)2, // Z
+                Axis = (GAIA.Analysis.Pnm.FlowAxis)2, // Z
                 CalculateDarcy = true
             };
 
@@ -543,7 +543,7 @@ namespace RealCaseVerifier
                 rho[x,y,z] = target_rho;
             }
 
-            var simParams = new GeoscientistToolkit.Analysis.AcousticSimulation.SimulationParameters();
+            var simParams = new GAIA.Analysis.AcousticSimulation.SimulationParameters();
             var sim = new AcousticSimulatorCPU(simParams);
 
             sxx[10, 5, 5] = 1000.0f;

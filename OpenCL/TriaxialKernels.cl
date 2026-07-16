@@ -1,4 +1,4 @@
-// GeoscientistToolkit/OpenCL/TriaxialKernels.cl
+// GAIA/OpenCL/TriaxialKernels.cl
 // OpenCL kernels for triaxial simulation with GPU acceleration
 //
 // Includes:

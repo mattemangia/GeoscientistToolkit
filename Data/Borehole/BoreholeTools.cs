@@ -1,23 +1,23 @@
-// GeoscientistToolkit/UI/Borehole/BoreholeTools.cs
+// GAIA/UI/Borehole/BoreholeTools.cs
 
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Tools.BoreholeSeismic;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Geothermal;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.Borehole;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.Pnm;
+using GAIA.Tools.BoreholeSeismic;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
 // Added for ImGuiExportFileDialog
 
-namespace GeoscientistToolkit.UI.Borehole;
+namespace GAIA.UI.Borehole;
 
 /// <summary>
 ///     Categorized tools for creating, editing, and analyzing borehole/well log data

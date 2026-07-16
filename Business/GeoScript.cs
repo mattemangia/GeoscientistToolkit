@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScript.cs
+// GAIA/Business/GeoScript/GeoScript.cs
 
 using System.Collections;
 using System.Data;
@@ -6,28 +6,28 @@ using System.Globalization;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Business.GeoScriptImageCommands;
-using GeoscientistToolkit.Business.GeoScriptUtilityCommands;
-using GeoscientistToolkit.Business.GeoScriptCtImageStackCommands;
-using GeoscientistToolkit.Business.GeoScriptBoreholeCommands;
-using GeoscientistToolkit.Business.GeoScriptGISExtendedCommands;
-using GeoscientistToolkit.Business.GeoScriptPNMCommands;
-using GeoscientistToolkit.Business.GeoScriptSeismicCommands;
-using GeoscientistToolkit.Business.GeoScriptMiscDatasetCommands;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GIS;
+using GAIA.Business.Thermodynamics;
+using GAIA.Business.GeoScriptImageCommands;
+using GAIA.Business.GeoScriptUtilityCommands;
+using GAIA.Business.GeoScriptCtImageStackCommands;
+using GAIA.Business.GeoScriptBoreholeCommands;
+using GAIA.Business.GeoScriptGISExtendedCommands;
+using GAIA.Business.GeoScriptPNMCommands;
+using GAIA.Business.GeoScriptSeismicCommands;
+using GAIA.Business.GeoScriptMiscDatasetCommands;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.Data.Materials;
+using GAIA.Data.Table;
+using GAIA.Util;
 using NCalc;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.Operation.Union;
 
 // Added for expression evaluation
 
-namespace GeoscientistToolkit.Business.GeoScript;
+namespace GAIA.Business.GeoScript;
 
 /// <summary>
 ///     Main entry point for parsing and executing GeoScript.
@@ -367,7 +367,7 @@ public static class CommandRegistry
             new SpeciateCommand(),
             new DiagnoseSpeciateCommand(),
             new DiagnosticThermodynamicCommand(),
-            new GeoscientistToolkit.Business.GeoScriptParameterSweepCommands.ThermoSweepCommand(),
+            new GAIA.Business.GeoScriptParameterSweepCommands.ThermoSweepCommand(),
 
             // Thermodynamics Extensions
             new CalculatePhasesCommand(),
@@ -383,7 +383,7 @@ public static class CommandRegistry
             new RunSimulationCommand(),
             new PhysicoChemAddForceCommand(),
             new PhysicoChemAddNucleationSiteCommand(),
-            new GeoscientistToolkit.Business.GeoScriptParameterSweepCommands.PhysicoChemSweepCommand(),
+            new GAIA.Business.GeoScriptParameterSweepCommands.PhysicoChemSweepCommand(),
             new AddCellCommand(),
             new SetCellMaterialCommand(),
 
@@ -503,20 +503,20 @@ public static class CommandRegistry
             new TextStatisticsCommand(),
 
             // Slope Stability Commands
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeGenerateBlocksCommand(),
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeAddJointSetCommand(),
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSetMaterialCommand(),
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSetAngleCommand(),
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeAddEarthquakeCommand(),
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSetWaterCommand(),
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeFilterBlocksCommand(),
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeTrackBlocksCommand(),
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeCalculateFOSCommand(),
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeSimulateCommand(),
-            new GeoscientistToolkit.Business.GeoScript.Commands.Slope.SlopeExportCommand(),
+            new GAIA.Business.GeoScript.Commands.Slope.SlopeGenerateBlocksCommand(),
+            new GAIA.Business.GeoScript.Commands.Slope.SlopeAddJointSetCommand(),
+            new GAIA.Business.GeoScript.Commands.Slope.SlopeSetMaterialCommand(),
+            new GAIA.Business.GeoScript.Commands.Slope.SlopeSetAngleCommand(),
+            new GAIA.Business.GeoScript.Commands.Slope.SlopeAddEarthquakeCommand(),
+            new GAIA.Business.GeoScript.Commands.Slope.SlopeSetWaterCommand(),
+            new GAIA.Business.GeoScript.Commands.Slope.SlopeFilterBlocksCommand(),
+            new GAIA.Business.GeoScript.Commands.Slope.SlopeTrackBlocksCommand(),
+            new GAIA.Business.GeoScript.Commands.Slope.SlopeCalculateFOSCommand(),
+            new GAIA.Business.GeoScript.Commands.Slope.SlopeSimulateCommand(),
+            new GAIA.Business.GeoScript.Commands.Slope.SlopeExportCommand(),
 
             // Geomechanics parameter sweeps
-            new GeoscientistToolkit.Business.GeoScriptParameterSweepCommands.GeomechSweepCommand()
+            new GAIA.Business.GeoScriptParameterSweepCommands.GeomechSweepCommand()
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }

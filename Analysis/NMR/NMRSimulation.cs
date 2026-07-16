@@ -1,16 +1,16 @@
-// GeoscientistToolkit/Analysis/NMR/NMRSimulation.cs
+// GAIA/Analysis/NMR/NMRSimulation.cs
 // FIXED: Correct pore size physics implementation
 
 using System.Diagnostics;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
+using GAIA.Network;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.NMR;
+namespace GAIA.Analysis.NMR;
 
 /// <summary>
 ///     High-performance NMR simulation using random walk technique with SIMD acceleration.

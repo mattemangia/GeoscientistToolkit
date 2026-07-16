@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Multiphase/MultiphaseFlowSolver.cs
+// GAIA/Analysis/Multiphase/MultiphaseFlowSolver.cs
 //
 // Multiphase flow solver for water-steam-NCG (non-condensable gas) systems
 // Implements TOUGH2/TOUGH3-like multiphase flow equations with phase equilibrium
@@ -13,12 +13,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using GeoscientistToolkit.Analysis.Thermodynamic;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Thermodynamic;
+using GAIA.Business.Thermodynamics;
+using GAIA.Network;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Multiphase;
+namespace GAIA.Analysis.Multiphase;
 
 /// <summary>
 /// Multiphase flow solver for 3-phase systems (liquid water, steam, non-condensable gas)

@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Util/ImageDecoder.cs
+// GAIA/Util/ImageDecoder.cs
 
 using StbImageSharp;
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 ///     Image decoder using StbImageSharp for PNG, JPEG, BMP, TGA, PSD, GIF support

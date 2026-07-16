@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Analysis/AcousticSimulation/SimulationData.cs
+// GAIA/Analysis/AcousticSimulation/SimulationData.cs
 
 using System.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 #region Supporting Classes
 

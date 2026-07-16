@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/MaterialLibraryWindow.cs
+// GAIA/UI/MaterialLibraryWindow.cs
 //
 // Material Library Editor (ImGui) — fixed "ref to property" issues for Name/Notes by using buffers.
 // - Uses _nameBuf and _notesBuf instead of passing ref to m.Name / m.Notes.
@@ -8,12 +8,12 @@
 
 using System.Globalization;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.Materials;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public sealed class MaterialLibraryWindow
 {

@@ -1,10 +1,10 @@
-// GeoscientistToolkit/OpenCL/OpenCLDeviceManager.cs
+// GAIA/OpenCL/OpenCLDeviceManager.cs
 //
 // ================================================================================================
 // Centralized OpenCL Device Management
 // ================================================================================================
 // This class provides centralized management of OpenCL device selection across all modules
-// in the GeoscientistToolkit application. It ensures that all OpenCL-accelerated components
+// in the GAIA application. It ensures that all OpenCL-accelerated components
 // (geothermal simulations, NMR, acoustic, geomechanical, etc.) use the same device as
 // configured in the application settings.
 //
@@ -23,11 +23,11 @@
 
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Settings;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.OpenCL;
+namespace GAIA.OpenCL;
 
 /// <summary>
 ///     Centralized manager for OpenCL device selection across the application.

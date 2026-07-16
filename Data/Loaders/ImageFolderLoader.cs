@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Loaders/ImageFolderLoader.cs
+// GAIA/Data/Loaders/ImageFolderLoader.cs
 
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Image;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class ImageFolderLoader : IDataLoader
 {

@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/CompoundLibraryExtensions.cs
+// GAIA/Business/CompoundLibraryExtensions.cs
 //
 // Extended thermodynamic database with additional minerals, aqueous species, and gases
 // for comprehensive geochemical modeling.
@@ -16,10 +16,10 @@
 //   calculating standard molal thermodynamic properties of minerals, gases, aqueous species.
 //   Computers & Geosciences, 18, 899-947.
 
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 ///     Extension methods for CompoundLibrary to add comprehensive thermodynamic data.

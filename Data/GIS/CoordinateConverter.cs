@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Util/CoordinateConverter.cs
+// GAIA/Util/CoordinateConverter.cs
 
 using System.Numerics;
 using System.Text.RegularExpressions;
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 ///     Utility class for coordinate conversions and formatting

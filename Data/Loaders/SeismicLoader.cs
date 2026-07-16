@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Loaders/SeismicLoader.cs
+// GAIA/Data/Loaders/SeismicLoader.cs
 
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Seismic;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 /// <summary>
 /// Loader for SEG-Y seismic datasets

@@ -1,21 +1,21 @@
-// GeoscientistToolkit/UI/GIS/Tools/HydrologicalAnalysisToolEnhanced.cs
+// GAIA/UI/GIS/Tools/HydrologicalAnalysisToolEnhanced.cs
 //
 // Advanced hydrological analysis with GPU acceleration, rainfall simulation, and water body tracking
 //
 
 using System.Numerics;
-using GeoscientistToolkit.Analysis.Hydrological;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.GIS;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Hydrological;
+using GAIA.Data;
+using GAIA.Data.GIS;
+using GAIA.UI;
+using GAIA.UI.GIS;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
-using GISOperations = GeoscientistToolkit.Business.GIS.GISOperationsImpl;
-using GeoscientistToolkit.Business.GIS;
+using GISOperations = GAIA.Business.GIS.GISOperationsImpl;
+using GAIA.Business.GIS;
 
-namespace GeoscientistToolkit.UI.GIS.Tools;
+namespace GAIA.UI.GIS.Tools;
 
 /// <summary>
 /// Advanced hydrological analysis tool with GPU acceleration and rainfall simulation

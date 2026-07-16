@@ -3,12 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using ImGuiNET;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.UI.Utils;
+using GAIA.Data.PhysicoChem;
+using GAIA.UI.Utils;
 using StbImageSharp;
 using StbImageWriteSharp;
 
-namespace GeoscientistToolkit.UI.Windows
+namespace GAIA.UI.Windows
 {
     /// <summary>
     /// ImGui window for managing and visualizing simulation probes.

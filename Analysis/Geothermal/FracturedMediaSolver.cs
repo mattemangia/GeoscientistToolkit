@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Geothermal/FracturedMediaSolver.cs
+// GAIA/Analysis/Geothermal/FracturedMediaSolver.cs
 //
 // ================================================================================================
 // REFERENCES (APA Format):
@@ -26,11 +26,11 @@
 // ================================================================================================
 
 using System;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Network;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Mesh3D;
+using GAIA.Network;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Geothermal;
+namespace GAIA.Analysis.Geothermal;
 
 /// <summary>
 /// Dual-continuum solver for fractured geothermal reservoirs

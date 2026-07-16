@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/SiftFeatureDetectorSIMD.cs
+﻿// GAIA/Business/Photogrammetry/SiftFeatureDetectorSIMD.cs
 
 using System;
 using System.Buffers;
@@ -10,10 +10,10 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.Panorama;
-using GeoscientistToolkit.Data.Image;
+using GAIA.Business.Panorama;
+using GAIA.Data.Image;
 
-namespace GeoscientistToolkit;
+namespace GAIA;
 
 public class SiftFeatures
 {

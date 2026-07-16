@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace GeoscientistToolkit.Scripting.GeoScript
+namespace GAIA.Scripting.GeoScript
 {
     /// <summary>
     /// Base class for all AST nodes

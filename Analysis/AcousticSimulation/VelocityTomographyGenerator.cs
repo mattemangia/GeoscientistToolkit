@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Analysis/AcousticSimulation/VelocityTomographyGenerator.cs
+// GAIA/Analysis/AcousticSimulation/VelocityTomographyGenerator.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.AcousticSimulation;
+namespace GAIA.Analysis.AcousticSimulation;
 
 /// <summary>
 ///     Generates 2D velocity tomography slices from 3D simulation results for visualization.

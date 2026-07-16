@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Loaders/AudioLoader.cs
+// GAIA/Data/Loaders/AudioLoader.cs
 
-using GeoscientistToolkit.Data.Media;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Media;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 /// <summary>
 /// Loader for audio files (WAV, MP3, OGG, etc.)

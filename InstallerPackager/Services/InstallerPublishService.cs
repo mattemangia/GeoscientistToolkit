@@ -1,6 +1,6 @@
-using GeoscientistToolkit.InstallerPackager.Models;
+using GAIA.InstallerPackager.Models;
 
-namespace GeoscientistToolkit.InstallerPackager.Services;
+namespace GAIA.InstallerPackager.Services;
 
 internal sealed class InstallerPublishService
 {

@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/UI/SystemInfoWindow.cs
+﻿// GAIA/UI/SystemInfoWindow.cs
 
 using System.Diagnostics;
 using System.Management;
@@ -10,7 +10,7 @@ using Veldrid;
 
 // Ensure you have added the System.Management NuGet package to your project.
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class SystemInfoWindow
 {

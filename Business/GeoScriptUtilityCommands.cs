@@ -1,16 +1,16 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptUtilityCommands.cs
+// GAIA/Business/GeoScript/GeoScriptUtilityCommands.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.Seismic;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptUtilityCommands;
+namespace GAIA.Business.GeoScriptUtilityCommands;
 
 /// <summary>
 /// LISTOPS command - List all available operations for a dataset type

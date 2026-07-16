@@ -1,13 +1,13 @@
-﻿// GeoscientistToolkit/UI/ThumbnailViewerPanel.cs (Updated with TextureManager)
+﻿// GAIA/UI/ThumbnailViewerPanel.cs (Updated with TextureManager)
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Image;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.Image;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 public class ThumbnailViewerPanel : BasePanel, IDisposable
 {

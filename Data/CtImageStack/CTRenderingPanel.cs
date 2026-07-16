@@ -1,12 +1,12 @@
-﻿// GeoscientistToolkit/Data/CtImageStack/CtRenderingPanel.cs
+﻿// GAIA/Data/CtImageStack/CtRenderingPanel.cs
 // FIXED: Material color changes now trigger 2D slice updates
 
 using System.Numerics;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.Util;
+using GAIA.UI;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.CtImageStack;
+namespace GAIA.Data.CtImageStack;
 
 /// <summary>
 ///     Control panel for CT rendering settings in the combined viewer.

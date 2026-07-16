@@ -1,12 +1,12 @@
 # Dependencies & Optional Components
 
-This document centralizes **mandatory** and **optional** requirements for the Geoscientist's Toolkit ecosystem, including GPU acceleration, GIS, and AI model support. It also provides OS-specific installation hints.
+This document centralizes **mandatory** and **optional** requirements for the GAIA (Geoscience Analysis, Imaging & Automation) ecosystem, including GPU acceleration, GIS, and AI model support. It also provides OS-specific installation hints.
 
 ## Required (Build/Run)
 
 | Component | Minimum Version | Notes |
 | --- | --- | --- |
-| .NET SDK | 8.0 | Required to build all projects (`GeoscientistToolkit.sln`). |
+| .NET SDK | 8.0 | Required to build all projects (`GAIA.sln`). |
 | .NET Runtime | 8.0 | Required to run the desktop app and NodeEndpoint. |
 | GPU Drivers | OpenGL 3.3+ or Vulkan | Rendering backend for 3D visualization. |
 | RAM | 8 GB (16 GB+ recommended) | Large datasets and GPU workflows benefit from more memory. |
@@ -55,7 +55,7 @@ This document centralizes **mandatory** and **optional** requirements for the Ge
 ## Validation Checklist
 
 1. `dotnet --version` returns `8.x`.
-2. `dotnet build GeoscientistToolkit.sln` completes without errors.
+2. `dotnet build GAIA.sln` completes without errors.
 3. `OpenCL` and `Vulkan` (if needed) are visible via vendor tools (`clinfo`, `vulkaninfo`).
 4. AI models load correctly from the `ONNX/` directory when enabled.
 5. Optional: run diagnostics with `dotnet run -- --ai-diagnostic` or `dotnet run -- --gui-diagnostic`.

@@ -1,12 +1,12 @@
-using GeoscientistToolkit.Installer.Models;
-using GeoscientistToolkit.InstallerPackager.Models;
-using GeoscientistToolkit.InstallerPackager.Services;
-using GeoscientistToolkit.InstallerPackager.Utilities;
+using GAIA.Installer.Models;
+using GAIA.InstallerPackager.Models;
+using GAIA.InstallerPackager.Services;
+using GAIA.InstallerPackager.Utilities;
 using NStack;
 using Terminal.Gui;
 using TerminalGuiApplication = Terminal.Gui.Application;
 
-namespace GeoscientistToolkit.InstallerPackager.UI;
+namespace GAIA.InstallerPackager.UI;
 
 internal sealed class PackagerTui
 {
@@ -53,7 +53,7 @@ internal sealed class PackagerTui
 
     private void CreateUI()
     {
-        _window = new Window("Geoscientist's Toolkit - Installer Packager")
+        _window = new Window("GAIA (Geoscience Analysis, Imaging & Automation) - Installer Packager")
         {
             X = 0,
             Y = 0,

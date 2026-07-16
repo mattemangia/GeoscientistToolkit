@@ -1,8 +1,8 @@
 using System.Text.Json;
-using GeoscientistToolkit.Installer.Models;
-using GeoscientistToolkit.Installer.Utilities;
+using GAIA.Installer.Models;
+using GAIA.Installer.Utilities;
 
-namespace GeoscientistToolkit.InstallerPackager.Utilities;
+namespace GAIA.InstallerPackager.Utilities;
 
 internal static class ManifestPersistence
 {
@@ -40,28 +40,28 @@ internal static class ManifestPersistence
                     PackageId = "imgui",
                     RuntimeIdentifier = "win-x64",
                     SelfContained = true,
-                    Description = "Geoscientist's Toolkit (ImGui)"
+                    Description = "GAIA (Geoscience Analysis, Imaging & Automation) (ImGui)"
                 },
                 new RuntimePackage
                 {
                     PackageId = "imgui",
                     RuntimeIdentifier = "linux-x64",
                     SelfContained = true,
-                    Description = "Geoscientist's Toolkit (ImGui)"
+                    Description = "GAIA (Geoscience Analysis, Imaging & Automation) (ImGui)"
                 },
                 new RuntimePackage
                 {
                     PackageId = "imgui",
                     RuntimeIdentifier = "osx-x64",
                     SelfContained = true,
-                    Description = "Geoscientist's Toolkit (ImGui)"
+                    Description = "GAIA (Geoscience Analysis, Imaging & Automation) (ImGui)"
                 },
                 new RuntimePackage
                 {
                     PackageId = "imgui",
                     RuntimeIdentifier = "osx-arm64",
                     SelfContained = true,
-                    Description = "Geoscientist's Toolkit (ImGui)"
+                    Description = "GAIA (Geoscience Analysis, Imaging & Automation) (ImGui)"
                 }
             }
         };

@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/Materials/CompoundLibrary.cs
+// GAIA/Data/Materials/CompoundLibrary.cs
 //
 // Singleton service for thermodynamic compound properties used in dissolution/precipitation calculations.
 // Provides comprehensive database of minerals, salts, and aqueous species relevant to petrophysics.
@@ -17,10 +17,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Materials;
+namespace GAIA.Data.Materials;
 
 public enum CrystalSystem
 {

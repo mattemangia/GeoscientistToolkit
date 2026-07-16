@@ -1,23 +1,23 @@
-// GeoscientistToolkit/Data/PhysicoChem/PhysicoChemTools.cs
+// GAIA/Data/PhysicoChem/PhysicoChemTools.cs
 
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Analysis.PhysicoChem;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Exporters;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.PhysicoChem;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.Exporters;
+using GAIA.Data.Materials;
+using GAIA.Data.Mesh3D;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.PhysicoChem;
+namespace GAIA.Data.PhysicoChem;
 
 /// <summary>
 /// Tools panel for PhysicoChem datasets - domain creation, BC setup,

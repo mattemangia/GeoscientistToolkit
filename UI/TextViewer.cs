@@ -1,13 +1,13 @@
-// GeoscientistToolkit/UI/TextViewer.cs
+// GAIA/UI/TextViewer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Text;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Text;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 /// Viewer and editor for text datasets

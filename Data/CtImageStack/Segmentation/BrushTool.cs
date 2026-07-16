@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/CtImageStack/Segmentation/BrushTool.cs
+// GAIA/Data/CtImageStack/Segmentation/BrushTool.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.CtImageStack.Segmentation;
+namespace GAIA.Data.CtImageStack.Segmentation;
 
 public class BrushTool : ISegmentationTool
 {

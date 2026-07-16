@@ -1,9 +1,9 @@
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Util;
 using System;
 using System.Collections.Generic;
 
-namespace GeoscientistToolkit.Scripting.GeoScript.Operations
+namespace GAIA.Scripting.GeoScript.Operations
 {
     /// <summary>
     /// Copy a dataset

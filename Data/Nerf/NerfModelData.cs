@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Nerf/NerfModelData.cs
+// GAIA/Data/Nerf/NerfModelData.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Nerf;
+namespace GAIA.Data.Nerf;
 
 /// <summary>
 /// Stores trained NeRF model data including hash grid encoding and MLP weights.

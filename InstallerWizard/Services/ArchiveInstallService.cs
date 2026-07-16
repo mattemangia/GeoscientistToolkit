@@ -1,9 +1,9 @@
 using System.IO.Compression;
 using System.Net.Http;
 using System.Security.Cryptography;
-using GeoscientistToolkit.Installer.Models;
+using GAIA.Installer.Models;
 
-namespace GeoscientistToolkit.Installer.Services;
+namespace GAIA.Installer.Services;
 
 internal sealed class ArchiveInstallService
 {

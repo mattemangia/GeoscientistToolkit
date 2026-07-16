@@ -1,6 +1,6 @@
 # PhysicoChem Reactors
 
-Guide for multiphysics reactor simulation in Geoscientist's Toolkit.
+Guide for multiphysics reactor simulation in GAIA (Geoscience Analysis, Imaging & Automation).
 
 ---
 

@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Text/TextDataset.cs
+// GAIA/Data/Text/TextDataset.cs
 
 using System.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Text;
+namespace GAIA.Data.Text;
 
 /// <summary>
 /// Dataset for handling text documents (TXT, RTF)

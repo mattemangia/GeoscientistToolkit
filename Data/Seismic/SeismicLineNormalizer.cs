@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Seismic/SeismicLineNormalizer.cs
+// GAIA/Data/Seismic/SeismicLineNormalizer.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Seismic;
+namespace GAIA.Data.Seismic;
 
 /// <summary>
 /// Normalizes seismic lines at intersections to create consistent amplitude,

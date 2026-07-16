@@ -1,11 +1,11 @@
-// GeoscientistToolkit/UI/Tools/ParticleSeparatorTool.cs
+// GAIA/UI/Tools/ParticleSeparatorTool.cs
 
-using GeoscientistToolkit.Analysis.ParticleSeparator;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
+using GAIA.Analysis.ParticleSeparator;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
 
-namespace GeoscientistToolkit.UI.Tools;
+namespace GAIA.UI.Tools;
 
 /// <summary>
 ///     UI bridge for the Particle Separator tool.

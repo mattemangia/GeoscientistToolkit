@@ -4,13 +4,13 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Security.Principal;
-using GeoscientistToolkit.Installer.Models;
-using GeoscientistToolkit.Installer.Services;
-using GeoscientistToolkit.Installer.Utilities;
+using GAIA.Installer.Models;
+using GAIA.Installer.Services;
+using GAIA.Installer.Utilities;
 using Terminal.Gui;
 using TerminalGuiApplication = Terminal.Gui.Application;
 
-namespace GeoscientistToolkit.Installer;
+namespace GAIA.Installer;
 
 internal sealed class InstallerWizardApp
 {
@@ -1080,7 +1080,7 @@ internal sealed class InstallerWizardApp
 
     private void CreateMacShortcut(string desktop, string target)
     {
-        var shortcut = Path.Combine(desktop, "GeoscientistToolkit.command");
+        var shortcut = Path.Combine(desktop, "GAIA.command");
         File.WriteAllText(shortcut, $"#!/bin/bash\n\"{target}\" \"$@\"\n");
         try
         {

@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Analysis/Photogrammetry/PhotogrammetryPipeline.cs
+// GAIA/Analysis/Photogrammetry/PhotogrammetryPipeline.cs
 
 using OpenCvSharp;
 using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Photogrammetry;
+namespace GAIA.Analysis.Photogrammetry;
 
 /// <summary>
 /// Complete real-time photogrammetry pipeline.

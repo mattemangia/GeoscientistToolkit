@@ -3,12 +3,12 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.AddIns.ParticleSeparator;
+namespace GAIA.AddIns.ParticleSeparator;
 
 public class ParticleSeparatorAddIn : IAddIn
 {
@@ -19,7 +19,7 @@ public class ParticleSeparatorAddIn : IAddIn
     public string Id => "ParticleSeparator";
     public string Name => "Particle Separator";
     public string Version => "2.0.0";
-    public string Author => "GeoscientistToolkit";
+    public string Author => "GAIA";
     public string Description => "High-performance particle separation with CPU/GPU acceleration";
 
     public void Initialize()

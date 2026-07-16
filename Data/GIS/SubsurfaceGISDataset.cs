@@ -1,12 +1,12 @@
-﻿// GeoscientistToolkit/Data/GIS/SubsurfaceGISDataset.cs
+﻿// GAIA/Data/GIS/SubsurfaceGISDataset.cs
 
 using System.Numerics;
 using System.Text.Json;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Geothermal;
+using GAIA.Data.Borehole;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.GIS;
+namespace GAIA.Data.GIS;
 
 /// <summary>
 /// Represents a 3D voxel grid point in the subsurface model

@@ -1,21 +1,21 @@
-﻿// GeoscientistToolkit/Data/Image/ImageTools.cs (Corrected)
+﻿// GAIA/Data/Image/ImageTools.cs (Corrected)
 
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using BitMiracle.LibTiff.Classic;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data.Image.AISegmentation;
-using GeoscientistToolkit.Data.Image.Segmentation;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.GIS.Tools;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Business;
+using GAIA.Data.Image.AISegmentation;
+using GAIA.Data.Image.Segmentation;
+using GAIA.UI;
+using GAIA.UI.GIS.Tools;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 using SkiaSharp;
 
-namespace GeoscientistToolkit.Data.Image;
+namespace GAIA.Data.Image;
 
 public class ImageTools : IDatasetTools
 {

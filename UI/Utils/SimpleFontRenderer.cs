@@ -1,6 +1,6 @@
-// GeoscientistToolkit/UI/Utils/SimpleFontRenderer.cs
+// GAIA/UI/Utils/SimpleFontRenderer.cs
 
-namespace GeoscientistToolkit.UI.Utils;
+namespace GAIA.UI.Utils;
 
 /// <summary>
 ///     A minimal, dependency-free bitmap font renderer for creating composite images.

@@ -1,13 +1,13 @@
-// GeoscientistToolkit/UI/CrossDatasetAnalysisPanel.cs (Fixed)
+// GAIA/UI/CrossDatasetAnalysisPanel.cs (Fixed)
 
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Data.Image;
+using GAIA.Business;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.Data.Image;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     Panel for cross-dataset analysis and integration

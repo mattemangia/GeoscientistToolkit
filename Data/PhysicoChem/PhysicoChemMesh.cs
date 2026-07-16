@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Data/PhysicoChem/PhysicoChemMesh.cs
+// GAIA/Data/PhysicoChem/PhysicoChemMesh.cs
 
 using System.Collections.Generic;
 using System.Linq;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Mesh3D;
+using GAIA.Data.Borehole;
+using GAIA.Data.Mesh3D;
 using Newtonsoft.Json;
 using SharpVoronoiLib;
 using SharpVoronoiLib.Exceptions;
 
-namespace GeoscientistToolkit.Data.PhysicoChem
+namespace GAIA.Data.PhysicoChem
 {
     /// <summary>
     ///     Represents a single cell in a PhysicoChem mesh.

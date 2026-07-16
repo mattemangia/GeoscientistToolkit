@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Business/Stratigraphies/SpanishStratigraphy.cs
+// GAIA/Business/Stratigraphies/SpanishStratigraphy.cs
 
 using System.Drawing;
 
-namespace GeoscientistToolkit.Business.Stratigraphies;
+namespace GAIA.Business.Stratigraphies;
 
 /// <summary>
 ///     Estratigrafía de España (castellano) con unidades regionales y nomenclatura usada en la Península Ibérica.

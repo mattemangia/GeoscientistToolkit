@@ -1,16 +1,16 @@
-// GeoscientistToolkit/UI/AcousticVolume/AcousticAnalysisTool.cs
+// GAIA/UI/AcousticVolume/AcousticAnalysisTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.AcousticVolume;
+using GAIA.Data.VolumeData;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
 // Using the standard Complex type
 
-namespace GeoscientistToolkit.UI.AcousticVolume;
+namespace GAIA.UI.AcousticVolume;
 
 /// <summary>
 ///     Provides analysis tools for AcousticVolumeDatasets, including statistics, histograms, and frequency analysis.

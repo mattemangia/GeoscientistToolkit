@@ -1,6 +1,6 @@
-// GeoscientistToolkit/Data/Loaders/IDataLoader.cs
+// GAIA/Data/Loaders/IDataLoader.cs
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public interface IDataLoader
 {

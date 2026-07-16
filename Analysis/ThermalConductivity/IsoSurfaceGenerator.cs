@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Analysis/IsosurfaceGenerator.cs
+// GAIA/Analysis/IsosurfaceGenerator.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.VolumeData;
+using GAIA.Data.Mesh3D;
+using GAIA.Data.VolumeData;
 
 // Added for ILabelVolumeData
 
-namespace GeoscientistToolkit.Analysis;
+namespace GAIA.Analysis;
 
 /// <summary>
 ///     Generates 3D isosurfaces and 2D isocontours from scalar field data using the Surface Nets algorithm.

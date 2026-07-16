@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/GeoScriptMultiphaseExtensions.cs
+// GAIA/Business/GeoScriptMultiphaseExtensions.cs
 //
 // GeoScript extensions for multiphase flow simulations
 // Provides commands to configure and run multiphase reactive transport
@@ -8,14 +8,14 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Analysis.Multiphase;
-using GeoscientistToolkit.Analysis.Thermodynamic;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Util;
+using GAIA.Analysis.Multiphase;
+using GAIA.Analysis.Thermodynamic;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.PhysicoChem;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 /// <summary>
 /// ENABLE_MULTIPHASE: Enables multiphase flow in the current PhysicoChem reactor

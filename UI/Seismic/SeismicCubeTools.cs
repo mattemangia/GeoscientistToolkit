@@ -1,14 +1,14 @@
-// GeoscientistToolkit/UI/Seismic/SeismicCubeTools.cs
+// GAIA/UI/Seismic/SeismicCubeTools.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Seismic;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Utils;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.Seismic;
+using GAIA.UI.Interfaces;
+using GAIA.UI.Utils;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Seismic;
+namespace GAIA.UI.Seismic;
 
 /// <summary>
 /// Tools panel for seismic cube datasets - manage lines, intersections, normalization, and packages

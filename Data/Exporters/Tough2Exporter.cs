@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Data/Exporters/Tough2Exporter.cs
+// GAIA/Data/Exporters/Tough2Exporter.cs
 //
 // TOUGH2 file exporter for multiphysics subsurface flow and transport simulations
 // Exports PhysicoChemDataset to TOUGH2 input file format
@@ -9,10 +9,10 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Util;
+using GAIA.Data.PhysicoChem;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Exporters;
+namespace GAIA.Data.Exporters;
 
 public class Tough2Exporter
 {
@@ -62,7 +62,7 @@ public class Tough2Exporter
     {
         _output.AppendLine("TITLE");
         _output.AppendLine($"**** {_dataset.Name} ****");
-        _output.AppendLine($"Exported from GeoscientistToolkit PhysicoChemDataset");
+        _output.AppendLine($"Exported from GAIA PhysicoChemDataset");
         _output.AppendLine($"Date: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         if (!string.IsNullOrEmpty(_dataset.Description))
         {

@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/Media/AudioDataset.cs
+// GAIA/Data/Media/AudioDataset.cs
 
 using NAudio.Wave;
 using NAudio.Vorbis;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Settings;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Media;
+namespace GAIA.Data.Media;
 
 /// <summary>
 /// Dataset for handling audio files (WAV, MP3, OGG, etc.)

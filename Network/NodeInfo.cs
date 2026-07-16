@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Network/NodeInfo.cs
+// GAIA/Network/NodeInfo.cs
 
 using System.Net.Sockets;
 
-namespace GeoscientistToolkit.Network;
+namespace GAIA.Network;
 
 /// <summary>
 ///     Represents information about a connected node in the network

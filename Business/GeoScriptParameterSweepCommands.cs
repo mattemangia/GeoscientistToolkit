@@ -1,19 +1,19 @@
-// GeoscientistToolkit/Business/GeoScript/GeoScriptParameterSweepCommands.cs
+// GAIA/Business/GeoScript/GeoScriptParameterSweepCommands.cs
 
 using System;
 using System.Data;
 using System.Globalization;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Business.Thermodynamics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Business.Thermodynamics;
+using GAIA.Data;
+using GAIA.Data.PhysicoChem;
+using GAIA.Data.Table;
+using GAIA.Data.TwoDGeology;
+using GAIA.Data.TwoDGeology.Geomechanics;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptParameterSweepCommands;
+namespace GAIA.Business.GeoScriptParameterSweepCommands;
 
 /// <summary>
 /// PHYSICOCHEM_SWEEP - configure a PhysicoChem parameter sweep entry.

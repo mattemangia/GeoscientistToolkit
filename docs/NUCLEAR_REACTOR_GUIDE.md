@@ -2,7 +2,7 @@
 
 ## Overview
 
-The GeoscientistToolkit includes a comprehensive nuclear reactor simulation module integrated with the PhysicoChem framework. This system enables simulation of nuclear fission reactors for power generation, including:
+The GAIA includes a comprehensive nuclear reactor simulation module integrated with the PhysicoChem framework. This system enables simulation of nuclear fission reactors for power generation, including:
 
 - **Reactor Types**: PWR, BWR, PHWR (CANDU), HTGR, LMFBR, Research reactors
 - **Physics**: Neutron diffusion, point kinetics, thermal-hydraulics
@@ -15,8 +15,8 @@ The GeoscientistToolkit includes a comprehensive nuclear reactor simulation modu
 ### Creating a PWR Reactor
 
 ```csharp
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Analysis.PhysicoChem;
+using GAIA.Data.PhysicoChem;
+using GAIA.Analysis.PhysicoChem;
 
 // Create reactor parameters
 var reactor = new NuclearReactorParameters();

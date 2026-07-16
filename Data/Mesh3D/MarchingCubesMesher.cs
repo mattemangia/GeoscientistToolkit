@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Mesh3D/MarchingCubesMesher.cs
+// GAIA/Data/Mesh3D/MarchingCubesMesher.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Util;
+using GAIA.Data.VolumeData;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Mesh3D;
+namespace GAIA.Data.Mesh3D;
 
 /// <summary>
 /// Generates 3D meshes from volumetric density data using the Marching Cubes algorithm.

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the implementation of Dual Pore Network Models in GeoscientistToolkit, based on the dual porosity approach from research by FOUBERT, DE BOEVER, and others for carbonate rock characterization.
+This document describes the implementation of Dual Pore Network Models in GAIA, based on the dual porosity approach from research by FOUBERT, DE BOEVER, and others for carbonate rock characterization.
 
 ## Scientific Background
 
@@ -468,4 +468,4 @@ The Dual PNM implementation provides a comprehensive framework for multi-scale p
 
 ## Contact & Support
 
-For questions, issues, or contributions related to the dual PNM implementation, please refer to the main GeoscientistToolkit documentation.
+For questions, issues, or contributions related to the dual PNM implementation, please refer to the main GAIA documentation.

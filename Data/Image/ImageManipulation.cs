@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/Image/ImageManipulation.cs
+// GAIA/Data/Image/ImageManipulation.cs
 
 using System;
 
-namespace GeoscientistToolkit.Data.Image
+namespace GAIA.Data.Image
 {
     /// <summary>
     /// Image manipulation utilities for resizing, cropping, rotating, and flipping

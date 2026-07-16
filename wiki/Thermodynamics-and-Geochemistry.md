@@ -1,6 +1,6 @@
 # Thermodynamics and Geochemistry
 
-Guide for thermodynamic calculations, phase diagrams, and geochemical modeling in Geoscientist's Toolkit.
+Guide for thermodynamic calculations, phase diagrams, and geochemical modeling in GAIA (Geoscience Analysis, Imaging & Automation).
 
 ---
 

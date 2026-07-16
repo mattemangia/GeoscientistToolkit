@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Business/Stratigraphies/StratigraphyManager.cs
+// GAIA/Business/Stratigraphies/StratigraphyManager.cs
 
 using System.Reflection;
 
-namespace GeoscientistToolkit.Business.Stratigraphies;
+namespace GAIA.Business.Stratigraphies;
 
 /// <summary>
 /// Manages available stratigraphy systems and the currently active one.

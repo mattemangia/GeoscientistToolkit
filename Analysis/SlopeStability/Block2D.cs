@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Analysis/SlopeStability/Block2D.cs
+// GAIA/Analysis/SlopeStability/Block2D.cs
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-namespace GeoscientistToolkit.Analysis.SlopeStability
+namespace GAIA.Analysis.SlopeStability
 {
     /// <summary>
     /// Represents a 2D rigid block (polygon) for slope stability analysis.

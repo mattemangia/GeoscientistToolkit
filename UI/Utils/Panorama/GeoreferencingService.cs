@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/GeoreferencingService.cs
+﻿// GAIA/Business/Photogrammetry/GeoreferencingService.cs
 
 using System;
 using System.Collections.Generic;
@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using MathNet.Numerics.LinearAlgebra;
 using MathNet.Numerics.LinearAlgebra.Double;
 
-namespace GeoscientistToolkit
+namespace GAIA
 {
     /// <summary>
     /// Handles georeferencing and coordinate transformations

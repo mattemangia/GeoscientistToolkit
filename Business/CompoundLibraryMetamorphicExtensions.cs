@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Business/CompoundLibraryMetamorphicExtensions.cs
+// GAIA/Business/CompoundLibraryMetamorphicExtensions.cs
 //
 // Extension for adding metamorphic minerals to the compound library.
 // Focus on Al2SiO5 polymorphs (Kyanite, Andalusite, Sillimanite) for P-T diagrams.
@@ -8,10 +8,10 @@
 // - Robie & Hemingway (1995): USGS thermodynamic properties
 // - Spear, F.S., 1993. Metamorphic Phase Equilibria and P-T-t Paths. MSA Monograph.
 
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Materials;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business;
+namespace GAIA.Business;
 
 public static class CompoundLibraryMetamorphicExtensions
 {

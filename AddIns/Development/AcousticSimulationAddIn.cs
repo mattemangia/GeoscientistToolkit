@@ -1,12 +1,12 @@
-// GeoscientistToolkit/AddIns/AcousticSimulation/AcousticSimulationAddIn.cs (FIXED)
+// GAIA/AddIns/AcousticSimulation/AcousticSimulationAddIn.cs (FIXED)
 
 using System.Runtime.InteropServices;
 using System.Text;
-using GeoscientistToolkit.Data.AcousticVolume;
-using GeoscientistToolkit.Util;
+using GAIA.Data.AcousticVolume;
+using GAIA.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.AddIns.AcousticSimulation;
+namespace GAIA.AddIns.AcousticSimulation;
 
 /// <summary>
 ///     Acoustic wave propagation simulation add-in for CT volume data.
@@ -15,10 +15,10 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation;
 public class AcousticSimulationAddIn : IAddIn
 {
     private static AcousticSimulationTool _tool;
-    public string Id => "com.geoscientisttoolkit.acousticsimulation";
+    public string Id => "com.gaia.acousticsimulation";
     public string Name => "Acoustic Wave Simulation";
     public string Version => "2.0.0";
-    public string Author => "GeoscientistToolkit Team";
+    public string Author => "GAIA Team";
 
     public string Description =>
         "Advanced acoustic/elastic wave propagation simulation with Vp/Vs analysis and real-time visualization.";
@@ -170,7 +170,7 @@ internal class UnifiedAcousticSimulator : IDisposable
     private unsafe void InitializeOpenCL()
     {
         // Use centralized device manager to get the device from settings
-        _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+        _device = GAIA.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
         if (_device == 0)
         {
@@ -178,7 +178,7 @@ internal class UnifiedAcousticSimulator : IDisposable
             throw new Exception("No OpenCL device available.");
         }
 
-        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        var deviceInfo = GAIA.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
         Logger.Log($"[AcousticSimulator]: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
         // Create context

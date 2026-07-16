@@ -5,16 +5,16 @@ using System.Text.RegularExpressions;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Data.Text;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Analysis.SlopeStability;
-using GeoscientistToolkit.Util;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
+using GAIA.Data.Borehole;
+using GAIA.Data.Table;
+using GAIA.Data.Text;
+using GAIA.Data.TwoDGeology;
+using GAIA.Analysis.SlopeStability;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Business.GeoScriptMiscDatasetCommands
+namespace GAIA.Business.GeoScriptMiscDatasetCommands
 {
     public class SaveCommand : IGeoScriptCommand
     {

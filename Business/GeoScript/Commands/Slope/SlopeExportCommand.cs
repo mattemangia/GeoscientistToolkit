@@ -2,11 +2,11 @@ using System;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Analysis.SlopeStability;
-using GeoscientistToolkit.Business.GeoScript;
-using GeoscientistToolkit.Data;
+using GAIA.Analysis.SlopeStability;
+using GAIA.Business.GeoScript;
+using GAIA.Data;
 
-namespace GeoscientistToolkit.Business.GeoScript.Commands.Slope
+namespace GAIA.Business.GeoScript.Commands.Slope
 {
     /// <summary>
     /// SLOPE_EXPORT command.

@@ -1,9 +1,9 @@
-// GeoscientistToolkit/Data/Loaders/TextLoader.cs
+// GAIA/Data/Loaders/TextLoader.cs
 
-using GeoscientistToolkit.Data.Text;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Text;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 /// <summary>
 /// Loader for text documents (TXT, RTF)

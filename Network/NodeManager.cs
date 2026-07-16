@@ -1,14 +1,14 @@
-// GeoscientistToolkit/Network/NodeManager.cs
+// GAIA/Network/NodeManager.cs
 
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.Util;
+using GAIA.Settings;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Network;
+namespace GAIA.Network;
 
 /// <summary>
 ///     Manages the distributed computing node network
@@ -659,7 +659,7 @@ public class NodeManager
     {
         try
         {
-            var devices = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAvailableDevices();
+            var devices = GAIA.OpenCL.OpenCLDeviceManager.GetAvailableDevices();
             return devices.Any();
         }
         catch
@@ -675,7 +675,7 @@ public class NodeManager
     {
         try
         {
-            var devices = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAvailableDevices();
+            var devices = GAIA.OpenCL.OpenCLDeviceManager.GetAvailableDevices();
             return devices.FirstOrDefault()?.Name ?? "None";
         }
         catch

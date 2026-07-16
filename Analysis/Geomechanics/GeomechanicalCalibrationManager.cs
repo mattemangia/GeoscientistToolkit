@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalCalibrationManager.cs
+// GAIA/Analysis/Geomechanics/GeomechanicalCalibrationManager.cs
 
 using System.Numerics;
 using System.Text.Json;
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.Geomechanics;
+namespace GAIA.Analysis.Geomechanics;
 
 public class CalibrationPoint
 {
@@ -38,7 +38,7 @@ public class GeomechanicalCalibrationManager
     {
         _calibrationFilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "GeoscientistToolkit", "GeomechanicalCalibration.json");
+            "GAIA", "GeomechanicalCalibration.json");
 
         LoadCalibrationData();
     }

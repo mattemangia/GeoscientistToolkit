@@ -2,7 +2,7 @@
 
 using System.Numerics;
 
-namespace GeoscientistToolkit;
+namespace GAIA;
 
 public class Material
 {

@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Photogrammetry/FeatureMatcher.cs
+// GAIA/Analysis/Photogrammetry/FeatureMatcher.cs
 
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -7,9 +7,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-using GeoscientistToolkit.Util;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Analysis.Photogrammetry;
+namespace GAIA.Analysis.Photogrammetry;
 
 /// <summary>
 /// Feature matching using LightGlue or traditional methods.

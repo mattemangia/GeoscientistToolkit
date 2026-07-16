@@ -1,9 +1,9 @@
-﻿// GeoscientistToolkit/Business/Photogrammetry/Math/MatrixExtensions.cs
+﻿// GAIA/Business/Photogrammetry/Math/MatrixExtensions.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business.Photogrammetry;
+using GAIA.Business.Photogrammetry;
 using MathNet.Numerics.LinearAlgebra;
-namespace GeoscientistToolkit
+namespace GAIA
 {
     /// <summary>
     /// Extension methods for matrix operations in photogrammetry

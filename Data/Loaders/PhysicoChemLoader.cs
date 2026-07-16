@@ -1,10 +1,10 @@
-// GeoscientistToolkit/Data/Loaders/PhysicoChemLoader.cs
+// GAIA/Data/Loaders/PhysicoChemLoader.cs
 
 using System.Text.Json;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Util;
+using GAIA.Data.PhysicoChem;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 public class PhysicoChemLoader : IDataLoader
 {

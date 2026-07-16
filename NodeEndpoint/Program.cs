@@ -1,9 +1,9 @@
 using System.Diagnostics;
-using GeoscientistToolkit.Network;
+using GAIA.Network;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using System.Net;
 
-namespace GeoscientistToolkit.NodeEndpoint;
+namespace GAIA.NodeEndpoint;
 
 public class Program
 {
@@ -36,7 +36,7 @@ public class Program
         builder.Services.AddSwaggerGen(c =>
         {
             c.SwaggerDoc("v1", new() {
-                Title = "GeoscientistToolkit Node Endpoint",
+                Title = "GAIA Node Endpoint",
                 Version = "v1",
                 Description = "REST API for distributed simulations and CT operations"
             });
@@ -97,11 +97,11 @@ public class Program
         var networkDiscovery = app.Services.GetRequiredService<Services.NetworkDiscoveryService>();
 
         // Load settings before accessing them
-        GeoscientistToolkit.Settings.SettingsManager.Instance.LoadSettings();
+        GAIA.Settings.SettingsManager.Instance.LoadSettings();
 
         // Auto-detect local IP if needed
         var localIp = Services.NetworkDiscoveryService.GetLocalIPAddress();
-        var nodeManagerSettings = GeoscientistToolkit.Settings.SettingsManager.Instance.Settings.NodeManager;
+        var nodeManagerSettings = GAIA.Settings.SettingsManager.Instance.Settings.NodeManager;
 
         if (nodeManagerSettings != null && (nodeManagerSettings.HostAddress == "auto" || nodeManagerSettings.HostAddress == "localhost"))
         {
@@ -111,7 +111,7 @@ public class Program
         var httpPort = builder.Configuration.GetValue<int>("HttpPort", 8500);
         var nodeManagerPort = builder.Configuration.GetValue<int>("NodeManager:ServerPort", 9876);
 
-        Console.WriteLine("=== GeoscientistToolkit Node Endpoint Server ===");
+        Console.WriteLine("=== GAIA Node Endpoint Server ===");
         Console.WriteLine($"Platform: {(OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "macOS" : OperatingSystem.IsLinux() ? "Linux" : "Unknown")}");
         Console.WriteLine($"Local IP: {localIp}");
         Console.WriteLine($"HTTP API: http://{localIp}:{httpPort}");

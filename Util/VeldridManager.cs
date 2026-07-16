@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Util/VeldridManager.cs
+﻿// GAIA/Util/VeldridManager.cs
 
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
@@ -6,7 +6,7 @@ using ImGuiNET;
 using Veldrid;
 using Veldrid.Sdl2;
 
-namespace GeoscientistToolkit.Util;
+namespace GAIA.Util;
 
 /// <summary>
 ///     A simple static class to hold global Veldrid resources.

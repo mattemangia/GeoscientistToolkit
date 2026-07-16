@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI.Windows
+namespace GAIA.UI.Windows
 {
     /// <summary>
     /// Node-based visual editor for building ORC (Organic Rankine Cycle) circuits.

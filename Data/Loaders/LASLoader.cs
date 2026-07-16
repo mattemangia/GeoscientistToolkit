@@ -1,12 +1,12 @@
-// GeoscientistToolkit/Data/Loaders/LASLoader.cs
+// GAIA/Data/Loaders/LASLoader.cs
 
 using System.Globalization;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.Data.Borehole;
-using GeoscientistToolkit.Util;
+using GAIA.Data.Borehole;
+using GAIA.Util;
 
-namespace GeoscientistToolkit.Data.Loaders;
+namespace GAIA.Data.Loaders;
 
 /// <summary>
 /// Loader for LAS (Log ASCII Standard) format files - industry standard for well log data

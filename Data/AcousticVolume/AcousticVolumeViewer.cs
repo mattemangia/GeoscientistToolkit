@@ -1,16 +1,16 @@
-// GeoscientistToolkit/Data/AcousticVolume/AcousticVolumeViewer.cs
+// GAIA/Data/AcousticVolume/AcousticVolumeViewer.cs
 
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Text.Json;
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI;
-using GeoscientistToolkit.UI.AcousticVolume;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Data.VolumeData;
+using GAIA.UI;
+using GAIA.UI.AcousticVolume;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Data.AcousticVolume;
+namespace GAIA.Data.AcousticVolume;
 
 /// <summary>
 ///     Viewer for acoustic simulation results with wave field visualization,

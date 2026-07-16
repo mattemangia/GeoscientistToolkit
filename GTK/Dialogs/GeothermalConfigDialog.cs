@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.GtkUI.Views;
+using GAIA.Analysis.Geothermal;
+using GAIA.Data.PhysicoChem;
+using GAIA.GtkUI.Views;
 using Gtk;
 
-namespace GeoscientistToolkit.GtkUI.Dialogs;
+namespace GAIA.GtkUI.Dialogs;
 
 /// <summary>
 /// Geothermal Deep Wells Configuration Dialog

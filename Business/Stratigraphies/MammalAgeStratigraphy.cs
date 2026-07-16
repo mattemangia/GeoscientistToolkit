@@ -1,8 +1,8 @@
-//GeoscientistToolkit/Business/Stratigraphies/MammalAgesStratigraphy.cs
+//GAIA/Business/Stratigraphies/MammalAgesStratigraphy.cs
 
 using System.Drawing;
 
-namespace GeoscientistToolkit.Business.Stratigraphies;
+namespace GAIA.Business.Stratigraphies;
 
 /// <summary>
 ///     European Land Mammal Ages (ELMA) - Biostratigraphic ages based on mammal fossils

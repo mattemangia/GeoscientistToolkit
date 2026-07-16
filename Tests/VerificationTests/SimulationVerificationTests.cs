@@ -3,24 +3,24 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.IO;
-using GeoscientistToolkit.Analysis.AcousticSimulation;
-using GeoscientistToolkit.Analysis.Geomechanics;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Analysis.Multiphase;
-using GeoscientistToolkit.Analysis.Pnm;
-using GeoscientistToolkit.Analysis.Seismology;
-using GeoscientistToolkit.Analysis.SlopeStability;
-using GeoscientistToolkit.Analysis.PhysicoChem;
-using GeoscientistToolkit.Analysis.Thermodynamic;
-using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.PhysicoChem;
-using GeoscientistToolkit.Data.Pnm;
-using GeoscientistToolkit.Data.TwoDGeology;
-using GeoscientistToolkit.Data.TwoDGeology.Geomechanics;
+using GAIA.Analysis.AcousticSimulation;
+using GAIA.Analysis.Geomechanics;
+using GAIA.Analysis.Geothermal;
+using GAIA.Analysis.Multiphase;
+using GAIA.Analysis.Pnm;
+using GAIA.Analysis.Seismology;
+using GAIA.Analysis.SlopeStability;
+using GAIA.Analysis.PhysicoChem;
+using GAIA.Analysis.Thermodynamic;
+using GAIA.Data.Materials;
+using GAIA.Data.PhysicoChem;
+using GAIA.Data.Pnm;
+using GAIA.Data.TwoDGeology;
+using GAIA.Data.TwoDGeology.Geomechanics;
 using MathNet.Numerics;
 using Xunit;
-using AcousticSimulationParameters = GeoscientistToolkit.Analysis.AcousticSimulation.SimulationParameters;
-using MultiphaseSolver = GeoscientistToolkit.Analysis.Multiphase.MultiphaseFlowSolver;
+using AcousticSimulationParameters = GAIA.Analysis.AcousticSimulation.SimulationParameters;
+using MultiphaseSolver = GAIA.Analysis.Multiphase.MultiphaseFlowSolver;
 
 namespace VerificationTests;
 
@@ -360,8 +360,8 @@ public class SimulationVerificationTests
         for (var j = 0; j < 5; j++)
             elevation[i, j] = 100f - i * 2f - j;
 
-        var flowDirection = GeoscientistToolkit.Business.GIS.GISOperationsImpl.CalculateD8FlowDirection(elevation);
-        var accumulation = GeoscientistToolkit.Business.GIS.GISOperationsImpl.CalculateFlowAccumulation(flowDirection);
+        var flowDirection = GAIA.Business.GIS.GISOperationsImpl.CalculateD8FlowDirection(elevation);
+        var accumulation = GAIA.Business.GIS.GISOperationsImpl.CalculateFlowAccumulation(flowDirection);
 
         Assert.True(accumulation[4, 4] >= accumulation[0, 0]);
         Assert.True(accumulation[4, 4] > 1);

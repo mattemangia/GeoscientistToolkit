@@ -1,8 +1,8 @@
-// GeoscientistToolkit/Data/GIS/SubsurfaceGISDatasetDTO.cs
+// GAIA/Data/GIS/SubsurfaceGISDatasetDTO.cs
 
 using System.Numerics;
 
-namespace GeoscientistToolkit.Data.GIS;
+namespace GAIA.Data.GIS;
 
 /// <summary>
 /// Data Transfer Object for SubsurfaceGISDataset serialization

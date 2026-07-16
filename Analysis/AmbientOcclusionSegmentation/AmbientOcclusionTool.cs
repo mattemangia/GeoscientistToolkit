@@ -1,13 +1,13 @@
-// GeoscientistToolkit/Analysis/AmbientOcclusionSegmentation/AmbientOcclusionTool.cs
+// GAIA/Analysis/AmbientOcclusionSegmentation/AmbientOcclusionTool.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
+using GAIA.Data;
+using GAIA.Data.CtImageStack;
+using GAIA.UI.Interfaces;
+using GAIA.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Analysis.AmbientOcclusionSegmentation;
+namespace GAIA.Analysis.AmbientOcclusionSegmentation;
 
 /// <summary>
 /// UI Tool for ambient occlusion-based cavity and pore segmentation

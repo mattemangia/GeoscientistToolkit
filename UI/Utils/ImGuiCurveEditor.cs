@@ -1,12 +1,12 @@
-﻿// GeoscientistToolkit/UI/ImGuiCurveEditor.cs
+﻿// GAIA/UI/ImGuiCurveEditor.cs
 
 using System.Globalization;
 using System.Numerics;
 using System.Text;
-using GeoscientistToolkit.UI.Utils;
+using GAIA.UI.Utils;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI;
+namespace GAIA.UI;
 
 /// <summary>
 ///     Represents a single point on the curve.

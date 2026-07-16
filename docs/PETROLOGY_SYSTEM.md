@@ -442,7 +442,7 @@ This petrology system provides:
 - ✅ **70+ partition coefficients** from peer-reviewed literature
 - ✅ **Bowen's reaction series** implemented algorithmically
 - ✅ **Metamorphic P-T diagrams** with triple point calculation
-- ✅ **Full integration** with GeoscientistToolkit GeoScript
+- ✅ **Full integration** with GAIA GeoScript
 
 **The key innovation**: Everything is calculated from fundamental thermodynamic properties (ΔGf, ΔHf, S°, V) - no hardcoded phase diagrams or reaction sequences!
 
