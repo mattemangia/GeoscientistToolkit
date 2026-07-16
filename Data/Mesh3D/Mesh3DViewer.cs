@@ -2,7 +2,6 @@ using System.Numerics;
 using GAIA.UI.Interfaces;
 using GAIA.Util;
 using ImGuiNET;
-using Veldrid;
 
 namespace GAIA.Data.Mesh3D;
 
@@ -11,12 +10,9 @@ namespace GAIA.Data.Mesh3D;
 /// </summary>
 public class Mesh3DViewer : IDatasetViewer, IDisposable
 {
-    private readonly D3D11MeshRenderer _d3dRenderer;
     private readonly Mesh3DDataset _dataset;
     private readonly Mesh3DEditor _editor;
-    private readonly MetalMeshRenderer _metalRenderer;
-    private readonly TextureManager _textureManager;
-    private readonly VulkanMeshRenderer _vulkanRenderer;
+    private readonly OpenTkMeshRenderer _renderer;
 
     private float _cameraDistance = 2.0f;
     private float _cameraPitch = MathF.PI / 6f;
@@ -40,41 +36,9 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
         // Initialize editor
         _editor = new Mesh3DEditor(_dataset);
 
-        // Initialize platform-specific renderer
-        var backend = VeldridManager.GraphicsDevice.BackendType;
-        Logger.Log($"Initializing Mesh3D renderer for backend: {backend}");
-
-        switch (backend)
-        {
-            case GraphicsBackend.Metal:
-                _metalRenderer = new MetalMeshRenderer();
-                _metalRenderer.Initialize(_dataset);
-                _textureManager = TextureManager.CreateFromTexture(_metalRenderer.ColorTarget);
-                break;
-
-            case GraphicsBackend.Direct3D11:
-                _d3dRenderer = new D3D11MeshRenderer();
-                _d3dRenderer.Initialize(_dataset);
-                _textureManager = TextureManager.CreateFromTexture(_d3dRenderer.ColorTarget);
-                break;
-
-            case GraphicsBackend.Vulkan:
-                _vulkanRenderer = new VulkanMeshRenderer();
-                _vulkanRenderer.Initialize(_dataset);
-                _textureManager = TextureManager.CreateFromTexture(_vulkanRenderer.ColorTarget);
-                break;
-
-            case GraphicsBackend.OpenGL:
-            case GraphicsBackend.OpenGLES:
-                _vulkanRenderer = new VulkanMeshRenderer();
-                _vulkanRenderer.Initialize(_dataset);
-                _textureManager = TextureManager.CreateFromTexture(_vulkanRenderer.ColorTarget);
-                Logger.Log("Using Vulkan renderer for OpenGL backend");
-                break;
-
-            default:
-                throw new NotSupportedException($"Graphics backend {backend} is not supported for Mesh3D rendering");
-        }
+        if (!OpenTkManager.IsInitialized) throw new InvalidOperationException("Mesh rendering requires OpenTK.");
+        _renderer = new OpenTkMeshRenderer();
+        _renderer.Initialize(_dataset);
 
         _cameraTarget = Vector3.Zero;
         UpdateCameraMatrices();
@@ -138,7 +102,7 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
         ImGui.SameLine();
         ImGui.Separator();
         ImGui.SameLine();
-        ImGui.TextDisabled($"[{VeldridManager.GraphicsDevice.BackendType}]");
+        ImGui.TextDisabled("[OpenTK / OpenGL]");
     }
 
     public void DrawContent(ref float zoom, ref Vector2 pan)
@@ -147,7 +111,7 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
         RenderScene();
 
         // Display rendered image
-        var textureId = _textureManager.GetImGuiTextureId();
+        var textureId = (IntPtr)_renderer.ColorTexture;
         if (textureId != IntPtr.Zero)
         {
             var availableSize = ImGui.GetContentRegionAvail();
@@ -213,20 +177,12 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
 
     public void Dispose()
     {
-        _textureManager?.Dispose();
-        _d3dRenderer?.Dispose();
-        _metalRenderer?.Dispose();
-        _vulkanRenderer?.Dispose();
+        _renderer?.Dispose();
     }
 
     private void RenderScene()
     {
-        if (_d3dRenderer != null)
-            _d3dRenderer.Render(_dataset, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
-        else if (_metalRenderer != null)
-            _metalRenderer.Render(_dataset, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
-        else if (_vulkanRenderer != null)
-            _vulkanRenderer.Render(_dataset, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
+        _renderer.Render(_viewMatrix, _projMatrix);
     }
 
     private void UpdateCameraMatrices()
@@ -242,13 +198,7 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
         _viewMatrix = Matrix4x4.CreateLookAt(cameraPosition, _cameraTarget, Vector3.UnitY);
 
         // Projection matrix
-        var aspect = 1.0f;
-        if (_d3dRenderer != null)
-            aspect = _d3dRenderer.Width / (float)_d3dRenderer.Height;
-        else if (_metalRenderer != null)
-            aspect = _metalRenderer.Width / (float)_metalRenderer.Height;
-        else if (_vulkanRenderer != null)
-            aspect = _vulkanRenderer.Width / (float)_vulkanRenderer.Height;
+        var aspect = _renderer?.Width / (float)Math.Max(1, _renderer?.Height ?? 1) ?? 1f;
 
         _projMatrix = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, 0.1f, 1000f);
     }

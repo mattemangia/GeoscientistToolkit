@@ -5,7 +5,6 @@ using GAIA.Data.Mesh3D;
 using GAIA.UI.Interfaces;
 using GAIA.Util;
 using ImGuiNET;
-using Veldrid;
 
 namespace GAIA.Data.PointCloud;
 
@@ -16,10 +15,7 @@ namespace GAIA.Data.PointCloud;
 public class PointCloudViewer : IDatasetViewer, IDisposable
 {
     private readonly PointCloudDataset _dataset;
-    private readonly D3D11MeshRenderer _d3dRenderer;
-    private readonly MetalMeshRenderer _metalRenderer;
-    private readonly VulkanMeshRenderer _vulkanRenderer;
-    private readonly TextureManager _textureManager;
+    private readonly OpenTkMeshRenderer _renderer;
 
     // Camera state
     private float _cameraDistance = 2.0f;
@@ -54,35 +50,9 @@ public class PointCloudViewer : IDatasetViewer, IDisposable
         // Create render mesh from point cloud
         CreateRenderMesh();
 
-        // Initialize platform-specific renderer
-        var backend = VeldridManager.GraphicsDevice.BackendType;
-        Logger.Log($"Initializing PointCloud renderer for backend: {backend}");
-
-        switch (backend)
-        {
-            case GraphicsBackend.Metal:
-                _metalRenderer = new MetalMeshRenderer();
-                _metalRenderer.Initialize(_renderMesh);
-                _textureManager = TextureManager.CreateFromTexture(_metalRenderer.ColorTarget);
-                break;
-
-            case GraphicsBackend.Direct3D11:
-                _d3dRenderer = new D3D11MeshRenderer();
-                _d3dRenderer.Initialize(_renderMesh);
-                _textureManager = TextureManager.CreateFromTexture(_d3dRenderer.ColorTarget);
-                break;
-
-            case GraphicsBackend.Vulkan:
-            case GraphicsBackend.OpenGL:
-            case GraphicsBackend.OpenGLES:
-                _vulkanRenderer = new VulkanMeshRenderer();
-                _vulkanRenderer.Initialize(_renderMesh);
-                _textureManager = TextureManager.CreateFromTexture(_vulkanRenderer.ColorTarget);
-                break;
-
-            default:
-                throw new NotSupportedException($"Graphics backend {backend} is not supported for PointCloud rendering");
-        }
+        if (!OpenTkManager.IsInitialized) throw new InvalidOperationException("Point-cloud rendering requires OpenTK.");
+        _renderer = new OpenTkMeshRenderer();
+        _renderer.Initialize(_renderMesh);
 
         _cameraTarget = Vector3.Zero;
         UpdateCameraMatrices();
@@ -377,7 +347,7 @@ public class PointCloudViewer : IDatasetViewer, IDisposable
         RenderScene();
 
         // Display rendered image
-        var textureId = _textureManager.GetImGuiTextureId();
+        var textureId = (IntPtr)_renderer.ColorTexture;
         if (textureId != IntPtr.Zero)
         {
             var availableSize = ImGui.GetContentRegionAvail();
@@ -446,21 +416,14 @@ public class PointCloudViewer : IDatasetViewer, IDisposable
     private void UpdateRenderer()
     {
         // Re-initialize renderer with updated mesh
-        if (_d3dRenderer != null) _d3dRenderer.Initialize(_renderMesh);
-        if (_metalRenderer != null) _metalRenderer.Initialize(_renderMesh);
-        if (_vulkanRenderer != null) _vulkanRenderer.Initialize(_renderMesh);
+        _renderer.Upload(_renderMesh);
     }
 
     private void RenderScene()
     {
         UpdateCameraMatrices();
 
-        if (_d3dRenderer != null)
-            _d3dRenderer.Render(_renderMesh, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
-        else if (_metalRenderer != null)
-            _metalRenderer.Render(_renderMesh, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
-        else if (_vulkanRenderer != null)
-            _vulkanRenderer.Render(_renderMesh, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
+        _renderer.Render(_viewMatrix, _projMatrix);
     }
 
     private void HandleMouseInput()
@@ -555,10 +518,7 @@ public class PointCloudViewer : IDatasetViewer, IDisposable
 
     public void Dispose()
     {
-        _d3dRenderer?.Dispose();
-        _metalRenderer?.Dispose();
-        _vulkanRenderer?.Dispose();
-        _textureManager?.Dispose();
+        _renderer?.Dispose();
         _renderMesh?.Unload();
     }
 
