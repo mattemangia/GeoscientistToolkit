@@ -37,12 +37,60 @@ public enum FlowAxis
     Z
 }
 
+/// <summary> Sub-volume of the source stack to analyse, in source voxels. Max bounds are exclusive. </summary>
+public sealed class PnmRegion
+{
+    public int MinX { get; set; }
+    public int MinY { get; set; }
+    public int MinZ { get; set; }
+    public int MaxX { get; set; }
+    public int MaxY { get; set; }
+    public int MaxZ { get; set; }
+
+    public long Width => MaxX - MinX;
+    public long Height => MaxY - MinY;
+    public long Depth => MaxZ - MinZ;
+    public long VoxelCount => Width * Height * Depth;
+
+    public static PnmRegion FullVolume(int width, int height, int depth)
+    {
+        return new PnmRegion { MinX = 0, MinY = 0, MinZ = 0, MaxX = width, MaxY = height, MaxZ = depth };
+    }
+
+    public PnmRegion Clamped(int width, int height, int depth)
+    {
+        var minX = Math.Clamp(MinX, 0, Math.Max(0, width - 1));
+        var minY = Math.Clamp(MinY, 0, Math.Max(0, height - 1));
+        var minZ = Math.Clamp(MinZ, 0, Math.Max(0, depth - 1));
+        return new PnmRegion
+        {
+            MinX = minX,
+            MinY = minY,
+            MinZ = minZ,
+            MaxX = Math.Clamp(MaxX, minX + 1, width),
+            MaxY = Math.Clamp(MaxY, minY + 1, height),
+            MaxZ = Math.Clamp(MaxZ, minZ + 1, depth)
+        };
+    }
+}
+
 public sealed class PNMGeneratorOptions
 {
     public int MaterialId { get; set; }
     public Neighborhood3D Neighborhood { get; set; } = Neighborhood3D.N26;
     public GenerationMode Mode { get; set; } = GenerationMode.Conservative;
     public bool UseOpenCL { get; set; }
+
+    /// <summary> Sub-volume to analyse. Null analyses the whole stack. </summary>
+    public PnmRegion Roi { get; set; }
+
+    /// <summary>
+    ///     Permits sampling the mask down to fit <see cref="MaxWorkingSetMB" />. Off by default and
+    ///     never implicit: decimating a binary mask aliases away the pore throats, which destroys the
+    ///     network topology and invalidates porosity, coordination number and permeability. A region
+    ///     that does not fit is an error the caller must resolve by cropping or raising the budget.
+    /// </summary>
+    public bool AllowDownsampling { get; set; }
 
     // inlet↔outlet path options for absolute perm setups
     public bool EnforceInletOutletConnectivity { get; set; }
@@ -126,6 +174,61 @@ public static class PNMGenerator
             dist[idx] = best;
         }";
 
+    /// <summary>
+    ///     Aggregate bytes per analysed voxel across the mask, eroded mask, label maps and EDT that
+    ///     the pipeline holds at once.
+    /// </summary>
+    private const long WorkingBytesPerVoxel = 20L;
+
+    public static long EstimateWorkingSetBytes(long voxelCount)
+    {
+        return voxelCount * WorkingBytesPerVoxel;
+    }
+
+    /// <summary>
+    ///     Returns the per-axis sampling step for the region, which is 1 unless the caller has
+    ///     explicitly opted into downsampling.
+    ///     <para>
+    ///         A region that exceeds the working-set budget is an error rather than something to
+    ///         quietly sample down. Decimating a binary mask is nearest-neighbour point sampling: it
+    ///         aliases away throats only a few voxels across, disconnects the network, and the
+    ///         resulting porosity, coordination number and permeability describe no real rock. Failing
+    ///         loudly and letting the caller crop a representative sub-volume at full resolution is
+    ///         the only defensible behaviour for a digital-rock pipeline.
+    ///     </para>
+    /// </summary>
+    private static int ResolveSampling(PnmRegion roi, PNMGeneratorOptions opt, DetailedProgressReporter progress)
+    {
+        var maxWorkingBytes = Math.Max(256L, opt.MaxWorkingSetMB) * 1024L * 1024L;
+        var maxWorkingVoxels = Math.Max(1L, maxWorkingBytes / WorkingBytesPerVoxel);
+        // The analysed grid is indexed with int arithmetic ((z*H+y)*W+x) and stored in single arrays,
+        // so it can never exceed int.MaxValue elements however large the memory budget is set. Fold
+        // that ceiling into the threshold so a generous budget triggers a clean crop request instead
+        // of a raw OverflowException deep inside mask extraction.
+        var effectiveMaxVoxels = Math.Min(maxWorkingVoxels, int.MaxValue);
+        var regionVoxels = roi.VoxelCount;
+        if (regionVoxels <= effectiveMaxVoxels) return 1;
+
+        if (!opt.AllowDownsampling)
+            throw new InvalidOperationException(
+                $"The selected region is {roi.Width}×{roi.Height}×{roi.Depth} voxels ({regionVoxels:N0}) and needs " +
+                $"about {EstimateWorkingSetBytes(regionVoxels) / (1024.0 * 1024 * 1024):F1} GB of working memory, " +
+                $"above the {opt.MaxWorkingSetMB} MB budget.\n\n" +
+                "Crop a smaller region, or raise the working-set budget if you have the memory. " +
+                "For a sandstone a representative elementary volume of roughly 1000³ voxels is standard " +
+                "and runs at full resolution.\n\n" +
+                "'Allow downsampling' lets generation proceed, but it samples the mask down and erases the " +
+                "pore throats: the resulting porosity, coordination number and permeability are not defensible.");
+
+        var sampling = Math.Max(1, (int)Math.Ceiling(Math.Pow(regionVoxels / (double)effectiveMaxVoxels, 1.0 / 3.0)));
+        var message = $"Downsampling 1/{sampling} per axis ({sampling * sampling * sampling}× fewer voxels) to fit " +
+                      $"the {opt.MaxWorkingSetMB} MB budget. Throats below {sampling} voxels are lost: " +
+                      "this network is for inspection only, not for petrophysics.";
+        Logger.LogWarning($"[PNMGenerator] {message}");
+        progress?.Report(0.03f, message);
+        return sampling;
+    }
+
     public static PNMDataset Generate(CtImageStackDataset ct, PNMGeneratorOptions opt, IProgress<float> progress,
         CancellationToken token)
     {
@@ -137,46 +240,42 @@ public static class PNMGenerator
         var progressReporter = new DetailedProgressReporter(progress);
         progressReporter.Report(0.01f, "Initializing PNM generation...");
 
+        var roi = (opt.Roi ?? PnmRegion.FullVolume(ct.Width, ct.Height, ct.Depth))
+            .Clamped(ct.Width, ct.Height, ct.Depth);
+        var sampling = ResolveSampling(roi, opt, progressReporter);
+
         // Voxel geometry (µm) — we take geometric mean if anisotropic spacing
-        var sourceVoxelCount = (long)ct.Width * ct.Height * ct.Depth;
-        // Watershed/EDT/CC need several byte/int/float buffers. Bound their aggregate working
-        // set and stream a uniformly sampled mask instead of ever allocating the source volume.
-        var maxWorkingBytes = Math.Max(256L, opt.MaxWorkingSetMB) * 1024 * 1024;
-        var maxWorkingVoxels = Math.Max(1L, maxWorkingBytes / 20L);
-        var sampling = sourceVoxelCount > maxWorkingVoxels
-            ? Math.Max(1, (int)Math.Ceiling(Math.Pow(sourceVoxelCount / (double)maxWorkingVoxels, 1.0 / 3.0)))
-            : 1;
         var vx = Math.Max(1e-9, ct.PixelSize) * sampling;
         var vy = Math.Max(1e-9, ct.PixelSize) * sampling;
         var vz = Math.Max(1e-9, ct.SliceThickness > 0 ? ct.SliceThickness : ct.PixelSize) * sampling;
         var vEdge = Math.Pow(vx * vy * vz, 1.0 / 3.0);
 
-        int W = (ct.Width + sampling - 1) / sampling;
-        int H = (ct.Height + sampling - 1) / sampling;
-        int D = (ct.Depth + sampling - 1) / sampling;
+        var W = (int)((roi.Width + sampling - 1) / sampling);
+        var H = (int)((roi.Height + sampling - 1) / sampling);
+        var D = (int)((roi.Depth + sampling - 1) / sampling);
         var labels = ct.LabelData;
-        if (sampling > 1)
-            progressReporter.Report(0.03f,
-                $"Large-volume mode: sampling 1/{sampling} per axis ({W}×{H}×{D})...");
 
         // Step 1: Extract material mask
         progressReporter.Report(0.05f, "Extracting material mask...");
-        var originalMask = new byte[checked(W * H * D)];
+        var originalMask = new byte[checked((long)W * H * D)];
         Parallel.For(0, D, new ParallelOptions
         {
             MaxDegreeOfParallelism = labels.IsMemoryMapped ? 2 : Math.Max(1, Environment.ProcessorCount - 1),
             CancellationToken = token
         }, () => new byte[ct.Width * ct.Height], (z, _, sourceSlice) =>
         {
-            var sourceZ = Math.Min(ct.Depth - 1, z * sampling);
+            var sourceZ = Math.Min(roi.MaxZ - 1, roi.MinZ + z * sampling);
             labels.ReadSliceZ(sourceZ, sourceSlice);
             for (var y = 0; y < H; y++)
             {
                 var row = (z * H + y) * W;
-                var sourceRow = Math.Min(ct.Height - 1, y * sampling) * ct.Width;
+                var sourceRow = Math.Min(roi.MaxY - 1, roi.MinY + y * sampling) * ct.Width;
                 for (var x = 0; x < W; x++)
-                    originalMask[row + x] = sourceSlice[sourceRow + Math.Min(ct.Width - 1, x * sampling)] ==
-                                            (byte)opt.MaterialId ? (byte)1 : (byte)0;
+                    originalMask[row + x] =
+                        sourceSlice[sourceRow + Math.Min(roi.MaxX - 1, roi.MinX + x * sampling)] ==
+                        (byte)opt.MaterialId
+                            ? (byte)1
+                            : (byte)0;
             }
 
             if (z % 10 == 0)
@@ -222,9 +321,22 @@ public static class PNMGenerator
         var poreCount = ccResult.ComponentCount;
         Logger.Log($"[PNMGenerator] Found {poreCount} pore centers after erosion");
 
+        token.ThrowIfCancellationRequested();
+
+        // Step 4: Watershed expansion to recover full pore volumes in original mask
+        progressReporter.Report(0.30f, "Expanding pores back to original boundaries (watershed)...");
+        var fullPoreLabels = WatershedExpansion(ccResult.Labels, originalMask, W, H, D, opt.Neighborhood,
+            progressReporter, 0.30f, 0.45f);
+
+        // Step 4b: the expansion reaches only what the erosion left a seed for, so anything thinner
+        // than the structuring element would vanish from the network. Label it instead of dropping it.
+        poreCount = RecoverUnseededRegions(fullPoreLabels, originalMask, W, H, D, poreCount, opt.Neighborhood,
+            progressReporter);
+
+        // Checked only now: erosion wiping out every seed is recoverable, an empty material mask is not.
         if (poreCount == 0)
         {
-            Logger.LogWarning("[PNMGenerator] No pores found. Try reducing erosion count or using a different mode.");
+            Logger.LogWarning("[PNMGenerator] No pores found: the selected material has no voxels in this volume.");
             var empty = new PNMDataset($"PNM_{ct.Name}_{opt.MaterialId}_Empty", "")
             {
                 VoxelSize = (float)vEdge,
@@ -237,12 +349,6 @@ public static class PNMGenerator
             PersistAndRegister(ct, empty, progressReporter);
             return empty;
         }
-
-        token.ThrowIfCancellationRequested();
-
-        // Step 4: Watershed expansion to recover full pore volumes in original mask
-        progressReporter.Report(0.30f, "Expanding pores back to original boundaries (watershed)...");
-        var fullPoreLabels = WatershedExpansion(ccResult.Labels, originalMask, W, H, D, progressReporter, 0.30f, 0.45f);
 
         token.ThrowIfCancellationRequested();
 
@@ -421,13 +527,64 @@ public static class PNMGenerator
     //   DOI: 10.1016/1047-3203(90)90014-M
     //
     // NEW: Watershed expansion to recover full pore volumes
+    /// <summary>
+    ///     Gives a label to every mask region the expansion could not reach, and returns the new
+    ///     total pore count.
+    ///     <para>
+    ///         <see cref="WatershedExpansion" /> only grows outwards from seeds, and the seeds come from
+    ///         the eroded mask. A pore thinner than the erosion structuring element loses all of its
+    ///         voxels, so it produces no seed, is never reached, and keeps label 0 — it was dropped
+    ///         from the network entirely, taking its volume out of the porosity with it. In a
+    ///         sandstone, whose throats are only a few voxels across, that silently deletes most of
+    ///         the network. Each unreached region is a genuine pore body and becomes one here.
+    ///     </para>
+    /// </summary>
+    private static int RecoverUnseededRegions(int[] expandedLabels, byte[] mask, int W, int H, int D,
+        int poreCount, Neighborhood3D nbh, DetailedProgressReporter progress)
+    {
+        var residual = new byte[mask.Length];
+        long residualVoxels = 0;
+        for (var i = 0; i < mask.Length; i++)
+            if (mask[i] > 0 && expandedLabels[i] == 0)
+            {
+                residual[i] = 1;
+                residualVoxels++;
+            }
+
+        if (residualVoxels == 0) return poreCount;
+
+        progress?.Report(0.45f, "Recovering pores erased by erosion...");
+        var residualComponents = ConnectedComponents3D(residual, W, H, D, nbh);
+        if (residualComponents.ComponentCount == 0) return poreCount;
+
+        for (var i = 0; i < residual.Length; i++)
+            if (residualComponents.Labels[i] > 0)
+                expandedLabels[i] = poreCount + residualComponents.Labels[i];
+
+        Logger.Log($"[PNMGenerator] Recovered {residualComponents.ComponentCount} pores " +
+                   $"({residualVoxels} voxels) that the erosion had erased; they would otherwise have been dropped");
+
+        return poreCount + residualComponents.ComponentCount;
+    }
+
+    // Full 3D neighbour offsets, ordered faces (6) → edges (12) → corners (8) so that the first
+    // 6/18/26 entries are exactly the N6/N18/N26 neighbourhoods.
+    private static readonly (int dx, int dy, int dz)[] NeighborOffsets =
+    {
+        (-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1),
+        (-1, -1, 0), (-1, 1, 0), (1, -1, 0), (1, 1, 0),
+        (-1, 0, -1), (-1, 0, 1), (1, 0, -1), (1, 0, 1),
+        (0, -1, -1), (0, -1, 1), (0, 1, -1), (0, 1, 1),
+        (-1, -1, -1), (-1, -1, 1), (-1, 1, -1), (-1, 1, 1),
+        (1, -1, -1), (1, -1, 1), (1, 1, -1), (1, 1, 1)
+    };
+
     private static int[] WatershedExpansion(int[] seedLabels, byte[] mask, int W, int H, int D,
-        DetailedProgressReporter progress, float startProgress, float endProgress)
+        Neighborhood3D nbh, DetailedProgressReporter progress, float startProgress, float endProgress)
     {
         var expanded = new int[seedLabels.Length];
         Array.Copy(seedLabels, expanded, seedLabels.Length);
 
-        // Priority queue for wavefront expansion
         var queue = new Queue<(int idx, int label)>();
 
         // Initialize with all labeled seed voxels
@@ -435,11 +592,15 @@ public static class PNMGenerator
             if (seedLabels[i] > 0 && mask[i] > 0)
                 queue.Enqueue((i, seedLabels[i]));
 
+        // Must match the connectivity used to label the seeds and to recover unseeded regions:
+        // expanding in a weaker neighbourhood would leave diagonally-attached voxels unreached, and
+        // RecoverUnseededRegions would then mint them as spurious isolated pores.
+        var neighborCount = (int)nbh;
+
         var totalVoxels = queue.Count;
         var processedVoxels = 0;
         var lastReportedPercent = 0;
 
-        // Expand labels to neighboring unlabeled voxels within the mask
         while (queue.Count > 0)
         {
             var (idx, label) = queue.Dequeue();
@@ -462,16 +623,12 @@ public static class PNMGenerator
             var y = idx % (W * H) / W;
             var x = idx % W;
 
-            // Check 6-neighbors
-            int[] dx = { -1, 1, 0, 0, 0, 0 };
-            int[] dy = { 0, 0, -1, 1, 0, 0 };
-            int[] dz = { 0, 0, 0, 0, -1, 1 };
-
-            for (var i = 0; i < 6; i++)
+            for (var i = 0; i < neighborCount; i++)
             {
-                var nx = x + dx[i];
-                var ny = y + dy[i];
-                var nz = z + dz[i];
+                var (ox, oy, oz) = NeighborOffsets[i];
+                var nx = x + ox;
+                var ny = y + oy;
+                var nz = z + oz;
 
                 if (nx >= 0 && nx < W && ny >= 0 && ny < H && nz >= 0 && nz < D)
                 {
@@ -1023,8 +1180,11 @@ public static class PNMGenerator
             lb.Add((a, 1));
         }
 
-        Logger.Log($"[BuildThroats] Found {list.Count} unique throats with radius range " +
-                   $"{list.Min(t => t.Radius):F3} to {list.Max(t => t.Radius):F3} voxels");
+        if (list.Count > 0)
+            Logger.Log($"[BuildThroats] Found {list.Count} unique throats with radius range " +
+                       $"{list.Min(t => t.Radius):F3} to {list.Max(t => t.Radius):F3} voxels");
+        else
+            Logger.Log("[BuildThroats] Found no throats: the pores in this network are isolated");
 
         return list;
     }
@@ -2016,6 +2176,18 @@ public sealed class PNMGenerationTool : IDatasetTools
     private bool _outMax = true;
     private bool _useOpenCL;
 
+    // Region of interest, in source voxels. Defaults to the whole stack, re-seeded per dataset.
+    private int _roiMinX, _roiMinY, _roiMinZ;
+    private int _roiMaxX, _roiMaxY, _roiMaxZ;
+    private string _roiDatasetKey = "";
+
+    private int _maxWorkingSetMB = 2048;
+    private bool _allowDownsampling;
+    private string _lastError = "";
+
+    /// <summary> Cube edge, in voxels, offered as a starting representative elementary volume. </summary>
+    private const int DefaultRevEdge = 1000;
+
     public PNMGenerationTool()
     {
         _progressDialog = new ProgressBarDialog("PNM Generation");
@@ -2052,6 +2224,8 @@ public sealed class PNMGenerationTool : IDatasetTools
 
         ImGui.Checkbox("Use OpenCL (GPU acceleration)", ref _useOpenCL);
 
+        DrawRegionSection(ct);
+
         // Inlet/Outlet
         ImGui.Separator();
         ImGui.Text("Inlet—Outlet (for permeability)");
@@ -2085,15 +2259,122 @@ public sealed class PNMGenerationTool : IDatasetTools
                     EnforceInletOutletConnectivity = _enforce,
                     Axis = (FlowAxis)_axisIndex,
                     InletIsMinSide = _inMin,
-                    OutletIsMaxSide = _outMax
+                    OutletIsMaxSide = _outMax,
+                    Roi = CurrentRegion(),
+                    MaxWorkingSetMB = _maxWorkingSetMB,
+                    AllowDownsampling = _allowDownsampling
                 };
 
+                _lastError = "";
                 StartGeneration(ct, opt);
             }
         }
 
         // Render progress dialog
         _progressDialog.Submit();
+    }
+
+    /// <summary>
+    ///     Region of interest plus the memory budget it has to fit.
+    ///     The generator refuses to sample a region down unless asked, so this section is the user's
+    ///     means of bringing a plug-sized stack within reach at full resolution.
+    /// </summary>
+    private void DrawRegionSection(CtImageStackDataset ct)
+    {
+        // Re-seed the bounds whenever the tool is pointed at a different stack.
+        var datasetKey = $"{ct.Name}|{ct.Width}x{ct.Height}x{ct.Depth}";
+        if (_roiDatasetKey != datasetKey)
+        {
+            _roiDatasetKey = datasetKey;
+            ResetRegionToFullVolume(ct);
+            _lastError = "";
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Region of Interest");
+
+        ImGui.SetNextItemWidth(-1);
+        ImGui.DragIntRange2("X range", ref _roiMinX, ref _roiMaxX, 1f, 0, ct.Width, "min %d", "max %d");
+        ImGui.SetNextItemWidth(-1);
+        ImGui.DragIntRange2("Y range", ref _roiMinY, ref _roiMaxY, 1f, 0, ct.Height, "min %d", "max %d");
+        ImGui.SetNextItemWidth(-1);
+        ImGui.DragIntRange2("Z range", ref _roiMinZ, ref _roiMaxZ, 1f, 0, ct.Depth, "min %d", "max %d");
+
+        if (ImGui.Button("Full volume")) ResetRegionToFullVolume(ct);
+        ImGui.SameLine();
+        if (ImGui.Button($"Centred {DefaultRevEdge}³ REV")) CentreRegion(ct, DefaultRevEdge);
+        ImGui.SameLine();
+        if (ImGui.Button("Fit to budget")) CentreRegion(ct, LargestEdgeWithinBudget());
+
+        ImGui.SetNextItemWidth(160);
+        if (ImGui.InputInt("Working set budget (MB)", ref _maxWorkingSetMB, 256, 1024))
+            _maxWorkingSetMB = Math.Max(256, _maxWorkingSetMB);
+
+        var region = CurrentRegion().Clamped(ct.Width, ct.Height, ct.Depth);
+        var workingSetGb = PNMGenerator.EstimateWorkingSetBytes(region.VoxelCount) / (1024.0 * 1024 * 1024);
+        var budgetGb = _maxWorkingSetMB / 1024.0;
+        var fits = workingSetGb <= budgetGb;
+
+        ImGui.TextDisabled($"Region: {region.Width}×{region.Height}×{region.Depth} = {region.VoxelCount:N0} voxels");
+        ImGui.TextColored(fits ? new Vector4(0.4f, 0.9f, 0.4f, 1f) : new Vector4(1f, 0.5f, 0.3f, 1f),
+            $"Estimated working set: {workingSetGb:F2} GB / {budgetGb:F2} GB budget");
+
+        if (!fits)
+        {
+            ImGui.Checkbox("Allow downsampling", ref _allowDownsampling);
+            if (_allowDownsampling)
+                ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f),
+                    "Downsampling erases pore throats. Porosity, coordination number and\n" +
+                    "permeability from this network are not petrophysically valid.");
+            else
+                ImGui.TextDisabled("Crop the region or raise the budget to generate at full resolution.");
+        }
+
+        if (!string.IsNullOrEmpty(_lastError))
+        {
+            ImGui.Separator();
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.45f, 0.4f, 1f));
+            ImGui.TextWrapped(_lastError);
+            ImGui.PopStyleColor();
+            if (ImGui.SmallButton("Dismiss")) _lastError = "";
+        }
+    }
+
+    private PnmRegion CurrentRegion()
+    {
+        return new PnmRegion
+        {
+            MinX = _roiMinX, MinY = _roiMinY, MinZ = _roiMinZ,
+            MaxX = _roiMaxX, MaxY = _roiMaxY, MaxZ = _roiMaxZ
+        };
+    }
+
+    private void ResetRegionToFullVolume(CtImageStackDataset ct)
+    {
+        _roiMinX = _roiMinY = _roiMinZ = 0;
+        _roiMaxX = ct.Width;
+        _roiMaxY = ct.Height;
+        _roiMaxZ = ct.Depth;
+    }
+
+    /// <summary> Centres a cube of the given edge in the stack, clamped to what the stack can hold. </summary>
+    private void CentreRegion(CtImageStackDataset ct, int edge)
+    {
+        var sizeX = Math.Clamp(edge, 1, ct.Width);
+        var sizeY = Math.Clamp(edge, 1, ct.Height);
+        var sizeZ = Math.Clamp(edge, 1, ct.Depth);
+        _roiMinX = (ct.Width - sizeX) / 2;
+        _roiMinY = (ct.Height - sizeY) / 2;
+        _roiMinZ = (ct.Depth - sizeZ) / 2;
+        _roiMaxX = _roiMinX + sizeX;
+        _roiMaxY = _roiMinY + sizeY;
+        _roiMaxZ = _roiMinZ + sizeZ;
+    }
+
+    private int LargestEdgeWithinBudget()
+    {
+        var voxels = Math.Max(256L, _maxWorkingSetMB) * 1024L * 1024L / 20L;
+        return Math.Max(1, (int)Math.Floor(Math.Pow(voxels, 1.0 / 3.0)));
     }
 
     private void StartGeneration(CtImageStackDataset ct, PNMGeneratorOptions options)
@@ -2130,6 +2411,9 @@ public sealed class PNMGenerationTool : IDatasetTools
             catch (Exception ex)
             {
                 _progressDialog.Close();
+                // Surfaced in the panel too: a budget rejection is a message the user has to act on,
+                // and it would otherwise only ever reach the log file.
+                _lastError = ex.Message;
                 Logger.LogError($"[PNMGenerationTool] Generation failed: {ex.Message}");
             }
         });
