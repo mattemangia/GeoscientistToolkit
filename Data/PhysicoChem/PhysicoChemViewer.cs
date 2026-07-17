@@ -16,6 +16,7 @@ namespace GAIA.Data.PhysicoChem;
 public class PhysicoChemViewer : IDatasetViewer
 {
     private readonly PhysicoChemDataset _dataset;
+    private readonly OpenTkPhysicoChemRenderer _renderer;
 
     // Camera controls
     private float _cameraDistance = 5.0f;
@@ -71,12 +72,17 @@ public class PhysicoChemViewer : IDatasetViewer
     private RenderMode _renderMode = RenderMode.Solid;
     private bool _showWireframe = true;
     private bool _showNormals = false;
+    private bool _orthographic;
 
     public PhysicoChemViewer(PhysicoChemDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
         _dataset.Load();
         _builder = new PhysicoChemBuilder(_dataset);
+        if (!OpenTkManager.IsInitialized) throw new InvalidOperationException("PhysicoChem rendering requires OpenTK.");
+        _renderer = new OpenTkPhysicoChemRenderer();
+        _renderer.Initialize();
+        FitCameraToMesh();
     }
 
     public void DrawToolbarControls()
@@ -142,6 +148,13 @@ public class PhysicoChemViewer : IDatasetViewer
         if (_viewMode == ViewMode.View3D && ImGui.Button("Reset Camera"))
         {
             ResetCamera();
+        }
+        if (_viewMode == ViewMode.View3D)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Fit")) FitCameraToMesh();
+            ImGui.SameLine();
+            if (ImGui.Button(_orthographic ? "Orthographic" : "Perspective")) _orthographic = !_orthographic;
         }
 
         if (_viewMode != ViewMode.ViewGraphs)
@@ -255,55 +268,45 @@ public class PhysicoChemViewer : IDatasetViewer
 
     private void Draw3DView(Vector2 cursorPos, Vector2 availableSize)
     {
-        var drawList = ImGui.GetWindowDrawList();
-        var bgColor = ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1.0f));
-        drawList.AddRectFilled(cursorPos, cursorPos + availableSize, bgColor);
+        var width = Math.Max(1, (int)availableSize.X);
+        var height = Math.Max(1, (int)availableSize.Y);
+        _renderer.Resize(width, height);
+        var displayState = _dataset.ResultHistory is { Count: > 0 } && _currentTimeStep < _dataset.ResultHistory.Count
+            ? _dataset.ResultHistory[_currentTimeStep]
+            : _dataset.CurrentState;
+        _renderer.Upload(_dataset, _fieldOptions[_selectedFieldIndex], displayState, _showMesh);
+        var eyeDirection = new Vector3(
+            MathF.Cos(_cameraPitch) * MathF.Cos(_cameraYaw),
+            MathF.Cos(_cameraPitch) * MathF.Sin(_cameraYaw),
+            MathF.Sin(_cameraPitch));
+        var view = Matrix4x4.CreateLookAt(_cameraTarget + eyeDirection * _cameraDistance, _cameraTarget, Vector3.UnitZ);
+        var aspect = width / (float)height;
+        var projection = _orthographic
+            ? Matrix4x4.CreateOrthographic(_cameraDistance * aspect, _cameraDistance, .001f, _cameraDistance * 20f)
+            : Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, .001f, Math.Max(100f, _cameraDistance * 20f));
+        _renderer.Render(view, projection, _renderMode);
 
-        // CRITICAL: Set cursor position to match background before creating button
-        // This ensures the InvisibleButton is positioned exactly where we want to capture input
         ImGui.SetCursorScreenPos(cursorPos);
-
-        // Invisible button for capturing mouse input
-        ImGui.InvisibleButton("PhysicoChemViewArea", availableSize,
-            ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
-
-        // Get ImGui IO for mouse state
+        ImGui.Image((IntPtr)_renderer.ColorTexture, availableSize, new Vector2(0, 1), new Vector2(1, 0));
+        var isHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
+        HandleMouseInput(isHovered || _isDragging || _isPanning);
         var io = ImGui.GetIO();
-
-        // Check if mouse is in bounds manually (more reliable than ImGui hover for all mouse buttons)
-        var mousePos = io.MousePos;
-        var isMouseInBounds = mousePos.X >= cursorPos.X && mousePos.X <= cursorPos.X + availableSize.X &&
-                              mousePos.Y >= cursorPos.Y && mousePos.Y <= cursorPos.Y + availableSize.Y;
-
-        // For hover detection, prioritize manual bounds check and ensure we're not blocking other UI
-        var isButtonHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
-        var isHovered = (isButtonHovered || isMouseInBounds) && !io.WantCaptureMouse;
-
-        var isClicked = ImGui.IsMouseClicked(ImGuiMouseButton.Left) && isHovered;
-        var isMouseDragging = ImGui.IsMouseDragging(ImGuiMouseButton.Left);
-        var isActive = ImGui.IsItemActive();
-
-        // Handle builder interactions first
-        if (_builderMode)
+        if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !io.KeyAlt)
         {
-            bool handledByBuilder = _builder.HandleMouseInteraction(
-                io.MousePos, cursorPos, availableSize,
-                isClicked, isMouseDragging,
-                _cameraYaw, _cameraPitch
-            );
-
-            if (!handledByBuilder)
+            var local = io.MousePos - cursorPos;
+            var picked = _renderer.Pick((int)local.X, (int)local.Y);
+            if (!io.KeyCtrl && !io.KeyShift) _dataset.SelectedCellIDs.Clear();
+            if (picked != null)
             {
-                HandleMouseInput(isHovered || isActive);
+                if (io.KeyCtrl && _dataset.SelectedCellIDs.Contains(picked)) _dataset.SelectedCellIDs.Remove(picked);
+                else if (!_dataset.SelectedCellIDs.Contains(picked)) _dataset.SelectedCellIDs.Add(picked);
             }
         }
-        else
-        {
-            HandleMouseInput(isHovered || isActive);
-        }
 
-        // Render 3D content with render mode
-        Render3DContent(drawList, cursorPos, availableSize, _renderMode);
+        var drawList = ImGui.GetWindowDrawList();
+        if (_showBoundaryConditions && !_builderMode)
+            foreach (var bc in _dataset.BoundaryConditions) DrawBoundaryCondition(drawList, cursorPos + availableSize * .5f, bc);
+        DrawAxes(drawList, cursorPos + availableSize - new Vector2(65, 65));
 
         // Render builder handles if in builder mode
         if (_builderMode)
@@ -365,7 +368,7 @@ public class PhysicoChemViewer : IDatasetViewer
 
     public void Dispose()
     {
-        // Cleanup resources if needed
+        _renderer?.Dispose();
     }
 
     private void ResetCamera()
@@ -374,6 +377,18 @@ public class PhysicoChemViewer : IDatasetViewer
         _cameraPitch = MathF.PI / 6f;
         _cameraDistance = 5.0f;
         _cameraTarget = Vector3.Zero;
+    }
+
+    private void FitCameraToMesh()
+    {
+        if (_dataset.Mesh.Cells.Count == 0) { ResetCamera(); return; }
+        var cells = _dataset.Mesh.Cells.Values;
+        var min = new Vector3(cells.Min(c => (float)(c.Center.X - Math.Cbrt(c.Volume) / 2)),
+            cells.Min(c => (float)(c.Center.Y - Math.Cbrt(c.Volume) / 2)), cells.Min(c => (float)(c.Center.Z - Math.Cbrt(c.Volume) / 2)));
+        var max = new Vector3(cells.Max(c => (float)(c.Center.X + Math.Cbrt(c.Volume) / 2)),
+            cells.Max(c => (float)(c.Center.Y + Math.Cbrt(c.Volume) / 2)), cells.Max(c => (float)(c.Center.Z + Math.Cbrt(c.Volume) / 2)));
+        _cameraTarget = (min + max) * .5f;
+        _cameraDistance = Math.Max(1f, Vector3.Distance(min, max) * 1.6f);
     }
 
     private void HandleMouseInput(bool isHovered)
@@ -389,14 +404,14 @@ public class PhysicoChemViewer : IDatasetViewer
         // Start new interactions when hovering
         if (isHovered)
         {
-            // Start dragging on left click
-            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !_isDragging && !_isPanning)
+            // Middle drag orbits; Shift+middle (and right drag) pans. Left click is reserved for picking.
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Middle) && !io.KeyShift && !_isDragging && !_isPanning)
             {
                 _isDragging = true;
                 _lastMousePos = io.MousePos;
             }
-            // Start panning on right or middle click
-            else if ((ImGui.IsMouseClicked(ImGuiMouseButton.Right) || ImGui.IsMouseClicked(ImGuiMouseButton.Middle)) && !_isDragging && !_isPanning)
+            else if ((ImGui.IsMouseClicked(ImGuiMouseButton.Right) ||
+                      (ImGui.IsMouseClicked(ImGuiMouseButton.Middle) && io.KeyShift)) && !_isDragging && !_isPanning)
             {
                 _isPanning = true;
                 _lastMousePos = io.MousePos;
@@ -406,7 +421,7 @@ public class PhysicoChemViewer : IDatasetViewer
         // Continue orbit rotation (left mouse drag)
         if (_isDragging)
         {
-            if (ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            if (ImGui.IsMouseDown(ImGuiMouseButton.Middle) && !io.KeyShift)
             {
                 var delta = io.MousePos - _lastMousePos;
                 _cameraYaw -= delta.X * 0.01f;
@@ -426,8 +441,13 @@ public class PhysicoChemViewer : IDatasetViewer
             {
                 var delta = io.MousePos - _lastMousePos;
                 var panSpeed = _cameraDistance * 0.002f;
-                _cameraTarget.X -= delta.X * panSpeed;
-                _cameraTarget.Y += delta.Y * panSpeed;
+                var forward = Vector3.Normalize(_cameraTarget - new Vector3(
+                    MathF.Cos(_cameraPitch) * MathF.Cos(_cameraYaw),
+                    MathF.Cos(_cameraPitch) * MathF.Sin(_cameraYaw),
+                    MathF.Sin(_cameraPitch)) * _cameraDistance);
+                var right = Vector3.Normalize(Vector3.Cross(forward, Vector3.UnitZ));
+                var up = Vector3.Normalize(Vector3.Cross(right, forward));
+                _cameraTarget += (-right * delta.X + up * delta.Y) * panSpeed;
                 _lastMousePos = io.MousePos;
             }
             else

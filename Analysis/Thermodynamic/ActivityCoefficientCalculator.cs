@@ -1,4 +1,4 @@
-// GAIA/Business/Thermodynamics/ActivityCoefficientCalculator.cs
+// ported from GeoscientistToolkit/Business/Thermodynamics/ActivityCoefficientCalculator.cs
 //
 // Activity coefficient calculation using Debye-Hückel, extended Debye-Hückel,
 // Davies, and Pitzer equations for various ionic strength ranges.
@@ -306,6 +306,8 @@ public class ActivityCoefficientCalculator
     private double GetBinaryInteractionCoefficient(string cation, string anion,
         double I, double sqrtI, double T)
     {
+        cation = ToPitzerSpeciesKey(cation);
+        anion = ToPitzerSpeciesKey(anion);
         var key = $"{cation}-{anion}";
         if (!_pitzerParams.TryGetValue(key, out var param))
         {
@@ -343,6 +345,8 @@ public class ActivityCoefficientCalculator
     /// </summary>
     private double GetTernaryInteractionCoefficient(string cation, string anion, double T)
     {
+        cation = ToPitzerSpeciesKey(cation);
+        anion = ToPitzerSpeciesKey(anion);
         var key = $"{cation}-{anion}";
         if (!_pitzerParams.TryGetValue(key, out var param) &&
             !_pitzerParams.TryGetValue($"{anion}-{cation}", out param))
@@ -362,9 +366,15 @@ public class ActivityCoefficientCalculator
     /// </summary>
     private double GetThetaParameter(string ion1, string ion2)
     {
+        ion1 = ToPitzerSpeciesKey(ion1);
+        ion2 = ToPitzerSpeciesKey(ion2);
         var key = ion1.CompareTo(ion2) < 0 ? (ion1, ion2) : (ion2, ion1);
         return _thetaParams.GetValueOrDefault(key, 0.0);
     }
+
+    /// <summary>The Pitzer tables are indexed by chemical formula, while reactor fields use display names.</summary>
+    private string ToPitzerSpeciesKey(string species)
+        => _compoundLibrary.Find(species)?.ChemicalFormula ?? species;
 
     /// <summary>
     ///     COMPLETE IMPLEMENTATION: E^θ and E^θ' electrostatic unsymmetric mixing terms.
@@ -480,6 +490,9 @@ public class ActivityCoefficientCalculator
     /// </summary>
     private double GetPsiParameter(string ion1, string ion2, string ion3)
     {
+        ion1 = ToPitzerSpeciesKey(ion1);
+        ion2 = ToPitzerSpeciesKey(ion2);
+        ion3 = ToPitzerSpeciesKey(ion3);
         var ions = new[] { ion1, ion2, ion3 }.OrderBy(x => x).ToArray();
         var key = (ions[0], ions[1], ions[2]);
         return _psiParams.GetValueOrDefault(key, 0.0);
@@ -515,33 +528,38 @@ public class ActivityCoefficientCalculator
     /// </summary>
     private double GetDebyeHuckelAPhi(double T_K)
     {
-        var (epsilon, rho) = GetWaterPropertiesAccurate(T_K);
-        var e = ELEMENTARY_CHARGE;
-
-        // A_phi = (1/3) * (2*pi*Na*rho_w)^0.5 * (e^2 / (4*pi*eps0*eps_r*k*T))^1.5
-        var factor1 = Math.Pow(e * e / (4.0 * Math.PI * PERMITTIVITY_VACUUM * epsilon * BOLTZMANN * T_K), 1.5);
-        var factor2 = Math.Sqrt(2.0 * AVOGADRO * rho / 1000.0); // rho is in kg/m3, needs to be kg/L for molality
-        return factor1 * factor2 / 3.0;
+        // A_phi (Pitzer osmotic-coefficient form) relates to the log10 Debye–Hückel A_gamma by
+        //   A_gamma(ln) = 3·A_phi   and   A_gamma(log10) = A_gamma(ln)/ln(10).
+        // So A_phi = ln(10)·A_gamma(log10)/3. At 25 °C this gives the textbook 0.392.
+        var (A_log10, _) = CalculateDebyeHuckelParameters(T_K);
+        return Math.Log(10) * A_log10 / 3.0;
     }
 
 
     /// <summary>
-    ///     Calculate Debye-Hückel parameters A_gamma and B with improved temperature dependence.
+    ///     Debye–Hückel A (log10 scale, kg^½·mol^-½) and B (Å⁻¹·kg^½·mol^-½) parameters as a
+    ///     function of temperature, via the static dielectric constant and density of water.
+    ///
+    ///     FIX (GAIA.Util): the original first-principles expressions were dimensionally
+    ///     inconsistent (A came out ~0.009 instead of 0.509; B was ~30× too small), which — once
+    ///     the dielectric sign bug was corrected — produced activity coefficients ≈ 1 at all ionic
+    ///     strengths. Replaced with the standard closed forms (Helgeson &amp; Kirkham 1974; Langmuir
+    ///     1997; Stumm &amp; Morgan 1996) whose constants reproduce the accepted 25 °C values
+    ///     A = 0.509 and B = 0.328 Å⁻¹ and scale correctly with (εr, T, ρ):
+    ///        A = 1.8246e6 · √ρ / (εr·T)^{3/2}      [log10]
+    ///        B = 50.29     · √ρ / (εr·T)^{1/2}      [Å⁻¹]
+    ///     with ρ in g/cm³.
     /// </summary>
-    private (double A_gamma_log10, double B_log10) CalculateDebyeHuckelParameters(double T_K)
+    private (double A_gamma_log10, double B_inv_angstrom) CalculateDebyeHuckelParameters(double T_K)
     {
-        var A_phi = GetDebyeHuckelAPhi(T_K);
-        var A_gamma = 3.0 * A_phi;
+        var (epsilon, rho_kg_m3) = GetWaterPropertiesAccurate(T_K);
+        var rho_g_cm3 = rho_kg_m3 / 1000.0;
+        var sqrtRho = Math.Sqrt(rho_g_cm3);
+        var epsT = epsilon * T_K;
 
-        var (epsilon, rho) = GetWaterPropertiesAccurate(T_K);
-        var e = ELEMENTARY_CHARGE;
-
-        // B parameter
-        var B = Math.Sqrt(2.0 * e * e * AVOGADRO * rho /
-                          (1000.0 * PERMITTIVITY_VACUUM * epsilon * BOLTZMANN * T_K));
-
-        // Convert to log base 10 for use in traditional DH equations
-        return (A_gamma / Math.Log(10), B / Math.Log(10));
+        var A = 1.8246e6 * sqrtRho / Math.Pow(epsT, 1.5);
+        var B = 50.29 * sqrtRho / Math.Sqrt(epsT);
+        return (A, B);
     }
 
     /// <summary>
@@ -554,23 +572,21 @@ public class ActivityCoefficientCalculator
         // for dielectric constant would be required.
         var T_C = T_K - 273.15;
 
-        // Bradley-Pitzer equation for dielectric constant (epsilon_r)
-        // Valid 0-350°C at water saturation pressure.
-        var U1 = 3.4279e2;
-        var U2 = -5.0866e-3;
-        var U3 = 9.4690e-7;
-        var U4 = -2.0525;
-        var U5 = 3.1159e3;
-        var U6 = -1.8289e2;
-        var U7 = -8.0325e3;
-        var U8 = 4.2142e6;
-        var U9 = 2.1417;
-
-        var epsilon = U1 * Math.Exp(U2 * T_K + U3 * T_K * T_K) +
-                      U4 + U5 / T_K + U6 * Math.Log(T_K) +
-                      U7 / T_K * Math.Log(U6 + T_K) +
-                      U8 / (T_K * T_K) * Math.Pow(U6 + T_K, -1) +
-                      U9 * Math.Log((U6 + T_K) / T_K);
+        // Static dielectric constant (relative permittivity, εr) of liquid water.
+        //
+        // FIX (GAIA.Util): the original port carried a mistranscribed Bradley–Pitzer
+        // expression that returned εr ≈ −1081 at 25 °C. A negative permittivity made the
+        // Debye–Hückel B parameter (∝ √εr) NaN, which propagated NaN into every aqueous
+        // activity coefficient. Replaced with the Malmberg & Maryott (1956) correlation,
+        // which reproduces the IUPAC reference value εr(25 °C)=78.30 and the correct
+        // temperature trend (J. Res. Natl. Bur. Stand. 56, 1–8). Formally validated 0–100 °C;
+        // it extrapolates monotonically and physically into the geothermal range, and the
+        // result is floored at a small positive value as a numerical safeguard.
+        var epsilon = 87.740
+                      - 0.40008 * T_C
+                      + 9.398e-4 * T_C * T_C
+                      - 1.410e-6 * T_C * T_C * T_C;
+        if (epsilon < 1.0) epsilon = 1.0; // permittivity can never drop below vacuum
 
         // IAPWS-IF97 density correlation (simplified for 1 bar)
         var rho = 999.842594 + 6.793952e-2 * T_C - 9.095290e-3 * T_C * T_C +
@@ -1799,7 +1815,8 @@ public class PitzerParameters
 
     /// <summary>
     ///     Calculates the value of a Pitzer parameter at a given temperature.
-    ///     P(T) = p1 + p2/T + p3*ln(T) + p4*(T-Tr) + p5*(T^2-Tr^2)
+    ///     p1 is the tabulated 25 °C value. The remaining coefficients are temperature
+    ///     corrections relative to that reference state.
     /// </summary>
     public double GetTemperatureDependentParam(double[]? coeffs, double T_K)
     {
@@ -1814,6 +1831,10 @@ public class PitzerParameters
         const double T_ref = 298.15;
         double p1 = coeffs[0], p2 = coeffs[1], p3 = coeffs[2], p4 = coeffs[3], p5 = coeffs[4];
 
-        return p1 + p2 / T_K + p3 * Math.Log(T_K) + p4 * (T_K - T_ref) + p5 * (T_K * T_K - T_ref * T_ref);
+        return p1
+               + p2 * (1.0 / T_K - 1.0 / T_ref)
+               + p3 * Math.Log(T_K / T_ref)
+               + p4 * (T_K - T_ref)
+               + p5 * (T_K * T_K - T_ref * T_ref);
     }
 }

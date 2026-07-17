@@ -1,4 +1,4 @@
-// GAIA/Data/Materials/CompoundLibrary.cs
+// ported from GeoscientistToolkit/Data/Materials/CompoundLibrary.cs
 //
 // Singleton service for thermodynamic compound properties used in dissolution/precipitation calculations.
 // Provides comprehensive database of minerals, salts, and aqueous species relevant to petrophysics.
@@ -17,7 +17,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using GAIA.Business;
+using GAIA.Data.Materials;
 using GAIA.Util;
 
 namespace GAIA.Data.Materials;
@@ -239,6 +239,12 @@ public sealed class CompoundLibrary
     private readonly List<ChemicalCompound> _compounds = new();
     private readonly List<Element> _elements = new();
 
+    // Find() is an O(n) scan over every compound (and a second canonical-key scan on a miss). Hot
+    // callers such as the virtual reactor resolve the same handful of names millions of times, so
+    // results are memoised here. The cache is cleared whenever the compound set changes.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, ChemicalCompound?> _findCache
+        = new(StringComparer.OrdinalIgnoreCase);
+
 
     private CompoundLibrary()
     {
@@ -248,6 +254,8 @@ public sealed class CompoundLibrary
         this.SeedAdditionalCompounds(); // Add extended database (from CompoundLibraryExtensions)
         this.SeedMetamorphicMinerals(); // Add metamorphic minerals (from CompoundLibraryMetamorphicExtensions)
         this.SeedMultiphaseCompounds(); // Add multiphase flow compounds (from CompoundLibraryMultiphaseExtensions)
+        this.SeedGeochemicalExpansionCompounds(); // Add broader evaporite, ore, oxide, phosphate, and clay coverage
+        this.SeedSoilPollutantCompounds(); // Add soil pollutant compounds (from CompoundLibrarySoilPollutantsExtensions)
     }
 
     // ENHANCEMENT: Add support for solid solutions
@@ -267,14 +275,83 @@ public sealed class CompoundLibrary
     public void Clear()
     {
         _compounds.Clear();
+        _findCache.Clear();
     }
 
     public ChemicalCompound? Find(string nameOrFormula)
     {
-        return _compounds.FirstOrDefault(c =>
+        if (string.IsNullOrEmpty(nameOrFormula)) return null;
+        if (_findCache.TryGetValue(nameOrFormula, out var cached)) return cached;
+        var result = FindUncached(nameOrFormula);
+        _findCache[nameOrFormula] = result;
+        return result;
+    }
+
+    private ChemicalCompound? FindUncached(string nameOrFormula)
+    {
+        // Fast path: exact (case-insensitive) match on name, formula, or synonym.
+        var exact = _compounds.FirstOrDefault(c =>
             string.Equals(c.Name, nameOrFormula, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(c.ChemicalFormula, nameOrFormula, StringComparison.OrdinalIgnoreCase) ||
             c.Synonyms.Any(s => string.Equals(s, nameOrFormula, StringComparison.OrdinalIgnoreCase)));
+        if (exact != null) return exact;
+
+        // FIX (GAIA.Util): the reaction generator looks species up in caret notation
+        // ("H^+", "OH^-", "CO3^2^-", "Na^+", …) while the database stores plain/Unicode
+        // formulas ("H+", "OH-", "CO32-", "Na+"). Previously these lookups returned null, so
+        // the stoichiometric balancer had no H⁺/OH⁻/oxyanion to work with and emitted
+        // fractional, charge-unbalanced reactions. Compare on a notation-agnostic canonical
+        // key so all charge/super/subscript conventions resolve to the same compound.
+        var key = CanonicalFormulaKey(nameOrFormula);
+        if (key.Length == 0) return null;
+        return _compounds.FirstOrDefault(c =>
+            CanonicalFormulaKey(c.ChemicalFormula) == key ||
+            c.Synonyms.Any(s => CanonicalFormulaKey(s) == key));
+    }
+
+    /// <summary>
+    ///     Reduce a chemical formula/charge string to a notation-agnostic key by mapping Unicode
+    ///     sub/superscripts to ASCII, stripping caret (^) charge markers and whitespace, and
+    ///     lower-casing. e.g. "CO3^2^-", "CO₃²⁻" and "co32-" all map to "co32-".
+    /// </summary>
+    private static string CanonicalFormulaKey(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+        var sb = new StringBuilder(s.Length);
+        foreach (var ch in s)
+        {
+            switch (ch)
+            {
+                case '^':
+                case ' ':
+                case '\t':
+                case '_':
+                case '{':
+                case '}':
+                    continue; // notation noise
+                // Unicode subscripts ₀-₉
+                case '₀': case '₁': case '₂': case '₃': case '₄':
+                case '₅': case '₆': case '₇': case '₈': case '₉':
+                    sb.Append((char)('0' + (ch - '₀'))); break;
+                // Unicode superscript digits
+                case '⁰': sb.Append('0'); break;
+                case '¹': sb.Append('1'); break;
+                case '²': sb.Append('2'); break;
+                case '³': sb.Append('3'); break;
+                case '⁴': sb.Append('4'); break;
+                case '⁵': sb.Append('5'); break;
+                case '⁶': sb.Append('6'); break;
+                case '⁷': sb.Append('7'); break;
+                case '⁸': sb.Append('8'); break;
+                case '⁹': sb.Append('9'); break;
+                case '⁺': sb.Append('+'); break;
+                case '⁻': sb.Append('-'); break;
+                default: sb.Append(char.ToLowerInvariant(ch)); break;
+            }
+        }
+        // Normalise charge written sign-first ("ca+2", "so4-2") to number-first ("ca2+", "so42-")
+        // so both conventions resolve to the same compound.
+        return Regex.Replace(sb.ToString(), @"([+-])(\d+)$", "$2$1");
     }
 /// <summary>
 /// Normalize chemical formula input to handle various user input formats.
@@ -408,6 +485,15 @@ public ChemicalCompound FindFlexible(string name)
             string.Equals(e.Name, symbolOrName, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>Add a new element or replace an existing one (matched by symbol).</summary>
+    public void AddOrUpdateElement(Element element)
+    {
+        if (element == null || string.IsNullOrWhiteSpace(element.Symbol)) return;
+        var existing = _elements.FirstOrDefault(e => string.Equals(e.Symbol, element.Symbol, StringComparison.OrdinalIgnoreCase));
+        if (existing != null) _elements.Remove(existing);
+        _elements.Add(element);
+    }
+
     public void AddOrUpdate(ChemicalCompound compound)
     {
         if (compound == null || string.IsNullOrWhiteSpace(compound.Name)) return;
@@ -424,6 +510,7 @@ public ChemicalCompound FindFlexible(string name)
             _compounds[idx] = compound;
             Logger.Log($"[CompoundLibrary] Updated compound: {compound.Name}");
         }
+        _findCache.Clear();
     }
 
     /// <summary>
@@ -433,7 +520,10 @@ public ChemicalCompound FindFlexible(string name)
     {
         var removedCount = _compounds.RemoveAll(c => c.IsUserCompound);
         if (removedCount > 0)
+        {
+            _findCache.Clear();
             Logger.Log($"[CompoundLibrary] Cleared {removedCount} user-defined compounds.");
+        }
     }
 
     public bool Remove(string name)
@@ -441,6 +531,7 @@ public ChemicalCompound FindFlexible(string name)
         var c = Find(name);
         if (c == null) return false;
         _compounds.Remove(c);
+        _findCache.Clear();
         Logger.Log($"[CompoundLibrary] Removed compound: {name}");
         return true;
     }
@@ -462,6 +553,7 @@ public ChemicalCompound FindFlexible(string name)
 
             _compounds.Clear();
             _compounds.AddRange(loaded);
+            _findCache.Clear();
 
             foreach (var c in _compounds) c.IsUserCompound = true;
 
@@ -1010,6 +1102,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "K-Feldspar",
+            LogKsp_25C = 0.015,
             Synonyms = new List<string> { "Microcline" },
             ChemicalFormula = "KAlSi3O8",
             Phase = CompoundPhase.Solid,
@@ -1340,6 +1433,354 @@ public ChemicalCompound FindFlexible(string name)
             OxidationState = 4,
             Notes = "Primary dissolved form of silicon in most natural waters.",
             Sources = { "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Strontium Ion",
+            ChemicalFormula = "Sr2+",
+            Synonyms = { "Sr2+", "Sr+2" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 2,
+            GibbsFreeEnergyFormation_kJ_mol = -563.8,
+            EnthalpyFormation_kJ_mol = -545.8,
+            Entropy_J_molK = -32.6,
+            MolecularWeight_g_mol = 87.62,
+            IsPrimaryElementSpecies = true,
+            Sources = { "PHREEQC database", "Parkhurst & Appelo (2013)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Barium Ion",
+            ChemicalFormula = "Ba2+",
+            Synonyms = { "Ba2+", "Ba+2" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 2,
+            GibbsFreeEnergyFormation_kJ_mol = -560.8,
+            EnthalpyFormation_kJ_mol = -537.6,
+            Entropy_J_molK = 9.6,
+            MolecularWeight_g_mol = 137.33,
+            IsPrimaryElementSpecies = true,
+            Sources = { "PHREEQC database", "Parkhurst & Appelo (2013)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Manganese(II) Ion",
+            ChemicalFormula = "Mn2+",
+            Synonyms = { "Mn2+", "Mn+2" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 2,
+            OxidationState = 2,
+            GibbsFreeEnergyFormation_kJ_mol = -228.1,
+            EnthalpyFormation_kJ_mol = -220.8,
+            Entropy_J_molK = -73.6,
+            MolecularWeight_g_mol = 54.94,
+            IsPrimaryElementSpecies = true,
+            Sources = { "PHREEQC database", "Parkhurst & Appelo (2013)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Zinc Ion",
+            ChemicalFormula = "Zn2+",
+            Synonyms = { "Zn2+", "Zn+2" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 2,
+            GibbsFreeEnergyFormation_kJ_mol = -147.1,
+            EnthalpyFormation_kJ_mol = -153.9,
+            Entropy_J_molK = -112.1,
+            MolecularWeight_g_mol = 65.38,
+            IsPrimaryElementSpecies = true,
+            Sources = { "PHREEQC database", "Parkhurst & Appelo (2013)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Lead(II) Ion",
+            ChemicalFormula = "Pb2+",
+            Synonyms = { "Pb2+", "Pb+2" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 2,
+            GibbsFreeEnergyFormation_kJ_mol = -24.4,
+            EnthalpyFormation_kJ_mol = 0.9,
+            Entropy_J_molK = 18.5,
+            MolecularWeight_g_mol = 207.2,
+            IsPrimaryElementSpecies = true,
+            Sources = { "PHREEQC database", "Parkhurst & Appelo (2013)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Nitrate Ion",
+            ChemicalFormula = "NO3-",
+            Synonyms = { "NO3-", "NO3^-" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = -1,
+            GibbsFreeEnergyFormation_kJ_mol = -111.3,
+            EnthalpyFormation_kJ_mol = -207.4,
+            Entropy_J_molK = 146.4,
+            MolecularWeight_g_mol = 62.00,
+            IsPrimaryElementSpecies = true,
+            Sources = { "PHREEQC database", "Parkhurst & Appelo (2013)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Phosphate Ion",
+            ChemicalFormula = "PO43-",
+            Synonyms = { "PO4^3-", "PO43-" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = -3,
+            GibbsFreeEnergyFormation_kJ_mol = -1018.7,
+            EnthalpyFormation_kJ_mol = -1277.4,
+            Entropy_J_molK = -220.9,
+            MolecularWeight_g_mol = 94.97,
+            IsPrimaryElementSpecies = true,
+            Sources = { "PHREEQC database", "Parkhurst & Appelo (2013)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Fluoride Ion",
+            ChemicalFormula = "F-",
+            Synonyms = { "F-", "F^-" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = -1,
+            GibbsFreeEnergyFormation_kJ_mol = -278.8,
+            EnthalpyFormation_kJ_mol = -332.6,
+            Entropy_J_molK = -13.8,
+            MolecularWeight_g_mol = 19.00,
+            IsPrimaryElementSpecies = true,
+            Sources = { "PHREEQC database", "Parkhurst & Appelo (2013)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Bromide Ion",
+            ChemicalFormula = "Br-",
+            Synonyms = { "Br-", "Br^-" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = -1,
+            GibbsFreeEnergyFormation_kJ_mol = -104.0,
+            EnthalpyFormation_kJ_mol = -121.6,
+            Entropy_J_molK = 82.4,
+            MolecularWeight_g_mol = 79.90,
+            IsPrimaryElementSpecies = true,
+            Sources = { "PHREEQC database", "Parkhurst & Appelo (2013)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Cuprous Ion",
+            ChemicalFormula = "Cu+",
+            Synonyms = { "Cu+" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 1,
+            GibbsFreeEnergyFormation_kJ_mol = 50.0,
+            EnthalpyFormation_kJ_mol = 71.7,
+            Entropy_J_molK = 40.6,
+            MolecularWeight_g_mol = 63.55,
+            Sources = { "NBS Tables", "CRC Handbook" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Cupric Ion",
+            ChemicalFormula = "Cu2+",
+            Synonyms = { "Cu2+", "Cu+2" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 2,
+            GibbsFreeEnergyFormation_kJ_mol = 65.5,
+            EnthalpyFormation_kJ_mol = 64.8,
+            Entropy_J_molK = -99.6,
+            MolecularWeight_g_mol = 63.55,
+            IsPrimaryElementSpecies = true,
+            Sources = { "NBS Tables", "CRC Handbook" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Nickel Ion",
+            ChemicalFormula = "Ni2+",
+            Synonyms = { "Ni2+", "Ni+2" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 2,
+            GibbsFreeEnergyFormation_kJ_mol = -45.6,
+            EnthalpyFormation_kJ_mol = -54.0,
+            Entropy_J_molK = -129.0,
+            MolecularWeight_g_mol = 58.69,
+            IsPrimaryElementSpecies = true,
+            Sources = { "NBS Tables", "CRC Handbook" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Mercuric Ion",
+            ChemicalFormula = "Hg2+",
+            Synonyms = { "Hg2+", "Hg+2" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 2,
+            GibbsFreeEnergyFormation_kJ_mol = 165.7,
+            EnthalpyFormation_kJ_mol = 171.1,
+            Entropy_J_molK = 32.0,
+            MolecularWeight_g_mol = 200.59,
+            IsPrimaryElementSpecies = true,
+            Sources = { "NBS Tables", "CRC Handbook" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Boric Acid",
+            ChemicalFormula = "H3BO3",
+            Synonyms = { "H3BO3(aq)" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 0,
+            GibbsFreeEnergyFormation_kJ_mol = -968.8,
+            EnthalpyFormation_kJ_mol = -1072.3,
+            Entropy_J_molK = 162.3,
+            MolecularWeight_g_mol = 61.83,
+            IsPrimaryElementSpecies = true,
+            Sources = { "LLNL database", "SUPCRT92" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Borate Ion",
+            ChemicalFormula = "B(OH)4-",
+            Synonyms = { "B(OH)4-" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = -1,
+            GibbsFreeEnergyFormation_kJ_mol = -1153.2,
+            EnthalpyFormation_kJ_mol = -1344.0,
+            Entropy_J_molK = 102.5,
+            MolecularWeight_g_mol = 78.84,
+            Sources = { "LLNL database", "SUPCRT92" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Arsenous Acid",
+            ChemicalFormula = "H3AsO3",
+            Synonyms = { "H3AsO3(aq)" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 0,
+            GibbsFreeEnergyFormation_kJ_mol = -639.8,
+            EnthalpyFormation_kJ_mol = -742.2,
+            Entropy_J_molK = 195.0,
+            MolecularWeight_g_mol = 125.94,
+            Sources = { "NEA database" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Arsenic Acid",
+            ChemicalFormula = "H3AsO4",
+            Synonyms = { "H3AsO4(aq)" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 0,
+            GibbsFreeEnergyFormation_kJ_mol = -765.9,
+            EnthalpyFormation_kJ_mol = -906.2,
+            Entropy_J_molK = 49.3,
+            MolecularWeight_g_mol = 141.94,
+            IsPrimaryElementSpecies = true,
+            Sources = { "NIST database", "WATEQ4F" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Arsenate Ion",
+            ChemicalFormula = "AsO43-",
+            Synonyms = { "AsO4-3" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = -3,
+            GibbsFreeEnergyFormation_kJ_mol = -648.4,
+            EnthalpyFormation_kJ_mol = -888.1,
+            Entropy_J_molK = -162.8,
+            MolecularWeight_g_mol = 138.92,
+            Sources = { "NIST database", "WATEQ4F" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Chromium(III) Ion",
+            ChemicalFormula = "Cr3+",
+            Synonyms = { "Cr3+", "Cr+3" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 3,
+            GibbsFreeEnergyFormation_kJ_mol = -215.1,
+            EnthalpyFormation_kJ_mol = -251.0,
+            Entropy_J_molK = -118.0,
+            MolecularWeight_g_mol = 52.00,
+            IsPrimaryElementSpecies = true,
+            Sources = { "NBS Tables", "CODATA" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Chromate Ion",
+            ChemicalFormula = "CrO42-",
+            Synonyms = { "CrO4-2" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = -2,
+            GibbsFreeEnergyFormation_kJ_mol = -717.1,
+            EnthalpyFormation_kJ_mol = -881.2,
+            Entropy_J_molK = 44.0,
+            MolecularWeight_g_mol = 116.00,
+            Sources = { "NBS Tables", "CODATA" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Cerium(III) Ion",
+            ChemicalFormula = "Ce3+",
+            Synonyms = { "Ce3+", "Ce+3" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 3,
+            GibbsFreeEnergyFormation_kJ_mol = -672.0,
+            EnthalpyFormation_kJ_mol = -696.2,
+            Entropy_J_molK = -205.0,
+            MolecularWeight_g_mol = 140.12,
+            IsPrimaryElementSpecies = true,
+            Sources = { "NBS Tables", "NIST" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Aqueous Titanium Hydroxide",
+            ChemicalFormula = "Ti(OH)4(aq)",
+            Synonyms = { "Ti(OH)4", "Ti(OH)4(aq)" },
+            Phase = CompoundPhase.Aqueous,
+            IonicCharge = 0,
+            GibbsFreeEnergyFormation_kJ_mol = -1267.5,
+            EnthalpyFormation_kJ_mol = -1411.7,
+            Entropy_J_molK = 218.7,
+            MolecularWeight_g_mol = 115.90,
+            IsPrimaryElementSpecies = true,
+            Sources = { "LLNL database", "Thermoddem" },
             IsUserCompound = false
         });
 
@@ -2477,6 +2918,163 @@ public ChemicalCompound FindFlexible(string name)
             Sources = new List<string> { "IUPAC", "CRC" }
         });
 
+        EnsureCompletePeriodicTable();
+
         Logger.Log($"[CompoundLibrary] Seeded {_elements.Count} elements");
     }
+
+    private void EnsureCompletePeriodicTable()
+    {
+        foreach (var seed in CompletePeriodicTable)
+        {
+            var alreadyPresent = _elements.Any(e =>
+                e.AtomicNumber == seed.AtomicNumber ||
+                string.Equals(e.Symbol, seed.Symbol, StringComparison.OrdinalIgnoreCase));
+
+            if (alreadyPresent) continue;
+
+            _elements.Add(new Element
+            {
+                Name = seed.Name,
+                Symbol = seed.Symbol,
+                AtomicNumber = seed.AtomicNumber,
+                AtomicMass = seed.AtomicMass,
+                ElementType = seed.ElementType,
+                Group = seed.Group,
+                Period = seed.Period,
+                Sources = new List<string> { "IUPAC Periodic Table 2023", "CRC Handbook 104th ed." }
+            });
+        }
+    }
+
+    private static readonly ElementSeed[] CompletePeriodicTable =
+    {
+        new(1, "Hydrogen", "H", 1.008, ElementType.Nonmetal, 1, 1),
+        new(2, "Helium", "He", 4.0026, ElementType.NobleGas, 18, 1),
+        new(3, "Lithium", "Li", 6.94, ElementType.AlkaliMetal, 1, 2),
+        new(4, "Beryllium", "Be", 9.0122, ElementType.AlkalineEarthMetal, 2, 2),
+        new(5, "Boron", "B", 10.81, ElementType.Metalloid, 13, 2),
+        new(6, "Carbon", "C", 12.011, ElementType.Nonmetal, 14, 2),
+        new(7, "Nitrogen", "N", 14.007, ElementType.Nonmetal, 15, 2),
+        new(8, "Oxygen", "O", 15.999, ElementType.Nonmetal, 16, 2),
+        new(9, "Fluorine", "F", 18.998, ElementType.Halogen, 17, 2),
+        new(10, "Neon", "Ne", 20.180, ElementType.NobleGas, 18, 2),
+        new(11, "Sodium", "Na", 22.990, ElementType.AlkaliMetal, 1, 3),
+        new(12, "Magnesium", "Mg", 24.305, ElementType.AlkalineEarthMetal, 2, 3),
+        new(13, "Aluminum", "Al", 26.982, ElementType.PostTransitionMetal, 13, 3),
+        new(14, "Silicon", "Si", 28.085, ElementType.Metalloid, 14, 3),
+        new(15, "Phosphorus", "P", 30.974, ElementType.Nonmetal, 15, 3),
+        new(16, "Sulfur", "S", 32.06, ElementType.Nonmetal, 16, 3),
+        new(17, "Chlorine", "Cl", 35.45, ElementType.Halogen, 17, 3),
+        new(18, "Argon", "Ar", 39.948, ElementType.NobleGas, 18, 3),
+        new(19, "Potassium", "K", 39.098, ElementType.AlkaliMetal, 1, 4),
+        new(20, "Calcium", "Ca", 40.078, ElementType.AlkalineEarthMetal, 2, 4),
+        new(21, "Scandium", "Sc", 44.956, ElementType.TransitionMetal, 3, 4),
+        new(22, "Titanium", "Ti", 47.867, ElementType.TransitionMetal, 4, 4),
+        new(23, "Vanadium", "V", 50.942, ElementType.TransitionMetal, 5, 4),
+        new(24, "Chromium", "Cr", 51.996, ElementType.TransitionMetal, 6, 4),
+        new(25, "Manganese", "Mn", 54.938, ElementType.TransitionMetal, 7, 4),
+        new(26, "Iron", "Fe", 55.845, ElementType.TransitionMetal, 8, 4),
+        new(27, "Cobalt", "Co", 58.933, ElementType.TransitionMetal, 9, 4),
+        new(28, "Nickel", "Ni", 58.693, ElementType.TransitionMetal, 10, 4),
+        new(29, "Copper", "Cu", 63.546, ElementType.TransitionMetal, 11, 4),
+        new(30, "Zinc", "Zn", 65.38, ElementType.TransitionMetal, 12, 4),
+        new(31, "Gallium", "Ga", 69.723, ElementType.PostTransitionMetal, 13, 4),
+        new(32, "Germanium", "Ge", 72.630, ElementType.Metalloid, 14, 4),
+        new(33, "Arsenic", "As", 74.922, ElementType.Metalloid, 15, 4),
+        new(34, "Selenium", "Se", 78.971, ElementType.Nonmetal, 16, 4),
+        new(35, "Bromine", "Br", 79.904, ElementType.Halogen, 17, 4),
+        new(36, "Krypton", "Kr", 83.798, ElementType.NobleGas, 18, 4),
+        new(37, "Rubidium", "Rb", 85.468, ElementType.AlkaliMetal, 1, 5),
+        new(38, "Strontium", "Sr", 87.62, ElementType.AlkalineEarthMetal, 2, 5),
+        new(39, "Yttrium", "Y", 88.906, ElementType.TransitionMetal, 3, 5),
+        new(40, "Zirconium", "Zr", 91.224, ElementType.TransitionMetal, 4, 5),
+        new(41, "Niobium", "Nb", 92.906, ElementType.TransitionMetal, 5, 5),
+        new(42, "Molybdenum", "Mo", 95.95, ElementType.TransitionMetal, 6, 5),
+        new(43, "Technetium", "Tc", 98, ElementType.TransitionMetal, 7, 5),
+        new(44, "Ruthenium", "Ru", 101.07, ElementType.TransitionMetal, 8, 5),
+        new(45, "Rhodium", "Rh", 102.91, ElementType.TransitionMetal, 9, 5),
+        new(46, "Palladium", "Pd", 106.42, ElementType.TransitionMetal, 10, 5),
+        new(47, "Silver", "Ag", 107.87, ElementType.TransitionMetal, 11, 5),
+        new(48, "Cadmium", "Cd", 112.41, ElementType.TransitionMetal, 12, 5),
+        new(49, "Indium", "In", 114.82, ElementType.PostTransitionMetal, 13, 5),
+        new(50, "Tin", "Sn", 118.71, ElementType.PostTransitionMetal, 14, 5),
+        new(51, "Antimony", "Sb", 121.76, ElementType.Metalloid, 15, 5),
+        new(52, "Tellurium", "Te", 127.60, ElementType.Metalloid, 16, 5),
+        new(53, "Iodine", "I", 126.90, ElementType.Halogen, 17, 5),
+        new(54, "Xenon", "Xe", 131.29, ElementType.NobleGas, 18, 5),
+        new(55, "Cesium", "Cs", 132.91, ElementType.AlkaliMetal, 1, 6),
+        new(56, "Barium", "Ba", 137.33, ElementType.AlkalineEarthMetal, 2, 6),
+        new(57, "Lanthanum", "La", 138.91, ElementType.Lanthanide, 3, 6),
+        new(58, "Cerium", "Ce", 140.12, ElementType.Lanthanide, 3, 6),
+        new(59, "Praseodymium", "Pr", 140.91, ElementType.Lanthanide, 3, 6),
+        new(60, "Neodymium", "Nd", 144.24, ElementType.Lanthanide, 3, 6),
+        new(61, "Promethium", "Pm", 145, ElementType.Lanthanide, 3, 6),
+        new(62, "Samarium", "Sm", 150.36, ElementType.Lanthanide, 3, 6),
+        new(63, "Europium", "Eu", 151.96, ElementType.Lanthanide, 3, 6),
+        new(64, "Gadolinium", "Gd", 157.25, ElementType.Lanthanide, 3, 6),
+        new(65, "Terbium", "Tb", 158.93, ElementType.Lanthanide, 3, 6),
+        new(66, "Dysprosium", "Dy", 162.50, ElementType.Lanthanide, 3, 6),
+        new(67, "Holmium", "Ho", 164.93, ElementType.Lanthanide, 3, 6),
+        new(68, "Erbium", "Er", 167.26, ElementType.Lanthanide, 3, 6),
+        new(69, "Thulium", "Tm", 168.93, ElementType.Lanthanide, 3, 6),
+        new(70, "Ytterbium", "Yb", 173.05, ElementType.Lanthanide, 3, 6),
+        new(71, "Lutetium", "Lu", 174.97, ElementType.Lanthanide, 3, 6),
+        new(72, "Hafnium", "Hf", 178.49, ElementType.TransitionMetal, 4, 6),
+        new(73, "Tantalum", "Ta", 180.95, ElementType.TransitionMetal, 5, 6),
+        new(74, "Tungsten", "W", 183.84, ElementType.TransitionMetal, 6, 6),
+        new(75, "Rhenium", "Re", 186.21, ElementType.TransitionMetal, 7, 6),
+        new(76, "Osmium", "Os", 190.23, ElementType.TransitionMetal, 8, 6),
+        new(77, "Iridium", "Ir", 192.22, ElementType.TransitionMetal, 9, 6),
+        new(78, "Platinum", "Pt", 195.08, ElementType.TransitionMetal, 10, 6),
+        new(79, "Gold", "Au", 196.97, ElementType.TransitionMetal, 11, 6),
+        new(80, "Mercury", "Hg", 200.59, ElementType.TransitionMetal, 12, 6),
+        new(81, "Thallium", "Tl", 204.38, ElementType.PostTransitionMetal, 13, 6),
+        new(82, "Lead", "Pb", 207.2, ElementType.PostTransitionMetal, 14, 6),
+        new(83, "Bismuth", "Bi", 208.98, ElementType.PostTransitionMetal, 15, 6),
+        new(84, "Polonium", "Po", 209, ElementType.PostTransitionMetal, 16, 6),
+        new(85, "Astatine", "At", 210, ElementType.Halogen, 17, 6),
+        new(86, "Radon", "Rn", 222, ElementType.NobleGas, 18, 6),
+        new(87, "Francium", "Fr", 223, ElementType.AlkaliMetal, 1, 7),
+        new(88, "Radium", "Ra", 226, ElementType.AlkalineEarthMetal, 2, 7),
+        new(89, "Actinium", "Ac", 227, ElementType.Actinide, 3, 7),
+        new(90, "Thorium", "Th", 232.04, ElementType.Actinide, 3, 7),
+        new(91, "Protactinium", "Pa", 231.04, ElementType.Actinide, 3, 7),
+        new(92, "Uranium", "U", 238.03, ElementType.Actinide, 3, 7),
+        new(93, "Neptunium", "Np", 237, ElementType.Actinide, 3, 7),
+        new(94, "Plutonium", "Pu", 244, ElementType.Actinide, 3, 7),
+        new(95, "Americium", "Am", 243, ElementType.Actinide, 3, 7),
+        new(96, "Curium", "Cm", 247, ElementType.Actinide, 3, 7),
+        new(97, "Berkelium", "Bk", 247, ElementType.Actinide, 3, 7),
+        new(98, "Californium", "Cf", 251, ElementType.Actinide, 3, 7),
+        new(99, "Einsteinium", "Es", 252, ElementType.Actinide, 3, 7),
+        new(100, "Fermium", "Fm", 257, ElementType.Actinide, 3, 7),
+        new(101, "Mendelevium", "Md", 258, ElementType.Actinide, 3, 7),
+        new(102, "Nobelium", "No", 259, ElementType.Actinide, 3, 7),
+        new(103, "Lawrencium", "Lr", 266, ElementType.Actinide, 3, 7),
+        new(104, "Rutherfordium", "Rf", 267, ElementType.TransitionMetal, 4, 7),
+        new(105, "Dubnium", "Db", 268, ElementType.TransitionMetal, 5, 7),
+        new(106, "Seaborgium", "Sg", 269, ElementType.TransitionMetal, 6, 7),
+        new(107, "Bohrium", "Bh", 270, ElementType.TransitionMetal, 7, 7),
+        new(108, "Hassium", "Hs", 277, ElementType.TransitionMetal, 8, 7),
+        new(109, "Meitnerium", "Mt", 278, ElementType.TransitionMetal, 9, 7),
+        new(110, "Darmstadtium", "Ds", 281, ElementType.TransitionMetal, 10, 7),
+        new(111, "Roentgenium", "Rg", 282, ElementType.TransitionMetal, 11, 7),
+        new(112, "Copernicium", "Cn", 285, ElementType.TransitionMetal, 12, 7),
+        new(113, "Nihonium", "Nh", 286, ElementType.PostTransitionMetal, 13, 7),
+        new(114, "Flerovium", "Fl", 289, ElementType.PostTransitionMetal, 14, 7),
+        new(115, "Moscovium", "Mc", 290, ElementType.PostTransitionMetal, 15, 7),
+        new(116, "Livermorium", "Lv", 293, ElementType.PostTransitionMetal, 16, 7),
+        new(117, "Tennessine", "Ts", 294, ElementType.Halogen, 17, 7),
+        new(118, "Oganesson", "Og", 294, ElementType.NobleGas, 18, 7)
+    };
+
+    private readonly record struct ElementSeed(
+        int AtomicNumber,
+        string Name,
+        string Symbol,
+        double AtomicMass,
+        ElementType ElementType,
+        int Group,
+        int Period);
 }

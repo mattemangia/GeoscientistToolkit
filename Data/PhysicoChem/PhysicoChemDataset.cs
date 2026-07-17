@@ -85,6 +85,9 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
     [JsonIgnore]
     public List<string> SelectedCellIDs { get; set; } = new();
 
+    [JsonIgnore]
+    public bool ComputationalMeshDirty { get; set; }
+
     /// <summary>
     /// Flag to enable coupling with geothermal simulation
     /// </summary>
@@ -111,6 +114,35 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
         GeneratedMesh = meshGenerator.GenerateMeshFromDomains(Domains, resolution);
 
         Mesh = ConvertGridMeshToPhysicoChem(GeneratedMesh);
+        ComputationalMeshDirty = false;
+    }
+
+    /// <summary>Creates a uniform editor mesh and the matching computational grid atomically.</summary>
+    public void SplitIntoStructuredGrid(int nx, int ny, int nz)
+    {
+        nx = Math.Max(1, nx); ny = Math.Max(1, ny); nz = Math.Max(1, nz);
+        Mesh.SplitIntoGrid(nx, ny, nz);
+        var cells = Mesh.Cells.Values;
+        var minX = cells.Min(c => c.Center.X - Math.Cbrt(c.Volume) / 2);
+        var minY = cells.Min(c => c.Center.Y - Math.Cbrt(c.Volume) / 2);
+        var minZ = cells.Min(c => c.Center.Z - Math.Cbrt(c.Volume) / 2);
+        var maxX = cells.Max(c => c.Center.X + Math.Cbrt(c.Volume) / 2);
+        var maxY = cells.Max(c => c.Center.Y + Math.Cbrt(c.Volume) / 2);
+        var maxZ = cells.Max(c => c.Center.Z + Math.Cbrt(c.Volume) / 2);
+        var materialIds = new int[nx, ny, nz];
+        for (var i=0;i<nx;i++) for(var j=0;j<ny;j++) for(var k=0;k<nz;k++)
+        {
+            var cell = Mesh.Cells[$"C_{i}_{j}_{k}"];
+            materialIds[i,j,k] = Math.Max(0, Domains.FindIndex(d => d.Material?.MaterialID == cell.MaterialID));
+        }
+        GeneratedMesh = new GridMesh3D(nx, ny, nz)
+        {
+            Origin = (minX, minY, minZ), Spacing = ((maxX-minX)/nx, (maxY-minY)/ny, (maxZ-minZ)/nz),
+            Metadata = new Dictionary<string, object> { ["MaterialIds"] = materialIds }
+        };
+        CurrentState = null;
+        ResultHistory = new List<PhysicoChemState>();
+        ComputationalMeshDirty = false;
     }
 
     private PhysicoChemMesh ConvertGridMeshToPhysicoChem(GridMesh3D gridMesh)
@@ -260,6 +292,8 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
 
         if (Mesh == null || Mesh.Cells.Count == 0)
             errors.Add("Mesh has not been generated or is empty");
+        if (ComputationalMeshDirty)
+            errors.Add("The editor mesh contains local refinements not represented by the structured solver grid. Generate or split a uniform computational grid before running.");
 
         return errors;
     }
@@ -388,6 +422,10 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
         // Serialize simulation parameters
         dto.SimulationParams = new SimulationParametersDTO
         {
+            EngineMode = SimulationParams.EngineMode.ToString(),
+            CouplingMaxIterations = SimulationParams.CouplingMaxIterations,
+            CouplingTolerance = SimulationParams.CouplingTolerance,
+            CouplingMaxRetries = SimulationParams.CouplingMaxRetries,
             TotalTime = SimulationParams.TotalTime,
             TimeStep = SimulationParams.TimeStep,
             OutputInterval = SimulationParams.OutputInterval,
@@ -515,7 +553,17 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
             NucleationSites.Add(site);
         }
 
-        // Import simulation parameters
+        // Import simulation parameters. Files predating the shared engine had no EngineMode;
+        // retain their historical multiphysics behaviour.
+        SimulationParams.EngineMode = Enum.TryParse<PhysicoChemSolverMode>(dto.SimulationParams.EngineMode, true, out var engineMode)
+            ? engineMode
+            : PhysicoChemSolverMode.AdvancedMultiphysics;
+        SimulationParams.CouplingMaxIterations = dto.SimulationParams.CouplingMaxIterations > 0
+            ? dto.SimulationParams.CouplingMaxIterations : 12;
+        SimulationParams.CouplingTolerance = dto.SimulationParams.CouplingTolerance > 0
+            ? dto.SimulationParams.CouplingTolerance : 1e-5;
+        SimulationParams.CouplingMaxRetries = dto.SimulationParams.CouplingMaxRetries > 0
+            ? dto.SimulationParams.CouplingMaxRetries : 5;
         SimulationParams.TotalTime = dto.SimulationParams.TotalTime;
         SimulationParams.TimeStep = dto.SimulationParams.TimeStep;
         SimulationParams.OutputInterval = dto.SimulationParams.OutputInterval;
@@ -565,6 +613,18 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
 /// </summary>
 public class SimulationParameters
 {
+    [JsonProperty]
+    public PhysicoChemSolverMode EngineMode { get; set; } = PhysicoChemSolverMode.GeoChemical;
+
+    [JsonProperty]
+    public int CouplingMaxIterations { get; set; } = 12;
+
+    [JsonProperty]
+    public double CouplingTolerance { get; set; } = 1e-5;
+
+    [JsonProperty]
+    public int CouplingMaxRetries { get; set; } = 5;
+
     [JsonProperty]
     public SimulationMode Mode { get; set; } = SimulationMode.TimeBased;
 
@@ -658,6 +718,13 @@ public class SimulationParameters
 
     [JsonProperty]
     public double GasBuoyancyVelocity { get; set; } = 20.0;
+}
+
+public enum PhysicoChemSolverMode
+{
+    GeoChemical,
+    AdvancedMultiphysics,
+    CoupledThermoMultiphysics
 }
 
 /// <summary>

@@ -1,4 +1,4 @@
-// GAIA/Data/Materials/Element.cs
+// ported from GeoscientistToolkit/Data/Materials/Element.cs
 
 namespace GAIA.Data.Materials;
 

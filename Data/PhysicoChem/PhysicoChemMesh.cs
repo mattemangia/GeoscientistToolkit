@@ -380,6 +380,44 @@ namespace GAIA.Data.PhysicoChem
             Connections.Clear(); // Connections are invalidated by the split
         }
 
+        /// <summary>Subdivides only the selected cubic cells while preserving total volume and properties.</summary>
+        public void SplitCells(IEnumerable<string> cellIds, int xDivisions, int yDivisions, int zDivisions)
+        {
+            xDivisions = Math.Max(1, xDivisions); yDivisions = Math.Max(1, yDivisions); zDivisions = Math.Max(1, zDivisions);
+            var selected = cellIds.Distinct().Where(Cells.ContainsKey).Select(id => Cells[id]).ToArray();
+            if (selected.Any(cell => cell.Vertices.Count > 0))
+                throw new InvalidOperationException("Selected-cell subdivision currently supports structured cubic cells only; Voronoi/polyhedral cells require geometric clipping.");
+            foreach (var parent in selected)
+            {
+                Cells.Remove(parent.ID);
+                var side = Math.Cbrt(Math.Max(parent.Volume, 1e-18));
+                var dx = side / xDivisions; var dy = side / yDivisions; var dz = side / zDivisions;
+                for (var i = 0; i < xDivisions; i++)
+                for (var j = 0; j < yDivisions; j++)
+                for (var k = 0; k < zDivisions; k++)
+                {
+                    var id = $"{parent.ID}.{i}.{j}.{k}";
+                    Cells[id] = new Cell
+                    {
+                        ID = id, MaterialID = parent.MaterialID, IsActive = parent.IsActive, IsVisible = parent.IsVisible,
+                        InitialConditions = CloneInitialConditions(parent.InitialConditions),
+                        Center = (parent.Center.X - side / 2 + (i + .5) * dx,
+                                  parent.Center.Y - side / 2 + (j + .5) * dy,
+                                  parent.Center.Z - side / 2 + (k + .5) * dz),
+                        Volume = dx * dy * dz
+                    };
+                }
+            }
+            Connections.Clear();
+        }
+
+        private static InitialConditions CloneInitialConditions(InitialConditions source) => source == null ? null : new InitialConditions
+        {
+            Temperature = source.Temperature, Pressure = source.Pressure,
+            Concentrations = new Dictionary<string, double>(source.Concentrations), InitialVelocity = source.InitialVelocity,
+            LiquidSaturation = source.LiquidSaturation, FluidType = source.FluidType
+        };
+
         public void GenerateVoronoiMesh(BoreholeDataset borehole, int layers, double radius, double height)
         {
             var sites = new List<VoronoiSite>();

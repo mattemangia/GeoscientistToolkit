@@ -1,8 +1,7 @@
 /// <summary>
-///     COMPLETE IMPLEMENTATION: Water properties using IAPWS-95 and IAPWS-97 formulations.
-///     Replaces simplified correlations with full equations valid for wide P-T ranges.
-///     Source: Wagner & Pruß, 2002. J. Phys. Chem. Ref. Data, 31(2), 387-535.
-///     IAPWS, 2016. Revised Release on the IAPWS Formulation 1995.
+///     Liquid-water density and dielectric properties for geochemical activity calculations.
+///     The atmospheric correlations are pressure-corrected with a secant bulk modulus; this is
+///     an engineering approximation, not a complete IAPWS-95 implementation.
 /// </summary>
 public class WaterPropertiesIAPWS
 {
@@ -22,24 +21,41 @@ public class WaterPropertiesIAPWS
     /// <summary>
     ///     Calculate water density and dielectric constant at given T and P.
     ///     Uses IAPWS-97 for industrial applications (simpler than IAPWS-95).
-    ///     Valid range: 273.15-1073.15 K, 0-100 MPa
+    ///     Supported engineering range: 273.15-373.15 K and 1-1000 bar. UNVERIFIED for scientific
+    ///     certification until the pressure correction is benchmarked against IAPWS R8-97/EOS data.
     /// </summary>
     public static (double epsilon, double rho_kg_m3) GetWaterProperties(double T_K, double P_bar)
     {
-        var P_MPa = P_bar * 0.1; // Convert bar to MPa
+        if (T_K < 273.15 || T_K > 373.15)
+            System.Diagnostics.Trace.TraceWarning($"[WaterProperties] UNVERIFIED temperature extrapolation at {T_K:F2} K; use IAPWS for certified results.");
+        if (P_bar < 1.0 || P_bar > 1000.0)
+            throw new ArgumentOutOfRangeException(nameof(P_bar), "Supported engineering pressure range is 1-1000 bar.");
+        // FIX (Prism.GeoGenesis): the original IAPWS-97 Region-1 implementation returned a grossly
+        // wrong liquid density (~5 kg/m³ at 25 °C instead of ~997) and a negative dielectric
+        // constant, which inflated the molality/ionic-strength conversion by ~180× and corrupted
+        // every activity/saturation-index calculation. Replaced with validated 1-bar correlations:
+        //   • density: 5th-order polynomial in T (°C), ρ(25 °C)=997.0 kg/m³ (Kell, 1975);
+        //   • dielectric: Malmberg & Maryott (1956), εr(25 °C)=78.3.
+        // These atmospheric-pressure correlations are accurate over the common 0–100 °C range.
+        // Pressure is then included through a secant bulk-modulus correction (approximately
+        // 2.2 GPa near ambient water). Callers must not extrapolate this approximation beyond the
+        // documented liquid range; use a complete IAPWS implementation for supercritical work.
+        var T_C = T_K - 273.15;
 
-        // Calculate density
-        double rho;
-        if (P_MPa < 16.5292 && T_K < 623.15) // Region 1 (liquid)
-            rho = CalculateDensityRegion1(T_K, P_MPa);
-        else if (P_MPa < 10.0 && T_K > 623.15) // Region 2 (vapor)
-            rho = CalculateDensityRegion2(T_K, P_MPa);
-        else // Region 3 or 4 (complex)
-            // Use simplified correlation for high P-T
-            rho = CalculateDensitySimplified(T_K, P_MPa);
+        var rhoAtmospheric = 999.842594 + 6.793952e-2 * T_C - 9.095290e-3 * T_C * T_C +
+                  1.001685e-4 * T_C * T_C * T_C - 1.120083e-6 * Math.Pow(T_C, 4) +
+                  6.536332e-9 * Math.Pow(T_C, 5);
+        var pressurePa = P_bar * 1e5;
+        var deltaPressure = pressurePa - 1e5;
+        var bulkModulusPa = 2.2e9;
+        var rho = rhoAtmospheric / Math.Max(0.8, 1.0 - deltaPressure / bulkModulusPa);
+        if (rho < 100.0) rho = 100.0; // guard against extrapolation past boiling at 1 bar
 
-        // Calculate dielectric constant
-        var epsilon = CalculateDielectricConstant(T_K, rho);
+        var epsilonAtmospheric = 87.740 - 0.40008 * T_C + 9.398e-4 * T_C * T_C - 1.410e-6 * T_C * T_C * T_C;
+        // First-order density scaling of the dielectric susceptibility. This keeps pressure
+        // effects explicit and monotone without claiming the full IAPWS R8-97 formulation.
+        var epsilon = 1.0 + (epsilonAtmospheric - 1.0) * rho / rhoAtmospheric;
+        if (epsilon < 1.0) epsilon = 1.0;
 
         return (epsilon, rho);
     }

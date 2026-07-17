@@ -1,4 +1,4 @@
-// GAIA/Business/CompoundLibraryMetamorphicExtensions.cs
+// ported from GeoscientistToolkit/Business/CompoundLibraryMetamorphicExtensions.cs
 //
 // Extension for adding metamorphic minerals to the compound library.
 // Focus on Al2SiO5 polymorphs (Kyanite, Andalusite, Sillimanite) for P-T diagrams.
@@ -11,7 +11,7 @@
 using GAIA.Data.Materials;
 using GAIA.Util;
 
-namespace GAIA.Business;
+namespace GAIA.Data.Materials;
 
 public static class CompoundLibraryMetamorphicExtensions
 {
@@ -25,6 +25,7 @@ public static class CompoundLibraryMetamorphicExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Kyanite",
+            LogKsp_25C = 15.94,
             ChemicalFormula = "Al2SiO5",
             Synonyms = new List<string> { "Al2SiO5", "Cyanite", "Disthene" },
             Phase = CompoundPhase.Solid,
@@ -47,6 +48,7 @@ public static class CompoundLibraryMetamorphicExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Andalusite",
+            LogKsp_25C = 16.21,
             ChemicalFormula = "Al2SiO5",
             Synonyms = new List<string> { "Al2SiO5", "Chiastolite" },
             Phase = CompoundPhase.Solid,
@@ -69,6 +71,7 @@ public static class CompoundLibraryMetamorphicExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Sillimanite",
+            LogKsp_25C = 16.57,
             ChemicalFormula = "Al2SiO5",
             Synonyms = new List<string> { "Al2SiO5", "Fibrolite" },
             Phase = CompoundPhase.Solid,
@@ -94,6 +97,7 @@ public static class CompoundLibraryMetamorphicExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Staurolite",
+            LogKsp_25C = 216.34,
             ChemicalFormula = "Fe2Al9Si4O23(OH)",
             Synonyms = new List<string> { "Fe2Al9Si4O23(OH)" },
             Phase = CompoundPhase.Solid,
@@ -115,6 +119,7 @@ public static class CompoundLibraryMetamorphicExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Cordierite",
+            LogKsp_25C = 49.43,
             ChemicalFormula = "Mg2Al4Si5O18",
             Synonyms = new List<string> { "Mg2Al4Si5O18", "Iolite" },
             Phase = CompoundPhase.Solid,
@@ -136,6 +141,7 @@ public static class CompoundLibraryMetamorphicExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Chloritoid",
+            LogKsp_25C = 21.79,
             ChemicalFormula = "FeAl2SiO5(OH)2",
             Synonyms = new List<string> { "FeAl2SiO5(OH)2" },
             Phase = CompoundPhase.Solid,

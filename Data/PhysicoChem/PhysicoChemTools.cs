@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
+using System.Threading.Tasks;
 using GAIA.Analysis.PhysicoChem;
 using GAIA.Business;
 using GAIA.Data;
@@ -99,12 +101,16 @@ public class PhysicoChemTools : IDatasetTools
     private bool _isSimulating = false;
     private float _simulationProgress = 0.0f;
     private string _simulationStatus = "";
+    private CancellationTokenSource _simulationCancellation;
     private int _selectedSweepIndex = -1;
     private string _sweepName = "Temperature";
     private string _sweepTargetPath = "SimulationParams.TotalTime";
     private double _sweepMinValue = 0.0;
     private double _sweepMaxValue = 1.0;
     private int _sweepInterpolationIndex = 0;
+    private bool _advancedWorkflow;
+    private readonly Stack<Dictionary<string, Cell>> _meshUndo = new();
+    private readonly Stack<Dictionary<string, Cell>> _meshRedo = new();
 
     // Selected items
     private int _selectedDomainIndex = -1;
@@ -173,6 +179,10 @@ public class PhysicoChemTools : IDatasetTools
         }
 
         ImGui.Text("PhysicoChem Reactor Simulation Tools");
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Guided", !_advancedWorkflow)) _advancedWorkflow = false;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Advanced", _advancedWorkflow)) _advancedWorkflow = true;
         ImGui.Separator();
 
         // Domain Management
@@ -184,7 +194,7 @@ public class PhysicoChemTools : IDatasetTools
         ImGui.Spacing();
 
         // Mesh Editing Tools
-        if (ImGui.CollapsingHeader("Mesh Editing & Deformation"))
+        if (_advancedWorkflow && ImGui.CollapsingHeader("Mesh Editing & Deformation"))
         {
             DrawMeshEditingTools(pcDataset);
         }
@@ -192,7 +202,7 @@ public class PhysicoChemTools : IDatasetTools
         ImGui.Spacing();
 
         // Boundary Conditions
-        if (ImGui.CollapsingHeader("Boundary Conditions"))
+        if (_advancedWorkflow && ImGui.CollapsingHeader("Boundary Conditions"))
         {
             DrawBoundaryConditions(pcDataset);
         }
@@ -200,7 +210,7 @@ public class PhysicoChemTools : IDatasetTools
         ImGui.Spacing();
 
         // Force Fields
-        if (ImGui.CollapsingHeader("Force Fields"))
+        if (_advancedWorkflow && ImGui.CollapsingHeader("Force Fields"))
         {
             DrawForceFields(pcDataset);
         }
@@ -208,7 +218,7 @@ public class PhysicoChemTools : IDatasetTools
         ImGui.Spacing();
 
         // Nucleation Sites
-        if (ImGui.CollapsingHeader("Nucleation Sites"))
+        if (_advancedWorkflow && ImGui.CollapsingHeader("Nucleation Sites"))
         {
             DrawNucleationSites(pcDataset);
         }
@@ -325,6 +335,14 @@ public class PhysicoChemTools : IDatasetTools
         ImGui.Separator();
         ImGui.Text("Split Mesh into Grid:");
 
+        if (!(_meshUndo.Count > 0)) ImGui.BeginDisabled();
+        if (ImGui.Button("Undo Mesh")) RestoreMeshSnapshot(dataset, _meshUndo, _meshRedo);
+        if (!(_meshUndo.Count > 0)) ImGui.EndDisabled();
+        ImGui.SameLine();
+        if (!(_meshRedo.Count > 0)) ImGui.BeginDisabled();
+        if (ImGui.Button("Redo Mesh")) RestoreMeshSnapshot(dataset, _meshRedo, _meshUndo);
+        if (!(_meshRedo.Count > 0)) ImGui.EndDisabled();
+
         ImGui.InputInt("X Divisions", ref _xDivisions);
         ImGui.InputInt("Y Divisions", ref _yDivisions);
         ImGui.InputInt("Z Divisions", ref _zDivisions);
@@ -333,7 +351,8 @@ public class PhysicoChemTools : IDatasetTools
         {
             try
             {
-                dataset.Mesh.SplitIntoGrid(_xDivisions, _yDivisions, _zDivisions);
+                PushMeshSnapshot(dataset);
+                dataset.SplitIntoStructuredGrid(_xDivisions, _yDivisions, _zDivisions);
                 Logger.Log($"Split mesh into a {_xDivisions}x{_yDivisions}x{_zDivisions} grid.");
                 ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             }
@@ -342,6 +361,19 @@ public class PhysicoChemTools : IDatasetTools
                 Logger.LogError($"Failed to split mesh: {ex.Message}");
             }
         }
+
+        ImGui.SameLine();
+        if (dataset.SelectedCellIDs.Count == 0) ImGui.BeginDisabled();
+        if (ImGui.Button("Split Selected"))
+        {
+            PushMeshSnapshot(dataset);
+            var selected = dataset.SelectedCellIDs.ToArray();
+            dataset.Mesh.SplitCells(selected, _xDivisions, _yDivisions, _zDivisions);
+            dataset.ComputationalMeshDirty = true;
+            dataset.SelectedCellIDs = dataset.Mesh.Cells.Keys.Where(id => selected.Any(parent => id.StartsWith(parent + "."))).ToList();
+            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+        }
+        if (dataset.SelectedCellIDs.Count == 0) ImGui.EndDisabled();
 
 
         ImGui.Spacing();
@@ -1254,9 +1286,69 @@ public class PhysicoChemTools : IDatasetTools
         return (xBox, yBox, zBox);
     }
 
+    private void PushMeshSnapshot(PhysicoChemDataset dataset)
+    {
+        _meshUndo.Push(CloneCells(dataset.Mesh.Cells));
+        _meshRedo.Clear();
+        while (_meshUndo.Count > 30)
+        {
+            var retained = _meshUndo.Reverse().Skip(1).Reverse().ToArray();
+            _meshUndo.Clear(); foreach (var snapshot in retained) _meshUndo.Push(snapshot);
+        }
+    }
+
+    private static void RestoreMeshSnapshot(PhysicoChemDataset dataset,
+        Stack<Dictionary<string, Cell>> source, Stack<Dictionary<string, Cell>> destination)
+    {
+        if (source.Count == 0) return;
+        destination.Push(CloneCells(dataset.Mesh.Cells));
+        dataset.Mesh.Cells = source.Pop();
+        dataset.Mesh.Connections.Clear();
+        dataset.ComputationalMeshDirty = true;
+        dataset.SelectedCellIDs.Clear();
+        ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+    }
+
+    private static Dictionary<string, Cell> CloneCells(Dictionary<string, Cell> cells) => cells.ToDictionary(
+        pair => pair.Key,
+        pair => new Cell
+        {
+            ID = pair.Value.ID, MaterialID = pair.Value.MaterialID, IsActive = pair.Value.IsActive,
+            IsVisible = pair.Value.IsVisible, InitialConditions = pair.Value.InitialConditions == null ? null : new InitialConditions
+            {
+                Temperature = pair.Value.InitialConditions.Temperature, Pressure = pair.Value.InitialConditions.Pressure,
+                Concentrations = new Dictionary<string, double>(pair.Value.InitialConditions.Concentrations),
+                InitialVelocity = pair.Value.InitialConditions.InitialVelocity,
+                LiquidSaturation = pair.Value.InitialConditions.LiquidSaturation,
+                FluidType = pair.Value.InitialConditions.FluidType
+            },
+            Center = pair.Value.Center, Volume = pair.Value.Volume,
+            Vertices = new List<Vector3>(pair.Value.Vertices)
+        });
+
     private void DrawSimulationParameters(PhysicoChemDataset dataset)
     {
         var simParams = dataset.SimulationParams;
+
+        var engineMode = (int)simParams.EngineMode;
+        if (ImGui.Combo("Engine", ref engineMode, Enum.GetNames<PhysicoChemSolverMode>(), Enum.GetValues<PhysicoChemSolverMode>().Length))
+            simParams.EngineMode = (PhysicoChemSolverMode)engineMode;
+        ImGui.TextDisabled(simParams.EngineMode switch
+        {
+            PhysicoChemSolverMode.GeoChemical => "GeoGenesis chemistry and reactive transport",
+            PhysicoChemSolverMode.AdvancedMultiphysics => "Flow, heat, forces and optional chemistry",
+            _ => "Bidirectional iterative thermo-multiphysics coupling"
+        });
+        if (simParams.EngineMode == PhysicoChemSolverMode.CoupledThermoMultiphysics)
+        {
+            var couplingIterations = simParams.CouplingMaxIterations;
+            var couplingTolerance = (float)simParams.CouplingTolerance;
+            if (ImGui.InputInt("Coupling Iterations", ref couplingIterations))
+                simParams.CouplingMaxIterations = Math.Max(1, couplingIterations);
+            if (ImGui.InputFloat("Coupling Tolerance", ref couplingTolerance, 0, 0, "%.2e"))
+                simParams.CouplingTolerance = Math.Max(1e-12, couplingTolerance);
+        }
+        ImGui.Separator();
 
         // Use temporary float variables for editing
         float totalTime = (float)simParams.TotalTime;
@@ -1478,8 +1570,8 @@ public class PhysicoChemTools : IDatasetTools
         {
             if (ImGui.Button("Stop", new Vector2(80, 30)))
             {
-                _isSimulating = false;
-                _simulationStatus = "Stopped by user";
+                _simulationCancellation?.Cancel();
+                _simulationStatus = "Stopping...";
             }
         }
 
@@ -1499,12 +1591,14 @@ public class PhysicoChemTools : IDatasetTools
         }
     }
 
-    private void RunSimulation(PhysicoChemDataset dataset)
+    private async void RunSimulation(PhysicoChemDataset dataset)
     {
         _isSimulating = true;
         _simulationProgress = 0.0f;
         _simulationStatus = "Initializing...";
 
+        _simulationCancellation?.Dispose();
+        _simulationCancellation = new CancellationTokenSource();
         try
         {
             // Initialize state
@@ -1522,7 +1616,7 @@ public class PhysicoChemTools : IDatasetTools
             var solver = new PhysicoChemSolver(dataset, progress);
 
             // Run simulation
-            solver.RunSimulation();
+            await Task.Run(() => solver.RunSimulation(_simulationCancellation.Token), _simulationCancellation.Token);
 
             _isSimulating = false;
             _simulationProgress = 1.0f;
@@ -1530,6 +1624,12 @@ public class PhysicoChemTools : IDatasetTools
 
             ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             Logger.Log($"Simulation completed: {dataset.ResultHistory.Count} timesteps");
+        }
+        catch (OperationCanceledException)
+        {
+            _isSimulating = false;
+            _simulationStatus = "Stopped by user";
+            Logger.LogWarning("Simulation cancelled by user");
         }
         catch (Exception ex)
         {

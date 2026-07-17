@@ -1,0 +1,616 @@
+// ported from GeoscientistToolkit/OpenCL/OpenCLDeviceManager.cs
+//
+// ================================================================================================
+// Centralized OpenCL Device Management
+// ================================================================================================
+// This class provides centralized management of OpenCL device selection across all modules
+// in the GAIA.GeoGenesis module. It ensures that all OpenCL-accelerated components
+// (geothermal simulations, NMR, acoustic, geomechanical, etc.) use the same device as
+// configured in the application settings.
+//
+// IMPLEMENTATION NOTES:
+// ------------------------------------------------------------------------------------------------
+// 1. Reads device preference from Settings.Hardware.ComputeGPU
+// 2. Supports "Auto" mode for automatic device selection
+// 3. Supports specific device selection by name (e.g., "NVIDIA RTX 3070", "Apple M1")
+// 4. Handles platform-specific considerations:
+//    - macOS (including M1/M2/M3): Prefers Metal-based OpenCL on Apple Silicon
+//    - Linux: Handles multiple OpenCL platforms (NVIDIA, AMD, Intel)
+//    - Windows: Standard GPU selection with fallback to CPU
+// 5. Thread-safe singleton pattern for device caching
+// 6. Provides device enumeration for settings UI
+// ================================================================================================
+
+using System.Runtime.InteropServices;
+using System.Text;
+using GAIA.GeoGenesis;
+using Silk.NET.OpenCL;
+
+namespace GAIA.GeoGenesis.Compute;
+
+/// <summary>
+///     Centralized manager for OpenCL device selection across the application.
+///     Ensures all OpenCL modules use the device configured in settings.
+/// </summary>
+public static class OpenCLDeviceManager
+{
+    private static readonly object _lock = new object();
+    private static CL _cl;
+    private static nint _cachedDevice;
+    private static string _cachedDeviceName;
+    private static string _cachedDeviceVendor;
+    private static ulong _cachedDeviceGlobalMemory;
+    private static string _lastEnumerationMessage = string.Empty;
+    private static bool _isInitialized;
+    private static List<OpenCLDeviceInfo> _availableDevices;
+
+    /// <summary>
+    ///     Gets the OpenCL device to use for compute operations based on application settings.
+    ///     Returns 0 if no suitable device is available.
+    /// </summary>
+    public static unsafe nint GetComputeDevice()
+    {
+        lock (_lock)
+        {
+            if (_isInitialized)
+                return _cachedDevice;
+
+            _cl = CL.GetApi();
+            _availableDevices = new List<OpenCLDeviceInfo>();
+
+            try
+            {
+                Logger.Log("OpenCLDeviceManager: Initializing device selection...");
+
+                // Get all available devices
+                var devices = EnumerateAllDevices();
+                _availableDevices = devices;
+
+                if (devices.Count == 0)
+                {
+                    Logger.LogWarning("No OpenCL devices found.");
+                    Logger.LogWarning("Please ensure GPU drivers with OpenCL support are installed.");
+                    _isInitialized = true;
+                    return 0;
+                }
+
+                // Get user preference from GeoGenesis compute settings
+                var preferredDeviceName = ComputeSettings.ComputeGpu ?? "Auto";
+
+                Logger.Log($"OpenCLDeviceManager: User preference = '{preferredDeviceName}'");
+                Logger.Log($"OpenCLDeviceManager: Found {devices.Count} OpenCL device(s)");
+
+                // Select device based on preference
+                OpenCLDeviceInfo selectedDevice = null;
+
+                if (preferredDeviceName == "Auto")
+                {
+                    // Auto mode: Prefer GPU over CPU, consider platform-specific preferences
+                    selectedDevice = SelectAutoDevice(devices);
+                }
+                else
+                {
+                    // Try to find device by name
+                    selectedDevice = devices.FirstOrDefault(d =>
+                        d.Name.Contains(preferredDeviceName, StringComparison.OrdinalIgnoreCase));
+
+                    if (selectedDevice == null)
+                    {
+                        Logger.LogWarning($"Preferred device '{preferredDeviceName}' not found. Falling back to auto selection.");
+                        selectedDevice = SelectAutoDevice(devices);
+                    }
+                }
+
+                if (selectedDevice != null)
+                {
+                    _cachedDevice = selectedDevice.Device;
+                    _cachedDeviceName = selectedDevice.Name;
+                    _cachedDeviceVendor = selectedDevice.Vendor;
+                    _cachedDeviceGlobalMemory = selectedDevice.GlobalMemory;
+
+                    Logger.Log($"OpenCLDeviceManager: Selected device: {_cachedDeviceName} ({_cachedDeviceVendor})");
+                    Logger.Log($"OpenCLDeviceManager: Global Memory: {_cachedDeviceGlobalMemory / (1024 * 1024)} MB");
+                    Logger.Log($"OpenCLDeviceManager: Device Type: {selectedDevice.Type}");
+                }
+                else
+                {
+                    Logger.LogWarning("No suitable OpenCL device could be selected.");
+                }
+
+                _isInitialized = true;
+                return _cachedDevice;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"OpenCLDeviceManager initialization error: {ex.Message}");
+                _isInitialized = true;
+                return 0;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets information about the currently selected device.
+    /// </summary>
+    public static (string Name, string Vendor, ulong GlobalMemory) GetDeviceInfo()
+    {
+        lock (_lock)
+        {
+            if (!_isInitialized)
+                GetComputeDevice();
+
+            return (_cachedDeviceName ?? "None", _cachedDeviceVendor ?? "None", _cachedDeviceGlobalMemory);
+        }
+    }
+
+    /// <summary>
+    ///     Gets all available OpenCL devices for display in settings UI.
+    /// </summary>
+    public static List<OpenCLDeviceInfo> GetAvailableDevices()
+    {
+        lock (_lock)
+        {
+            if (!_isInitialized)
+                GetComputeDevice();
+
+            return _availableDevices ?? new List<OpenCLDeviceInfo>();
+        }
+    }
+
+    /// <summary>
+    ///     Gets all GPU devices for multi-GPU parallelization if enabled in settings.
+    ///     Returns a list with the single selected device if multi-GPU is disabled or only one GPU is available.
+    /// </summary>
+    public static List<OpenCLDeviceInfo> GetAllComputeDevices()
+    {
+        lock (_lock)
+        {
+            if (!_isInitialized)
+                GetComputeDevice();
+
+            var enableMultiGPU = ComputeSettings.EnableMultiGpuParallelization;
+
+            if (!enableMultiGPU || _availableDevices == null)
+            {
+                // Multi-GPU disabled or not initialized - return single device
+                if (_cachedDevice != 0 && _availableDevices != null)
+                {
+                    var singleDevice = _availableDevices.FirstOrDefault(d => d.Device == _cachedDevice);
+                    if (singleDevice != null)
+                        return new List<OpenCLDeviceInfo> { singleDevice };
+                }
+                return new List<OpenCLDeviceInfo>();
+            }
+
+            // Multi-GPU enabled - return all GPU devices
+            var gpuDevices = _availableDevices.Where(d => d.Type == DeviceType.Gpu).ToList();
+
+            if (gpuDevices.Count > 1)
+            {
+                Logger.Log($"OpenCLDeviceManager: Multi-GPU mode enabled with {gpuDevices.Count} GPUs");
+                foreach (var gpu in gpuDevices)
+                {
+                    Logger.Log($"  - {gpu.Name} ({gpu.Vendor}) - {gpu.GlobalMemory / (1024 * 1024)} MB");
+                }
+            }
+            else if (gpuDevices.Count == 1)
+            {
+                Logger.Log("OpenCLDeviceManager: Only one GPU available, using single-GPU mode");
+            }
+
+            return gpuDevices.Count > 0 ? gpuDevices : new List<OpenCLDeviceInfo> { _availableDevices.FirstOrDefault(d => d.Device == _cachedDevice) }.Where(d => d != null).ToList();
+        }
+    }
+
+    /// <summary>
+    ///     Checks if multi-GPU mode is enabled and multiple GPUs are available.
+    /// </summary>
+    public static bool IsMultiGPUEnabled()
+    {
+        lock (_lock)
+        {
+            var enableMultiGPU = ComputeSettings.EnableMultiGpuParallelization;
+
+            if (!enableMultiGPU)
+                return false;
+
+            if (!_isInitialized)
+                GetComputeDevice();
+
+            var gpuDevices = _availableDevices?.Where(d => d.Type == DeviceType.Gpu).ToList();
+            return gpuDevices != null && gpuDevices.Count > 1;
+        }
+    }
+
+    /// <summary>
+    ///     Resets the device cache. Call this when settings change to force device reselection.
+    /// </summary>
+    public static void Reset()
+    {
+        lock (_lock)
+        {
+            _isInitialized = false;
+            _cachedDevice = 0;
+            _cachedDeviceName = null;
+            _cachedDeviceVendor = null;
+            _cachedDeviceGlobalMemory = 0;
+            _availableDevices = null;
+            _lastEnumerationMessage = string.Empty;
+        }
+    }
+
+    /// <summary>
+    ///     Returns the most recent OpenCL enumeration diagnostic for settings UIs.
+    /// </summary>
+    public static string GetEnumerationDiagnostic()
+    {
+        lock (_lock)
+        {
+            if (!_isInitialized)
+                GetComputeDevice();
+
+            return _lastEnumerationMessage ?? string.Empty;
+        }
+    }
+
+    /// <summary>
+    ///     Enumerates all available OpenCL devices across all platforms.
+    /// </summary>
+    private static unsafe List<OpenCLDeviceInfo> EnumerateAllDevices()
+    {
+        var result = new List<OpenCLDeviceInfo>();
+
+        try
+        {
+            // Get all platforms
+            uint numPlatforms;
+            _cl.GetPlatformIDs(0, null, &numPlatforms);
+
+            if (numPlatforms == 0)
+                return result;
+
+            var platforms = new nint[numPlatforms];
+            fixed (nint* platformsPtr = platforms)
+            {
+                _cl.GetPlatformIDs(numPlatforms, platformsPtr, null);
+            }
+
+            var platformSummaries = new List<string>();
+
+            // For each platform, enumerate devices
+            foreach (var platform in platforms)
+            {
+                var platformName = GetPlatformName(platform);
+
+                // Try to get GPU devices first
+                var gpuDevices = GetDevicesOfType(platform, DeviceType.Gpu, platformName);
+                result.AddRange(gpuDevices);
+
+                // Then get CPU devices
+                var cpuDevices = GetDevicesOfType(platform, DeviceType.Cpu, platformName);
+                result.AddRange(cpuDevices);
+
+                platformSummaries.Add($"{platformName}: {gpuDevices.Count} GPU, {cpuDevices.Count} CPU");
+            }
+
+            _lastEnumerationMessage = platformSummaries.Count == 0
+                ? "OpenCL ICD loader reported no platforms."
+                : string.Join("; ", platformSummaries);
+
+            var vendorFiles = GetOpenClIcdVendorFiles();
+            if (HasAmdPciDevice() && !result.Any(IsAmdDevice))
+            {
+                var vendorFileSummary = vendorFiles.Count == 0
+                    ? "no ICD vendor files"
+                    : string.Join(", ", vendorFiles);
+                var msg = "AMD GPU hardware is present, but no AMD OpenCL device was reported. " +
+                          $"Installed ICD vendor files: {vendorFileSummary}. Install or repair an AMD/Mesa OpenCL ICD.";
+                Logger.LogWarning($"OpenCLDeviceManager: {msg}");
+                _lastEnumerationMessage = string.IsNullOrWhiteSpace(_lastEnumerationMessage)
+                    ? msg
+                    : $"{_lastEnumerationMessage}; {msg}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Error enumerating OpenCL devices: {ex.Message}");
+            _lastEnumerationMessage = $"OpenCL enumeration failed: {ex.Message}";
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    ///     Gets devices of a specific type from a platform.
+    /// </summary>
+    private static unsafe List<OpenCLDeviceInfo> GetDevicesOfType(nint platform, DeviceType deviceType, string platformName)
+    {
+        var result = new List<OpenCLDeviceInfo>();
+
+        try
+        {
+            uint numDevices;
+            _cl.GetDeviceIDs(platform, deviceType, 0, null, &numDevices);
+
+            if (numDevices == 0)
+                return result;
+
+            var devices = new nint[numDevices];
+            fixed (nint* devicesPtr = devices)
+            {
+                _cl.GetDeviceIDs(platform, deviceType, numDevices, devicesPtr, null);
+            }
+
+            foreach (var device in devices)
+            {
+                var deviceInfo = GetDeviceInformation(device, platform, platformName, deviceType);
+                if (deviceInfo != null)
+                    result.Add(deviceInfo);
+            }
+        }
+        catch
+        {
+            // Platform doesn't support this device type, which is normal
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    ///     Gets detailed information about an OpenCL device.
+    /// </summary>
+    private static unsafe OpenCLDeviceInfo GetDeviceInformation(nint device, nint platform, string platformName, DeviceType deviceType)
+    {
+        try
+        {
+            // Get device name
+            string deviceName = GetDeviceString(device, DeviceInfo.Name);
+
+            // Get device vendor
+            string vendor = GetDeviceString(device, DeviceInfo.Vendor);
+
+            // Get global memory size
+            ulong globalMem;
+            _cl.GetDeviceInfo(device, (uint)DeviceInfo.GlobalMemSize, sizeof(ulong), &globalMem, null);
+
+            // Get max compute units
+            uint computeUnits;
+            _cl.GetDeviceInfo(device, (uint)DeviceInfo.MaxComputeUnits, sizeof(uint), &computeUnits, null);
+
+            // Get max clock frequency
+            uint maxClockFreq;
+            _cl.GetDeviceInfo(device, (uint)DeviceInfo.MaxClockFrequency, sizeof(uint), &maxClockFreq, null);
+
+            var extensions = GetDeviceString(device, DeviceInfo.Extensions);
+
+            return new OpenCLDeviceInfo
+            {
+                Device = device,
+                Platform = platform,
+                PlatformName = platformName,
+                Name = deviceName,
+                Vendor = vendor,
+                Type = deviceType,
+                GlobalMemory = globalMem,
+                ComputeUnits = computeUnits,
+                MaxClockFrequency = maxClockFreq,
+                SupportsFp64 = extensions.Contains("cl_khr_fp64", StringComparison.Ordinal)
+            };
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Error getting device information: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    ///     Gets the name of an OpenCL platform.
+    /// </summary>
+    private static unsafe string GetPlatformName(nint platform)
+    {
+        try
+        {
+            nuint paramSize;
+            _cl.GetPlatformInfo(platform, (uint)PlatformInfo.Name, 0, null, &paramSize);
+            if (paramSize == 0)
+                return "Unknown";
+
+            var nameBuffer = new byte[(int)paramSize];
+            fixed (byte* namePtr = nameBuffer)
+            {
+                _cl.GetPlatformInfo(platform, (uint)PlatformInfo.Name, paramSize, namePtr, null);
+            }
+
+            return DecodeNullTerminatedUtf8(nameBuffer);
+        }
+        catch
+        {
+            return "Unknown";
+        }
+    }
+
+    private static unsafe string GetDeviceString(nint device, DeviceInfo info)
+    {
+        nuint paramSize;
+        _cl.GetDeviceInfo(device, (uint)info, 0, null, &paramSize);
+        if (paramSize == 0)
+            return "Unknown";
+
+        var buffer = new byte[(int)paramSize];
+        fixed (byte* ptr = buffer)
+        {
+            _cl.GetDeviceInfo(device, (uint)info, paramSize, ptr, null);
+        }
+
+        return DecodeNullTerminatedUtf8(buffer);
+    }
+
+    private static string DecodeNullTerminatedUtf8(byte[] buffer)
+    {
+        var length = Array.IndexOf(buffer, (byte)0);
+        if (length < 0)
+            length = buffer.Length;
+        return Encoding.UTF8.GetString(buffer, 0, length).Trim();
+    }
+
+    /// <summary>
+    ///     Selects the best device automatically based on platform-specific heuristics.
+    /// </summary>
+    private static OpenCLDeviceInfo SelectAutoDevice(List<OpenCLDeviceInfo> devices)
+    {
+        if (devices.Count == 0)
+            return null;
+
+        // Windows, Linux and macOS can all expose multiple OpenCL platforms. Keep CUDA selection
+        // independent and pick the best OpenCL GPU by kernel suitability: fp64 first, then memory.
+        var bestGpu = devices
+            .Where(d => d.Type == DeviceType.Gpu)
+            .OrderByDescending(d => d.SupportsFp64)
+            .ThenByDescending(d => d.GlobalMemory)
+            .ThenByDescending(GetPlatformPreferenceScore)
+            .ThenBy(d => d.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+
+        if (bestGpu != null)
+        {
+            Logger.Log("OpenCLDeviceManager: Selecting best OpenCL GPU by fp64 support and memory");
+            return bestGpu;
+        }
+
+        var cpu = devices
+            .Where(d => d.Type == DeviceType.Cpu)
+            .OrderByDescending(d => d.SupportsFp64)
+            .ThenByDescending(d => d.GlobalMemory)
+            .FirstOrDefault();
+        if (cpu != null)
+        {
+            Logger.Log("OpenCLDeviceManager: No GPU found, falling back to CPU");
+            return cpu;
+        }
+
+        // Last resort: return first device
+        Logger.LogWarning("OpenCLDeviceManager: Using first available device as last resort");
+        return devices[0];
+    }
+
+    private static bool IsAmdDevice(OpenCLDeviceInfo device)
+    {
+        return device.Vendor.Contains("AMD", StringComparison.OrdinalIgnoreCase) ||
+               device.Vendor.Contains("Advanced Micro Devices", StringComparison.OrdinalIgnoreCase) ||
+               device.Name.Contains("AMD", StringComparison.OrdinalIgnoreCase) ||
+               device.Name.Contains("Radeon", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsNvidiaDevice(OpenCLDeviceInfo device)
+    {
+        return device.Vendor.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) ||
+               device.Name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) ||
+               device.Name.Contains("GeForce", StringComparison.OrdinalIgnoreCase) ||
+               device.Name.Contains("Quadro", StringComparison.OrdinalIgnoreCase) ||
+               device.Name.Contains("RTX", StringComparison.OrdinalIgnoreCase) ||
+               device.Name.Contains("GTX", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsIntelDevice(OpenCLDeviceInfo device)
+    {
+        return device.Vendor.Contains("Intel", StringComparison.OrdinalIgnoreCase) ||
+               device.Name.Contains("Intel", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAppleDevice(OpenCLDeviceInfo device)
+    {
+        return device.Vendor.Contains("Apple", StringComparison.OrdinalIgnoreCase) ||
+               device.Name.Contains("Apple", StringComparison.OrdinalIgnoreCase) ||
+               device.PlatformName.Contains("Apple", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int GetPlatformPreferenceScore(OpenCLDeviceInfo device)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            if (IsAppleDevice(device)) return 4;
+            if (IsAmdDevice(device)) return 3;
+            if (IsNvidiaDevice(device)) return 2;
+            if (IsIntelDevice(device)) return 1;
+            return 0;
+        }
+
+        if (IsAmdDevice(device) || IsNvidiaDevice(device)) return 3;
+        if (IsAppleDevice(device)) return 2;
+        if (IsIntelDevice(device)) return 1;
+        return 0;
+    }
+
+    private static bool HasAmdPciDevice()
+    {
+        try
+        {
+            const string pciDevices = "/sys/bus/pci/devices";
+            if (!Directory.Exists(pciDevices))
+                return false;
+
+            foreach (var deviceDir in Directory.EnumerateDirectories(pciDevices))
+            {
+                var vendorPath = Path.Combine(deviceDir, "vendor");
+                var classPath = Path.Combine(deviceDir, "class");
+                if (!File.Exists(vendorPath) || !File.Exists(classPath))
+                    continue;
+
+                var vendor = File.ReadAllText(vendorPath).Trim();
+                var deviceClass = File.ReadAllText(classPath).Trim();
+                if (string.Equals(vendor, "0x1002", StringComparison.OrdinalIgnoreCase) &&
+                    deviceClass.StartsWith("0x03", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort Linux diagnostic only.
+        }
+
+        return false;
+    }
+
+    private static List<string> GetOpenClIcdVendorFiles()
+    {
+        try
+        {
+            const string icdDir = "/etc/OpenCL/vendors";
+            if (!Directory.Exists(icdDir))
+                return new List<string>();
+
+            return Directory.EnumerateFiles(icdDir, "*.icd")
+                .Select(path => Path.GetFileName(path) ?? string.Empty)
+                .Where(name => name.Length > 0)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            return new List<string>();
+        }
+    }
+}
+
+/// <summary>
+///     Information about an available OpenCL device.
+/// </summary>
+public class OpenCLDeviceInfo
+{
+    public nint Device { get; set; }
+    public nint Platform { get; set; }
+    public string PlatformName { get; set; }
+    public string Name { get; set; }
+    public string Vendor { get; set; }
+    public DeviceType Type { get; set; }
+    public ulong GlobalMemory { get; set; }
+    public uint ComputeUnits { get; set; }
+    public uint MaxClockFrequency { get; set; }
+    public bool SupportsFp64 { get; set; }
+
+    public string DisplayName => $"{Name} ({Vendor}) - {GlobalMemory / (1024 * 1024)} MB";
+    public string TypeString => Type == DeviceType.Gpu ? "GPU" : "CPU";
+}

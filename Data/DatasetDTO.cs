@@ -518,6 +518,10 @@ public class NucleationSiteDTO
 
 public class SimulationParametersDTO
 {
+    public string EngineMode { get; set; }
+    public int CouplingMaxIterations { get; set; }
+    public double CouplingTolerance { get; set; }
+    public int CouplingMaxRetries { get; set; }
     public double TotalTime { get; set; }
     public double TimeStep { get; set; }
     public double OutputInterval { get; set; }

@@ -1,4 +1,4 @@
-// GAIA/Business/Thermodynamics/ThermodynamicSolver.cs
+// ported from GeoscientistToolkit/Business/Thermodynamics/ThermodynamicSolver.cs
 //
 // Comprehensive thermodynamic equilibrium solver for geochemical systems
 // based on Gibbs energy minimization with automatic reaction identification.
@@ -365,6 +365,20 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     }
 
     /// <summary>
+    ///     Single-pass activity update: recompute ionic strength from the current SpeciesMoles and
+    ///     evaluate aqueous activity coefficients (Debye–Hückel/Davies/Pitzer) without running the
+    ///     full Newton speciation. This is the stable, standard basis for saturation-index / scaling
+    ///     calculations when the supplied species are taken as the free-ion concentrations, and it
+    ///     avoids the convergence sensitivity of the full equilibrium solve. After calling this,
+    ///     <see cref="CalculateSaturationIndices"/> can be used directly.
+    /// </summary>
+    public void ComputeActivities(ThermodynamicState state)
+    {
+        UpdateIonicStrength(state);
+        _activityCalculator.CalculateActivityCoefficients(state);
+    }
+
+    /// <summary>
     ///     ENHANCEMENT: Calculate saturation indices for all minerals, now including solid solutions.
     ///     SI = log10(IAP/K)
     ///     For solid solutions, SI is calculated for each end-member: SI_i = log10(IAP_i / (K_i * a_i))
@@ -419,6 +433,36 @@ public class ThermodynamicSolver : SimulatorNodeSupport
         return saturationIndices;
     }
 
+    /// <summary>
+    ///     Saturation index SI = log10(IAP/Ksp) for a SPECIFIC mineral, identified by library name.
+    ///     Unlike <see cref="CalculateSaturationIndices"/> (which auto-generates one reaction per
+    ///     elemental composition and therefore collapses polymorphs such as calcite/aragonite to a
+    ///     single representative), this evaluates exactly the requested phase. Requires that
+    ///     activities have been populated (e.g. via <see cref="ComputeActivities"/>). Returns NaN if
+    ///     the mineral is unknown or its dissolution reaction cannot be balanced.
+    /// </summary>
+    public double SaturationIndex(ThermodynamicState state, string mineralName)
+    {
+        var compound = _compoundLibrary.Find(mineralName);
+        if (compound == null || compound.Phase != CompoundPhase.Solid) return double.NaN;
+        var reaction = _reactionGenerator.GenerateSingleDissolutionReaction(compound);
+        if (reaction == null) return double.NaN;
+
+        return SaturationIndex(state, reaction);
+    }
+
+    /// <summary>
+    ///     Saturation index for a pre-generated dissolution reaction. Hot-loop callers (e.g. the
+    ///     virtual reactor evaluating every grid cell) generate the reaction once and reuse it here,
+    ///     avoiding the expensive per-cell reaction balancing of the name-based overload.
+    /// </summary>
+    public double SaturationIndex(ThermodynamicState state, ChemicalReaction reaction)
+    {
+        var logIAP = CalculateLogIAP(reaction, state);
+        var logK = reaction.CalculateLogK(state.Temperature_K);
+        return logIAP - logK;
+    }
+
     private double CalculateLogIAP(ChemicalReaction reaction, ThermodynamicState state)
     {
         var logIAP = 0.0;
@@ -426,6 +470,12 @@ public class ThermodynamicSolver : SimulatorNodeSupport
             // Only consider products (aqueous species) for IAP
             if (coeff > 0)
             {
+                // Pure liquid water is the solvent reference state (a≈1) and is not carried as a
+                // dissolved field in the reactor. Hydrated evaporites would otherwise appear
+                // undersaturated simply because their explicit water activity is absent.
+                if (string.Equals(species, "Water", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(species, "H2O", StringComparison.OrdinalIgnoreCase))
+                    continue;
                 if (state.Activities.TryGetValue(species, out var activity))
                     logIAP += coeff * Math.Log10(Math.Max(activity, 1e-30));
                 else

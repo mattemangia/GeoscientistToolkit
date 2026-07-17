@@ -1,4 +1,5 @@
 using GAIA.Util;
+using GAIA.Data.PhysicoChem;
 using OpenTK.Graphics.OpenGL;
 
 namespace GAIA.UI.Diagnostics;
@@ -32,9 +33,24 @@ internal static class OpenTkGraphicsSelfTest
             if (geothermal.GetRenderTargetImGuiBinding() == IntPtr.Zero)
                 throw new InvalidOperationException("Geothermal renderer did not create a color target.");
         }
+        using (var reactor = new OpenTkPhysicoChemRenderer())
+        {
+            reactor.Initialize();
+            reactor.Resize(64, 64);
+            var dataset = new PhysicoChemDataset("OpenGL self-test");
+            dataset.Mesh.Cells["center"] = new Cell
+            {
+                ID = "center", Center = (0, 0, 0), Volume = 0.25, MaterialID = "Default",
+                InitialConditions = new InitialConditions()
+            };
+            reactor.Upload(dataset);
+            reactor.Render(System.Numerics.Matrix4x4.Identity, System.Numerics.Matrix4x4.Identity, RenderMode.Solid);
+            if (reactor.ColorTexture == 0 || reactor.Pick(32, 32) != "center")
+                throw new InvalidOperationException("PhysicoChem depth/picking framebuffer self-test failed.");
+        }
         var error = GL.GetError();
         if (error != ErrorCode.NoError)
             throw new InvalidOperationException($"OpenGL self-test ended with {error}.");
-        Logger.Log("[OpenTK self-test] PNM and geothermal renderer checks passed.");
+        Logger.Log("[OpenTK self-test] PNM, geothermal and PhysicoChem depth/picking checks passed.");
     }
 }

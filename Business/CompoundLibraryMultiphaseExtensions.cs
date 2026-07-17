@@ -1,4 +1,4 @@
-// GAIA/Business/CompoundLibraryMultiphaseExtensions.cs
+// ported from GeoscientistToolkit/Business/CompoundLibraryMultiphaseExtensions.cs
 //
 // Extension to CompoundLibrary adding compounds for multiphase flow simulations
 // Includes gases (CO2, CH4, H2S, N2, O2), aqueous species, and dissolved gas species
@@ -13,7 +13,7 @@
 using GAIA.Data.Materials;
 using GAIA.Util;
 
-namespace GAIA.Business;
+namespace GAIA.Data.Materials;
 
 /// <summary>
 /// Extension methods to add multiphase flow compounds to CompoundLibrary

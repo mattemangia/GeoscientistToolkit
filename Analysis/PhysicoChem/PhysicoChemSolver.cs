@@ -6,7 +6,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using GAIA.Analysis.Thermodynamic;
+using System.Threading;
+using GAIA.GeoGenesis.Thermodynamics;
 using GAIA.Data.Mesh3D;
 using GAIA.Data.PhysicoChem;
 using GAIA.Network;
@@ -60,7 +61,7 @@ public class PhysicoChemSolver : SimulatorNodeSupport
     /// <summary>
     /// Run the full simulation
     /// </summary>
-    public void RunSimulation()
+    public void RunSimulation(CancellationToken cancellationToken = default)
     {
         var errors = _dataset.Validate();
         if (errors.Count > 0)
@@ -122,29 +123,13 @@ public class PhysicoChemSolver : SimulatorNodeSupport
         Logger.Log($"[PhysicoChemSolver] Starting simulation ({simParams.Mode}): {simParams.TotalTime} s, dt={dt} s");
 
         // Main time loop - support both time-based and step-based modes
-        bool shouldContinue = true;
-        while (shouldContinue)
+        while (simParams.Mode == SimulationMode.TimeBased ? t < simParams.TotalTime : step < simParams.MaxSteps)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            var acceptedDt = simParams.Mode == SimulationMode.TimeBased
+                ? Math.Min(dt, simParams.TotalTime - t)
+                : dt;
             step++;
-            t += dt;
-            state.CurrentTime = t;
-
-            // Check termination condition based on mode
-            if (simParams.Mode == SimulationMode.TimeBased)
-            {
-                shouldContinue = t < simParams.TotalTime;
-                _progress?.Report(((float)(t / simParams.TotalTime), $"Step {step}: t = {t:F2} s"));
-            }
-            else // StepBased
-            {
-                shouldContinue = step < simParams.MaxSteps;
-                _progress?.Report(((float)step / simParams.MaxSteps, $"Step {step}/{simParams.MaxSteps}: t = {t:F2} s"));
-            }
-
-            if (!shouldContinue) break;
-
-            // Operator splitting approach (like TOUGHREACT)
-            var newState = state.Clone();
 
             try
             {
@@ -152,45 +137,12 @@ public class PhysicoChemSolver : SimulatorNodeSupport
                 if (simParams.EnableParameterSweep && _dataset.ParameterSweepManager != null)
                 {
                     double normalizedTime = simParams.Mode == SimulationMode.TimeBased
-                        ? t / simParams.TotalTime
+                        ? (t + acceptedDt) / simParams.TotalTime
                         : (double)step / simParams.MaxSteps;
                     _dataset.ParameterSweepManager.ApplyToSimulation(_dataset, normalizedTime);
                 }
 
-                // 1. Apply forces
-                if (simParams.EnableForces && _dataset.Forces.Count > 0)
-                {
-                    ApplyForces(newState, dt);
-                }
-
-                // 2. Solve flow
-                if (simParams.EnableFlow)
-                {
-                    _flowSolver.SolveFlow(newState, dt, _dataset.BoundaryConditions);
-                }
-
-                // 3. Solve heat transfer
-                if (simParams.EnableHeatTransfer)
-                {
-                    _heatTransfer.SolveHeat(newState, dt, _dataset.BoundaryConditions);
-                }
-
-                // 4. Solve reactive transport
-                if (simParams.EnableReactiveTransport)
-                {
-                    var flowData = CreateFlowData(newState);
-                    var transportState = CreateTransportState(newState);
-
-                    transportState = _reactiveTransport.SolveTimeStep(transportState, dt, flowData);
-
-                    UpdateStateFromTransport(newState, transportState);
-                }
-
-                // 5. Handle nucleation
-                if (simParams.EnableNucleation && _dataset.NucleationSites.Count > 0)
-                {
-                    _nucleationSolver.UpdateNucleation(_dataset, newState, _dataset.NucleationSites, dt);
-                }
+                var newState = AdvanceTimeStep(state, acceptedDt, cancellationToken);
 
                 // 6. Apply boundary conditions
                 ApplyBoundaryConditions(newState);
@@ -201,8 +153,13 @@ public class PhysicoChemSolver : SimulatorNodeSupport
                     CoupleWithGeothermalSimulation(newState);
                 }
 
+                t += acceptedDt;
                 state = newState;
+                state.CurrentTime = t;
                 _dataset.CurrentState = state;
+                _progress?.Report(simParams.Mode == SimulationMode.TimeBased
+                    ? ((float)(t / simParams.TotalTime), $"Step {step}: t = {t:F2} s")
+                    : ((float)step / simParams.MaxSteps, $"Step {step}/{simParams.MaxSteps}: t = {t:F2} s"));
 
                 // Update computed properties for tracking
                 UpdateComputedProperties(state);
@@ -226,15 +183,20 @@ public class PhysicoChemSolver : SimulatorNodeSupport
 
                 if (shouldOutput)
                 {
-                    _dataset.ResultHistory.Add(state.Clone());
+                    var history = new List<PhysicoChemState>(_dataset.ResultHistory) { state.Clone() };
+                    _dataset.ResultHistory = history;
                     outputStep++;
                     Logger.Log($"[PhysicoChemSolver] t={t:F2} s, step={step}, saved output #{outputStep}");
                 }
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 Logger.LogError($"[PhysicoChemSolver] Error at t={t:F2} s: {ex.Message}");
-                break;
+                throw;
             }
 
             // Adaptive time stepping (optional)
@@ -242,6 +204,131 @@ public class PhysicoChemSolver : SimulatorNodeSupport
         }
 
         Logger.Log($"[PhysicoChemSolver] Simulation completed: {step} steps, {outputStep} outputs");
+    }
+
+    private PhysicoChemState AdvanceTimeStep(PhysicoChemState source, double dt, CancellationToken ct)
+    {
+        return _dataset.SimulationParams.EngineMode switch
+        {
+            PhysicoChemSolverMode.GeoChemical => AdvanceChemistry(source.Clone(), dt, ct, force: true),
+            PhysicoChemSolverMode.AdvancedMultiphysics => AdvancePhysicsAndChemistry(source.Clone(), dt, ct),
+            PhysicoChemSolverMode.CoupledThermoMultiphysics => AdvanceCoupled(source, dt, ct),
+            _ => throw new ArgumentOutOfRangeException(nameof(_dataset.SimulationParams.EngineMode))
+        };
+    }
+
+    private PhysicoChemState AdvancePhysicsAndChemistry(PhysicoChemState state, double dt, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var p = _dataset.SimulationParams;
+        if (p.EnableForces && _dataset.Forces.Count > 0) ApplyForces(state, dt);
+        if (p.EnableFlow) _flowSolver.SolveFlow(state, dt, _dataset.BoundaryConditions);
+        if (p.EnableHeatTransfer) _heatTransfer.SolveHeat(state, dt, _dataset.BoundaryConditions);
+        if (p.EnableReactiveTransport) AdvanceChemistry(state, dt, ct);
+        return state;
+    }
+
+    private PhysicoChemState AdvanceChemistry(PhysicoChemState state, double dt, CancellationToken ct, bool force = false)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (force || _dataset.SimulationParams.EnableReactiveTransport)
+        {
+            var transport = _reactiveTransport.SolveTimeStep(CreateTransportState(state), dt, CreateFlowData(state));
+            UpdateStateFromTransport(state, transport);
+        }
+        if (_dataset.SimulationParams.EnableNucleation && _dataset.NucleationSites.Count > 0)
+            _nucleationSolver.UpdateNucleation(_dataset, state, _dataset.NucleationSites, dt);
+        return state;
+    }
+
+    private PhysicoChemState AdvanceCoupled(PhysicoChemState source, double requestedDt, CancellationToken ct)
+    {
+        var p = _dataset.SimulationParams;
+        for (var retry = 0; retry <= p.CouplingMaxRetries; retry++)
+        {
+            var substeps = 1 << retry;
+            var dt = requestedDt / substeps;
+            var advanced = source.Clone();
+            var converged = true;
+            for (var substep = 0; substep < substeps; substep++)
+            {
+                if (!TryAdvanceCoupledStep(advanced, dt, ct, out var next))
+                {
+                    converged = false;
+                    break;
+                }
+                advanced = next;
+            }
+            if (converged) return advanced;
+            Logger.LogWarning($"[PhysicoChemSolver] Coupling retry {retry + 1}: {substeps * 2} substeps");
+        }
+        throw new InvalidOperationException(
+            $"Thermo-multiphysics coupling failed after {p.CouplingMaxRetries + 1} attempts at t={source.CurrentTime:F3} s.");
+    }
+
+    private bool TryAdvanceCoupledStep(PhysicoChemState source, double dt, CancellationToken ct,
+        out PhysicoChemState result)
+    {
+        var p = _dataset.SimulationParams;
+        var iterate = source.Clone();
+        for (var iteration = 1; iteration <= p.CouplingMaxIterations; iteration++)
+        {
+            ct.ThrowIfCancellationRequested();
+            // Every Picard iterate represents the same n→n+1 interval. Only coefficient guesses
+            // (porosity/permeability) come from the previous iterate; conserved fields restart at n.
+            var candidate = source.Clone();
+            CopyCouplingCoefficients(iterate, candidate);
+            candidate = AdvancePhysicsAndChemistry(candidate, dt, ct);
+            ApplyChemistryPropertyFeedback(source, candidate);
+            var residual = CouplingResidual(iterate, candidate);
+            _progress?.Report((0f, $"Coupling {iteration}/{p.CouplingMaxIterations}, residual={residual:E2}"));
+            iterate = candidate;
+            if (residual <= p.CouplingTolerance) { result = iterate; return true; }
+        }
+        result = null;
+        return false;
+    }
+
+    private static void CopyCouplingCoefficients(PhysicoChemState from, PhysicoChemState to)
+    {
+        Array.Copy(from.Porosity, to.Porosity, from.Porosity.Length);
+        Array.Copy(from.Permeability, to.Permeability, from.Permeability.Length);
+    }
+
+    private static double CouplingResidual(PhysicoChemState before, PhysicoChemState after)
+    {
+        double max = 0;
+        void Accumulate(float[,,] a, float[,,] b)
+        {
+            for (var i = 0; i < a.GetLength(0); i++)
+            for (var j = 0; j < a.GetLength(1); j++)
+            for (var k = 0; k < a.GetLength(2); k++)
+                max = Math.Max(max, Math.Abs(b[i, j, k] - a[i, j, k]) / Math.Max(1.0, Math.Abs(a[i, j, k])));
+        }
+        Accumulate(before.Temperature, after.Temperature);
+        Accumulate(before.Pressure, after.Pressure);
+        Accumulate(before.Porosity, after.Porosity);
+        foreach (var species in before.Concentrations.Keys.Intersect(after.Concentrations.Keys))
+            Accumulate(before.Concentrations[species], after.Concentrations[species]);
+        return max;
+    }
+
+    private static void ApplyChemistryPropertyFeedback(PhysicoChemState baseline, PhysicoChemState state)
+    {
+        for (var i = 0; i < state.Porosity.GetLength(0); i++)
+        for (var j = 0; j < state.Porosity.GetLength(1); j++)
+        for (var k = 0; k < state.Porosity.GetLength(2); k++)
+        {
+            var phi0 = Math.Clamp(baseline.Porosity[i, j, k], 1e-4f, 0.95f);
+            var mineralDelta = state.Minerals.Sum(entry => Math.Max(0f, entry.Value[i, j, k] -
+                (baseline.Minerals.TryGetValue(entry.Key, out var oldField) ? oldField[i, j, k] : 0f)));
+            var phi = Math.Clamp(phi0 - mineralDelta, 1e-4f, 0.95f);
+            state.Porosity[i, j, k] = phi;
+            var ratio = phi / phi0;
+            state.Permeability[i, j, k] = Math.Max(1e-22f,
+                baseline.Permeability[i, j, k] * ratio * ratio * ratio *
+                (1 - phi0) * (1 - phi0) / ((1 - phi) * (1 - phi)));
+        }
     }
 
     /// <summary>

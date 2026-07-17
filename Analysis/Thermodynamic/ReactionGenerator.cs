@@ -1,4 +1,4 @@
-// GAIA/Business/Thermodynamics/ReactionGenerator.cs
+// ported from GeoscientistToolkit/Business/Thermodynamics/ReactionGenerator.cs
 //
 // Automatically generates chemical reactions from compound thermodynamic data
 // without hardcoding. Uses stoichiometric matrix analysis and thermodynamic feasibility.
@@ -132,6 +132,13 @@ public class ReactionGenerator
         // Calculate thermodynamic properties
         CalculateReactionThermodynamics(reaction);
 
+        // A tabulated solubility product is the authoritative equilibrium constant for the
+        // dissolution reaction. Retaining the value calculated from formation energies here can
+        // be materially wrong for hydrated evaporites because the solvent reference state is not
+        // represented by a dissolved-water species.
+        if (mineral.LogKsp_25C.HasValue)
+            reaction.LogK_25C = mineral.LogKsp_25C.Value;
+
         return reaction;
     }
 
@@ -142,6 +149,14 @@ public class ReactionGenerator
     public Dictionary<string, int> ParseChemicalFormula(string formula)
     {
         var composition = new Dictionary<string, int>();
+
+        // FIX (GAIA.Util): strip the trailing ionic-charge token so it is not mistaken for
+        // an element subscript. The database writes charges glued to the formula ("CO32-", "SO42-",
+        // "Ca2+", "HCO3-"), so the previous regex read "CO32-" as O₃₂ and "SO42-" as O₄₂ — which
+        // made every carbonate/sulfate dissolution reaction wildly unbalanced. The charge magnitude
+        // is the last digit before the sign(s) when ≥2 digits trail; a lone trailing digit is the
+        // charge only for a monatomic ion (Ca2+, S2-) and otherwise a subscript (NO3-, HCO3-).
+        formula = StripChargeSuffix(formula);
 
         // Pre-process to expand parentheses
         formula = ExpandParentheses(formula);
@@ -168,6 +183,32 @@ public class ReactionGenerator
         }
 
         return composition;
+    }
+
+    /// <summary>
+    ///     Remove a trailing ionic-charge suffix (digits + +/- signs) from a chemical formula,
+    ///     leaving only the atomic part. Handles both glued ("CO32-", "Ca2+") and bare ("Na+",
+    ///     "NO3-") notations. The element subscript that immediately precedes the charge is kept.
+    /// </summary>
+    private static string StripChargeSuffix(string formula)
+    {
+        if (string.IsNullOrEmpty(formula)) return formula;
+        var m = Regex.Match(formula, @"^(.*?)(\d*)([+-]+)$");
+        if (!m.Success || m.Groups[3].Value.Length == 0) return formula;
+
+        var head = m.Groups[1].Value;     // formula without the trailing digit-run and sign
+        var digits = m.Groups[2].Value;   // trailing digit-run immediately before the sign(s)
+
+        if (digits.Length >= 2)
+            return head + digits.Substring(0, digits.Length - 1); // last digit is the charge magnitude
+        if (digits.Length == 1)
+        {
+            // A single trailing digit is the charge only for a monatomic ion (e.g. Ca2+, S2-);
+            // for a polyatomic ion it is the last element's subscript (e.g. NO3-, HCO3-).
+            var headIsSingleElement = Regex.IsMatch(head, @"^[A-Z][a-z]?$");
+            return headIsSingleElement ? head : head + digits;
+        }
+        return head; // charge written without a magnitude digit (±1)
     }
 
     private string ExpandParentheses(string formula)
@@ -205,49 +246,64 @@ public class ReactionGenerator
         var products = new List<ChemicalCompound>();
         var elements = elementalComp.Keys.ToList();
 
-        // Add the most common, simple, free aqueous ion for each element
+        // Whether the mineral itself is oxic (contains oxygen): oxide/carbonate/sulfate/etc.
+        // dissolve to the OXIDIZED aqueous species (the oxyanion), not the reduced one.
+        var mineralIsOxic = elementalComp.ContainsKey("O");
+
+        // Pick the dissolution product for each non-O/H element.
         foreach (var element in elements.Where(e => e != "O" && e != "H"))
         {
-            // SURGICAL FIX: First try to find primary ions
-            var primaryIon = _compoundLibrary.Compounds
+            // Candidate free aqueous ions for this element, restricted to "simple" species made
+            // only of {element, O, H} so we never drag an unrelated metal/complex into the balance.
+            var candidates = _compoundLibrary.Compounds
                 .Where(c => c.Phase == CompoundPhase.Aqueous &&
-                            c.IsPrimaryElementSpecies &&
-                            ParseChemicalFormula(c.ChemicalFormula).ContainsKey(element))
-                .FirstOrDefault();
+                            c.IonicCharge.HasValue && c.IonicCharge.Value != 0)
+                .Select(c => (comp: c, f: ParseChemicalFormula(c.ChemicalFormula)))
+                .Where(x => x.f.ContainsKey(element) &&
+                            x.f.Keys.All(k => k == element || k == "O" || k == "H"))
+                .ToList();
 
-            if (primaryIon != null) 
+            ChemicalCompound? chosen = null;
+            if (candidates.Count > 0)
             {
-                products.Add(primaryIon);
+                // FIX (GAIA.Util): the previous logic grabbed the first species flagged
+                // IsPrimaryElementSpecies regardless of redox state, so e.g. gypsum (S⁶⁺ sulfate)
+                // dissolved to reduced H2S. Instead, for an oxic mineral prefer the species
+                // carrying the most oxygen (the oxyanion: CO3²⁻, SO4²⁻, PO4³⁻ …); break ties and
+                // anoxic minerals by the simplest ion (fewest atoms). This preserves the element's
+                // oxidation state and matches the tabulated solubility-product convention.
+                //
+                // We restrict oxyanion oxygen-preference sorting only to actual oxyanion-forming
+                // elements (C, S, P, N, B, Si) so metal cations (Cu, Cr, Fe, Mn, Zn, Pb, etc.) in
+                // oxic minerals are not incorrectly matched to oxyanions (e.g. chromite to chromate).
+                var formsOxyanion = (element == "C" || element == "S" || element == "P" || element == "N" || element == "B" || element == "Si");
+
+                chosen = candidates
+                    .OrderByDescending(x => formsOxyanion ? (mineralIsOxic ? x.f.GetValueOrDefault("O") : -x.f.GetValueOrDefault("O")) : 0)
+                    .ThenByDescending(x => x.comp.IsPrimaryElementSpecies)
+                    .ThenBy(x => x.f.Values.Sum())
+                    .First().comp;
             }
             else
             {
-                // SURGICAL FIX: If no primary ion marked, find the simplest aqueous ion for this element
-                var simpleIons = _compoundLibrary.Compounds
-                    .Where(c => c.Phase == CompoundPhase.Aqueous &&
-                                c.IonicCharge.HasValue &&
-                                ParseChemicalFormula(c.ChemicalFormula).ContainsKey(element))
-                    .ToList();
-                
-                if (simpleIons.Any())
-                {
-                    // Choose the simplest ion (fewest total atoms)
-                    var simplestIon = simpleIons
-                        .OrderBy(ion => ParseChemicalFormula(ion.ChemicalFormula).Values.Sum())
-                        .First();
-                    
-                    products.Add(simplestIon);
-                    Logger.Log($"[ReactionGenerator] Auto-selected {simplestIon.Name} as dissolution product for element {element}");
-                }
+                // Fallback: any aqueous species (charged or neutral, e.g. a master species like CO2(aq)).
+                chosen = _compoundLibrary.Compounds.FirstOrDefault(c =>
+                    c.Phase == CompoundPhase.Aqueous &&
+                    ParseChemicalFormula(c.ChemicalFormula).ContainsKey(element));
             }
+
+            if (chosen != null) products.Add(chosen);
+            else Logger.LogWarning($"[ReactionGenerator] No aqueous dissolution product found for element {element}");
         }
 
-        // Add water, H+, OH- as they are always present and needed for balancing
+        // Add H2O and H+ for O/H balancing. OH⁻ is intentionally NOT added: it is linearly
+        // dependent on {H2O, H+} (OH⁻ = H2O − H+), and including all three makes the element/charge
+        // matrix rank-deficient, which previously caused the SVD balancer to emit absurd (1e14…)
+        // coefficients for minerals needing water balancing (e.g. calcite, gypsum).
         var water = _compoundLibrary.Find("H2O");
         if (water != null) products.Add(water);
-        var hIon = _compoundLibrary.Find("H^+");
+        var hIon = _compoundLibrary.Find("H+");
         if (hIon != null) products.Add(hIon);
-        var ohIon = _compoundLibrary.Find("OH^-");
-        if (ohIon != null) products.Add(ohIon);
 
         return products.Distinct().ToList();
     }
@@ -1248,14 +1304,18 @@ public class ReactionGenerator
             var hco3 = _compoundLibrary.Find("HCO3^-");
             var co3 = _compoundLibrary.Find("CO3^2^-");
             var h_plus = _compoundLibrary.Find("H^+");
+            var water = _compoundLibrary.Find("H2O");
 
-            // H2CO3* <-> HCO3^- + H^+ (pKa1 ~ 6.35)
-            // Note: H2CO3* represents the sum of CO2(aq) and H2CO3. We use CO2(aq) as the primary species.
-            if (co2_aq != null && hco3 != null && h_plus != null)
+            // CO2(aq) + H2O <-> HCO3^- + H^+ (pKa1 ~ 6.35)
+            // Note: CO2(aq) here stands in for H2CO3* (the sum of CO2(aq) and true H2CO3). The water on
+            // the left is mandatory: without it the C/O/H balance is wrong and ΔG° (hence logK) is off by
+            // ΔGf°(H2O) ≈ 237 kJ/mol — which previously produced an unphysical pKa1 of ≈ −35.
+            if (co2_aq != null && hco3 != null && h_plus != null && water != null)
             {
                 var reaction = new ChemicalReaction { Name = "Carbonic Acid First Dissociation" };
                 reaction.Type = ReactionType.AcidBase;
                 reaction.Stoichiometry[co2_aq.Name] = -1.0;
+                reaction.Stoichiometry[water.Name] = -1.0;
                 reaction.Stoichiometry[hco3.Name] = 1.0;
                 reaction.Stoichiometry[h_plus.Name] = 1.0;
                 CalculateReactionThermodynamics(reaction);
@@ -1515,6 +1575,111 @@ public class ReactionGenerator
     /// <summary>
     ///     Calculate standard thermodynamic properties from formation data.
     /// </summary>
+    /// <summary>Outcome of parsing a free-text chemical equation.</summary>
+    public sealed class ParsedReaction
+    {
+        public ChemicalReaction? Reaction { get; init; }
+        public bool Ok { get; init; }
+        public string Error { get; init; } = string.Empty;
+        public bool MassBalanced { get; init; }
+        public bool ChargeBalanced { get; init; }
+        public string BalanceDetail { get; init; } = string.Empty;
+        public List<string> UnknownSpecies { get; } = new();
+    }
+
+    /// <summary>
+    ///     Parse a human-written chemical / geochemical equation into a <see cref="ChemicalReaction"/>,
+    ///     resolving every species against the compound library, computing ΔG°/ΔH°/log K from the
+    ///     formation properties, and checking element &amp; charge balance. This is what powers the
+    ///     "write an equation" box in the PRISM reaction builder.
+    ///
+    ///     Accepted syntax (reactants on the left, products on the right):
+    ///         "Calcite + 2 H+ = Ca+2 + CO2(aq) + H2O"
+    ///         "CaCO3 -> Ca+2 + CO3-2"
+    ///     Separators "=", "->", "=>", "&lt;=&gt;", "⇌" are all accepted; species may be given by
+    ///     name ("Calcite", "Bicarbonate") or formula ("CaCO3", "HCO3-"); optional integer/decimal
+    ///     coefficients precede the species.
+    /// </summary>
+    public ParsedReaction ParseEquation(string equation)
+    {
+        if (string.IsNullOrWhiteSpace(equation))
+            return new ParsedReaction { Ok = false, Error = "Empty equation." };
+
+        var sepMatch = Regex.Match(equation, @"<=>|=>|->|⇌|=");
+        if (!sepMatch.Success)
+            return new ParsedReaction { Ok = false, Error = "Missing reaction separator ('=', '->', '⇌')." };
+
+        var lhs = equation.Substring(0, sepMatch.Index);
+        var rhs = equation.Substring(sepMatch.Index + sepMatch.Length);
+
+        var reaction = new ChemicalReaction { Name = equation.Trim(), Stoichiometry = new Dictionary<string, double>() };
+        var unknown = new List<string>();
+
+        bool AddSide(string side, double sign)
+        {
+            // Split on '+' used as a TERM SEPARATOR (whitespace on both sides) so charge signs in
+            // cation formulas like "Ca+2" / "Na+" are preserved.
+            foreach (var rawTerm in Regex.Split(side, @"\s+\+\s+"))
+            {
+                if (string.IsNullOrWhiteSpace(rawTerm)) continue;
+                var m = Regex.Match(rawTerm, @"^\s*(\d+(?:\.\d+)?)?\s*(.+?)\s*$");
+                if (!m.Success) continue;
+                var coeff = string.IsNullOrEmpty(m.Groups[1].Value) ? 1.0 : double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                var token = m.Groups[2].Value.Trim();
+                if (token.Length == 0) continue;
+
+                var compound = _compoundLibrary.Find(token);
+                if (compound == null) { unknown.Add(token); continue; }
+
+                // Use the canonical library name so downstream lookups (activities, SI) resolve.
+                reaction.Stoichiometry[compound.Name] =
+                    reaction.Stoichiometry.GetValueOrDefault(compound.Name) + sign * coeff;
+            }
+            return true;
+        }
+
+        AddSide(lhs, -1.0); // reactants consumed
+        AddSide(rhs, +1.0); // products formed
+
+        var result = new ParsedReaction { Reaction = reaction };
+        if (unknown.Count > 0)
+        {
+            result.UnknownSpecies.AddRange(unknown);
+            return new ParsedReaction
+            {
+                Reaction = reaction, Ok = false,
+                Error = "Unknown species: " + string.Join(", ", unknown),
+            };
+        }
+        if (reaction.Stoichiometry.Count < 2)
+            return new ParsedReaction { Reaction = reaction, Ok = false, Error = "Need at least one reactant and one product." };
+
+        CalculateReactionThermodynamics(reaction);
+
+        // Element + charge balance check.
+        var elem = new Dictionary<string, double>();
+        double charge = 0;
+        foreach (var (name, coeff) in reaction.Stoichiometry)
+        {
+            var c = _compoundLibrary.Find(name)!;
+            foreach (var (e, n) in ParseChemicalFormula(c.ChemicalFormula))
+                elem[e] = elem.GetValueOrDefault(e) + coeff * n;
+            charge += coeff * (c.IonicCharge ?? 0);
+        }
+        var massOk = elem.Values.All(v => Math.Abs(v) < 1e-6);
+        var chargeOk = Math.Abs(charge) < 1e-6;
+        var bad = string.Join(" ", elem.Where(kv => Math.Abs(kv.Value) > 1e-6).Select(kv => $"{kv.Key}:{kv.Value:+0.##;-0.##}"));
+
+        return new ParsedReaction
+        {
+            Reaction = reaction,
+            Ok = true,
+            MassBalanced = massOk,
+            ChargeBalanced = chargeOk,
+            BalanceDetail = massOk && chargeOk ? "balanced" : $"unbalanced ({bad} charge:{charge:+0.##;-0.##})"
+        };
+    }
+
     private void CalculateReactionThermodynamics(ChemicalReaction reaction)
     {
         double deltaG = 0.0, deltaH = 0.0, deltaS = 0.0, deltaCp = 0.0;

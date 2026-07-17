@@ -1,4 +1,4 @@
-// GAIA/Business/CompoundLibraryExtensions.cs
+// ported from GeoscientistToolkit/Business/CompoundLibraryExtensions.cs
 //
 // Extended thermodynamic database with additional minerals, aqueous species, and gases
 // for comprehensive geochemical modeling.
@@ -19,7 +19,7 @@
 using GAIA.Data.Materials;
 using GAIA.Util;
 
-namespace GAIA.Business;
+namespace GAIA.Data.Materials;
 
 /// <summary>
 ///     Extension methods for CompoundLibrary to add comprehensive thermodynamic data.
@@ -40,6 +40,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Forsterite",
+            LogKsp_25C = 28.61,
             ChemicalFormula = "Mg2SiO4",
             Synonyms = new List<string> { "Mg2SiO4", "Mg-Olivine" },
             Phase = CompoundPhase.Solid,
@@ -60,6 +61,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Fayalite",
+            LogKsp_25C = 19.03,
             ChemicalFormula = "Fe2SiO4",
             Synonyms = new List<string> { "Fe2SiO4", "Fe-Olivine" },
             Phase = CompoundPhase.Solid,
@@ -81,6 +83,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Enstatite",
+            LogKsp_25C = 11.84,
             ChemicalFormula = "MgSiO3",
             Synonyms = new List<string> { "MgSiO3", "Mg-Pyroxene" },
             Phase = CompoundPhase.Solid,
@@ -101,6 +104,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Ferrosilite",
+            LogKsp_25C = 8.05,
             ChemicalFormula = "FeSiO3",
             Synonyms = new List<string> { "FeSiO3", "Fe-Pyroxene" },
             Phase = CompoundPhase.Solid,
@@ -121,6 +125,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Diopside",
+            LogKsp_25C = 21.74,
             ChemicalFormula = "CaMgSi2O6",
             Synonyms = new List<string> { "CaMgSi2O6" },
             Phase = CompoundPhase.Solid,
@@ -142,6 +147,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Albite",
+            LogKsp_25C = 3.01,
             ChemicalFormula = "NaAlSi3O8",
             Synonyms = new List<string> { "NaAlSi3O8", "Na-Feldspar" },
             Phase = CompoundPhase.Solid,
@@ -162,6 +168,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Anorthite",
+            LogKsp_25C = 24.24,
             ChemicalFormula = "CaAl2Si2O8",
             Synonyms = new List<string> { "CaAl2Si2O8", "Ca-Feldspar" },
             Phase = CompoundPhase.Solid,
@@ -182,6 +189,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Orthoclase",
+            LogKsp_25C = 0.62,
             ChemicalFormula = "KAlSi3O8",
             Synonyms = new List<string> { "KAlSi3O8", "K-Feldspar" },
             Phase = CompoundPhase.Solid,
@@ -468,6 +476,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Periclase",
+            LogKsp_25C = 21.59,
             ChemicalFormula = "MgO",
             Synonyms = new List<string> { "Magnesia" },
             Phase = CompoundPhase.Solid,
@@ -488,6 +497,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Wustite",
+            LogKsp_25C = 12.41,
             ChemicalFormula = "FeO",
             Synonyms = new List<string> { "Ferrous oxide" },
             Phase = CompoundPhase.Solid,
@@ -545,171 +555,6 @@ public static class CompoundLibraryExtensions
             Color = "Black, brown-black",
             Notes = "Main ore of chromium",
             Sources = new List<string> { "Robie & Hemingway (1995)" },
-            IsUserCompound = false
-        });
-
-        // =======================================================================
-        // ADDITIONAL AQUEOUS SPECIES (PHREEQC database)
-        // =======================================================================
-
-        library.AddOrUpdate(new ChemicalCompound
-        {
-            Name = "Strontium ion",
-            ChemicalFormula = "Sr2+",
-            Synonyms = new List<string> { "Sr2+", "Sr+2" },
-            Phase = CompoundPhase.Aqueous,
-            IonicCharge = 2,
-            GibbsFreeEnergyFormation_kJ_mol = -563.8,  // PHREEQC database
-            EnthalpyFormation_kJ_mol = -545.8,
-            Entropy_J_molK = -32.6,
-            MolecularWeight_g_mol = 87.62,
-            IsPrimaryElementSpecies = true,
-            Sources = new List<string> { "PHREEQC database", "Parkhurst & Appelo (2013)" },
-            IsUserCompound = false
-        });
-
-        library.AddOrUpdate(new ChemicalCompound
-        {
-            Name = "Barium ion",
-            ChemicalFormula = "Ba2+",
-            Synonyms = new List<string> { "Ba2+", "Ba+2" },
-            Phase = CompoundPhase.Aqueous,
-            IonicCharge = 2,
-            GibbsFreeEnergyFormation_kJ_mol = -560.8,  // PHREEQC database
-            EnthalpyFormation_kJ_mol = -537.6,
-            Entropy_J_molK = 9.6,
-            MolecularWeight_g_mol = 137.33,
-            IsPrimaryElementSpecies = true,
-            Sources = new List<string> { "PHREEQC database", "Parkhurst & Appelo (2013)" },
-            IsUserCompound = false
-        });
-
-        library.AddOrUpdate(new ChemicalCompound
-        {
-            Name = "Manganese(II) ion",
-            ChemicalFormula = "Mn2+",
-            Synonyms = new List<string> { "Mn2+", "Mn+2" },
-            Phase = CompoundPhase.Aqueous,
-            IonicCharge = 2,
-            OxidationState = 2,
-            GibbsFreeEnergyFormation_kJ_mol = -228.1,  // PHREEQC database
-            EnthalpyFormation_kJ_mol = -220.8,
-            Entropy_J_molK = -73.6,
-            MolecularWeight_g_mol = 54.94,
-            IsPrimaryElementSpecies = true,
-            Sources = new List<string> { "PHREEQC database", "Parkhurst & Appelo (2013)" },
-            IsUserCompound = false
-        });
-
-        library.AddOrUpdate(new ChemicalCompound
-        {
-            Name = "Zinc ion",
-            ChemicalFormula = "Zn2+",
-            Synonyms = new List<string> { "Zn2+", "Zn+2" },
-            Phase = CompoundPhase.Aqueous,
-            IonicCharge = 2,
-            GibbsFreeEnergyFormation_kJ_mol = -147.1,  // PHREEQC database
-            EnthalpyFormation_kJ_mol = -153.9,
-            Entropy_J_molK = -112.1,
-            MolecularWeight_g_mol = 65.38,
-            IsPrimaryElementSpecies = true,
-            Sources = new List<string> { "PHREEQC database", "Parkhurst & Appelo (2013)" },
-            IsUserCompound = false
-        });
-
-        library.AddOrUpdate(new ChemicalCompound
-        {
-            Name = "Lead(II) ion",
-            ChemicalFormula = "Pb2+",
-            Synonyms = new List<string> { "Pb2+", "Pb+2" },
-            Phase = CompoundPhase.Aqueous,
-            IonicCharge = 2,
-            GibbsFreeEnergyFormation_kJ_mol = -24.4,  // PHREEQC database
-            EnthalpyFormation_kJ_mol = 0.9,
-            Entropy_J_molK = 18.5,
-            MolecularWeight_g_mol = 207.2,
-            IsPrimaryElementSpecies = true,
-            Sources = new List<string> { "PHREEQC database", "Parkhurst & Appelo (2013)" },
-            IsUserCompound = false
-        });
-
-        library.AddOrUpdate(new ChemicalCompound
-        {
-            Name = "Aluminum ion",
-            ChemicalFormula = "Al3+",
-            Synonyms = new List<string> { "Al3+", "Al+3" },
-            Phase = CompoundPhase.Aqueous,
-            IonicCharge = 3,
-            GibbsFreeEnergyFormation_kJ_mol = -485.0,  // PHREEQC database
-            EnthalpyFormation_kJ_mol = -531.0,
-            Entropy_J_molK = -321.7,
-            MolecularWeight_g_mol = 26.98,
-            IsPrimaryElementSpecies = true,
-            Sources = new List<string> { "PHREEQC database", "Parkhurst & Appelo (2013)" },
-            IsUserCompound = false
-        });
-
-        library.AddOrUpdate(new ChemicalCompound
-        {
-            Name = "Nitrate ion",
-            ChemicalFormula = "NO3-",
-            Synonyms = new List<string> { "NO3-", "NO3^-" },
-            Phase = CompoundPhase.Aqueous,
-            IonicCharge = -1,
-            GibbsFreeEnergyFormation_kJ_mol = -111.3,  // PHREEQC database
-            EnthalpyFormation_kJ_mol = -207.4,
-            Entropy_J_molK = 146.4,
-            MolecularWeight_g_mol = 62.00,
-            IsPrimaryElementSpecies = true,
-            Sources = new List<string> { "PHREEQC database", "Parkhurst & Appelo (2013)" },
-            IsUserCompound = false
-        });
-
-        library.AddOrUpdate(new ChemicalCompound
-        {
-            Name = "Phosphate ion",
-            ChemicalFormula = "PO43-",
-            Synonyms = new List<string> { "PO4^3-", "PO43-" },
-            Phase = CompoundPhase.Aqueous,
-            IonicCharge = -3,
-            GibbsFreeEnergyFormation_kJ_mol = -1018.7,  // PHREEQC database
-            EnthalpyFormation_kJ_mol = -1277.4,
-            Entropy_J_molK = -220.9,
-            MolecularWeight_g_mol = 94.97,
-            IsPrimaryElementSpecies = true,
-            Sources = new List<string> { "PHREEQC database", "Parkhurst & Appelo (2013)" },
-            IsUserCompound = false
-        });
-
-        library.AddOrUpdate(new ChemicalCompound
-        {
-            Name = "Fluoride ion",
-            ChemicalFormula = "F-",
-            Synonyms = new List<string> { "F-", "F^-" },
-            Phase = CompoundPhase.Aqueous,
-            IonicCharge = -1,
-            GibbsFreeEnergyFormation_kJ_mol = -278.8,  // PHREEQC database
-            EnthalpyFormation_kJ_mol = -332.6,
-            Entropy_J_molK = -13.8,
-            MolecularWeight_g_mol = 19.00,
-            IsPrimaryElementSpecies = true,
-            Sources = new List<string> { "PHREEQC database", "Parkhurst & Appelo (2013)" },
-            IsUserCompound = false
-        });
-
-        library.AddOrUpdate(new ChemicalCompound
-        {
-            Name = "Bromide ion",
-            ChemicalFormula = "Br-",
-            Synonyms = new List<string> { "Br-", "Br^-" },
-            Phase = CompoundPhase.Aqueous,
-            IonicCharge = -1,
-            GibbsFreeEnergyFormation_kJ_mol = -104.0,  // PHREEQC database
-            EnthalpyFormation_kJ_mol = -121.6,
-            Entropy_J_molK = 82.4,
-            MolecularWeight_g_mol = 79.90,
-            IsPrimaryElementSpecies = true,
-            Sources = new List<string> { "PHREEQC database", "Parkhurst & Appelo (2013)" },
             IsUserCompound = false
         });
 
@@ -952,6 +797,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Muscovite",
+            LogKsp_25C = 14.02,
             ChemicalFormula = "KAl2(AlSi3O10)(OH)2",
             Synonyms = new List<string> { "KAl2(AlSi3O10)(OH)2", "White mica" },
             Phase = CompoundPhase.Solid,
@@ -973,6 +819,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Phlogopite",
+            LogKsp_25C = 41.10,
             ChemicalFormula = "KMg3(AlSi3O10)(OH)2",
             Synonyms = new List<string> { "KMg3(AlSi3O10)(OH)2", "Mg-biotite" },
             Phase = CompoundPhase.Solid,
@@ -994,6 +841,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Biotite",
+            LogKsp_25C = 32.77,
             ChemicalFormula = "K(Mg,Fe)3(AlSi3O10)(OH)2",
             Synonyms = new List<string> { "Black mica" },
             Phase = CompoundPhase.Solid,
@@ -1040,6 +888,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Pyrophyllite",
+            LogKsp_25C = -0.42,
             ChemicalFormula = "Al2Si4O10(OH)2",
             Synonyms = new List<string> { "Al2Si4O10(OH)2" },
             Phase = CompoundPhase.Solid,
@@ -1082,6 +931,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Serpentine",
+            LogKsp_25C = 33.18,
             ChemicalFormula = "Mg3Si2O5(OH)4",
             Synonyms = new List<string> { "Mg3Si2O5(OH)4", "Antigorite", "Chrysotile", "Lizardite" },
             Phase = CompoundPhase.Solid,
@@ -1107,6 +957,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Tremolite",
+            LogKsp_25C = 67.28,
             ChemicalFormula = "Ca2Mg5Si8O22(OH)2",
             Synonyms = new List<string> { "Ca2Mg5Si8O22(OH)2" },
             Phase = CompoundPhase.Solid,
@@ -1128,6 +979,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Actinolite",
+            LogKsp_25C = 7.13,
             ChemicalFormula = "Ca2(Mg,Fe)5Si8O22(OH)2",
             Synonyms = new List<string> { "Ca2(Mg,Fe)5Si8O22(OH)2" },
             Phase = CompoundPhase.Solid,
@@ -1468,6 +1320,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Pyrrhotite",
+            LogKsp_25C = -3.68,
             ChemicalFormula = "Fe1-xS",
             Synonyms = new List<string> { "FeS", "Magnetic pyrite" },
             Phase = CompoundPhase.Solid,
@@ -1602,6 +1455,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Hercynite",
+            LogKsp_25C = 28.85,
             ChemicalFormula = "FeAl2O4",
             Synonyms = new List<string> { "FeAl2O4", "Fe-spinel" },
             Phase = CompoundPhase.Solid,
