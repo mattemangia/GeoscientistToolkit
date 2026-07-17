@@ -5,6 +5,7 @@ using GAIA.Analysis.RemoveSmallIslands;
 using GAIA;
 using GAIA.Analysis.ParticleSeparator;
 using GAIA.Data.CtImageStack.Segmentation;
+using GAIA.Analysis.AmbientOcclusionSegmentation;
 
 namespace VerificationTests;
 
@@ -406,5 +407,36 @@ public sealed class CtLabelStorageTests
         var middle = result[(2, 0)];
         Assert.True(middle.Any(value => value != 0));
         Assert.True(middle.Skip(6 * 24).Take(6 * 24).Any(value => value != 0));
+    }
+
+    [Fact]
+    public void AmbientOcclusion_AdaptiveGridCoversWholeDatasetWhenApplied()
+    {
+        using var grayscale = new ChunkedVolume(64, 64, 20, 16);
+        grayscale.Fill(255);
+        using var labels = new ChunkedLabelVolume(64, 64, 20, 16, false);
+        var dataset = new CtImageStackDataset("ao-adaptive", Path.GetTempPath())
+        {
+            Width = 64, Height = 64, Depth = 20, VolumeData = grayscale, LabelData = labels
+        };
+        using var processor = new AmbientOcclusionSegmentation();
+        var settings = new AmbientOcclusionSettings
+        {
+            UseGpu = false, RayCount = 1, RayLength = 1, MaxWorkingSetMB = 1,
+            MaterialThreshold = 1, SegmentationThreshold = 1
+        };
+
+        var result = processor.ComputeAmbientOcclusion(dataset, settings);
+        Assert.True(result.SamplingStep > 1);
+        Assert.Equal((64 + result.SamplingStep - 1) / result.SamplingStep, result.AoField.GetLength(0));
+        for (var z = 0; z < result.SegmentationMask.GetLength(2); z++)
+        for (var y = 0; y < result.SegmentationMask.GetLength(1); y++)
+        for (var x = 0; x < result.SegmentationMask.GetLength(0); x++)
+            result.SegmentationMask[x, y, z] = true;
+
+        processor.ApplySegmentation(dataset, result, 9);
+
+        Assert.Equal(9, labels[0, 0, 0]);
+        Assert.Equal(9, labels[63, 63, 19]);
     }
 }

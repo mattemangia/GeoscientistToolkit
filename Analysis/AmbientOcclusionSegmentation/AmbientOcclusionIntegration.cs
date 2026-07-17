@@ -88,12 +88,12 @@ public static class AmbientOcclusionIntegration
         // Draw based on preview mode
         if (preview.ShowAoField)
         {
-            DrawAoFieldHeatmap(dl, aoField, viewIndex, sliceIndex, imagePos, imageSize, imageWidth, imageHeight);
+            DrawAoFieldHeatmap(dl, preview.Result, viewIndex, sliceIndex, imagePos, imageSize, imageWidth, imageHeight);
         }
 
         if (preview.ShowSegmentationMask)
         {
-            DrawSegmentationOverlay(dl, mask, viewIndex, sliceIndex, imagePos, imageSize, imageWidth, imageHeight,
+            DrawSegmentationOverlay(dl, preview.Result, viewIndex, sliceIndex, imagePos, imageSize, imageWidth, imageHeight,
                 preview.OverlayColor, preview.OverlayOpacity);
         }
 
@@ -104,9 +104,10 @@ public static class AmbientOcclusionIntegration
         }
     }
 
-    private static void DrawAoFieldHeatmap(ImDrawListPtr dl, float[,,] aoField, int viewIndex, int sliceIndex,
+    private static void DrawAoFieldHeatmap(ImDrawListPtr dl, AmbientOcclusionResult result, int viewIndex, int sliceIndex,
         Vector2 imagePos, Vector2 imageSize, int imageWidth, int imageHeight)
     {
+        var aoField = result.AoField;
         int width = aoField.GetLength(0);
         int height = aoField.GetLength(1);
         int depth = aoField.GetLength(2);
@@ -118,7 +119,7 @@ public static class AmbientOcclusionIntegration
         {
             for (int x = 0; x < imageWidth; x += stepSize)
             {
-                float aoValue = GetAoValue(aoField, x, y, sliceIndex, viewIndex, width, height, depth,
+                float aoValue = GetAoValue(result, x, y, sliceIndex, viewIndex,
                     imageWidth, imageHeight);
 
                 if (aoValue < 0)
@@ -141,9 +142,10 @@ public static class AmbientOcclusionIntegration
         }
     }
 
-    private static void DrawSegmentationOverlay(ImDrawListPtr dl, bool[,,] mask, int viewIndex, int sliceIndex,
+    private static void DrawSegmentationOverlay(ImDrawListPtr dl, AmbientOcclusionResult result, int viewIndex, int sliceIndex,
         Vector2 imagePos, Vector2 imageSize, int imageWidth, int imageHeight, Vector4 color, float opacity)
     {
+        var mask = result.SegmentationMask;
         int width = mask.GetLength(0);
         int height = mask.GetLength(1);
         int depth = mask.GetLength(2);
@@ -158,7 +160,7 @@ public static class AmbientOcclusionIntegration
         {
             for (int x = 0; x < imageWidth; x += stepSize)
             {
-                bool isSegmented = GetMaskValue(mask, x, y, sliceIndex, viewIndex, width, height, depth,
+                bool isSegmented = GetMaskValue(result, x, y, sliceIndex, viewIndex,
                     imageWidth, imageHeight);
 
                 if (!isSegmented)
@@ -236,69 +238,54 @@ public static class AmbientOcclusionIntegration
         dl.AddText(textPos, white, $"Accel: {result.AccelerationType}");
     }
 
-    private static float GetAoValue(float[,,] aoField, int imgX, int imgY, int sliceIndex, int viewIndex,
-        int width, int height, int depth, int imageWidth, int imageHeight)
+    private static float GetAoValue(AmbientOcclusionResult result, int imgX, int imgY, int sliceIndex, int viewIndex,
+        int imageWidth, int imageHeight)
     {
         // Map image coordinates to volume coordinates
-        int x, y, z;
-
-        switch (viewIndex)
-        {
-            case 0: // XY view
-                x = (int)((float)imgX / imageWidth * width);
-                y = (int)((float)imgY / imageHeight * height);
-                z = Math.Clamp(sliceIndex, 0, depth - 1);
-                break;
-            case 1: // XZ view
-                x = (int)((float)imgX / imageWidth * width);
-                z = (int)((float)imgY / imageHeight * depth);
-                y = Math.Clamp(sliceIndex, 0, height - 1);
-                break;
-            case 2: // YZ view
-                y = (int)((float)imgX / imageWidth * height);
-                z = (int)((float)imgY / imageHeight * depth);
-                x = Math.Clamp(sliceIndex, 0, width - 1);
-                break;
-            default:
-                return -1;
-        }
-
-        if (x < 0 || x >= width || y < 0 || y >= height || z < 0 || z >= depth)
-            return -1;
-
-        return aoField[x, y, z];
+        if (!MapToResult(result, imgX, imgY, sliceIndex, viewIndex, imageWidth, imageHeight,
+                out var x, out var y, out var z)) return -1;
+        return result.AoField[x, y, z];
     }
 
-    private static bool GetMaskValue(bool[,,] mask, int imgX, int imgY, int sliceIndex, int viewIndex,
-        int width, int height, int depth, int imageWidth, int imageHeight)
+    private static bool GetMaskValue(AmbientOcclusionResult result, int imgX, int imgY, int sliceIndex, int viewIndex,
+        int imageWidth, int imageHeight)
     {
-        int x, y, z;
+        return MapToResult(result, imgX, imgY, sliceIndex, viewIndex, imageWidth, imageHeight,
+                   out var x, out var y, out var z) && result.SegmentationMask[x, y, z];
+    }
 
+    private static bool MapToResult(AmbientOcclusionResult result, int imgX, int imgY, int sliceIndex, int viewIndex,
+        int imageWidth, int imageHeight, out int x, out int y, out int z)
+    {
+        var region = result.ProcessingRegion;
+        var step = Math.Max(1, result.SamplingStep);
+        int gx, gy, gz;
         switch (viewIndex)
         {
             case 0: // XY view
-                x = (int)((float)imgX / imageWidth * width);
-                y = (int)((float)imgY / imageHeight * height);
-                z = Math.Clamp(sliceIndex, 0, depth - 1);
+                gx = (int)((imgX + .5f) / imageWidth * result.DatasetWidth);
+                gy = (int)((imgY + .5f) / imageHeight * result.DatasetHeight);
+                gz = sliceIndex;
                 break;
             case 1: // XZ view
-                x = (int)((float)imgX / imageWidth * width);
-                z = (int)((float)imgY / imageHeight * depth);
-                y = Math.Clamp(sliceIndex, 0, height - 1);
+                gx = (int)((imgX + .5f) / imageWidth * result.DatasetWidth);
+                gz = (int)((imgY + .5f) / imageHeight * result.DatasetDepth);
+                gy = sliceIndex;
                 break;
             case 2: // YZ view
-                y = (int)((float)imgX / imageWidth * height);
-                z = (int)((float)imgY / imageHeight * depth);
-                x = Math.Clamp(sliceIndex, 0, width - 1);
+                gy = (int)((imgX + .5f) / imageWidth * result.DatasetHeight);
+                gz = (int)((imgY + .5f) / imageHeight * result.DatasetDepth);
+                gx = sliceIndex;
                 break;
             default:
-                return false;
+                x = y = z = 0; return false;
         }
-
-        if (x < 0 || x >= width || y < 0 || y >= height || z < 0 || z >= depth)
-            return false;
-
-        return mask[x, y, z];
+        if (gx < region.MinX || gx >= region.MaxX || gy < region.MinY || gy >= region.MaxY ||
+            gz < region.MinZ || gz >= region.MaxZ) { x = y = z = 0; return false; }
+        x = Math.Min(result.AoField.GetLength(0) - 1, (gx - region.MinX) / step);
+        y = Math.Min(result.AoField.GetLength(1) - 1, (gy - region.MinY) / step);
+        z = Math.Min(result.AoField.GetLength(2) - 1, (gz - region.MinZ) / step);
+        return true;
     }
 
     private static Vector4 GetHeatmapColor(float value, float alpha)

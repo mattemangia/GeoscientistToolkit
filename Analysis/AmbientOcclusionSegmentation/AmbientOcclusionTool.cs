@@ -369,12 +369,14 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
             if (ImGui.Checkbox("Show AO Heatmap", ref showAo))
             {
                 _preview.ShowAoField = showAo;
+                UpdatePreviewRegistration();
             }
 
             bool showMask = _preview.ShowSegmentationMask;
             if (ImGui.Checkbox("Show Segmentation Mask", ref showMask))
             {
                 _preview.ShowSegmentationMask = showMask;
+                UpdatePreviewRegistration();
             }
 
             if (showMask)
@@ -610,6 +612,7 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
 
         _currentResult.SegmentationMask = mask;
         _preview.Result = _currentResult;
+        UpdatePreviewRegistration();
     }
 
     private void UpdatePreviewRegistration()

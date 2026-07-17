@@ -92,6 +92,7 @@ public class AmbientOcclusionSettings
     /// Number of CPU threads for fallback
     /// </summary>
     public int CpuThreads { get; set; } = Environment.ProcessorCount;
+    public int MaxWorkingSetMB { get; set; } = 256;
 }
 
 /// <summary>
@@ -136,6 +137,11 @@ public class AmbientOcclusionResult
     /// Acceleration type used (GPU, SIMD, CPU)
     /// </summary>
     public string AccelerationType { get; set; }
+    public Region3D ProcessingRegion { get; set; }
+    public int SamplingStep { get; set; } = 1;
+    public int DatasetWidth { get; set; }
+    public int DatasetHeight { get; set; }
+    public int DatasetDepth { get; set; }
 }
 
 /// <summary>
@@ -216,6 +222,15 @@ public class AmbientOcclusionSegmentation : IDisposable
             MaxY = dataset.Height,
             MaxZ = dataset.Depth
         };
+        // GPU mode temporarily holds input, output, transfer and managed 3D arrays; budget
+        // conservatively at 16 bytes per sampled voxel to avoid approaching OOM.
+        var maximumWorkingVoxels = Math.Max(1L, (long)settings.MaxWorkingSetMB * 1024 * 1024 / 16);
+        var regionVoxels = (long)region.Width * region.Height * region.Depth;
+        var samplingStep = regionVoxels <= maximumWorkingVoxels ? 1 :
+            Math.Max(1, (int)Math.Ceiling(Math.Pow(regionVoxels / (double)maximumWorkingVoxels, 1.0 / 3)));
+        if (samplingStep > 1)
+            Logger.LogWarning($"[AmbientOcclusion] Using adaptive {samplingStep}x sampling across the complete " +
+                              $"region to keep the working set below {settings.MaxWorkingSetMB} MB.");
 
         // Precompute ray directions
         CurrentStage = "Generating ray directions";
@@ -229,19 +244,19 @@ public class AmbientOcclusionSegmentation : IDisposable
         if (settings.UseGpu && _gpuAvailable)
         {
             CurrentStage = "Computing AO (GPU)";
-            aoField = ComputeAoFieldGpu(dataset, settings, region, cancellationToken);
+            aoField = ComputeAoFieldGpu(dataset, settings, region, samplingStep, cancellationToken);
             accelType = "GPU (OpenCL)";
         }
         else if (Vector.IsHardwareAccelerated)
         {
             CurrentStage = "Computing AO (SIMD)";
-            aoField = ComputeAoFieldSimd(dataset, settings, region, cancellationToken);
+            aoField = ComputeAoFieldSimd(dataset, settings, region, samplingStep, cancellationToken);
             accelType = "SIMD CPU";
         }
         else
         {
             CurrentStage = "Computing AO (CPU)";
-            aoField = ComputeAoFieldCpu(dataset, settings, region, cancellationToken);
+            aoField = ComputeAoFieldCpu(dataset, settings, region, samplingStep, cancellationToken);
             accelType = "Multi-threaded CPU";
         }
 
@@ -264,7 +279,12 @@ public class AmbientOcclusionSegmentation : IDisposable
             SegmentationMask = mask,
             ProcessingTime = stopwatch.Elapsed.TotalSeconds,
             VoxelsPerSecond = (long)(totalVoxels / stopwatch.Elapsed.TotalSeconds),
-            AccelerationType = accelType
+            AccelerationType = samplingStep == 1 ? accelType : $"{accelType}, adaptive {samplingStep}x",
+            ProcessingRegion = region,
+            SamplingStep = samplingStep,
+            DatasetWidth = dataset.Width,
+            DatasetHeight = dataset.Height,
+            DatasetDepth = dataset.Depth
         };
     }
 
@@ -286,9 +306,9 @@ public class AmbientOcclusionSegmentation : IDisposable
         }
 
         var mask = result.SegmentationMask;
-        var width = mask.GetLength(0);
-        var height = mask.GetLength(1);
-        var depth = mask.GetLength(2);
+        var region = result.ProcessingRegion;
+        var step = Math.Max(1, result.SamplingStep);
+        var depth = region.Depth;
 
         var completed = 0;
         Parallel.For(0, depth, new ParallelOptions
@@ -300,18 +320,22 @@ public class AmbientOcclusionSegmentation : IDisposable
             var slice = ArrayPool<byte>.Shared.Rent(dataset.Width * dataset.Height);
             try
             {
-            dataset.LabelData.ReadSliceZ(z, slice);
+            var globalZ = region.MinZ + z;
+            dataset.LabelData.ReadSliceZ(globalZ, slice);
             var modified = false;
-            for (int y = 0; y < height; y++)
-            for (int x = 0; x < width; x++)
+            var mz = Math.Min(mask.GetLength(2) - 1, z / step);
+            for (var y = region.MinY; y < region.MaxY; y++)
+            for (var x = region.MinX; x < region.MaxX; x++)
             {
-                    if (mask[x, y, z])
+                    var mx = Math.Min(mask.GetLength(0) - 1, (x - region.MinX) / step);
+                    var my = Math.Min(mask.GetLength(1) - 1, (y - region.MinY) / step);
+                    if (mask[mx, my, mz])
                     {
                         slice[y * dataset.Width + x] = targetMaterialId;
                         modified = true;
                     }
             }
-            if (modified) dataset.LabelData.WriteSliceZ(z, slice);
+            if (modified) dataset.LabelData.WriteSliceZ(globalZ, slice);
             var done = Interlocked.Increment(ref completed);
             if ((done & 7) == 0 || done == depth) progress?.Report(done / (float)depth);
             }
@@ -515,44 +539,17 @@ __kernel void threshold_ao(
         CtImageStackDataset dataset,
         AmbientOcclusionSettings settings,
         Region3D region,
+        int samplingStep,
         CancellationToken cancellationToken)
     {
-        int width = region.Width;
-        int height = region.Height;
-        int depth = region.Depth;
+        int width = (region.Width + samplingStep - 1) / samplingStep;
+        int height = (region.Height + samplingStep - 1) / samplingStep;
+        int depth = (region.Depth + samplingStep - 1) / samplingStep;
         long totalVoxels = (long)width * height * depth;
 
-        // Extract volume data
-        var volumeData = new byte[totalVoxels];
-        int idx = 0;
-        for (int z = region.MinZ; z < region.MaxZ; z++)
-        {
-            for (int y = region.MinY; y < region.MaxY; y++)
-            {
-                for (int x = region.MinX; x < region.MaxX; x++)
-                {
-                    volumeData[idx++] = dataset.VolumeData[x, y, z];
-                }
-            }
-        }
-
-        // Extract label data if using existing material
-        byte[] labelData = null;
-        if (settings.UseExistingMaterial && dataset.LabelData != null)
-        {
-            labelData = new byte[totalVoxels];
-            idx = 0;
-            for (int z = region.MinZ; z < region.MaxZ; z++)
-            {
-                for (int y = region.MinY; y < region.MaxY; y++)
-                {
-                    for (int x = region.MinX; x < region.MaxX; x++)
-                    {
-                        labelData[idx++] = dataset.LabelData[x, y, z];
-                    }
-                }
-            }
-        }
+        var (volumeData, labelData) = ExtractSampledVolumes(dataset, settings, region, samplingStep,
+            cancellationToken);
+        var idx = 0;
 
         // Prepare ray directions for GPU
         var rayDirData = new float[_rayDirections.Length * 3];
@@ -618,7 +615,7 @@ __kernel void threshold_ao(
             CheckErr(_cl.SetKernelArg(_computeAoKernel, 6, (nuint)sizeof(int), &depth), "SetKernelArg 6");
             int rayCount = settings.RayCount;
             CheckErr(_cl.SetKernelArg(_computeAoKernel, 7, (nuint)sizeof(int), &rayCount), "SetKernelArg 7");
-            float rayLength = settings.RayLength;
+            float rayLength = settings.RayLength / samplingStep;
             CheckErr(_cl.SetKernelArg(_computeAoKernel, 8, (nuint)sizeof(float), &rayLength), "SetKernelArg 8");
             byte threshold = settings.MaterialThreshold;
             CheckErr(_cl.SetKernelArg(_computeAoKernel, 9, (nuint)sizeof(byte), &threshold), "SetKernelArg 9");
@@ -676,17 +673,59 @@ __kernel void threshold_ao(
 
     #region SIMD CPU Implementation
 
+    private static (byte[] volume, byte[] labels) ExtractSampledVolumes(CtImageStackDataset dataset,
+        AmbientOcclusionSettings settings, Region3D region, int samplingStep, CancellationToken token)
+    {
+        var width = (region.Width + samplingStep - 1) / samplingStep;
+        var height = (region.Height + samplingStep - 1) / samplingStep;
+        var depth = (region.Depth + samplingStep - 1) / samplingStep;
+        var volume = new byte[checked(width * height * depth)];
+        var labels = settings.UseExistingMaterial && dataset.LabelData != null ? new byte[volume.Length] : null;
+        var source = ArrayPool<byte>.Shared.Rent(checked(dataset.Width * dataset.Height));
+        var labelSource = labels != null ? ArrayPool<byte>.Shared.Rent(checked(dataset.Width * dataset.Height)) : null;
+        try
+        {
+            var outputZ = 0;
+            for (var z = region.MinZ; z < region.MaxZ; z += samplingStep, outputZ++)
+            {
+                token.ThrowIfCancellationRequested();
+                dataset.VolumeData.ReadSliceZ(z, source);
+                if (labels != null) dataset.LabelData.ReadSliceZ(z, labelSource);
+                var outputY = 0;
+                for (var y = region.MinY; y < region.MaxY; y += samplingStep, outputY++)
+                {
+                    var output = (outputZ * height + outputY) * width;
+                    var outputX = 0;
+                    for (var x = region.MinX; x < region.MaxX; x += samplingStep, outputX++)
+                    {
+                        volume[output + outputX] = source[y * dataset.Width + x];
+                        if (labels != null) labels[output + outputX] = labelSource[y * dataset.Width + x];
+                    }
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(source);
+            if (labelSource != null) ArrayPool<byte>.Shared.Return(labelSource);
+        }
+        return (volume, labels);
+    }
+
     private float[,,] ComputeAoFieldSimd(
         CtImageStackDataset dataset,
         AmbientOcclusionSettings settings,
         Region3D region,
+        int samplingStep,
         CancellationToken cancellationToken)
     {
-        int width = region.Width;
-        int height = region.Height;
-        int depth = region.Depth;
+        int width = (region.Width + samplingStep - 1) / samplingStep;
+        int height = (region.Height + samplingStep - 1) / samplingStep;
+        int depth = (region.Depth + samplingStep - 1) / samplingStep;
 
         var aoField = new float[width, height, depth];
+        var (volume, labels) = ExtractSampledVolumes(dataset, settings, region, samplingStep, cancellationToken);
+        var sampledRayLength = Math.Max(1, settings.RayLength / samplingStep);
 
         Parallel.For(0, depth, new ParallelOptions
         {
@@ -698,21 +737,9 @@ __kernel void threshold_ao(
             {
                 for (int x = 0; x < width; x++)
                 {
-                    int gx = region.MinX + x;
-                    int gy = region.MinY + y;
-                    int gz = region.MinZ + z;
-
-                    // Check if voxel is material (based on mode)
-                    bool isMaterial;
-                    if (settings.UseExistingMaterial && dataset.LabelData != null)
-                    {
-                        isMaterial = dataset.LabelData[gx, gy, gz] == settings.SourceMaterialId;
-                    }
-                    else
-                    {
-                        byte voxelValue = dataset.VolumeData[gx, gy, gz];
-                        isMaterial = voxelValue >= settings.MaterialThreshold;
-                    }
+                    var center = (z * height + y) * width + x;
+                    var isMaterial = labels != null ? labels[center] == settings.SourceMaterialId :
+                        volume[center] >= settings.MaterialThreshold;
 
                     if (!isMaterial)
                     {
@@ -730,29 +757,22 @@ __kernel void threshold_ao(
                         const float stepSize = 1f;
                         bool hit = false;
 
-                        while (t < settings.RayLength)
+                        while (t < sampledRayLength)
                         {
                             t += stepSize;
 
-                            int rx = gx + (int)(dir.X * t + 0.5f);
-                            int ry = gy + (int)(dir.Y * t + 0.5f);
-                            int rz = gz + (int)(dir.Z * t + 0.5f);
+                            int rx = x + (int)(dir.X * t + 0.5f);
+                            int ry = y + (int)(dir.Y * t + 0.5f);
+                            int rz = z + (int)(dir.Z * t + 0.5f);
 
-                            if (rx < 0 || rx >= dataset.Width ||
-                                ry < 0 || ry >= dataset.Height ||
-                                rz < 0 || rz >= dataset.Depth)
+                            if (rx < 0 || rx >= width || ry < 0 || ry >= height || rz < 0 || rz >= depth)
                                 break;
 
                             // Check if ray hit material (based on mode)
                             bool rayHitMaterial;
-                            if (settings.UseExistingMaterial && dataset.LabelData != null)
-                            {
-                                rayHitMaterial = dataset.LabelData[rx, ry, rz] == settings.SourceMaterialId;
-                            }
-                            else
-                            {
-                                rayHitMaterial = dataset.VolumeData[rx, ry, rz] >= settings.MaterialThreshold;
-                            }
+                            var rayIndex = (rz * height + ry) * width + rx;
+                            rayHitMaterial = labels != null ? labels[rayIndex] == settings.SourceMaterialId :
+                                volume[rayIndex] >= settings.MaterialThreshold;
 
                             if (rayHitMaterial)
                             {
@@ -781,10 +801,11 @@ __kernel void threshold_ao(
         CtImageStackDataset dataset,
         AmbientOcclusionSettings settings,
         Region3D region,
+        int samplingStep,
         CancellationToken cancellationToken)
     {
         // Same as SIMD implementation for now
-        return ComputeAoFieldSimd(dataset, settings, region, cancellationToken);
+        return ComputeAoFieldSimd(dataset, settings, region, samplingStep, cancellationToken);
     }
 
     #endregion
