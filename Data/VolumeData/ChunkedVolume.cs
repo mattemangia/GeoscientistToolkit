@@ -36,6 +36,7 @@ public class ChunkedVolume : IGrayscaleVolumeData
 
     // Constants
     public const int DEFAULT_CHUNK_DIM = 256;
+    public const long MAX_MAPPED_WINDOW_BYTES = 64L * 1024 * 1024;
     private const int HEADER_SIZE = 40; // 4 ints + 1 int + 1 double + 3 ints
 
     // Properties for compatibility
@@ -43,7 +44,8 @@ public class ChunkedVolume : IGrayscaleVolumeData
 
     public int TotalChunks => _chunkCountX * _chunkCountY * _chunkCountZ;
     public bool IsMemoryMapped => _useMemoryMapping;
-    public long MappedWindowSize => _useMemoryMapping ? checked((long)ChunkDim * ChunkDim * ChunkDim) : 0;
+    public long MappedWindowSize => _useMemoryMapping ? Math.Min(MAX_MAPPED_WINDOW_BYTES,
+        checked((long)ChunkDim * ChunkDim * ChunkDim)) : 0;
     public string BackingFilePath { get; }
     public byte[][] Chunks { get; private set; }
 
@@ -93,8 +95,8 @@ public class ChunkedVolume : IGrayscaleVolumeData
         _chunkCountZ = (depth + chunkDim - 1) / chunkDim;
 
         _mmf = mmf ?? throw new ArgumentNullException(nameof(mmf));
-        _viewAccessor = new ChunkMappedAccessor(_mmf, headerSize,
-            checked((long)chunkDim * chunkDim * chunkDim), fileLength);
+        _viewAccessor = new ChunkMappedAccessor(_mmf, headerSize, Math.Min(MAX_MAPPED_WINDOW_BYTES,
+            checked((long)chunkDim * chunkDim * chunkDim)), fileLength);
         _headerSize = headerSize;
         BackingFilePath = backingFilePath;
         Chunks = null;

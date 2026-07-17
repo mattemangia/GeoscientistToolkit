@@ -564,6 +564,20 @@ public sealed class CtLabelStorageTests
         Assert.Equal((byte)22, alongY[3, 5, 1]);
     }
 
+    [Fact]
+    public void LegacyGigabyteChunks_AreSplitIntoBoundedMmfWindows()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"gaia-large-chunk-{Guid.NewGuid():N}.bin");
+        try
+        {
+            using var labels = new ChunkedLabelVolume(1025, 1, 1, 1024, true, path);
+            Assert.Equal(64L * 1024 * 1024, labels.MappedWindowSize);
+            labels[1024, 0, 0] = 37; // jumps beyond the first 1 GiB padded chunk
+            Assert.Equal(37, labels[1024, 0, 0]);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
     {
         public void Report(T value) => report(value);

@@ -43,7 +43,8 @@ public class ChunkedLabelVolume : ILabelVolumeData
     public int AllocatedChunkCount => _useMemoryMapping ? ChunkCountX * ChunkCountY * ChunkCountZ :
         _chunks?.Count(chunk => chunk != null) ?? 0;
     public bool IsMemoryMapped => _useMemoryMapping;
-    public long MappedWindowSize => _useMemoryMapping ? checked((long)ChunkDim * ChunkDim * ChunkDim) : 0;
+    public long MappedWindowSize => _useMemoryMapping ? Math.Min(ChunkedVolume.MAX_MAPPED_WINDOW_BYTES,
+        checked((long)ChunkDim * ChunkDim * ChunkDim)) : 0;
     public event Action<int> SliceChanged;
 
     private bool _disposed;
@@ -108,8 +109,8 @@ public class ChunkedLabelVolume : ILabelVolumeData
 
         _mmf = mmf;
         var fileLength = new FileInfo(filePath ?? throw new ArgumentNullException(nameof(filePath))).Length;
-        _viewAccessor = new ChunkMappedAccessor(mmf, HEADER_SIZE,
-            checked((long)chunkDim * chunkDim * chunkDim), fileLength);
+        _viewAccessor = new ChunkMappedAccessor(mmf, HEADER_SIZE, Math.Min(ChunkedVolume.MAX_MAPPED_WINDOW_BYTES,
+            checked((long)chunkDim * chunkDim * chunkDim)), fileLength);
 
         Logger.Log($"[ChunkedLabelVolume] Initialized MM volume: {Width}x{Height}x{Depth}, ChunkDim={ChunkDim}");
     }
@@ -706,7 +707,8 @@ public class ChunkedLabelVolume : ILabelVolumeData
 
             // Open memory-mapped file
             _mmf = MemoryMappedFile.CreateFromFile(FilePath, FileMode.Open, null, 0, MemoryMappedFileAccess.ReadWrite);
-            _viewAccessor = new ChunkMappedAccessor(_mmf, HEADER_SIZE, chunkSize, totalSize);
+            _viewAccessor = new ChunkMappedAccessor(_mmf, HEADER_SIZE,
+                Math.Min(ChunkedVolume.MAX_MAPPED_WINDOW_BYTES, chunkSize), totalSize);
         }
         catch (Exception ex)
         {
