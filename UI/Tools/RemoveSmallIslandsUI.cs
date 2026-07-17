@@ -109,7 +109,8 @@ public class RemoveSmallIslandsUI : IDisposable
                 _processor.CurrentStage = "Generating preview";
                 _processor.Progress = 0.9f;
                 var previewMask =
-                    await Task.Run(() => GeneratePreviewMask(_lastAnalysisResult.LabelVolume, smallParticleIds), token);
+                    await Task.Run(() => _processor.GeneratePreviewMask(dataset, _lastAnalysisResult,
+                        smallParticleIds, token), token);
                 CtImageStackTools.Update3DPreviewFromExternal(dataset, previewMask, new Vector4(1, 0, 0, 0.5f));
             }
             else
@@ -118,7 +119,7 @@ public class RemoveSmallIslandsUI : IDisposable
                 _processor.CurrentStage = "Applying changes";
                 _processor.Progress = 0.9f;
                 await Task.Run(
-                    () => ApplyCleaning(dataset.LabelData, _lastAnalysisResult.LabelVolume, smallParticleIds, token),
+                    () => _processor.ApplyCleaning(dataset, _lastAnalysisResult, smallParticleIds, token),
                     token);
                 ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
                 ProjectManager.Instance.HasUnsavedChanges = true;
@@ -151,46 +152,19 @@ public class RemoveSmallIslandsUI : IDisposable
         return (long)(thresholdUm3 / voxelVolumeUm3);
     }
 
-    private byte[] GeneratePreviewMask(int[,,] labelVolume, HashSet<int> smallParticleIds)
-    {
-        int w = labelVolume.GetLength(0), h = labelVolume.GetLength(1), d = labelVolume.GetLength(2);
-        var mask = new byte[(long)w * h * d];
-        Parallel.For(0, d, z =>
-        {
-            for (var y = 0; y < h; y++)
-            for (var x = 0; x < w; x++)
-                if (smallParticleIds.Contains(labelVolume[x, y, z]))
-                    mask[(long)z * w * h + (long)y * w + x] = 255;
-        });
-        return mask;
-    }
-
-    private void ApplyCleaning(ChunkedLabelVolume datasetLabels, int[,,] islandLabels, HashSet<int> smallParticleIds,
-        CancellationToken token)
-    {
-        var d = islandLabels.GetLength(2);
-        Parallel.For(0, d, new ParallelOptions { CancellationToken = token }, z =>
-        {
-            for (var y = 0; y < islandLabels.GetLength(1); y++)
-            for (var x = 0; x < islandLabels.GetLength(0); x++)
-                if (smallParticleIds.Contains(islandLabels[x, y, z]))
-                    datasetLabels[x, y, z] = 0;
-
-            _processor.Progress = 0.9f + 0.1f * (z + 1) / d;
-        });
-    }
 }
 
 internal class IslandAnalysisResult
 {
-    public int[,,] LabelVolume;
+    internal RunUnionFind Components;
+    public byte MaterialId;
     public List<IslandParticle> Particles;
 }
 
 internal class IslandParticle
 {
     public int Id;
-    public int VoxelCount;
+    public long VoxelCount;
 }
 
 internal class IslandAnalysisProcessor : IDisposable
@@ -204,137 +178,159 @@ internal class IslandAnalysisProcessor : IDisposable
 
     public IslandAnalysisResult Analyze(CtImageStackDataset dataset, Material material, CancellationToken token)
     {
-        CurrentStage = "Extracting mask";
+        CurrentStage = "Scanning connected material runs";
         Progress = 0;
-        var mask = ExtractMaterialMask(dataset, material, token);
+        var components = new RunUnionFind();
+        ScanRuns(dataset, material.ID, components, null, token,
+            value => Progress = value * .55f);
         token.ThrowIfCancellationRequested();
-        CurrentStage = "Labeling components";
-        Progress = 0.2f;
-        var labels = LabelComponents3DParallel(mask, token);
-        token.ThrowIfCancellationRequested();
-        CurrentStage = "Analyzing particles";
-        Progress = 0.6f;
-        var particles = AnalyzeParticles(labels, token);
+        CurrentStage = "Counting connected components";
+        var counts = new Dictionary<int, long>();
+        ScanRuns(dataset, material.ID, components, run =>
+        {
+            var root = components.Find(run.Label);
+            counts[root] = counts.GetValueOrDefault(root) + run.EndX - run.StartX;
+        }, token, value => Progress = .55f + value * .25f);
         token.ThrowIfCancellationRequested();
         CurrentStage = "Complete";
         Progress = 1.0f;
-        return new IslandAnalysisResult { LabelVolume = labels, Particles = particles };
+        return new IslandAnalysisResult
+        {
+            Components = components,
+            MaterialId = material.ID,
+            Particles = counts.Select(pair => new IslandParticle { Id = pair.Key, VoxelCount = pair.Value }).ToList()
+        };
     }
 
-    private byte[,,] ExtractMaterialMask(CtImageStackDataset d, Material m, CancellationToken t)
+    public byte[] GeneratePreviewMask(CtImageStackDataset dataset, IslandAnalysisResult analysis,
+        HashSet<int> selectedRoots, CancellationToken token)
     {
-        var mask = new byte[d.Width, d.Height, d.Depth];
-        Parallel.For(0, d.Depth, new ParallelOptions
+        var length = checked((long)dataset.Width * dataset.Height * dataset.Depth);
+        if (length > int.MaxValue)
+            throw new InvalidOperationException(
+                "The selected volume is too large for the legacy full-resolution preview. " +
+                "Cleaning remains out-of-core and can be applied directly.");
+        var preview = new byte[(int)length];
+        ScanRuns(dataset, analysis.MaterialId, analysis.Components, run =>
         {
-            CancellationToken = t,
-            MaxDegreeOfParallelism = d.LabelData.IsMemoryMapped ? 2 : Math.Max(1, Environment.ProcessorCount - 1)
-        }, z =>
-        {
-            var slice = new byte[d.Width * d.Height];
-            d.LabelData.ReadSliceZ(z, slice);
-            for (var y = 0; y < d.Height; y++)
-            for (var x = 0; x < d.Width; x++)
-                if (slice[y * d.Width + x] == m.ID)
-                    mask[x, y, z] = 1;
-            Progress = 0.2f * (z + 1) / d.Depth;
-        });
-        return mask;
+            if (!selectedRoots.Contains(analysis.Components.Find(run.Label))) return;
+            preview.AsSpan((run.Z * dataset.Height + run.Y) * dataset.Width + run.StartX,
+                run.EndX - run.StartX).Fill(255);
+        }, token, value => Progress = .8f + value * .2f);
+        return preview;
     }
 
-    private int[,,] LabelComponents3DParallel(byte[,,] mask, CancellationToken token)
+    public void ApplyCleaning(CtImageStackDataset dataset, IslandAnalysisResult analysis,
+        HashSet<int> selectedRoots, CancellationToken token)
     {
-        int w = mask.GetLength(0), h = mask.GetLength(1), d = mask.GetLength(2);
-        var labels = new int[w, h, d];
-        var uf = new ConcurrentUnionFind();
-        var next = 1;
-        Parallel.For(0, d, new ParallelOptions { CancellationToken = token }, z =>
+        var currentZ = -1;
+        byte[] slice = null;
+        bool[] changedChunks = null;
+        void FlushSlice()
         {
-            for (var y = 0; y < h; y++)
-            for (var x = 0; x < w; x++)
-            {
-                if (mask[x, y, z] == 0) continue;
-                var n = new List<int>();
-                if (x > 0 && labels[x - 1, y, z] > 0) n.Add(labels[x - 1, y, z]);
-                if (y > 0 && labels[x, y - 1, z] > 0) n.Add(labels[x, y - 1, z]);
-                if (z > 0 && labels[x, y, z - 1] > 0) n.Add(labels[x, y, z - 1]);
-                if (n.Count == 0)
-                {
-                    var l = Interlocked.Increment(ref next) - 1;
-                    labels[x, y, z] = l;
-                    uf.MakeSet(l);
-                }
-                else
-                {
-                    var min = n.Min();
-                    labels[x, y, z] = min;
-                    foreach (var neighbor in n) uf.Union(min, neighbor);
-                }
-            }
-
-            Progress = 0.2f + 0.3f * (z + 1) / d;
-        });
-        token.ThrowIfCancellationRequested();
-        var final = new ConcurrentDictionary<int, int>();
-        var counter = 0;
-        Parallel.For(0, d, new ParallelOptions { CancellationToken = token }, z =>
-        {
-            for (var y = 0; y < h; y++)
-            for (var x = 0; x < w; x++)
-                if (labels[x, y, z] > 0)
-                {
-                    var root = uf.Find(labels[x, y, z]);
-                    if (!final.ContainsKey(root)) final.TryAdd(root, Interlocked.Increment(ref counter));
-                    labels[x, y, z] = final[root];
-                }
-
-            Progress = 0.5f + 0.1f * (z + 1) / d;
-        });
-        return labels;
-    }
-
-    private List<IslandParticle> AnalyzeParticles(int[,,] labels, CancellationToken token)
-    {
-        var particles = new ConcurrentDictionary<int, int>();
-        var d = labels.GetLength(2);
-        Parallel.For(0, d, new ParallelOptions { CancellationToken = token }, z =>
-        {
-            for (var y = 0; y < labels.GetLength(1); y++)
-            for (var x = 0; x < labels.GetLength(0); x++)
-            {
-                var l = labels[x, y, z];
-                if (l > 0) particles.AddOrUpdate(l, 1, (k, c) => c + 1);
-            }
-
-            Progress = 0.6f + 0.2f * (z + 1) / d;
-        });
-        return particles.Select(kvp => new IslandParticle { Id = kvp.Key, VoxelCount = kvp.Value }).ToList();
-    }
-
-    private class ConcurrentUnionFind
-    {
-        private readonly ConcurrentDictionary<int, int> p = new();
-
-        public void MakeSet(int x)
-        {
-            p.TryAdd(x, x);
+            if (currentZ < 0 || !changedChunks.Any(value => value)) return;
+            dataset.LabelData.WriteSliceZChangedChunks(currentZ, slice, changedChunks);
         }
-
-        public int Find(int x)
+        ScanRuns(dataset, analysis.MaterialId, analysis.Components, run =>
         {
-            if (!p.TryGetValue(x, out var parent))
+            if (run.Z != currentZ)
             {
-                MakeSet(x);
-                return x;
+                FlushSlice();
+                currentZ = run.Z;
+                slice = new byte[dataset.Width * dataset.Height];
+                dataset.LabelData.ReadSliceZ(currentZ, slice);
+                changedChunks = new bool[dataset.LabelData.ChunkCountX * dataset.LabelData.ChunkCountY];
             }
+            if (!selectedRoots.Contains(analysis.Components.Find(run.Label))) return;
+            slice.AsSpan(run.Y * dataset.Width + run.StartX, run.EndX - run.StartX).Clear();
+            var firstChunk = run.StartX / dataset.LabelData.ChunkDim;
+            var lastChunk = (run.EndX - 1) / dataset.LabelData.ChunkDim;
+            var chunkY = run.Y / dataset.LabelData.ChunkDim;
+            for (var cx = firstChunk; cx <= lastChunk; cx++)
+                changedChunks[chunkY * dataset.LabelData.ChunkCountX + cx] = true;
+        }, token, value => Progress = .9f + value * .1f);
+        FlushSlice();
+    }
 
-            if (parent == x) return x;
-            return p[x] = Find(parent);
-        }
+    private readonly record struct MaterialRun(int Z, int Y, int StartX, int EndX, int Label);
 
-        public void Union(int x, int y)
+    private static void ScanRuns(CtImageStackDataset dataset, byte materialId, RunUnionFind components,
+        Action<MaterialRun> visitor, CancellationToken token, Action<float> progress)
+    {
+        var previousSlice = new List<MaterialRun>[dataset.Height];
+        var nextLabel = 1;
+        var slice = new byte[checked(dataset.Width * dataset.Height)];
+        for (var z = 0; z < dataset.Depth; z++)
         {
-            int rX = Find(x), rY = Find(y);
-            if (rX != rY) p[Math.Max(rX, rY)] = Math.Min(rX, rY);
+            token.ThrowIfCancellationRequested();
+            dataset.LabelData.ReadSliceZ(z, slice);
+            var currentSlice = new List<MaterialRun>[dataset.Height];
+            List<MaterialRun> previousRow = null;
+            for (var y = 0; y < dataset.Height; y++)
+            {
+                var rowRuns = new List<MaterialRun>();
+                var x = 0;
+                while (x < dataset.Width)
+                {
+                    while (x < dataset.Width && slice[y * dataset.Width + x] != materialId) x++;
+                    if (x == dataset.Width) break;
+                    var start = x++;
+                    while (x < dataset.Width && slice[y * dataset.Width + x] == materialId) x++;
+                    var end = x;
+                    var neighbors = EnumerateOverlaps(previousRow, start, end)
+                        .Concat(EnumerateOverlaps(previousSlice[y], start, end)).Select(run => run.Label).ToArray();
+                    int label;
+                    if (neighbors.Length == 0)
+                    {
+                        label = nextLabel++;
+                        components.Ensure(label);
+                    }
+                    else
+                    {
+                        label = neighbors.Min();
+                        components.Ensure(label);
+                        foreach (var neighbor in neighbors) components.Union(label, neighbor);
+                    }
+                    var run = new MaterialRun(z, y, start, end, label);
+                    rowRuns.Add(run);
+                    visitor?.Invoke(run);
+                }
+                currentSlice[y] = rowRuns;
+                previousRow = rowRuns;
+            }
+            previousSlice = currentSlice;
+            progress?.Invoke((z + 1f) / dataset.Depth);
         }
+    }
+
+    private static IEnumerable<MaterialRun> EnumerateOverlaps(List<MaterialRun> runs, int start, int end)
+    {
+        if (runs == null) yield break;
+        foreach (var run in runs)
+        {
+            if (run.EndX <= start) continue;
+            if (run.StartX >= end) yield break;
+            yield return run;
+        }
+    }
+}
+
+internal sealed class RunUnionFind
+{
+    private readonly List<int> _parents = new() { 0 };
+    public void Ensure(int label) { while (_parents.Count <= label) _parents.Add(_parents.Count); }
+    public int Find(int label)
+    {
+        Ensure(label);
+        var root = label;
+        while (_parents[root] != root) root = _parents[root];
+        while (_parents[label] != label) { var next = _parents[label]; _parents[label] = root; label = next; }
+        return root;
+    }
+    public void Union(int a, int b)
+    {
+        var ra = Find(a); var rb = Find(b);
+        if (ra == rb) return;
+        _parents[Math.Max(ra, rb)] = Math.Min(ra, rb);
     }
 }

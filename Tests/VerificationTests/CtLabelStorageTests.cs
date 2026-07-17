@@ -1,6 +1,8 @@
 using GAIA.Data.VolumeData;
 using GAIA.Data.CtImageStack;
 using System.Diagnostics;
+using GAIA.Analysis.RemoveSmallIslands;
+using GAIA;
 
 namespace VerificationTests;
 
@@ -319,5 +321,36 @@ public sealed class CtLabelStorageTests
         labels.WriteSliceZ(3, slice); // identical rewrite remains unchanged
 
         Assert.Equal(new[] { 3 }, changed);
+    }
+
+    [Fact]
+    public void IslandAnalysis_StreamsCrossSliceComponentsAndCleansOnlySmallOnes()
+    {
+        using var grayscale = new ChunkedVolume(10, 8, 3, 4);
+        using var labels = new ChunkedLabelVolume(10, 8, 3, 4, false);
+        // Two-voxel island.
+        labels[1, 1, 0] = 5;
+        labels[2, 1, 0] = 5;
+        // Four-voxel component connected through Z.
+        labels[7, 5, 0] = 5;
+        labels[7, 5, 1] = 5;
+        labels[8, 5, 1] = 5;
+        labels[8, 5, 2] = 5;
+        var dataset = new CtImageStackDataset("islands", Path.GetTempPath())
+        {
+            Width = 10, Height = 8, Depth = 3, VolumeData = grayscale, LabelData = labels
+        };
+        using var processor = new IslandAnalysisProcessor();
+        var material = new Material("target", System.Numerics.Vector4.One, 0, 255, 5);
+
+        var result = processor.Analyze(dataset, material, CancellationToken.None);
+        Assert.Equal(new long[] { 2, 4 }, result.Particles.Select(p => p.VoxelCount).Order().ToArray());
+        var small = result.Particles.Where(p => p.VoxelCount < 3).Select(p => p.Id).ToHashSet();
+        processor.ApplyCleaning(dataset, result, small, CancellationToken.None);
+
+        Assert.Equal(0, labels[1, 1, 0]);
+        Assert.Equal(0, labels[2, 1, 0]);
+        Assert.Equal(5, labels[7, 5, 0]);
+        Assert.Equal(5, labels[8, 5, 2]);
     }
 }
