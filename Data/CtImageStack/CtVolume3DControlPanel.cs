@@ -94,6 +94,17 @@ public class CtVolume3DControlPanel : BasePanel
         ImGui.Text("Display Options");
         ImGui.Checkbox("Show Grayscale Volume", ref _viewer.ShowGrayscale);
 
+        var showBoundingBox = _viewer.ShowBoundingBox;
+        if (ImGui.Checkbox("Show Bounding Box", ref showBoundingBox)) _viewer.ShowBoundingBox = showBoundingBox;
+        if (showBoundingBox)
+        {
+            ImGui.SameLine();
+            var showLabels = _viewer.ShowBoundingBoxLabels;
+            if (ImGui.Checkbox("Coordinates", ref showLabels)) _viewer.ShowBoundingBoxLabels = showLabels;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Annotates the box with the volume extent in voxels and physical units.");
+        }
+
         ImGui.Text("Color Map");
         string[] colorMaps = { "Grayscale", "Hot", "Cool", "Rainbow" };
         ImGui.Combo("##ColorMap", ref _viewer.ColorMapIndex, colorMaps, colorMaps.Length);
@@ -164,6 +175,15 @@ public class CtVolume3DControlPanel : BasePanel
 
         ImGui.Separator();
 
+        var showSliceOverlay = _viewer.ShowSliceOverlay;
+        if (ImGui.Checkbox("Slice Overlay on Cuts", ref showSliceOverlay))
+            _viewer.ShowSliceOverlay = showSliceOverlay;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Textures the exposed face of an enabled cut with the slice read at full\n" +
+                             "resolution, where hairline features such as cracks remain visible.");
+
+        ImGui.Separator();
+
         // Orthogonal Slices
         if (ImGui.CollapsingHeader("Orthogonal Slices", ImGuiTreeNodeFlags.DefaultOpen))
         {
@@ -173,12 +193,20 @@ public class CtVolume3DControlPanel : BasePanel
             {
                 ImGui.Spacing();
                 ImGui.Indent();
-                ImGui.Text("X Slice (Red)");
-                ImGui.SliderFloat("##xslice", ref _viewer.SlicePositions.X, 0.0f, 1.0f, "%.3f");
-                ImGui.Text("Y Slice (Green)");
-                ImGui.SliderFloat("##yslice", ref _viewer.SlicePositions.Y, 0.0f, 1.0f, "%.3f");
-                ImGui.Text("Z Slice (Blue)");
-                ImGui.SliderFloat("##zslice", ref _viewer.SlicePositions.Z, 0.0f, 1.0f, "%.3f");
+                for (var axis = 0; axis < 3; axis++)
+                {
+                    var name = axis switch { 0 => "X", 1 => "Y", _ => "Z" };
+                    ImGui.PushStyleColor(ImGuiCol.Text, CtViewPalette.ToVector4(CtViewPalette.Crosshair(axis)));
+                    ImGui.Text($"{name} Slice ({CtViewPalette.CrosshairName(axis)})");
+                    ImGui.PopStyleColor();
+                    switch (axis)
+                    {
+                        case 0: ImGui.SliderFloat("##xslice", ref _viewer.SlicePositions.X, 0.0f, 1.0f, "%.3f"); break;
+                        case 1: ImGui.SliderFloat("##yslice", ref _viewer.SlicePositions.Y, 0.0f, 1.0f, "%.3f"); break;
+                        default: ImGui.SliderFloat("##zslice", ref _viewer.SlicePositions.Z, 0.0f, 1.0f, "%.3f"); break;
+                    }
+                }
+
                 ImGui.Spacing();
                 if (ImGui.Button("Reset to Center")) _viewer.SlicePositions = new Vector3(0.5f);
                 ImGui.Unindent();

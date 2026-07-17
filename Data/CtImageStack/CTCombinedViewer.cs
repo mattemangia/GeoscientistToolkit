@@ -76,6 +76,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private TextureManager _textureYZ;
     private float _windowLevel = 128;
     private float _windowWidth = 255;
+    private bool _linkThresholds = true;
+    private bool _showVolumeData = true;
     private float _zoomXY = 1.0f;
     private float _zoomXZ = 1.0f;
     private float _zoomYZ = 1.0f;
@@ -148,6 +150,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         {
             _windowLevel = value;
             _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+            if (_linkThresholds) PushWindowLevelTo3D();
         }
     }
 
@@ -158,6 +161,21 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         {
             _windowWidth = value;
             _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+            if (_linkThresholds) PushWindowLevelTo3D();
+        }
+    }
+
+    /// <summary>
+    ///     Keeps the 2D window/level and the 3D grayscale thresholds describing the same
+    ///     intensity range, so a feature visible on a slice is visible in the volume.
+    /// </summary>
+    public bool LinkThresholds
+    {
+        get => _linkThresholds;
+        set
+        {
+            _linkThresholds = value;
+            if (value) PushWindowLevelTo3D();
         }
     }
 
@@ -165,7 +183,18 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     public bool SyncViews { get; set; } = true;
     public bool ShowScaleBar { get; set; } = true;
     public bool ShowCuttingPlanes { get; set; } = true;
-    public bool ShowVolumeData { get; set; } = true;
+
+    public bool ShowVolumeData
+    {
+        get => _showVolumeData;
+        set
+        {
+            _showVolumeData = value;
+            // Every view mode has to honour this. It used to be assigned only while drawing the
+            // combined layout, so the checkbox did nothing whenever the 3D view was on its own.
+            if (VolumeViewer != null) VolumeViewer.ShowGrayscale = value;
+        }
+    }
 
     public float VolumeStepSize
     {
@@ -181,7 +210,9 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         get => VolumeViewer?.MinThreshold ?? 0.1f;
         set
         {
-            if (VolumeViewer != null) VolumeViewer.MinThreshold = value;
+            if (VolumeViewer == null) return;
+            VolumeViewer.MinThreshold = value;
+            if (_linkThresholds) PullWindowLevelFrom3D();
         }
     }
 
@@ -190,8 +221,31 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         get => VolumeViewer?.MaxThreshold ?? 1.0f;
         set
         {
-            if (VolumeViewer != null) VolumeViewer.MaxThreshold = value;
+            if (VolumeViewer == null) return;
+            VolumeViewer.MaxThreshold = value;
+            if (_linkThresholds) PullWindowLevelFrom3D();
         }
+    }
+
+    /// <summary>Maps the 2D window/level (grayscale units) onto the 3D thresholds (normalized).</summary>
+    private void PushWindowLevelTo3D()
+    {
+        if (VolumeViewer == null) return;
+        var min = (_windowLevel - _windowWidth * 0.5f) / 255f;
+        var max = (_windowLevel + _windowWidth * 0.5f) / 255f;
+        VolumeViewer.MinThreshold = Math.Clamp(min, 0f, 1f);
+        VolumeViewer.MaxThreshold = Math.Clamp(Math.Max(max, min + 0.004f), 0f, 1f);
+    }
+
+    /// <summary>The inverse mapping, for when the 3D thresholds are the ones being dragged.</summary>
+    private void PullWindowLevelFrom3D()
+    {
+        if (VolumeViewer == null) return;
+        var min = VolumeViewer.MinThreshold * 255f;
+        var max = VolumeViewer.MaxThreshold * 255f;
+        _windowWidth = Math.Max(1f, max - min);
+        _windowLevel = (min + max) * 0.5f;
+        _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
     }
 
     public int ColorMapIndex
@@ -532,13 +586,15 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 _loadingStatus = "Creating GPU volume resources...";
                 try
                 {
+                    // The viewer derives MinThreshold from an Otsu split of the volume; adopting it
+                    // here (instead of overwriting it with a fixed 0.05) gives both views the same
+                    // auto contrast, and keeps the 3D from opening as a fog of air voxels.
                     VolumeViewer = new CtVolume3DViewer(_streamingDataset)
                     {
                         ShowGrayscale = ShowVolumeData,
-                        StepSize = 2.0f,
-                        MinThreshold = 0.05f,
-                        MaxThreshold = 1.0f
+                        StepSize = 2.0f
                     };
+                    if (_linkThresholds) PullWindowLevelFrom3D();
                     UpdateVolumeViewerSlices();
                 }
                 catch (Exception ex)
@@ -648,21 +704,21 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
         _windowLevel = 128;
         _windowWidth = 255;
+        if (_linkThresholds) PushWindowLevelTo3D();
         UpdateVolumeViewerSlices();
     }
 
     private void UpdateVolumeViewerSlices()
     {
-        if (VolumeViewer != null && SyncViews)
-        {
-            VolumeViewer.SlicePositions = new Vector3(
-                Math.Clamp((float)_sliceX / Math.Max(1, _dataset.Width - 1), 0f, 1f),
-                Math.Clamp((float)_sliceY / Math.Max(1, _dataset.Height - 1), 0f, 1f),
-                Math.Clamp((float)_sliceZ / Math.Max(1, _dataset.Depth - 1), 0f, 1f)
-            );
+        if (VolumeViewer == null || !SyncViews) return;
 
-            VolumeViewer.ShowSlices = SyncViews;
-        }
+        // Only the positions follow the 2D crosshair. Whether the slice planes are drawn is the
+        // user's choice ("Show Slice Planes"), which forcing it from SyncViews used to override.
+        VolumeViewer.SlicePositions = new Vector3(
+            Math.Clamp((float)_sliceX / Math.Max(1, _dataset.Width - 1), 0f, 1f),
+            Math.Clamp((float)_sliceY / Math.Max(1, _dataset.Height - 1), 0f, 1f),
+            Math.Clamp((float)_sliceZ / Math.Max(1, _dataset.Depth - 1), 0f, 1f)
+        );
     }
 
     private void DrawCombinedView()
@@ -696,8 +752,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             ImGui.BeginChild("3D_Content", contentSize);
             var dummyZoom = 1.0f;
             var dummyPan = Vector2.Zero;
-
-            VolumeViewer.ShowGrayscale = ShowVolumeData;
 
             DrawVolumeSafely(ref dummyZoom, ref dummyPan);
             ImGui.EndChild();
@@ -1573,23 +1627,31 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         }
     }
 
+    /// <summary>
+    ///     Each line is coloured by the axis whose position it marks, so the vertical line in the XY
+    ///     view (the X slice) reads cyan in every view that shows it. The cutting planes use a
+    ///     separate hue family, since both land on the same slice and the cut is drawn last.
+    /// </summary>
     private void DrawCrosshairs(ImDrawListPtr dl, int viewIndex, Vector2 canvasPos, Vector2 canvasSize,
         Vector2 imagePos, Vector2 imageSize, int imageWidth, int imageHeight)
     {
-        var color = 0xFF00FF00;
+        int vAxis, hAxis;
         float x1, y1;
 
         switch (viewIndex)
         {
             case 0:
+                vAxis = 0; hAxis = 1;
                 x1 = (float)_sliceX / imageWidth;
                 y1 = (float)_sliceY / imageHeight;
                 break;
             case 1:
+                vAxis = 0; hAxis = 2;
                 x1 = (float)_sliceX / imageWidth;
                 y1 = (float)_sliceZ / imageHeight;
                 break;
             case 2:
+                vAxis = 1; hAxis = 2;
                 x1 = (float)_sliceY / imageWidth;
                 y1 = (float)_sliceZ / imageHeight;
                 break;
@@ -1598,13 +1660,30 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
         var screenX = imagePos.X + x1 * imageSize.X;
         var screenY = imagePos.Y + y1 * imageSize.Y;
+        var top = Math.Max(imagePos.Y, canvasPos.Y);
+        var bottom = Math.Min(imagePos.Y + imageSize.Y, canvasPos.Y + canvasSize.Y);
+        var left = Math.Max(imagePos.X, canvasPos.X);
+        var right = Math.Min(imagePos.X + imageSize.X, canvasPos.X + canvasSize.X);
+
+        // A gap around the intersection keeps the voxel under the crosshair readable.
+        const float gap = 5f;
+        var shadow = CtViewPalette.ToImGui(Vector3.Zero, 0.55f);
+        var vColor = CtViewPalette.ToImGui(CtViewPalette.Crosshair(vAxis));
+        var hColor = CtViewPalette.ToImGui(CtViewPalette.Crosshair(hAxis));
 
         if (screenX >= imagePos.X && screenX <= imagePos.X + imageSize.X)
-            dl.AddLine(new Vector2(screenX, Math.Max(imagePos.Y, canvasPos.Y)),
-                new Vector2(screenX, Math.Min(imagePos.Y + imageSize.Y, canvasPos.Y + canvasSize.Y)), color, 1.0f);
+        {
+            dl.AddLine(new Vector2(screenX + 1, top), new Vector2(screenX + 1, bottom), shadow, 3f);
+            dl.AddLine(new Vector2(screenX, top), new Vector2(screenX, Math.Max(top, screenY - gap)), vColor, 1.5f);
+            dl.AddLine(new Vector2(screenX, Math.Min(bottom, screenY + gap)), new Vector2(screenX, bottom), vColor, 1.5f);
+        }
+
         if (screenY >= imagePos.Y && screenY <= imagePos.Y + imageSize.Y)
-            dl.AddLine(new Vector2(Math.Max(imagePos.X, canvasPos.X), screenY),
-                new Vector2(Math.Min(imagePos.X + imageSize.X, canvasPos.X + canvasSize.X), screenY), color, 1.0f);
+        {
+            dl.AddLine(new Vector2(left, screenY + 1), new Vector2(right, screenY + 1), shadow, 3f);
+            dl.AddLine(new Vector2(left, screenY), new Vector2(Math.Max(left, screenX - gap), screenY), hColor, 1.5f);
+            dl.AddLine(new Vector2(Math.Min(right, screenX + gap), screenY), new Vector2(right, screenY), hColor, 1.5f);
+        }
     }
 
     private void DrawCuttingPlanes(ImDrawListPtr dl, int viewIndex, Vector2 canvasPos, Vector2 canvasSize,
@@ -1612,13 +1691,13 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     {
         if (VolumeViewer == null) return;
 
-        if (VolumeViewer.CutXEnabled && (viewIndex == 0 || viewIndex == 1))
+        if (VolumeViewer.CutXEnabled && VolumeViewer.ShowCutXPlaneVisual && (viewIndex == 0 || viewIndex == 1))
         {
             var normalizedX = VolumeViewer.CutXPosition;
             var screenX = imagePos.X + normalizedX * imageSize.X;
             if (screenX >= imagePos.X && screenX <= imagePos.X + imageSize.X)
             {
-                uint color = 0x6060FF60;
+                var color = CtViewPalette.ToImGui(CtViewPalette.Cut(0), 0.85f);
                 dl.AddLine(new Vector2(screenX, Math.Max(imagePos.Y, canvasPos.Y)),
                     new Vector2(screenX, Math.Min(imagePos.Y + imageSize.Y, canvasPos.Y + canvasSize.Y)), color, 2.0f);
                 DrawArrow(dl, new Vector2(screenX, imagePos.Y + imageSize.Y * 0.5f),
@@ -1626,13 +1705,13 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             }
         }
 
-        if (VolumeViewer.CutYEnabled && (viewIndex == 0 || viewIndex == 2))
+        if (VolumeViewer.CutYEnabled && VolumeViewer.ShowCutYPlaneVisual && (viewIndex == 0 || viewIndex == 2))
         {
             var normalizedY = VolumeViewer.CutYPosition;
             var screenY = imagePos.Y + (1.0f - normalizedY) * imageSize.Y;
             if (screenY >= imagePos.Y && screenY <= imagePos.Y + imageSize.Y)
             {
-                uint color = 0x6060FF60;
+                var color = CtViewPalette.ToImGui(CtViewPalette.Cut(1), 0.85f);
                 dl.AddLine(new Vector2(Math.Max(imagePos.X, canvasPos.X), screenY),
                     new Vector2(Math.Min(imagePos.X + imageSize.X, canvasPos.X + canvasSize.X), screenY), color, 2.0f);
                 DrawArrow(dl, new Vector2(imagePos.X + imageSize.X * 0.5f, screenY),
@@ -1640,10 +1719,10 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             }
         }
 
-        if (VolumeViewer.CutZEnabled && (viewIndex == 1 || viewIndex == 2))
+        if (VolumeViewer.CutZEnabled && VolumeViewer.ShowCutZPlaneVisual && (viewIndex == 1 || viewIndex == 2))
         {
             var normalizedZ = VolumeViewer.CutZPosition;
-            uint color = 0x60FF6060;
+            var color = CtViewPalette.ToImGui(CtViewPalette.Cut(2), 0.85f);
 
             if (viewIndex == 1)
             {
@@ -1671,8 +1750,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             }
         }
 
-        if (VolumeViewer.ClippingPlanes != null)
-            foreach (var plane in VolumeViewer.ClippingPlanes.Where(p => p.Enabled))
+        if (VolumeViewer.ClippingPlanes != null && VolumeViewer.ShowPlaneVisualizations)
+            foreach (var plane in VolumeViewer.ClippingPlanes.Where(p => p.Enabled && p.IsVisualizationVisible))
                 DrawClippingPlaneIntersection(dl, plane, viewIndex, canvasPos, canvasSize, imagePos, imageSize);
     }
 
@@ -1680,7 +1759,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         Vector2 canvasPos, Vector2 canvasSize, Vector2 imagePos, Vector2 imageSize)
     {
         var planeNormal = plane.Normal;
-        uint color = 0x60FFFF60;
+        var color = CtViewPalette.ToImGui(CtViewPalette.ClipPlane, 0.75f);
 
         switch (viewIndex)
         {

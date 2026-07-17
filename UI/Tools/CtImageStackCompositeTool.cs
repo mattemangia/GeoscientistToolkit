@@ -272,7 +272,12 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
     {
         if (_disposed) return;
 
-        if (dataset is not CtImageStackDataset ctDataset)
+        // A stack imported "Optimized for 3D" is registered in the project as the streaming
+        // dataset, which keeps the voxels the tools edit on its editable partner. Selecting it
+        // must open the same tools rather than report that none apply.
+        var ctDataset = dataset as CtImageStackDataset ?? (dataset as StreamingCtVolumeDataset)?.EditablePartner;
+
+        if (ctDataset == null)
         {
             ImGui.TextDisabled("These tools are available for CT Image Stack datasets.");
             UnregisterAllForDataset(_lastDataset);

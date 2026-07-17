@@ -114,6 +114,14 @@ public class CtRenderingPanel : BasePanel
         if (ImGui.DragFloat("Width", ref windowWidth, 1f, 1f, 255f))
             _viewer.WindowWidth = windowWidth;
 
+        var linkThresholds = _viewer.LinkThresholds;
+        if (ImGui.Checkbox("Link 3D thresholds", ref linkThresholds))
+            _viewer.LinkThresholds = linkThresholds;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Keeps the 3D grayscale thresholds on the same intensity range as this\n" +
+                             "window/level, so slices and volume show the same features.\n" +
+                             "Min = (Level - Width/2) / 255, Max = (Level + Width/2) / 255.");
+
         if (ImGui.Button("Auto W/L"))
         {
             _viewer.WindowLevel = 128;
@@ -169,6 +177,36 @@ public class CtRenderingPanel : BasePanel
 
         var showVolumeData = _viewer.ShowVolumeData;
         if (ImGui.Checkbox("Show Grayscale", ref showVolumeData)) _viewer.ShowVolumeData = showVolumeData;
+
+        var showBoundingBox = _viewer.VolumeViewer.ShowBoundingBox;
+        if (ImGui.Checkbox("Show Bounding Box", ref showBoundingBox))
+            _viewer.VolumeViewer.ShowBoundingBox = showBoundingBox;
+
+        if (showBoundingBox)
+        {
+            ImGui.SameLine();
+            var showLabels = _viewer.VolumeViewer.ShowBoundingBoxLabels;
+            if (ImGui.Checkbox("Coordinates", ref showLabels))
+                _viewer.VolumeViewer.ShowBoundingBoxLabels = showLabels;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Annotates the box with the volume extent in voxels and physical units.");
+        }
+
+        var showSlices = _viewer.VolumeViewer.ShowSlices;
+        if (ImGui.Checkbox("Show Slice Planes (3D crosshair)", ref showSlices))
+            _viewer.VolumeViewer.ShowSlices = showSlices;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip($"Draws the slice at the 2D crosshair on each axis:\n" +
+                             $"X {CtViewPalette.CrosshairName(0)}, Y {CtViewPalette.CrosshairName(1)}, " +
+                             $"Z {CtViewPalette.CrosshairName(2)}.");
+
+        var showSliceOverlay = _viewer.VolumeViewer.ShowSliceOverlay;
+        if (ImGui.Checkbox("Slice Overlay on Cuts", ref showSliceOverlay))
+            _viewer.VolumeViewer.ShowSliceOverlay = showSliceOverlay;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Textures the exposed face of an enabled cut with the slice read at full\n" +
+                             "resolution. The volume body is ray-marched from a reduced LOD, so hairline\n" +
+                             "features such as cracks are only visible on these planes.");
 
         ImGui.Separator();
 
@@ -387,12 +425,18 @@ public class CtRenderingPanel : BasePanel
     private void DrawAxisCuttingPlane(string axis, ref bool enabled, ref float position,
         ref bool forward, ref bool showVisual)
     {
+        var index = axis == "X" ? 0 : axis == "Y" ? 1 : 2;
+        ImGui.PushStyleColor(ImGuiCol.Text, CtViewPalette.ToVector4(CtViewPalette.Cut(index)));
         ImGui.Checkbox($"{axis}-Axis Cut", ref enabled);
+        ImGui.PopStyleColor();
 
         if (enabled)
         {
             ImGui.SameLine();
             ImGui.Checkbox($"Show##{axis}", ref showVisual);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip($"Outlines the cut plane in {CtViewPalette.CutName(index).ToLowerInvariant()} " +
+                                 "and, with \"Slice Overlay on Cuts\", textures its face with the slice.");
 
             ImGui.DragFloat($"Position##{axis}", ref position, 0.01f, 0.0f, 1.0f);
 

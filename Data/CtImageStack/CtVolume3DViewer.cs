@@ -37,6 +37,10 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private readonly Dictionary<byte, bool> _materialVisibility = new();
     private int _program, _vao, _vbo, _ebo, _fbo, _colorTexture, _depthBuffer;
     private int _volumeTexture, _labelTexture, _previewTexture, _materialTexture;
+    private int _lineProgram, _lineVao, _lineVbo, _lineBufferBytes;
+    private readonly int[] _sliceTextures = new int[3];
+    private readonly int[] _sliceTextureIndex = { -1, -1, -1 };
+    private float _maxLineWidth = 1f;
     private int _renderWidth = 1280, _renderHeight = 720;
     private Vector3 _cameraTarget;
     private float _cameraYaw = -MathF.PI / 4f, _cameraPitch = MathF.PI / 6f, _cameraDistance = 2f;
@@ -53,12 +57,21 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     public bool CutXForward = true, CutYForward = true, CutZForward = true;
     public float CutXPosition = 0.5f, CutYPosition = 0.5f, CutZPosition = 0.5f;
     public float MinThreshold = 0.05f, MaxThreshold = 1f, StepSize = 2f;
-    public bool ShowGrayscale = true, ShowSlices;
+    public bool ShowGrayscale = true, ShowSlices = true;
     public Vector3 SlicePositions = new(0.5f);
     public bool ShowCutXPlaneVisual { get; set; } = true;
     public bool ShowCutYPlaneVisual { get; set; } = true;
     public bool ShowCutZPlaneVisual { get; set; } = true;
     public bool ShowPlaneVisualizations { get; set; } = true;
+
+    /// <summary>
+    ///     Textures the plane faces with the slice read from the full-resolution volume. The
+    ///     ray-marched body samples a downsampled LOD, so hairline features like cracks only
+    ///     survive on these planes.
+    /// </summary>
+    public bool ShowSliceOverlay { get; set; } = true;
+    public bool ShowBoundingBox { get; set; } = true;
+    public bool ShowBoundingBoxLabels { get; set; } = true;
     public List<ClippingPlane> ClippingPlanes { get; } = new();
 
     public CtVolume3DViewer(StreamingCtVolumeDataset dataset)
@@ -96,12 +109,15 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         if (desiredW != _renderWidth || desiredH != _renderHeight) ResizeTarget(desiredW, desiredH);
         HandleInput();
         Render();
+        var origin = ImGui.GetCursorScreenPos();
         ImGui.Image((IntPtr)_colorTexture, available, new Vector2(0, 1), new Vector2(1, 0));
+        DrawOverlayLabels(origin, available);
     }
 
     private void CreateResources()
     {
         _program = CreateProgram(VertexShader, FragmentShader);
+        _lineProgram = CreateProgram(LineVertexShader, LineFragmentShader);
         float[] vertices =
         {
             0,0,0, 1,0,0, 1,1,0, 0,1,0, 0,0,1, 1,0,1, 1,1,1, 0,1,1
@@ -115,6 +131,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo); GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * 4, vertices, BufferUsageHint.StaticDraw);
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo); GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * 4, indices, BufferUsageHint.StaticDraw);
         GL.EnableVertexAttribArray(0); GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 12, 0);
+        CreateLineResources();
         var lod = _streamingDataset.RenderLod ?? _streamingDataset.BaseLod;
         var bricks = _streamingDataset.RenderLodVolumeData ?? _streamingDataset.BaseLodVolumeData;
         var density = ReconstructVolume(lod, bricks, _streamingDataset.BrickSize);
@@ -130,11 +147,25 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         ResizeTarget(_renderWidth, _renderHeight);
     }
 
+    private void CreateLineResources()
+    {
+        _lineVao = GL.GenVertexArray(); _lineVbo = GL.GenBuffer();
+        GL.BindVertexArray(_lineVao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _lineVbo);
+        GL.EnableVertexAttribArray(0); GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 28, 0);
+        GL.EnableVertexAttribArray(1); GL.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 28, 12);
+        // Core profiles are only required to support a width of 1, so ask before asking for more.
+        var range = new float[2];
+        GL.GetFloat(GetPName.AliasedLineWidthRange, range);
+        _maxLineWidth = range[1] > 0 ? range[1] : 1f;
+    }
+
     private void Render()
     {
         if (_labelsDirty) { UploadLabels(); _labelsDirty = false; }
         if (_previewDirty) { UploadPreview(); _previewDirty = false; }
         if (_materialsDirty) { UploadMaterials(); _materialsDirty = false; }
+        UpdateSlicePlaneTextures();
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
         GL.Viewport(0, 0, _renderWidth, _renderHeight);
         GL.Enable(EnableCap.DepthTest); GL.Enable(EnableCap.CullFace); GL.CullFace(CullFaceMode.Back);
@@ -152,13 +183,322 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         var pi = 0;
         foreach (var p in ClippingPlanes.Where(p => p.Enabled).Take(MAX_CLIPPING_PLANES))
         {
-            Set4($"uPlanes[{pi++}]", new Vector4(p.Normal, p.Mirror ? -p.Distance : p.Distance));
+            // The side is carried separately: folding Mirror into the sign of the distance made a
+            // negative distance flip the kept half as a side effect.
+            Set4($"uPlanes[{pi}]", new Vector4(Vector3.Normalize(p.Normal), p.Distance));
+            Set1($"uPlaneMirror[{pi}]", p.Mirror ? 1 : 0);
+            pi++;
         }
+        var planePos = Vector3.Zero; var planeOn = Vector3.Zero;
+        for (var axis = 0; axis < 3; axis++)
+        {
+            var pos = ResolvePlanePosition(axis);
+            if (pos == null || _sliceTextures[axis] == 0) continue;
+            SetComponent(ref planePos, axis, pos.Value);
+            SetComponent(ref planeOn, axis, 1f);
+        }
+        Set3("uSlicePlanePos", planePos); Set3("uSlicePlaneOn", planeOn);
         Set1("uShowPreview", _showPreview ? 1 : 0); Set4("uPreviewColor", _previewColor);
         Bind3D(0, _volumeTexture, "uVolume"); Bind3D(1, _labelTexture, "uLabels"); Bind3D(2, _previewTexture, "uPreview");
         GL.ActiveTexture(TextureUnit.Texture3); GL.BindTexture(TextureTarget.Texture2D, _materialTexture); Set1("uMaterials", 3);
+        for (var axis = 0; axis < 3; axis++)
+        {
+            GL.ActiveTexture(TextureUnit.Texture4 + axis);
+            GL.BindTexture(TextureTarget.Texture2D, _sliceTextures[axis]);
+            Set1(axis switch { 0 => "uSliceX", 1 => "uSliceY", _ => "uSliceZ" }, 4 + axis);
+        }
+        // The shader already composites front-to-back into acc, so it writes the frame directly;
+        // leaving ImGui's blend enabled here would attenuate it a second time.
+        GL.Disable(EnableCap.Blend);
         GL.BindVertexArray(_vao); GL.DrawElements(PrimitiveType.Triangles, 36, DrawElementsType.UnsignedInt, 0);
+        RenderOverlayLines();
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+    }
+
+    /// <summary>Box, plane borders and the slice cross, drawn over the volume so they stay legible.</summary>
+    private void RenderOverlayLines()
+    {
+        var verts = new List<float>();
+        BuildOverlayLines(verts);
+        if (verts.Count == 0) return;
+        GL.UseProgram(_lineProgram);
+        GL.UniformMatrix4(GL.GetUniformLocation(_lineProgram, "uView"), 1, false, ToArray(_view));
+        GL.UniformMatrix4(GL.GetUniformLocation(_lineProgram, "uProjection"), 1, false, ToArray(_projection));
+        GL.BindVertexArray(_lineVao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _lineVbo);
+        var bytes = verts.Count * sizeof(float);
+        if (bytes > _lineBufferBytes)
+        {
+            _lineBufferBytes = (int)(bytes * 1.5f);
+            GL.BufferData(BufferTarget.ArrayBuffer, _lineBufferBytes, IntPtr.Zero, BufferUsageHint.DynamicDraw);
+        }
+        GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero, bytes, verts.ToArray());
+        GL.Disable(EnableCap.DepthTest); GL.Disable(EnableCap.CullFace);
+        GL.Enable(EnableCap.Blend); GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        GL.LineWidth(Math.Min(1.5f, _maxLineWidth));
+        GL.DrawArrays(PrimitiveType.Lines, 0, verts.Count / 7);
+        GL.LineWidth(1f);
+        GL.Enable(EnableCap.DepthTest);
+    }
+
+    private void BuildOverlayLines(List<float> v)
+    {
+        if (ShowBoundingBox) AddBox(v, Vector3.Zero, VolumeScale, CtViewPalette.BoundingBox, 0.85f);
+        if (!ShowPlaneVisualizations) return;
+
+        for (var axis = 0; axis < 3; axis++)
+        {
+            if (CutEnabled(axis) && CutVisual(axis))
+                AddAxisRect(v, axis, CutPosition(axis), CtViewPalette.Cut(axis), 0.95f);
+            if (ShowSlices)
+                AddAxisRect(v, axis, Component(SlicePositions, axis), CtViewPalette.Crosshair(axis), 0.9f);
+        }
+
+        if (ShowSlices)
+        {
+            // The three-way intersection: one line per direction, each in that axis' crosshair colour.
+            var c = SlicePositions * VolumeScale;
+            AddLine(v, new Vector3(0, c.Y, c.Z), new Vector3(VolumeScale.X, c.Y, c.Z), CtViewPalette.Crosshair(0), 1f);
+            AddLine(v, new Vector3(c.X, 0, c.Z), new Vector3(c.X, VolumeScale.Y, c.Z), CtViewPalette.Crosshair(1), 1f);
+            AddLine(v, new Vector3(c.X, c.Y, 0), new Vector3(c.X, c.Y, VolumeScale.Z), CtViewPalette.Crosshair(2), 1f);
+        }
+
+        foreach (var p in ClippingPlanes.Where(p => p.Enabled && p.IsVisualizationVisible).Take(MAX_CLIPPING_PLANES))
+            AddClipPolygon(v, p, CtViewPalette.ClipPlane, 0.9f);
+    }
+
+    private void AddBox(List<float> v, Vector3 lo, Vector3 hi, Vector3 color, float alpha)
+    {
+        Vector3 C(int i) => new(((i & 1) != 0) ? hi.X : lo.X, ((i & 2) != 0) ? hi.Y : lo.Y, ((i & 4) != 0) ? hi.Z : lo.Z);
+        int[] edges = { 0,1, 1,3, 3,2, 2,0, 4,5, 5,7, 7,6, 6,4, 0,4, 1,5, 2,6, 3,7 };
+        for (var i = 0; i < edges.Length; i += 2) AddLine(v, C(edges[i]), C(edges[i + 1]), color, alpha);
+    }
+
+    /// <summary>Outlines the full extent of the volume at <paramref name="pos" /> along an axis.</summary>
+    private void AddAxisRect(List<float> v, int axis, float pos, Vector3 color, float alpha)
+    {
+        var s = VolumeScale;
+        var p = Math.Clamp(pos, 0f, 1f) * Component(s, axis);
+        Vector3[] q = axis switch
+        {
+            0 => new[] { new Vector3(p, 0, 0), new Vector3(p, s.Y, 0), new Vector3(p, s.Y, s.Z), new Vector3(p, 0, s.Z) },
+            1 => new[] { new Vector3(0, p, 0), new Vector3(s.X, p, 0), new Vector3(s.X, p, s.Z), new Vector3(0, p, s.Z) },
+            _ => new[] { new Vector3(0, 0, p), new Vector3(s.X, 0, p), new Vector3(s.X, s.Y, p), new Vector3(0, s.Y, p) }
+        };
+        for (var i = 0; i < 4; i++) AddLine(v, q[i], q[(i + 1) % 4], color, alpha);
+    }
+
+    /// <summary>Traces where an arbitrary plane crosses the volume, by cutting the 12 box edges.</summary>
+    private void AddClipPolygon(List<float> v, ClippingPlane plane, Vector3 color, float alpha)
+    {
+        var n = Vector3.Normalize(plane.Normal);
+        if (!float.IsFinite(n.X) || n.LengthSquared() < 1e-6f) return;
+        // Matches the shader: dot(p - 0.5, n) == Distance - 0.5, in normalized volume space.
+        var c = plane.Distance - 0.5f + Vector3.Dot(new Vector3(0.5f), n);
+        Vector3 Corner(int i) => new((i & 1) != 0 ? 1 : 0, (i & 2) != 0 ? 1 : 0, (i & 4) != 0 ? 1 : 0);
+        int[] edges = { 0,1, 1,3, 3,2, 2,0, 4,5, 5,7, 7,6, 6,4, 0,4, 1,5, 2,6, 3,7 };
+        var hits = new List<Vector3>();
+        for (var i = 0; i < edges.Length; i += 2)
+        {
+            var a = Corner(edges[i]); var b = Corner(edges[i + 1]);
+            var da = Vector3.Dot(a, n) - c; var db = Vector3.Dot(b, n) - c;
+            if (da * db > 0f || Math.Abs(da - db) < 1e-9f) continue;
+            hits.Add(Vector3.Lerp(a, b, da / (da - db)));
+        }
+        if (hits.Count < 3) return;
+
+        // Order the hits around the polygon centroid, in a basis lying in the plane.
+        var centre = hits.Aggregate(Vector3.Zero, (s, p) => s + p) / hits.Count;
+        var u = Vector3.Normalize(Vector3.Cross(n, Math.Abs(n.Z) < 0.9f ? Vector3.UnitZ : Vector3.UnitX));
+        var w = Vector3.Cross(n, u);
+        hits.Sort((p, q) => MathF.Atan2(Vector3.Dot(p - centre, w), Vector3.Dot(p - centre, u))
+            .CompareTo(MathF.Atan2(Vector3.Dot(q - centre, w), Vector3.Dot(q - centre, u))));
+        for (var i = 0; i < hits.Count; i++)
+            AddLine(v, hits[i] * VolumeScale, hits[(i + 1) % hits.Count] * VolumeScale, color, alpha);
+    }
+
+    private static void AddLine(List<float> v, Vector3 a, Vector3 b, Vector3 color, float alpha)
+    {
+        v.Add(a.X); v.Add(a.Y); v.Add(a.Z); v.Add(color.X); v.Add(color.Y); v.Add(color.Z); v.Add(alpha);
+        v.Add(b.X); v.Add(b.Y); v.Add(b.Z); v.Add(color.X); v.Add(color.Y); v.Add(color.Z); v.Add(alpha);
+    }
+
+    /// <summary>
+    ///     Where the textured plane for an axis sits, or null when that axis has none. A cut being
+    ///     inspected wins over the crosshair slice: one plane per axis keeps a single full-resolution
+    ///     slice texture per axis.
+    /// </summary>
+    private float? ResolvePlanePosition(int axis)
+    {
+        if (ShowPlaneVisualizations && ShowSliceOverlay && CutEnabled(axis) && CutVisual(axis)) return CutPosition(axis);
+        if (ShowSlices) return Component(SlicePositions, axis);
+        return null;
+    }
+
+    private bool CutEnabled(int axis) => axis switch { 0 => CutXEnabled, 1 => CutYEnabled, _ => CutZEnabled };
+    private bool CutVisual(int axis) => axis switch { 0 => ShowCutXPlaneVisual, 1 => ShowCutYPlaneVisual, _ => ShowCutZPlaneVisual };
+    private float CutPosition(int axis) => axis switch { 0 => CutXPosition, 1 => CutYPosition, _ => CutZPosition };
+    private int AxisLength(int axis) => axis switch { 0 => _editableDataset.Width, 1 => _editableDataset.Height, _ => _editableDataset.Depth };
+    private static float Component(Vector3 v, int axis) => axis switch { 0 => v.X, 1 => v.Y, _ => v.Z };
+    private static void SetComponent(ref Vector3 v, int axis, float value)
+    {
+        if (axis == 0) v.X = value; else if (axis == 1) v.Y = value; else v.Z = value;
+    }
+
+    /// <summary>The plane texture for an axis: (u, v) run along the two axes it does not span.</summary>
+    private (int w, int h) SliceTextureSize(int axis) => axis switch
+    {
+        0 => (_editableDataset.Height, _editableDataset.Depth),
+        1 => (_editableDataset.Width, _editableDataset.Depth),
+        _ => (_editableDataset.Width, _editableDataset.Height)
+    };
+
+    private void UpdateSlicePlaneTextures()
+    {
+        for (var axis = 0; axis < 3; axis++)
+        {
+            var pos = ResolvePlanePosition(axis);
+            if (pos == null) continue;
+            var length = AxisLength(axis);
+            if (length <= 0) continue;
+            var index = Math.Clamp((int)MathF.Round(pos.Value * (length - 1)), 0, length - 1);
+            if (_sliceTextures[axis] != 0 && _sliceTextureIndex[axis] == index) continue;
+            var (w, h) = SliceTextureSize(axis);
+            if (w <= 0 || h <= 0) continue;
+            var data = ExtractSlice(axis, index, w, h);
+            if (_sliceTextures[axis] == 0) _sliceTextures[axis] = CreateSliceTexture(w, h);
+            GL.BindTexture(TextureTarget.Texture2D, _sliceTextures[axis]);
+            // R8 rows are not padded to 4 bytes, which the default unpack alignment assumes.
+            GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+            GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, w, h, PixelFormat.Red, PixelType.UnsignedByte, data);
+            _sliceTextureIndex[axis] = index;
+        }
+    }
+
+    private byte[] ExtractSlice(int axis, int index, int w, int h)
+    {
+        var data = new byte[w * h];
+        var volume = _editableDataset.VolumeData;
+        if (volume == null) return data;
+        try
+        {
+            switch (axis)
+            {
+                case 0:
+                    Parallel.For(0, h, z => { for (var y = 0; y < w; y++) data[z * w + y] = volume[index, y, z]; });
+                    break;
+                case 1:
+                    Parallel.For(0, h, z => { for (var x = 0; x < w; x++) data[z * w + x] = volume[x, index, z]; });
+                    break;
+                default:
+                    volume.ReadSliceZ(index, data);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[CtVolume3DViewer] Could not read the slice for axis {axis} at {index}: {ex.Message}");
+        }
+        return data;
+    }
+
+    private static int CreateSliceTexture(int w, int h)
+    {
+        var t = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, t);
+        GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.R8, w, h, 0, PixelFormat.Red, PixelType.UnsignedByte, IntPtr.Zero);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        return t;
+    }
+
+    private void InvalidateSlicePlaneTextures()
+    {
+        for (var i = 0; i < 3; i++) _sliceTextureIndex[i] = -1;
+    }
+
+    // --- Screen-space annotation -------------------------------------------------------------
+
+    private void DrawOverlayLabels(Vector2 origin, Vector2 size)
+    {
+        if (!ShowBoundingBox || !ShowBoundingBoxLabels) return;
+        var dl = ImGui.GetWindowDrawList();
+        var vp = _view * _projection;
+        var s = VolumeScale;
+        var unit = _editableDataset.Unit ?? "µm";
+        var px = _editableDataset.PixelSize;
+        var thickness = _editableDataset.SliceThickness > 0 ? _editableDataset.SliceThickness : px;
+
+        Label(dl, vp, origin, size, Vector3.Zero, "0, 0, 0", CtViewPalette.BoundingBox);
+        Label(dl, vp, origin, size, new Vector3(s.X * 0.5f, 0, 0),
+            $"X  {_editableDataset.Width} px · {FormatLength(_editableDataset.Width, px, unit)}", CtViewPalette.BoundingBox);
+        Label(dl, vp, origin, size, new Vector3(0, s.Y * 0.5f, 0),
+            $"Y  {_editableDataset.Height} px · {FormatLength(_editableDataset.Height, px, unit)}", CtViewPalette.BoundingBox);
+        Label(dl, vp, origin, size, new Vector3(0, 0, s.Z * 0.5f),
+            $"Z  {_editableDataset.Depth} px · {FormatLength(_editableDataset.Depth, thickness, unit)}", CtViewPalette.BoundingBox);
+
+        if (!ShowPlaneVisualizations) return;
+        for (var axis = 0; axis < 3; axis++)
+        {
+            var voxelSize = axis == 2 ? thickness : px;
+            var name = axis switch { 0 => "X", 1 => "Y", _ => "Z" };
+            if (CutEnabled(axis) && CutVisual(axis))
+            {
+                var voxel = (int)MathF.Round(CutPosition(axis) * (AxisLength(axis) - 1));
+                Label(dl, vp, origin, size, PlaneCentre(axis, CutPosition(axis)),
+                    $"{name} cut  {voxel} px · {FormatLength(voxel, voxelSize, unit)}", CtViewPalette.Cut(axis));
+            }
+            else if (ShowSlices)
+            {
+                var voxel = (int)MathF.Round(Component(SlicePositions, axis) * (AxisLength(axis) - 1));
+                Label(dl, vp, origin, size, PlaneCentre(axis, Component(SlicePositions, axis)),
+                    $"{name} {voxel} px", CtViewPalette.Crosshair(axis));
+            }
+        }
+    }
+
+    private Vector3 PlaneCentre(int axis, float pos)
+    {
+        var s = VolumeScale;
+        var p = Math.Clamp(pos, 0f, 1f) * Component(s, axis);
+        return axis switch
+        {
+            0 => new Vector3(p, s.Y * 0.5f, s.Z),
+            1 => new Vector3(s.X * 0.5f, p, s.Z),
+            _ => new Vector3(s.X * 0.5f, s.Y, p)
+        };
+    }
+
+    private static void Label(ImDrawListPtr dl, Matrix4x4 vp, Vector2 origin, Vector2 size, Vector3 world,
+        string text, Vector3 color)
+    {
+        if (!Project(vp, origin, size, world, out var screen)) return;
+        dl.AddText(screen + new Vector2(1, 1), CtViewPalette.ToImGui(Vector3.Zero, 0.8f), text);
+        dl.AddText(screen, CtViewPalette.ToImGui(color), text);
+    }
+
+    /// <summary>Projects a world point onto the displayed image. The image is drawn flipped, so
+    /// that NDC +Y lands at the top of the rect.</summary>
+    private static bool Project(Matrix4x4 viewProj, Vector2 origin, Vector2 size, Vector3 world, out Vector2 screen)
+    {
+        screen = Vector2.Zero;
+        var clip = Vector4.Transform(new Vector4(world, 1f), viewProj);
+        if (clip.W <= 1e-5f) return false;
+        var ndc = new Vector3(clip.X, clip.Y, clip.Z) / clip.W;
+        if (ndc.X < -1.5f || ndc.X > 1.5f || ndc.Y < -1.5f || ndc.Y > 1.5f) return false;
+        screen = origin + new Vector2((ndc.X * 0.5f + 0.5f) * size.X, (1f - (ndc.Y * 0.5f + 0.5f)) * size.Y);
+        return true;
+    }
+
+    private static string FormatLength(int voxels, float voxelSize, string unit)
+    {
+        if (voxelSize <= 0 || !float.IsFinite(voxelSize)) return $"{voxels} px";
+        var length = voxels * voxelSize;
+        if ((unit == "µm" || unit == "um") && length >= 1000f) return $"{length / 1000f:0.##} mm";
+        return $"{length:0.##} {unit}";
     }
 
     private Vector3 CameraPosition => _cameraTarget + new Vector3(MathF.Cos(_cameraYaw) * MathF.Cos(_cameraPitch), MathF.Sin(_cameraPitch), MathF.Sin(_cameraYaw) * MathF.Cos(_cameraPitch)) * _cameraDistance;
@@ -179,7 +519,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     }
 
     public void ResetCamera() { _cameraTarget = VolumeScale * 0.5f; _cameraYaw = -MathF.PI / 4; _cameraPitch = MathF.PI / 6; _cameraDistance = Math.Max(1.5f, VolumeScale.Length() * 1.25f); UpdateCamera(); }
-    public void ResetView() { ResetCamera(); CutXEnabled = CutYEnabled = CutZEnabled = false; ClippingPlanes.Clear(); }
+    public void ResetView() { ResetCamera(); CutXEnabled = CutYEnabled = CutZEnabled = false; ClippingPlanes.Clear(); InvalidateSlicePlaneTextures(); }
     private void UpdateCamera() { _view = Matrix4x4.CreateLookAt(CameraPosition, _cameraTarget, Vector3.UnitY); _projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4, _renderWidth / (float)_renderHeight, 0.01f, 100f); }
     public void UpdateClippingPlaneNormal(ClippingPlane p) { var q = Quaternion.CreateFromYawPitchRoll(p.Rotation.Y, p.Rotation.X, p.Rotation.Z); p.Normal = Vector3.Normalize(Vector3.Transform(-Vector3.UnitZ, q)); }
     public void MarkLabelsAsDirty() => _labelsDirty = true;
@@ -209,12 +549,12 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo); GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, _colorTexture, 0); GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, RenderbufferTarget.Renderbuffer, _depthBuffer); GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); UpdateCamera();
     }
 
-    private static int CreateTexture3D(int w, int h, int d, byte[] data, bool linear = true) { var t=GL.GenTexture(); var filter=linear?(int)TextureMinFilter.Linear:(int)TextureMinFilter.Nearest; GL.BindTexture(TextureTarget.Texture3D,t); GL.TexImage3D(TextureTarget.Texture3D,0,PixelInternalFormat.R8,w,h,d,0,PixelFormat.Red,PixelType.UnsignedByte,data); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMinFilter,filter); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMagFilter,filter); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapS,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapT,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapR,(int)TextureWrapMode.ClampToEdge); return t; }
+    private static int CreateTexture3D(int w, int h, int d, byte[] data, bool linear = true) { var t=GL.GenTexture(); var filter=linear?(int)TextureMinFilter.Linear:(int)TextureMinFilter.Nearest; GL.BindTexture(TextureTarget.Texture3D,t); GL.PixelStore(PixelStoreParameter.UnpackAlignment,1); GL.TexImage3D(TextureTarget.Texture3D,0,PixelInternalFormat.R8,w,h,d,0,PixelFormat.Red,PixelType.UnsignedByte,data); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMinFilter,filter); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureMagFilter,filter); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapS,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapT,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture3D,TextureParameterName.TextureWrapR,(int)TextureWrapMode.ClampToEdge); return t; }
 
     /// <summary>256x1 RGBA lookup indexed by label id: rgb is the material colour, alpha its
     /// effective opacity. A hidden material is stored as opacity 0, which the shader's mix()
     /// and max() already collapse to a no-op, so visibility needs no separate channel.</summary>
-    private static int CreateMaterialTexture() { var t=GL.GenTexture(); GL.BindTexture(TextureTarget.Texture2D,t); GL.TexImage2D(TextureTarget.Texture2D,0,PixelInternalFormat.Rgba8,256,1,0,PixelFormat.Rgba,PixelType.UnsignedByte,IntPtr.Zero); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureMinFilter,(int)TextureMinFilter.Nearest); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureMagFilter,(int)TextureMagFilter.Nearest); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureWrapS,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureWrapT,(int)TextureWrapMode.ClampToEdge); return t; }
+    private static int CreateMaterialTexture() { var t=GL.GenTexture(); GL.BindTexture(TextureTarget.Texture2D,t); GL.TexImage2D(TextureTarget.Texture2D,0,PixelInternalFormat.Rgba8,256,1,0,PixelFormat.Rgba,PixelType.UnsignedByte,IntPtr.Zero); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureMinFilter,(int)TextureMinFilter.Nearest); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureMagFilter,(int)TextureMinFilter.Nearest); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureWrapS,(int)TextureWrapMode.ClampToEdge); GL.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureWrapT,(int)TextureWrapMode.ClampToEdge); return t; }
 
     private void UploadMaterials()
     {
@@ -240,11 +580,12 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private static long TextureWidth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureWidth,out int v);return v;} private static long TextureHeight(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureHeight,out int v);return v;} private static long TextureDepth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureDepth,out int v);return v;}
     // Material colours can be edited outside the 3D panel (segmentation, material editor),
     // so refresh the lookup alongside the labels rather than only on visibility/opacity changes.
-    private void OnDatasetDataChanged(Dataset d){if(d==_editableDataset){_labelsDirty=true;_materialsDirty=true;}} private void OnPreviewChanged(CtImageStackDataset d,byte[] m,Vector4 c){if(d!=_editableDataset)return;_previewMask=m;_previewColor=c;_showPreview=m!=null;_previewDirty=true;}
+    private void OnDatasetDataChanged(Dataset d){if(d==_editableDataset){_labelsDirty=true;_materialsDirty=true;InvalidateSlicePlaneTextures();}} private void OnPreviewChanged(CtImageStackDataset d,byte[] m,Vector4 c){if(d!=_editableDataset)return;_previewMask=m;_previewColor=c;_showPreview=m!=null;_previewDirty=true;}
     private void Bind3D(int unit,int tex,string name){GL.ActiveTexture(TextureUnit.Texture0+unit);GL.BindTexture(TextureTarget.Texture3D,tex);Set1(name,unit);} private void Set1(string n,int v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set1(string n,float v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set3(string n,Vector3 v)=>GL.Uniform3(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z);private void Set4(string n,Vector4 v)=>GL.Uniform4(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z,v.W);
     // System.Numerics is row-vector (v*M); GLSL is column-vector (M*v). Passing the row-major
     // array with transpose=false makes GL read it column-major, which is the transpose GLSL needs.
-    private void SetMatrix(string n,Matrix4x4 m){var a=new[]{m.M11,m.M12,m.M13,m.M14,m.M21,m.M22,m.M23,m.M24,m.M31,m.M32,m.M33,m.M34,m.M41,m.M42,m.M43,m.M44};GL.UniformMatrix4(GL.GetUniformLocation(_program,n),1,false,a);}
+    private static float[] ToArray(Matrix4x4 m)=>new[]{m.M11,m.M12,m.M13,m.M14,m.M21,m.M22,m.M23,m.M24,m.M31,m.M32,m.M33,m.M34,m.M41,m.M42,m.M43,m.M44};
+    private void SetMatrix(string n,Matrix4x4 m){GL.UniformMatrix4(GL.GetUniformLocation(_program,n),1,false,ToArray(m));}
     private static int CreateProgram(string vs,string fs){int Compile(ShaderType t,string s){var x=GL.CreateShader(t);
         // Without a current context glCreateShader silently returns 0 and the info log comes back
         // empty, so report the real cause instead of an InvalidOperationException with no message.
@@ -253,17 +594,139 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
 
     public static Vector3 CalculateNormalizedPhysicalScale(int w,int h,int d,float px,float st){var xy=px>0&&float.IsFinite(px)?px:1;var z=st>0&&float.IsFinite(st)?st:xy;var p=new Vector3(Math.Max(1,w)*xy,Math.Max(1,h)*xy,Math.Max(1,d)*z);return p/Math.Max(p.X,Math.Max(p.Y,p.Z));}
     public static byte CalculateOtsuThreshold(byte[] data){if(data==null||data.Length==0)return 0;var h=new long[256];foreach(var v in data)h[v]++;double sum=0,sb=0,best=-1;long wb=0;for(int i=0;i<256;i++)sum+=i*h[i];byte t=0;for(int i=0;i<255;i++){wb+=h[i];if(wb==0)continue;var wf=data.LongLength-wb;if(wf==0)break;sb+=i*h[i];var mb=sb/wb;var mf=(sum-sb)/wf;var v=wb*(double)wf*(mb-mf)*(mb-mf);if(v>best){best=v;t=(byte)i;}}return t;}
-    public void Dispose(){if(_disposed)return;_disposed=true;ProjectManager.Instance.DatasetDataChanged-=OnDatasetDataChanged;CtImageStackTools.Preview3DChanged-=OnPreviewChanged;_controlPanel?.Dispose();foreach(var t in new[]{_volumeTexture,_labelTexture,_previewTexture,_materialTexture,_colorTexture})if(t!=0)GL.DeleteTexture(t);if(_depthBuffer!=0)GL.DeleteRenderbuffer(_depthBuffer);if(_fbo!=0)GL.DeleteFramebuffer(_fbo);if(_vbo!=0)GL.DeleteBuffer(_vbo);if(_ebo!=0)GL.DeleteBuffer(_ebo);if(_vao!=0)GL.DeleteVertexArray(_vao);if(_program!=0)GL.DeleteProgram(_program);}
+    public void Dispose(){if(_disposed)return;_disposed=true;ProjectManager.Instance.DatasetDataChanged-=OnDatasetDataChanged;CtImageStackTools.Preview3DChanged-=OnPreviewChanged;_controlPanel?.Dispose();foreach(var t in new[]{_volumeTexture,_labelTexture,_previewTexture,_materialTexture,_colorTexture,_sliceTextures[0],_sliceTextures[1],_sliceTextures[2]})if(t!=0)GL.DeleteTexture(t);if(_depthBuffer!=0)GL.DeleteRenderbuffer(_depthBuffer);if(_fbo!=0)GL.DeleteFramebuffer(_fbo);if(_vbo!=0)GL.DeleteBuffer(_vbo);if(_ebo!=0)GL.DeleteBuffer(_ebo);if(_vao!=0)GL.DeleteVertexArray(_vao);if(_lineVbo!=0)GL.DeleteBuffer(_lineVbo);if(_lineVao!=0)GL.DeleteVertexArray(_lineVao);if(_program!=0)GL.DeleteProgram(_program);if(_lineProgram!=0)GL.DeleteProgram(_lineProgram);}
 
     private const string VertexShader=@"#version 330 core
 layout(location=0) in vec3 p; uniform mat4 uView,uProjection; uniform vec3 uScale; out vec3 world; void main(){world=p*uScale;gl_Position=uProjection*uView*vec4(world,1);}";
+
+    private const string LineVertexShader=@"#version 330 core
+layout(location=0) in vec3 p; layout(location=1) in vec4 c; uniform mat4 uView,uProjection; out vec4 vColor;
+void main(){vColor=c;gl_Position=uProjection*uView*vec4(p,1);}";
+
+    private const string LineFragmentShader=@"#version 330 core
+in vec4 vColor; out vec4 outColor; void main(){outColor=vColor;}";
+
     private const string FragmentShader=@"#version 330 core
-in vec3 world;out vec4 outColor;uniform sampler3D uVolume,uLabels,uPreview;uniform sampler2D uMaterials;uniform vec3 uScale,uCamera,uVolumeSize;uniform float uMin,uMax,uStep;uniform int uShowGray,uColorMap,uShowPreview,uPlaneCount;uniform vec4 uCutX,uCutY,uCutZ,uPlanes[8],uPreviewColor;
-bool boxHit(vec3 ro,vec3 rd,out float a,out float b){vec3 q0=(vec3(0)-ro)/rd,q1=(uScale-ro)/rd,mn=min(q0,q1),mx=max(q0,q1);a=max(max(mn.x,mn.y),mn.z);b=min(min(mx.x,mx.y),mx.z);return b>=max(a,0.0);}bool cut(vec3 p){if(uCutX.x>.5&&(p.x-uCutX.z)*uCutX.y>0)return true;if(uCutY.x>.5&&(p.y-uCutY.z)*uCutY.y>0)return true;if(uCutZ.x>.5&&(p.z-uCutZ.z)*uCutZ.y>0)return true;for(int i=0;i<uPlaneCount;i++){vec3 n=normalize(uPlanes[i].xyz);float d=abs(uPlanes[i].w);float s=dot(p-vec3(.5),n)-(d-.5);if(uPlanes[i].w<0?s<0:s>0)return true;}return false;}// Interleaved gradient noise (Jimenez). Every ray starts at the box entry and steps by a
+in vec3 world;
+out vec4 outColor;
+
+uniform sampler3D uVolume,uLabels,uPreview;
+uniform sampler2D uMaterials;
+uniform sampler2D uSliceX,uSliceY,uSliceZ;   // full-resolution slice at each plane
+uniform vec3 uScale,uCamera,uVolumeSize;
+uniform float uMin,uMax,uStep;
+uniform int uShowGray,uColorMap,uShowPreview,uPlaneCount;
+uniform vec4 uCutX,uCutY,uCutZ,uPlanes[8],uPreviewColor;
+uniform float uPlaneMirror[8];
+uniform vec3 uSlicePlanePos;   // normalized position of the textured plane, per axis
+uniform vec3 uSlicePlaneOn;    // 1 = that axis has a textured plane
+
+bool boxHit(vec3 ro,vec3 rd,out float a,out float b){
+    vec3 q0=(vec3(0)-ro)/rd,q1=(uScale-ro)/rd,mn=min(q0,q1),mx=max(q0,q1);
+    a=max(max(mn.x,mn.y),mn.z);b=min(min(mx.x,mx.y),mx.z);return b>=max(a,0.0);
+}
+
+bool cut(vec3 p){
+    if(uCutX.x>.5&&(p.x-uCutX.z)*uCutX.y>0.0)return true;
+    if(uCutY.x>.5&&(p.y-uCutY.z)*uCutY.y>0.0)return true;
+    if(uCutZ.x>.5&&(p.z-uCutZ.z)*uCutZ.y>0.0)return true;
+    for(int i=0;i<uPlaneCount;i++){
+        vec3 n=normalize(uPlanes[i].xyz);
+        float s=dot(p-vec3(.5),n)-(uPlanes[i].w-.5);
+        if(uPlaneMirror[i]>.5?s<0.0:s>0.0)return true;
+    }
+    return false;
+}
+
+// Interleaved gradient noise (Jimenez). Every ray starts at the box entry and steps by a
 // fixed ds, and for a perspective camera that entry varies as d/cos(theta) around the face
 // normal, so the samples line up into concentric shells that read as rings while orbiting.
 // Offsetting each ray by a per-pixel fraction of ds turns that coherent banding into
 // high-frequency noise, which the eye tolerates far better.
 float ign(vec2 q){return fract(52.9829189*fract(dot(q,vec2(.06711056,.00583715))));}
-vec3 cmap(float x){if(uColorMap==0)return vec3(x);if(uColorMap==1)return clamp(vec3(3*x,3*x-1,3*x-2),0,1);if(uColorMap==2)return vec3(x,1-x,1);return clamp(abs(mod(x*6+vec3(0,4,2),6)-3)-1,0,1);}void main(){vec3 ro=uCamera,rd=normalize(world-ro);float a,b;if(!boxHit(ro,rd,a,b))discard;a=max(a,0);vec4 acc=vec4(0);float base=min(uScale.x/uVolumeSize.x,min(uScale.y/uVolumeSize.y,uScale.z/uVolumeSize.z));float ds=max(base*uStep,(b-a)/2048.0);a+=ds*ign(gl_FragCoord.xy);for(int i=0;i<2048&&a<=b&&acc.a<.985;i++,a+=ds){vec3 p=(ro+rd*a)/uScale;if(cut(p))continue;float den=texture(uVolume,p).r;float n=clamp((den-uMin)/max(.001,uMax-uMin),0,1);float al=uShowGray!=0?smoothstep(0,1,n):0;vec3 col=cmap(n);if(al>.01){vec3 e=1/uVolumeSize;vec3 g=vec3(texture(uVolume,p+vec3(e.x,0,0)).r-texture(uVolume,p-vec3(e.x,0,0)).r,texture(uVolume,p+vec3(0,e.y,0)).r-texture(uVolume,p-vec3(0,e.y,0)).r,texture(uVolume,p+vec3(0,0,e.z)).r-texture(uVolume,p-vec3(0,0,e.z)).r);if(length(g)>.0001)col*=.3+.7*abs(dot(normalize(g),normalize(vec3(.4,.6,1))));}int mid=int(texture(uLabels,p).r*255.0+0.5);if(mid>0){vec4 mat=texelFetch(uMaterials,ivec2(mid,0),0);if(mat.a>.002){col=mix(col,mat.rgb,mat.a);al=max(al,mat.a);}}if(uShowPreview!=0&&texture(uPreview,p).r>.5){col=mix(col,uPreviewColor.rgb,uPreviewColor.a);al=max(al,uPreviewColor.a);}float ca=clamp(al*ds*80,0,1);acc+=(1-acc.a)*vec4(col*ca,ca);}outColor=acc;}";
+
+vec3 cmap(float x){
+    if(uColorMap==0)return vec3(x);
+    if(uColorMap==1)return clamp(vec3(3*x,3*x-1,3*x-2),0,1);
+    if(uColorMap==2)return vec3(x,1-x,1);
+    return clamp(abs(mod(x*6+vec3(0,4,2),6)-3)-1,0,1);
+}
+
+float window(float density){return clamp((density-uMin)/max(.001,uMax-uMin),0,1);}
+
+float samplePlane(int axis,vec3 p){
+    if(axis==0)return texture(uSliceX,vec2(p.y,p.z)).r;
+    if(axis==1)return texture(uSliceY,vec2(p.x,p.z)).r;
+    return texture(uSliceZ,vec2(p.x,p.y)).r;
+}
+
+void main(){
+    vec3 ro=uCamera,rd=normalize(world-ro);
+    float a,b;
+    if(!boxHit(ro,rd,a,b))discard;
+    a=max(a,0);
+
+    // Normalized-space ray: p(t) = ron + rdn*t stays on the same parameter t as the world ray.
+    vec3 ron=ro/uScale,rdn=rd/uScale;
+
+    // The planes are opaque, so the nearest one both terminates the march and is composited
+    // underneath whatever the volume accumulated in front of it.
+    float tPlane=1e30;int planeAxis=-1;vec3 planeP=vec3(0);
+    for(int axis=0;axis<3;axis++){
+        if(uSlicePlaneOn[axis]<.5)continue;
+        if(abs(rdn[axis])<1e-6)continue;
+        float t=(uSlicePlanePos[axis]-ron[axis])/rdn[axis];
+        if(t<a||t>b||t>=tPlane)continue;
+        vec3 p=ron+rdn*t;
+        // Snap the spanned axis: a cut tests (p[axis] - cutPos) * dir > 0, and rounding either
+        // side of an exact hit would speckle the plane away half the time.
+        p[axis]=uSlicePlanePos[axis];
+        if(any(lessThan(p,vec3(0)))||any(greaterThan(p,vec3(1))))continue;
+        if(cut(p))continue;
+        tPlane=t;planeAxis=axis;planeP=p;
+    }
+
+    vec4 acc=vec4(0);
+    float base=min(uScale.x/uVolumeSize.x,min(uScale.y/uVolumeSize.y,uScale.z/uVolumeSize.z));
+    float ds=max(base*uStep,(b-a)/2048.0);
+    float end=min(b,tPlane);
+    a+=ds*ign(gl_FragCoord.xy);
+    for(int i=0;i<2048&&a<=end&&acc.a<.985;i++,a+=ds){
+        vec3 p=(ro+rd*a)/uScale;
+        if(cut(p))continue;
+        float den=texture(uVolume,p).r;
+        float n=window(den);
+        float al=uShowGray!=0?smoothstep(0,1,n):0;
+        vec3 col=cmap(n);
+        if(al>.01){
+            vec3 e=1/uVolumeSize;
+            vec3 g=vec3(texture(uVolume,p+vec3(e.x,0,0)).r-texture(uVolume,p-vec3(e.x,0,0)).r,
+                        texture(uVolume,p+vec3(0,e.y,0)).r-texture(uVolume,p-vec3(0,e.y,0)).r,
+                        texture(uVolume,p+vec3(0,0,e.z)).r-texture(uVolume,p-vec3(0,0,e.z)).r);
+            if(length(g)>.0001)col*=.3+.7*abs(dot(normalize(g),normalize(vec3(.4,.6,1))));
+        }
+        int mid=int(texture(uLabels,p).r*255.0+0.5);
+        if(mid>0){
+            vec4 mat=texelFetch(uMaterials,ivec2(mid,0),0);
+            if(mat.a>.002){col=mix(col,mat.rgb,mat.a);al=max(al,mat.a);}
+        }
+        if(uShowPreview!=0&&texture(uPreview,p).r>.5){col=mix(col,uPreviewColor.rgb,uPreviewColor.a);al=max(al,uPreviewColor.a);}
+        float ca=clamp(al*ds*80,0,1);
+        acc+=(1-acc.a)*vec4(col*ca,ca);
+    }
+
+    if(planeAxis>=0&&acc.a<.985){
+        // Same window and colour map as the slice views, so a feature reads identically in both.
+        vec3 col=cmap(window(samplePlane(planeAxis,planeP)));
+        int mid=int(texture(uLabels,planeP).r*255.0+0.5);
+        if(mid>0){
+            vec4 mat=texelFetch(uMaterials,ivec2(mid,0),0);
+            if(mat.a>.002)col=mix(col,mat.rgb,mat.a*.65);
+        }
+        if(uShowPreview!=0&&texture(uPreview,planeP).r>.5)col=mix(col,uPreviewColor.rgb,uPreviewColor.a);
+        acc+=(1-acc.a)*vec4(col,1);
+    }
+
+    outColor=acc;
+}";
 }
