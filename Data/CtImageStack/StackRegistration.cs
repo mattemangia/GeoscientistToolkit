@@ -60,9 +60,11 @@ public class StackRegistration
         Logger.Log($"[StackRegistration] Starting registration: {dataset1.Name} + {dataset2.Name}");
         Logger.Log($"[StackRegistration] Alignment: {alignment}, Method: {_method}");
 
-        // Ensure both datasets are loaded
-        if (dataset1.VolumeData == null) dataset1.Load();
-        if (dataset2.VolumeData == null) dataset2.Load();
+        // Loading can materialize a RAM-backed dataset; never execute it on the caller/UI thread.
+        if (dataset1.VolumeData == null)
+            await Task.Run(dataset1.Load, cancellationToken).ConfigureAwait(false);
+        if (dataset2.VolumeData == null)
+            await Task.Run(dataset2.Load, cancellationToken).ConfigureAwait(false);
 
         var vol1 = dataset1.VolumeData;
         var vol2 = dataset2.VolumeData;
