@@ -11,7 +11,6 @@ namespace GAIA;
 
 public class CtImageStackTools : IDatasetTools
 {
-    private const int PREVIEW_UPDATE_DELAY_MS = 250;
 
     // --- Static members for 3D preview control ---
     private static readonly object _previewLock = new();
@@ -22,13 +21,12 @@ public class CtImageStackTools : IDatasetTools
 
     // --- NEW: Static state for real-time 2D threshold preview ---
     private static bool _isThresholdPreviewActive;
+    private static bool _is3DThresholdPreviewActive;
     private static byte _previewMinThreshold;
     private static byte _previewMaxThreshold = 255;
     private static WeakReference<Material> _previewMaterialRef;
     private CtImageStackDataset _currentDataset;
     private CtSegmentationIntegration _interactiveSegmentation;
-    private bool _isGenerating3DPreview;
-    private DateTime _lastPreviewUpdate = DateTime.MinValue;
     private byte _maxThreshold = 255;
 
 
@@ -39,8 +37,6 @@ public class CtImageStackTools : IDatasetTools
 
     // --- 3D Threshold preview state ---
     private bool _show3DThresholdPreview;
-    private bool _preview3DPending;
-    private byte[] _thresholdPreviewMask3D;
     private CtOperationHandle _thresholdOperation;
 
     public void Draw(Dataset dataset)
@@ -112,29 +108,23 @@ public class CtImageStackTools : IDatasetTools
         if (ImGui.IsItemActive() || thresholdChanged) Set2DPreviewState(true, _selectedMaterialForThresholding);
 
         ImGui.Spacing();
-        if (ImGui.Checkbox("Show 3D Preview", ref _show3DThresholdPreview))
+        if (ImGui.Checkbox("Show Threshold Preview (2D + 3D)", ref _show3DThresholdPreview))
         {
-            if (_show3DThresholdPreview) _ = Update3DThresholdPreviewAsync(ctDataset);
-            else Clear3DThresholdPreview();
+            _is3DThresholdPreviewActive = _show3DThresholdPreview;
+            Set2DPreviewState(_show3DThresholdPreview, _selectedMaterialForThresholding);
+            if (!_show3DThresholdPreview) Clear3DThresholdPreview();
         }
 
         if (_show3DThresholdPreview)
         {
             ImGui.SameLine();
-            if (_isGenerating3DPreview) ImGui.TextColored(new Vector4(1, 1, 0, 1), "Generating...");
-            else ImGui.TextColored(new Vector4(0, 1, 0, 1), "Preview Active");
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), "Preview Active");
 
             // Each refresh rescans the whole volume, so coalesce a drag into one run per interval.
             // The request has to outlive the frame it was made on: firing only when a change and
             // an elapsed interval coincide dropped the value the drag settled on, leaving the
             // preview showing a threshold the user had already moved past.
-            if (thresholdChanged) _preview3DPending = true;
-            if (_preview3DPending && !_isGenerating3DPreview &&
-                (DateTime.Now - _lastPreviewUpdate).TotalMilliseconds > PREVIEW_UPDATE_DELAY_MS)
-            {
-                _preview3DPending = false;
-                _ = Update3DThresholdPreviewAsync(ctDataset);
-            }
+            if (thresholdChanged) Set2DPreviewState(true, _selectedMaterialForThresholding);
         }
 
         ImGui.Spacing();
@@ -241,57 +231,23 @@ public class CtImageStackTools : IDatasetTools
         return (false, 0, 0, Vector4.Zero);
     }
 
+    public static (bool IsActive, byte Min, byte Max, Vector4 Color) Get3DThresholdPreviewState()
+    {
+        var state = Get2DThresholdPreviewState();
+        return (_is3DThresholdPreviewActive && state.IsActive, state.Min, state.Max, state.Color);
+    }
+
     public Material GetSelectedMaterialForThresholding()
     {
         return _selectedMaterialForThresholding;
     }
 
-    private async Task Update3DThresholdPreviewAsync(CtImageStackDataset dataset)
-    {
-        if (_isGenerating3DPreview) return;
-
-        _isGenerating3DPreview = true;
-
-        try
-        {
-            await Task.Run(() =>
-            {
-                var volume = dataset.VolumeData;
-                var width = dataset.Width;
-                var height = dataset.Height;
-                var depth = dataset.Depth;
-
-                _thresholdPreviewMask3D = new byte[width * height * depth];
-
-                Parallel.For(0, depth, z =>
-                {
-                    var slice = new byte[width * height];
-                    volume.ReadSliceZ(z, slice);
-
-                    for (var i = 0; i < slice.Length; i++)
-                        if (slice[i] >= _minThreshold && slice[i] <= _maxThreshold)
-                            _thresholdPreviewMask3D[z * width * height + i] = 255;
-                });
-            });
-
-            var previewColor = _selectedMaterialForThresholding?.Color ?? new Vector4(1, 0, 0, 0.5f);
-            previewColor.W = 0.5f;
-            Update3DPreviewFromExternal(dataset, _thresholdPreviewMask3D, previewColor);
-
-            _lastPreviewUpdate = DateTime.Now;
-        }
-        finally
-        {
-            _isGenerating3DPreview = false;
-        }
-    }
-
     private void Clear3DThresholdPreview()
     {
+        _is3DThresholdPreviewActive = false;
         if (_currentDataset != null)
         {
-            Update3DPreviewFromExternal(_currentDataset, null, Vector4.Zero);
-            _thresholdPreviewMask3D = null;
+            PreviewChanged?.Invoke(_currentDataset);
         }
     }
 

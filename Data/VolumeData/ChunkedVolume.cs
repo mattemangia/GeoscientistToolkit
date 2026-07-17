@@ -1,6 +1,7 @@
 ﻿// GAIA/Data/VolumeData/ChunkedVolume.cs
 
 using System.IO.MemoryMappedFiles;
+using System.Buffers;
 using GAIA.Util;
 
 namespace GAIA.Data.VolumeData;
@@ -41,6 +42,7 @@ public class ChunkedVolume : IGrayscaleVolumeData
     public int ChunkDim { get; }
 
     public int TotalChunks => _chunkCountX * _chunkCountY * _chunkCountZ;
+    public bool IsMemoryMapped => _useMemoryMapping;
     public byte[][] Chunks { get; private set; }
 
     #endregion
@@ -164,6 +166,10 @@ public class ChunkedVolume : IGrayscaleVolumeData
 
         var cz = z / ChunkDim;
         var lz = z % ChunkDim;
+        var planeSize = ChunkDim * ChunkDim;
+        var mappedPlane = _useMemoryMapping ? ArrayPool<byte>.Shared.Rent(planeSize) : null;
+        try
+        {
         for (var cy = 0; cy < _chunkCountY; cy++)
         for (var cx = 0; cx < _chunkCountX; cx++)
         {
@@ -172,17 +178,20 @@ public class ChunkedVolume : IGrayscaleVolumeData
             var yStart = cy * ChunkDim;
             var xEnd = Math.Min(xStart + ChunkDim, Width);
             var yEnd = Math.Min(yStart + ChunkDim, Height);
-            for (var y = yStart; y < yEnd; y++)
+            if (_useMemoryMapping)
             {
-                var sourceOffset = y * Width + xStart;
-                var targetOffset = lz * ChunkDim * ChunkDim + (y - yStart) * ChunkDim;
-                var length = xEnd - xStart;
-                if (_useMemoryMapping)
-                    _viewAccessor.WriteArray(CalculateGlobalOffset(chunkIndex, targetOffset), data, sourceOffset, length);
-                else
-                    Array.Copy(data, sourceOffset, Chunks[chunkIndex], targetOffset, length);
+                mappedPlane.AsSpan(0, planeSize).Clear();
+                for (var y = yStart; y < yEnd; y++)
+                    data.AsSpan(y * Width + xStart, xEnd - xStart)
+                        .CopyTo(mappedPlane.AsSpan((y - yStart) * ChunkDim));
+                _viewAccessor.WriteArray(CalculateGlobalOffset(chunkIndex, lz * planeSize), mappedPlane, 0, planeSize);
             }
+            else for (var y = yStart; y < yEnd; y++)
+                Array.Copy(data, y * Width + xStart, Chunks[chunkIndex],
+                    lz * planeSize + (y - yStart) * ChunkDim, xEnd - xStart);
         }
+        }
+        finally { if (mappedPlane != null) ArrayPool<byte>.Shared.Return(mappedPlane); }
     }
 
     /// <summary>
@@ -195,6 +204,10 @@ public class ChunkedVolume : IGrayscaleVolumeData
 
         var cz = z / ChunkDim;
         var lz = z % ChunkDim;
+        var planeSize = ChunkDim * ChunkDim;
+        var mappedPlane = _useMemoryMapping ? ArrayPool<byte>.Shared.Rent(planeSize) : null;
+        try
+        {
         for (var cy = 0; cy < _chunkCountY; cy++)
         for (var cx = 0; cx < _chunkCountX; cx++)
         {
@@ -203,17 +216,19 @@ public class ChunkedVolume : IGrayscaleVolumeData
             var yStart = cy * ChunkDim;
             var xEnd = Math.Min(xStart + ChunkDim, Width);
             var yEnd = Math.Min(yStart + ChunkDim, Height);
-            for (var y = yStart; y < yEnd; y++)
+            if (_useMemoryMapping)
             {
-                var sourceOffset = lz * ChunkDim * ChunkDim + (y - yStart) * ChunkDim;
-                var targetOffset = y * Width + xStart;
-                var length = xEnd - xStart;
-                if (_useMemoryMapping)
-                    _viewAccessor.ReadArray(CalculateGlobalOffset(chunkIndex, sourceOffset), buffer, targetOffset, length);
-                else
-                    Array.Copy(Chunks[chunkIndex], sourceOffset, buffer, targetOffset, length);
+                _viewAccessor.ReadArray(CalculateGlobalOffset(chunkIndex, lz * planeSize), mappedPlane, 0, planeSize);
+                for (var y = yStart; y < yEnd; y++)
+                    Array.Copy(mappedPlane, (y - yStart) * ChunkDim, buffer,
+                        y * Width + xStart, xEnd - xStart);
             }
+            else for (var y = yStart; y < yEnd; y++)
+                Array.Copy(Chunks[chunkIndex], lz * planeSize + (y - yStart) * ChunkDim,
+                    buffer, y * Width + xStart, xEnd - xStart);
         }
+        }
+        finally { if (mappedPlane != null) ArrayPool<byte>.Shared.Return(mappedPlane); }
     }
 
     /// <summary>

@@ -638,15 +638,15 @@ public static class CTStackLoader
         {
             Logger.Log("[CTStackLoader] Creating empty labels file");
 
-            var labels = new ChunkedLabelVolume(
+            // A sparse memory-mapped backing file keeps even multi-terabyte logical label
+            // volumes out of managed RAM; untouched regions consume no physical pages.
+            using var labels = new ChunkedLabelVolume(
                 volume.Width,
                 volume.Height,
                 volume.Depth,
                 volume.ChunkDim,
-                false); // Always create labels in memory
-
-            labels.SaveAsBin(labelsPath);
-            labels.Dispose();
+                true,
+                labelsPath);
         }
     }
 

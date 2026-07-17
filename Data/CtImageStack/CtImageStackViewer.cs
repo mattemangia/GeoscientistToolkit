@@ -547,6 +547,8 @@ public class CtImageStackViewer : IDatasetViewer
         {
             var (width, height) = GetImageDimensionsForView(viewIndex);
             var imageData = ExtractSliceData(viewIndex, width, height);
+            var thresholdPreview = CtImageStackTools.Get2DThresholdPreviewState();
+            var rawThresholdData = thresholdPreview.IsActive ? (byte[])imageData.Clone() : null;
             ApplyWindowLevel(imageData);
 
             var currentSlice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => -1 };
@@ -561,6 +563,12 @@ public class CtImageStackViewer : IDatasetViewer
                 // 1. Base Layer: Grayscale image
                 var value = imageData[i];
                 var finalColor = new Vector4(value / 255f, value / 255f, value / 255f, 1.0f);
+
+                if (rawThresholdData != null && rawThresholdData[i] >= thresholdPreview.Min &&
+                    rawThresholdData[i] <= thresholdPreview.Max)
+                    finalColor = Vector4.Lerp(finalColor,
+                        new Vector4(thresholdPreview.Color.X, thresholdPreview.Color.Y,
+                            thresholdPreview.Color.Z, 1f), .5f);
 
                 // 2. Committed Selection Layer
                 if (committedSelectionMask != null && committedSelectionMask[i] > 0)

@@ -215,6 +215,11 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         }
         Set3("uSlicePlanePos", planePos); Set3("uSlicePlaneOn", planeOn);
         Set1("uShowPreview", _showPreview ? 1 : 0); Set4("uPreviewColor", _previewColor);
+        var thresholdPreview = CtImageStackTools.Get3DThresholdPreviewState();
+        Set1("uShowThresholdPreview", thresholdPreview.IsActive ? 1 : 0);
+        GL.Uniform2(GL.GetUniformLocation(_program, "uThresholdRange"),
+            thresholdPreview.Min / 255f, thresholdPreview.Max / 255f);
+        Set4("uThresholdColor", thresholdPreview.Color);
         Bind3D(0, _volumeTexture, "uVolume"); Bind3D(1, _labelTexture, "uLabels"); Bind3D(2, _previewTexture, "uPreview");
         GL.ActiveTexture(TextureUnit.Texture3); GL.BindTexture(TextureTarget.Texture2D, _materialTexture); Set1("uMaterials", 3);
         for (var axis = 0; axis < 3; axis++)
@@ -646,8 +651,9 @@ uniform sampler2D uMaterials;
 uniform sampler2D uSliceX,uSliceY,uSliceZ;   // full-resolution slice at each plane
 uniform vec3 uScale,uCamera,uVolumeSize;
 uniform float uMin,uMax,uStep;
-uniform int uShowGray,uColorMap,uShowPreview,uPlaneCount;
-uniform vec4 uCutX,uCutY,uCutZ,uPlanes[8],uPreviewColor;
+uniform int uShowGray,uColorMap,uShowPreview,uShowThresholdPreview,uPlaneCount;
+uniform vec2 uThresholdRange;
+uniform vec4 uCutX,uCutY,uCutZ,uPlanes[8],uPreviewColor,uThresholdColor;
 uniform float uPlaneMirror[8];
 uniform vec3 uSlicePlanePos;   // normalized position of the textured plane, per axis
 uniform vec3 uSlicePlaneOn;    // 1 = that axis has a textured plane
@@ -742,19 +748,22 @@ void main(){
             if(mat.a>.002){col=mix(col,mat.rgb,mat.a);al=max(al,mat.a);}
         }
         if(uShowPreview!=0&&texture(uPreview,p).r>.5){col=mix(col,uPreviewColor.rgb,uPreviewColor.a);al=max(al,uPreviewColor.a);}
+        if(uShowThresholdPreview!=0&&den>=uThresholdRange.x&&den<=uThresholdRange.y){col=mix(col,uThresholdColor.rgb,.55);al=max(al,.45);}
         float ca=clamp(al*ds*80,0,1);
         acc+=(1-acc.a)*vec4(col*ca,ca);
     }
 
     if(planeAxis>=0&&acc.a<.985){
         // Same window and colour map as the slice views, so a feature reads identically in both.
-        vec3 col=cmap(window(samplePlane(planeAxis,planeP)));
+        float planeDensity=samplePlane(planeAxis,planeP);
+        vec3 col=cmap(window(planeDensity));
         int mid=int(texture(uLabels,planeP).r*255.0+0.5);
         if(mid>0){
             vec4 mat=texelFetch(uMaterials,ivec2(mid,0),0);
             if(mat.a>.002)col=mix(col,mat.rgb,mat.a*.65);
         }
         if(uShowPreview!=0&&texture(uPreview,planeP).r>.5)col=mix(col,uPreviewColor.rgb,uPreviewColor.a);
+        if(uShowThresholdPreview!=0&&planeDensity>=uThresholdRange.x&&planeDensity<=uThresholdRange.y)col=mix(col,uThresholdColor.rgb,.55);
         acc+=(1-acc.a)*vec4(col,1);
     }
 

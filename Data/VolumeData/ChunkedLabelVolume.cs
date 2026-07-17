@@ -39,6 +39,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
     public int DirtyChunkCount => _dirtyChunks.Count;
     public int AllocatedChunkCount => _useMemoryMapping ? ChunkCountX * ChunkCountY * ChunkCountZ :
         _chunks?.Count(chunk => chunk != null) ?? 0;
+    public bool IsMemoryMapped => _useMemoryMapping;
 
     private bool _disposed;
 
@@ -203,7 +204,11 @@ public class ChunkedLabelVolume : ILabelVolumeData
 
         var cz = z / ChunkDim;
         var lz = z % ChunkDim;
+        var planeSize = ChunkDim * ChunkDim;
+        var mappedPlane = _useMemoryMapping ? ArrayPool<byte>.Shared.Rent(planeSize) : null;
 
+        try
+        {
         for (var cy = 0; cy < ChunkCountY; cy++)
         {
             for (var cx = 0; cx < ChunkCountX; cx++)
@@ -215,26 +220,61 @@ public class ChunkedLabelVolume : ILabelVolumeData
                 var xEnd = Math.Min(xStart + ChunkDim, Width);
                 var yEnd = Math.Min(yStart + ChunkDim, Height);
 
-                for (var y = yStart; y < yEnd; y++)
+                if (_useMemoryMapping)
                 {
-                    var ly = y % ChunkDim;
-                    var dstOffset = y * Width + xStart;
-                    var srcOffsetInChunk = lz * ChunkDim * ChunkDim + ly * ChunkDim;
-                    var length = xEnd - xStart;
+                    _viewAccessor.ReadArray(CalculateGlobalOffset(chunkIndex, lz * planeSize),
+                        mappedPlane, 0, planeSize);
+                }
+                var chunk = _useMemoryMapping ? mappedPlane : _chunks[chunkIndex];
+                if (chunk == null) continue;
+                var planeBase = _useMemoryMapping ? 0 : lz * planeSize;
+                for (var y = yStart; y < yEnd; y++)
+                    Array.Copy(chunk, planeBase + (y - yStart) * ChunkDim, buffer,
+                        y * Width + xStart, xEnd - xStart);
+            }
+        }
+        }
+        finally { if (mappedPlane != null) ArrayPool<byte>.Shared.Return(mappedPlane); }
+    }
 
-                    if (_useMemoryMapping)
-                    {
-                        var chunkStartInFile = CalculateGlobalOffset(chunkIndex, 0);
-                        _viewAccessor.ReadArray(chunkStartInFile + srcOffsetInChunk, buffer, dstOffset, length);
-                    }
-                    else
-                    {
-                        var chunk = _chunks[chunkIndex];
-                        if (chunk != null) Array.Copy(chunk, srcOffsetInChunk, buffer, dstOffset, length);
-                    }
+    /// <summary>Writes explicitly changed chunk planes using one contiguous MMF call per chunk.</summary>
+    public void WriteSliceZChangedChunks(int z, byte[] buffer, bool[] changedChunks)
+    {
+        if (buffer == null || buffer.Length < Width * Height) throw new ArgumentException("Invalid slice buffer.");
+        if (changedChunks == null || changedChunks.Length < ChunkCountX * ChunkCountY)
+            throw new ArgumentException("Changed-chunk map is too small.", nameof(changedChunks));
+        ValidateCoordinates(0, 0, z);
+        var cz = z / ChunkDim; var lz = z % ChunkDim; var planeSize = ChunkDim * ChunkDim;
+        var plane = _useMemoryMapping ? ArrayPool<byte>.Shared.Rent(planeSize) : null;
+        try
+        {
+            for (var cy = 0; cy < ChunkCountY; cy++)
+            for (var cx = 0; cx < ChunkCountX; cx++)
+            {
+                if (!changedChunks[cy * ChunkCountX + cx]) continue;
+                var chunkIndex = GetChunkIndex(cx, cy, cz);
+                var xStart = cx * ChunkDim; var yStart = cy * ChunkDim;
+                var xEnd = Math.Min(xStart + ChunkDim, Width);
+                var yEnd = Math.Min(yStart + ChunkDim, Height);
+                if (_useMemoryMapping)
+                {
+                    plane.AsSpan(0, planeSize).Clear();
+                    for (var y = yStart; y < yEnd; y++)
+                        buffer.AsSpan(y * Width + xStart, xEnd - xStart)
+                            .CopyTo(plane.AsSpan((y - yStart) * ChunkDim));
+                    _viewAccessor.WriteArray(CalculateGlobalOffset(chunkIndex, lz * planeSize), plane, 0, planeSize);
+                }
+                else
+                {
+                    var chunk = _chunks[chunkIndex] ??= new byte[ChunkDim * ChunkDim * ChunkDim];
+                    for (var y = yStart; y < yEnd; y++)
+                        Array.Copy(buffer, y * Width + xStart, chunk,
+                            lz * planeSize + (y - yStart) * ChunkDim, xEnd - xStart);
+                    _dirtyChunks[chunkIndex] = 0;
                 }
             }
         }
+        finally { if (plane != null) ArrayPool<byte>.Shared.Return(plane); }
     }
 
     /// <summary>
@@ -250,7 +290,8 @@ public class ChunkedLabelVolume : ILabelVolumeData
         var cz = z / ChunkDim;
         var lz = z % ChunkDim;
 
-        var mappedRow = _useMemoryMapping ? ArrayPool<byte>.Shared.Rent(ChunkDim) : null;
+        var planeSize = ChunkDim * ChunkDim;
+        var mappedPlane = _useMemoryMapping ? ArrayPool<byte>.Shared.Rent(planeSize) : null;
         try
         {
         for (var cy = 0; cy < ChunkCountY; cy++)
@@ -265,49 +306,49 @@ public class ChunkedLabelVolume : ILabelVolumeData
                 var xEnd = Math.Min(xStart + ChunkDim, Width);
                 var yEnd = Math.Min(yStart + ChunkDim, Height);
 
+                byte[] chunk;
+                var planeBase = lz * planeSize;
+                if (_useMemoryMapping)
+                {
+                    _viewAccessor.ReadArray(CalculateGlobalOffset(chunkIndex, planeBase),
+                        mappedPlane, 0, planeSize);
+                    chunk = mappedPlane;
+                    planeBase = 0;
+                }
+                else
+                    chunk = _chunks[chunkIndex];
+
                 for (var y = yStart; y < yEnd; y++)
                 {
-                    var ly = y % ChunkDim;
                     var srcOffset = y * Width + xStart;
-                    var dstOffsetInChunk = lz * ChunkDim * ChunkDim + ly * ChunkDim;
+                    var dstOffsetInChunk = planeBase + (y - yStart) * ChunkDim;
                     var length = xEnd - xStart;
 
-                    if (_useMemoryMapping)
+                    if (chunk == null)
                     {
-                        var chunkStartInFile = CalculateGlobalOffset(chunkIndex, 0);
-                        _viewAccessor.ReadArray(chunkStartInFile + dstOffsetInChunk, mappedRow, 0, length);
-                        if (!mappedRow.AsSpan(0, length).SequenceEqual(buffer.AsSpan(srcOffset, length)))
-                        {
-                            _viewAccessor.WriteArray(chunkStartInFile + dstOffsetInChunk, buffer, srcOffset, length);
-                            chunkModified = true;
-                        }
+                        if (buffer.AsSpan(srcOffset, length).IndexOfAnyExcept((byte)0) < 0) continue;
+                        var created = new byte[ChunkDim * ChunkDim * ChunkDim];
+                        chunk = Interlocked.CompareExchange(ref _chunks[chunkIndex], created, null) ?? created;
                     }
-                    else
+                    if (!chunk.AsSpan(dstOffsetInChunk, length).SequenceEqual(buffer.AsSpan(srcOffset, length)))
                     {
-                        var chunk = _chunks[chunkIndex];
-                        if (chunk == null)
-                        {
-                            var containsLabel = false;
-                            for (var i = 0; i < length; i++)
-                                if (buffer[srcOffset + i] != 0) { containsLabel = true; break; }
-                            if (!containsLabel) continue;
-                            var created = new byte[ChunkDim * ChunkDim * ChunkDim];
-                            chunk = Interlocked.CompareExchange(ref _chunks[chunkIndex], created, null) ?? created;
-                        }
-                        if (!chunk.AsSpan(dstOffsetInChunk, length).SequenceEqual(buffer.AsSpan(srcOffset, length)))
-                        {
-                            Array.Copy(buffer, srcOffset, chunk, dstOffsetInChunk, length);
-                            chunkModified = true;
-                        }
+                        Array.Copy(buffer, srcOffset, chunk, dstOffsetInChunk, length);
+                        chunkModified = true;
                     }
                 }
-                if (chunkModified && !_useMemoryMapping) _dirtyChunks[chunkIndex] = 0;
+                if (chunkModified)
+                {
+                    if (_useMemoryMapping)
+                        _viewAccessor.WriteArray(CalculateGlobalOffset(chunkIndex, lz * planeSize),
+                            mappedPlane, 0, planeSize);
+                    else _dirtyChunks[chunkIndex] = 0;
+                }
             }
         }
         }
         finally
         {
-            if (mappedRow != null) ArrayPool<byte>.Shared.Return(mappedRow);
+            if (mappedPlane != null) ArrayPool<byte>.Shared.Return(mappedPlane);
         }
     }
 
@@ -525,11 +566,12 @@ public class ChunkedLabelVolume : ILabelVolumeData
 
         try
         {
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath) ?? ".");
             // Create or overwrite the backing file
             using (var fs = new FileStream(FilePath, FileMode.Create, FileAccess.Write))
             {
                 // Write header
-                using (var bw = new BinaryWriter(fs))
+                using (var bw = new BinaryWriter(fs, System.Text.Encoding.UTF8, true))
                 {
                     bw.Write(Width);
                     bw.Write(Height);

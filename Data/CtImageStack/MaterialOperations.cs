@@ -69,6 +69,10 @@ public static class MaterialOperations
         var width = grayscaleVolume.Width;
         var height = grayscaleVolume.Height;
         var depth = grayscaleVolume.Depth;
+        var chunkedLabels = labelVolume as ChunkedLabelVolume;
+        var memoryMapped = (grayscaleVolume as ChunkedVolume)?.IsMemoryMapped == true ||
+                           chunkedLabels?.IsMemoryMapped == true;
+        var workerCount = memoryMapped ? Math.Min(2, _optimalThreadCount) : _optimalThreadCount;
 
         return Task.Run(() =>
         {
@@ -77,12 +81,17 @@ public static class MaterialOperations
             var sliceLength = width * height;
 
             Parallel.For(0, depth,
-                new ParallelOptions { MaxDegreeOfParallelism = _optimalThreadCount, CancellationToken = cancellationToken },
-                () => (Gray: ArrayPool<byte>.Shared.Rent(sliceLength), Labels: ArrayPool<byte>.Shared.Rent(sliceLength)),
+                new ParallelOptions { MaxDegreeOfParallelism = workerCount, CancellationToken = cancellationToken },
+                () => (Gray: ArrayPool<byte>.Shared.Rent(sliceLength),
+                    Labels: ArrayPool<byte>.Shared.Rent(sliceLength),
+                    Changed: chunkedLabels == null ? null :
+                        ArrayPool<bool>.Shared.Rent(chunkedLabels.ChunkCountX * chunkedLabels.ChunkCountY)),
                 (z, _, buffers) =>
                 {
                 var graySlice = buffers.Gray;
                 var labelSlice = buffers.Labels;
+                if (buffers.Changed != null)
+                    Array.Clear(buffers.Changed, 0, chunkedLabels.ChunkCountX * chunkedLabels.ChunkCountY);
 
                 grayscaleVolume.ReadSliceZ(z, graySlice);
                 labelVolume.ReadSliceZ(z, labelSlice);
@@ -98,6 +107,9 @@ public static class MaterialOperations
                             {
                                 labelSlice[i] = materialID;
                                 modified = true;
+                                if (buffers.Changed != null)
+                                    buffers.Changed[(i / width / chunkedLabels.ChunkDim) * chunkedLabels.ChunkCountX +
+                                                    (i % width / chunkedLabels.ChunkDim)] = true;
                             }
                     }
                 else // Remove operation
@@ -108,12 +120,18 @@ public static class MaterialOperations
                         {
                             labelSlice[i] = 0; // Set to exterior
                             modified = true;
+                            if (buffers.Changed != null)
+                                buffers.Changed[(i / width / chunkedLabels.ChunkDim) * chunkedLabels.ChunkCountX +
+                                                (i % width / chunkedLabels.ChunkDim)] = true;
                         }
                     }
 
                 if (modified)
                 {
-                    labelVolume.WriteSliceZ(z, labelSlice);
+                    if (chunkedLabels != null)
+                        chunkedLabels.WriteSliceZChangedChunks(z, labelSlice, buffers.Changed);
+                    else
+                        labelVolume.WriteSliceZ(z, labelSlice);
                     Interlocked.Exchange(ref anyModified, 1);
                 }
                 var done = Interlocked.Increment(ref completedSlices);
@@ -123,6 +141,7 @@ public static class MaterialOperations
                 {
                     ArrayPool<byte>.Shared.Return(buffers.Gray);
                     ArrayPool<byte>.Shared.Return(buffers.Labels);
+                    if (buffers.Changed != null) ArrayPool<bool>.Shared.Return(buffers.Changed);
                 });
 
             // FIXED: Auto-save label data after modification

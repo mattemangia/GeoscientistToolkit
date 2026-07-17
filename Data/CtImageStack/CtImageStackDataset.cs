@@ -175,7 +175,9 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
             var volumePath = GetVolumePath();
             if (File.Exists(volumePath))
             {
-                var loadTask = ChunkedVolume.LoadFromBinAsync(volumePath, false);
+                // CT volumes can be much larger than physical RAM. Keep the file as the backing
+                // store and let the OS page cache retain only the actively used regions.
+                var loadTask = ChunkedVolume.LoadFromBinAsync(volumePath, true);
                 VolumeData = loadTask.GetAwaiter().GetResult();
                 if (VolumeData != null)
                 {
@@ -197,7 +199,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
             {
                 try
                 {
-                    var loadedLabels = ChunkedLabelVolume.LoadFromBin(labelPath, false);
+                    var loadedLabels = ChunkedLabelVolume.LoadFromBin(labelPath, true);
                     if (VolumeData != null &&
                         (loadedLabels.Width != VolumeData.Width ||
                          loadedLabels.Height != VolumeData.Height ||
@@ -215,7 +217,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
                     Logger.LogError(
                         $"[CtImageStackDataset] Failed to load label file '{labelPath}': {ex.Message}. A new empty label volume will be used.");
                     if (VolumeData != null)
-                        LabelData = new ChunkedLabelVolume(Width, Height, Depth, VolumeData.ChunkDim, false, labelPath);
+                        LabelData = new ChunkedLabelVolume(Width, Height, Depth, VolumeData.ChunkDim, true, labelPath);
                 }
             }
             else if (VolumeData != null)
@@ -225,7 +227,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
                 // a segmentation action or saves the project.
                 Logger.Log(
                     $"[CtImageStackDataset] No label file found for {Name}. A new in-memory label volume will be used.");
-                LabelData = new ChunkedLabelVolume(Width, Height, Depth, VolumeData.ChunkDim, false, labelPath);
+                LabelData = new ChunkedLabelVolume(Width, Height, Depth, VolumeData.ChunkDim, true, labelPath);
             }
         }
     }
