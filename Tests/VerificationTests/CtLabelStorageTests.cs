@@ -1,4 +1,6 @@
 using GAIA.Data.VolumeData;
+using GAIA.Data.CtImageStack;
+using System.Diagnostics;
 
 namespace VerificationTests;
 
@@ -160,6 +162,42 @@ public sealed class CtLabelStorageTests
         finally
         {
             if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task ThresholdAssignment_IsLazyAndDoesNotDirtyPhysicalLabelChunks()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"gaia-virtual-threshold-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var labelPath = Path.Combine(directory, $"{Path.GetFileName(directory)}.Labels.bin");
+        try
+        {
+            using var grayscale = new ChunkedVolume(32, 24, 5, 8);
+            using var labels = new ChunkedLabelVolume(32, 24, 5, 8, true, labelPath);
+            var density = new byte[32 * 24];
+            for (var i = 0; i < density.Length; i++) density[i] = (byte)(i % 256);
+            for (var z = 0; z < 5; z++) grayscale.WriteSliceZ(z, density);
+            var dataset = new CtImageStackDataset("virtual", directory)
+            {
+                Width = 32, Height = 24, Depth = 5, VolumeData = grayscale, LabelData = labels
+            };
+
+            var timer = Stopwatch.StartNew();
+            await MaterialOperations.AddVoxelsByThresholdAsync(grayscale, labels, 4, 100, 140, dataset);
+            timer.Stop();
+
+            Assert.True(timer.Elapsed < TimeSpan.FromSeconds(1));
+            Assert.Equal(0, labels.DirtyChunkCount);
+            var evaluated = new byte[32 * 24];
+            labels.ReadSliceZ(2, evaluated);
+            for (var i = 0; i < evaluated.Length; i++)
+                Assert.Equal(density[i] is >= 100 and <= 140 ? (byte)4 : (byte)0, evaluated[i]);
+            Assert.True(File.Exists(labelPath + ".rules.json"));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
 }

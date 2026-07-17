@@ -61,7 +61,11 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
             ImGui.TextColored(new Vector4(1f, .35f, .35f, 1f), _volumeOperation.Error);
 
         // Quick actions bar
-        if (ImGui.Button("Save All Materials", new Vector2(150, 0))) SaveMaterials(ct);
+        if (_volumeOperation?.IsActive == true) ImGui.BeginDisabled();
+        if (ImGui.Button("Save CT Data to Disk", new Vector2(180, 0)))
+            _volumeOperation = CtOperationCoordinator.For(ct).Enqueue("Persisting CT data",
+                (token, progress) => ct.PersistCtDataAsync(token, progress));
+        if (_volumeOperation?.IsActive == true) ImGui.EndDisabled();
         ImGui.SameLine();
         if (ImGui.Button("Browse Library", new Vector2(150, 0)))
         {

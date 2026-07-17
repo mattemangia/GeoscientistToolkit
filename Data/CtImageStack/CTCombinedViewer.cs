@@ -93,6 +93,12 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private float _zoomXZ = 1.0f;
     private float _zoomYZ = 1.0f;
     private float _sliceWheelAccumulator;
+    private readonly HashSet<int> _pendingSliceViews = new();
+    private readonly int[] _sliceRequestVersions = new int[3];
+    private Task<CtSliceTextureResult> _sliceTextureTask;
+    private CancellationTokenSource _sliceTextureCancellation;
+    private int _buildingSliceView = -1;
+    private int _buildingSliceVersion;
 
     public CtCombinedViewer(CtImageStackDataset dataset)
     {
@@ -300,6 +306,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         }
 
         FlushDisplayUpdates();
+        PumpSliceTexturePipeline();
 
         // Thermal visualization options
         if (_dataset.ThermalResults != null)
@@ -411,6 +418,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
     public void Dispose()
     {
+        _sliceTextureCancellation?.Cancel();
+        _sliceTextureCancellation?.Dispose();
         ProjectManager.Instance.DatasetDataChanged -= OnDatasetDataChanged;
         CtImageStackTools.Preview3DChanged -= OnPreview3DChanged;
         CtImageStackTools.PreviewChanged -= OnGenericPreviewChanged;
@@ -1135,7 +1144,10 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
         if (needsUpdate || texture == null || !texture.IsValid)
         {
-            UpdateTexture(viewIndex, ref texture);
+            if (CurrentSliceDisplayMode == SliceDisplayMode.Grayscale)
+                QueueSliceTexture(viewIndex);
+            else
+                UpdateTexture(viewIndex, ref texture);
             needsUpdate = false;
         }
 
@@ -1271,6 +1283,67 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             dl.AddCircleFilled(new Vector2(screenX, screenY), radius, finalColor);
             dl.AddText(new Vector2(screenX + 8, screenY - 8), finalColor, label);
         }
+    }
+
+    private void QueueSliceTexture(int viewIndex)
+    {
+        _pendingSliceViews.Add(viewIndex);
+        _sliceRequestVersions[viewIndex]++;
+        if (_buildingSliceView == viewIndex && _sliceTextureTask is { IsCompleted: false })
+            _sliceTextureCancellation?.Cancel();
+    }
+
+    private void PumpSliceTexturePipeline()
+    {
+        if (_sliceTextureTask != null && _sliceTextureTask.IsCompleted)
+        {
+            if (_sliceTextureTask.IsCompletedSuccessfully)
+            {
+                var result = _sliceTextureTask.Result;
+                var currentSlice = result.View switch { 0 => _sliceZ, 1 => _sliceY, _ => _sliceX };
+                if (result.Slice == currentSlice && _buildingSliceVersion == _sliceRequestVersions[result.View])
+                {
+                    var replacement = TextureManager.CreateFromPixelData(result.Rgba,
+                        (uint)result.Width, (uint)result.Height);
+                    switch (result.View)
+                    {
+                        case 0: _textureXY?.Dispose(); _textureXY = replacement; break;
+                        case 1: _textureXZ?.Dispose(); _textureXZ = replacement; break;
+                        case 2: _textureYZ?.Dispose(); _textureYZ = replacement; break;
+                    }
+                }
+            }
+            else if (_sliceTextureTask.IsFaulted)
+                Logger.LogError($"[CT] Async slice render failed: {_sliceTextureTask.Exception?.GetBaseException().Message}");
+            _sliceTextureTask = null;
+            _sliceTextureCancellation?.Dispose();
+            _sliceTextureCancellation = null;
+            _buildingSliceView = -1;
+        }
+
+        if (_sliceTextureTask != null || _pendingSliceViews.Count == 0) return;
+        var view = _pendingSliceViews.Min();
+        _pendingSliceViews.Remove(view);
+        _buildingSliceView = view;
+        _buildingSliceVersion = _sliceRequestVersions[view];
+        var slice = view switch { 0 => _sliceZ, 1 => _sliceY, _ => _sliceX };
+        var (width, height) = GetImageDimensionsForView(view);
+        var materials = new Dictionary<byte, (Vector4 Color, float Opacity)>();
+        foreach (var material in _dataset.Materials)
+            if (material.ID != 0 && GetMaterialVisibility(material.ID))
+                materials[material.ID] = (material.Color, GetMaterialOpacity(material.ID) * .4f);
+        var threshold = CtImageStackTools.Get2DThresholdPreviewState();
+        var targetMaterial = _dataset.Materials.FirstOrDefault(material =>
+            material.ID == (_interactiveSegmentation?.TargetMaterialId ?? 0));
+        var external = CtImageStackTools.GetPreviewData(_dataset);
+        var request = new CtSliceTextureRequest(view, slice, width, height, _windowLevel, _windowWidth,
+            VolumeViewer?.ColorMapIndex ?? 1, materials, threshold,
+            _interactiveSegmentation?.GetCommittedSelectionMask(slice, view),
+            _interactiveSegmentation?.GetPreviewMask(slice, view),
+            targetMaterial?.Color ?? new Vector4(1, 0, 0, 1), external.isActive, external.mask, external.color);
+        _sliceTextureCancellation = new CancellationTokenSource();
+        var token = _sliceTextureCancellation.Token;
+        _sliceTextureTask = Task.Run(() => CtSliceTexturePipeline.Build(_dataset, request, token), token);
     }
 
     private void UpdateTexture(int viewIndex, ref TextureManager texture)

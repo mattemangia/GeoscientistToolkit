@@ -3,6 +3,7 @@
 using System.IO.MemoryMappedFiles;
 using System.Collections.Concurrent;
 using System.Buffers;
+using GAIA.Data.CtImageStack;
 using GAIA.Util;
 
 namespace GAIA.Data.VolumeData;
@@ -36,6 +37,8 @@ public class ChunkedLabelVolume : ILabelVolumeData
     // Header size constant
     private const int HEADER_SIZE = 28; // Width, height, depth, chunk dim and three chunk counts
     private readonly ConcurrentDictionary<int, byte> _dirtyChunks = new();
+    private volatile VirtualThresholdLabelRule[] _virtualRules = Array.Empty<VirtualThresholdLabelRule>();
+    private IGrayscaleVolumeData _ruleGrayscale;
     public int DirtyChunkCount => _dirtyChunks.Count;
     public int AllocatedChunkCount => _useMemoryMapping ? ChunkCountX * ChunkCountY * ChunkCountZ :
         _chunks?.Count(chunk => chunk != null) ?? 0;
@@ -147,10 +150,10 @@ public class ChunkedLabelVolume : ILabelVolumeData
                 if (_useMemoryMapping)
                 {
                     var globalOffset = CalculateGlobalOffset(chunkIndex, offset);
-                    return _viewAccessor.ReadByte(globalOffset);
+                    return ApplyVirtualRules(_viewAccessor.ReadByte(globalOffset), x, y, z);
                 }
 
-                return _chunks[chunkIndex]?[offset] ?? 0;
+                return ApplyVirtualRules(_chunks[chunkIndex]?[offset] ?? 0, x, y, z);
             }
             catch (Exception ex)
             {
@@ -235,6 +238,44 @@ public class ChunkedLabelVolume : ILabelVolumeData
         }
         }
         finally { if (mappedPlane != null) ArrayPool<byte>.Shared.Return(mappedPlane); }
+        ApplyVirtualRules(z, buffer);
+    }
+
+    public void SetVirtualThresholdRules(IGrayscaleVolumeData grayscale,
+        IEnumerable<VirtualThresholdLabelRule> rules)
+    {
+        _ruleGrayscale = grayscale;
+        _virtualRules = rules?.ToArray() ?? Array.Empty<VirtualThresholdLabelRule>();
+    }
+
+    private byte ApplyVirtualRules(byte stored, int x, int y, int z)
+    {
+        var rules = _virtualRules;
+        if (rules.Length == 0 || _ruleGrayscale == null) return stored;
+        var density = _ruleGrayscale[x, y, z];
+        var value = stored;
+        foreach (var rule in rules)
+            if (density >= rule.Min && density <= rule.Max && (rule.Add || value == rule.MaterialId))
+                value = rule.Add ? rule.MaterialId : (byte)0;
+        return value;
+    }
+
+    private void ApplyVirtualRules(int z, byte[] labels)
+    {
+        var rules = _virtualRules;
+        if (rules.Length == 0 || _ruleGrayscale == null) return;
+        var length = checked(Width * Height);
+        var grayscale = ArrayPool<byte>.Shared.Rent(length);
+        try
+        {
+            _ruleGrayscale.ReadSliceZ(z, grayscale);
+            foreach (var rule in rules)
+                for (var i = 0; i < length; i++)
+                    if (grayscale[i] >= rule.Min && grayscale[i] <= rule.Max &&
+                        (rule.Add || labels[i] == rule.MaterialId))
+                        labels[i] = rule.Add ? rule.MaterialId : (byte)0;
+        }
+        finally { ArrayPool<byte>.Shared.Return(grayscale); }
     }
 
     public unsafe void ReadSliceXZ(int y, byte[] destination)
@@ -267,6 +308,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
             }
         }
         finally { if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.ReleasePointer(); }
+        ApplyVirtualRulesOrthogonal(1, y, destination);
     }
 
     public unsafe void ReadSliceYZ(int x, byte[] destination)
@@ -291,6 +333,26 @@ public class ChunkedLabelVolume : ILabelVolumeData
             }
         }
         finally { if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.ReleasePointer(); }
+        ApplyVirtualRulesOrthogonal(2, x, destination);
+    }
+
+    private void ApplyVirtualRulesOrthogonal(int view, int slice, byte[] labels)
+    {
+        var rules = _virtualRules;
+        if (rules.Length == 0 || _ruleGrayscale is not ChunkedVolume grayscaleVolume) return;
+        var length = view == 1 ? Width * Depth : Height * Depth;
+        var grayscale = ArrayPool<byte>.Shared.Rent(length);
+        try
+        {
+            if (view == 1) grayscaleVolume.ReadSliceXZ(slice, grayscale);
+            else grayscaleVolume.ReadSliceYZ(slice, grayscale);
+            foreach (var rule in rules)
+                for (var i = 0; i < length; i++)
+                    if (grayscale[i] >= rule.Min && grayscale[i] <= rule.Max &&
+                        (rule.Add || labels[i] == rule.MaterialId))
+                        labels[i] = rule.Add ? rule.MaterialId : (byte)0;
+        }
+        finally { ArrayPool<byte>.Shared.Return(grayscale); }
     }
 
     /// <summary>Writes explicitly changed chunk planes using one contiguous MMF call per chunk.</summary>

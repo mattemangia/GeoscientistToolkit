@@ -69,6 +69,27 @@ public static class MaterialOperations
         var width = grayscaleVolume.Width;
         var height = grayscaleVolume.Height;
         var depth = grayscaleVolume.Depth;
+
+        // Threshold assignment is a declarative label layer. Registering it is O(1) regardless
+        // of volume size; consumers evaluate it only for the chunks/slices they actually read.
+        if (dataset != null && ReferenceEquals(dataset.VolumeData, grayscaleVolume) &&
+            ReferenceEquals(dataset.LabelData, labelVolume))
+        {
+            dataset.AddVirtualThresholdRule(materialID, minVal, maxVal, isAddOperation);
+            if (isAddOperation)
+            {
+                var material = dataset.Materials.FirstOrDefault(candidate => candidate.ID == materialID);
+                if (material != null) material.IsVisible = true;
+            }
+            progress?.Report(1f);
+            OpenTkManager.ExecuteOnMainThread(() =>
+            {
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+                ProjectManager.Instance.HasUnsavedChanges = true;
+            });
+            Logger.Log($"[MaterialOperations] Registered virtual threshold layer for material {materialID}.");
+            return Task.CompletedTask;
+        }
         var chunkedLabels = labelVolume as ChunkedLabelVolume;
         var memoryMapped = (grayscaleVolume as ChunkedVolume)?.IsMemoryMapped == true ||
                            chunkedLabels?.IsMemoryMapped == true;

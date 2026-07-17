@@ -45,6 +45,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
     // --- NEW PROPERTIES FOR MATERIALS AND LABELS ---
     public ChunkedLabelVolume LabelData { get; set; }
     public List<Material> Materials { get; set; } = new();
+    public List<VirtualThresholdLabelRule> VirtualThresholdRules { get; private set; } = new();
 
     // --- NEW PROPERTIES FOR STORING ANALYSIS RESULTS ---
     public NMRResults NmrResults { get; set; }
@@ -169,15 +170,18 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
 
     public override void Load()
     {
+        var volumeCandidate = GetVolumePath();
+        var labelCandidate = GetLabelPath();
+        var persistedBytes = (File.Exists(volumeCandidate) ? new FileInfo(volumeCandidate).Length : 0) +
+                             (File.Exists(labelCandidate) ? new FileInfo(labelCandidate).Length : 0);
+        var useMemoryMapping = CtMemoryPolicy.ShouldUseMemoryMapping(persistedBytes);
         // Load Grayscale Data
         if (VolumeData == null)
         {
             var volumePath = GetVolumePath();
             if (File.Exists(volumePath))
             {
-                // CT volumes can be much larger than physical RAM. Keep the file as the backing
-                // store and let the OS page cache retain only the actively used regions.
-                var loadTask = ChunkedVolume.LoadFromBinAsync(volumePath, true);
+                var loadTask = ChunkedVolume.LoadFromBinAsync(volumePath, useMemoryMapping);
                 VolumeData = loadTask.GetAwaiter().GetResult();
                 if (VolumeData != null)
                 {
@@ -199,7 +203,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
             {
                 try
                 {
-                    var loadedLabels = ChunkedLabelVolume.LoadFromBin(labelPath, true);
+                    var loadedLabels = ChunkedLabelVolume.LoadFromBin(labelPath, useMemoryMapping);
                     if (VolumeData != null &&
                         (loadedLabels.Width != VolumeData.Width ||
                          loadedLabels.Height != VolumeData.Height ||
@@ -217,7 +221,8 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
                     Logger.LogError(
                         $"[CtImageStackDataset] Failed to load label file '{labelPath}': {ex.Message}. A new empty label volume will be used.");
                     if (VolumeData != null)
-                        LabelData = new ChunkedLabelVolume(Width, Height, Depth, VolumeData.ChunkDim, true, labelPath);
+                        LabelData = new ChunkedLabelVolume(Width, Height, Depth, VolumeData.ChunkDim,
+                            useMemoryMapping, labelPath);
                 }
             }
             else if (VolumeData != null)
@@ -227,9 +232,50 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
                 // a segmentation action or saves the project.
                 Logger.Log(
                     $"[CtImageStackDataset] No label file found for {Name}. A new in-memory label volume will be used.");
-                LabelData = new ChunkedLabelVolume(Width, Height, Depth, VolumeData.ChunkDim, true, labelPath);
+                LabelData = new ChunkedLabelVolume(Width, Height, Depth, VolumeData.ChunkDim,
+                    useMemoryMapping, labelPath);
             }
         }
+        LoadVirtualThresholdRules();
+        LabelData?.SetVirtualThresholdRules(VolumeData, VirtualThresholdRules);
+    }
+
+    public void AddVirtualThresholdRule(byte materialId, byte min, byte max, bool add)
+    {
+        VirtualThresholdRules.Add(new VirtualThresholdLabelRule(materialId, min, max, add));
+        LabelData?.SetVirtualThresholdRules(VolumeData, VirtualThresholdRules);
+        SaveVirtualThresholdRules();
+    }
+
+    public void RemoveVirtualThresholdRules(byte materialId)
+    {
+        VirtualThresholdRules.RemoveAll(rule => rule.MaterialId == materialId);
+        LabelData?.SetVirtualThresholdRules(VolumeData, VirtualThresholdRules);
+        SaveVirtualThresholdRules();
+    }
+
+    private void LoadVirtualThresholdRules()
+    {
+        var path = GetVirtualThresholdRulesPath();
+        if (!File.Exists(path)) { VirtualThresholdRules.Clear(); return; }
+        try
+        {
+            VirtualThresholdRules = JsonSerializer.Deserialize<List<VirtualThresholdLabelRule>>(
+                File.ReadAllText(path)) ?? new List<VirtualThresholdLabelRule>();
+        }
+        catch (Exception ex)
+        {
+            VirtualThresholdRules.Clear();
+            Logger.LogWarning($"[CT] Cannot load virtual threshold rules: {ex.Message}");
+        }
+    }
+
+    public void SaveVirtualThresholdRules()
+    {
+        var path = GetVirtualThresholdRulesPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+        File.WriteAllText(path, JsonSerializer.Serialize(VirtualThresholdRules,
+            new JsonSerializerOptions { WriteIndented = true }));
     }
 
     public override void Unload()
@@ -261,6 +307,20 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
             cancellationToken.ThrowIfCancellationRequested();
             SaveLabelData(cancellationToken, progress);
         }, cancellationToken);
+    }
+
+    public async Task PersistCtDataAsync(CancellationToken cancellationToken = default,
+        IProgress<float> progress = null)
+    {
+        var labelProgress = new Progress<float>(value => progress?.Report(value * .9f));
+        await SaveLabelDataAsync(cancellationToken, labelProgress).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        await Task.Run(() =>
+        {
+            SaveVirtualThresholdRules();
+            SaveMaterials();
+        }, cancellationToken).ConfigureAwait(false);
+        progress?.Report(1f);
     }
 
     // --- NEW METHOD: Save materials to a local JSON file ---
@@ -489,6 +549,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
     }
 
     public string GetLabelRenderCachePath() => GetLabelPath() + ".renderlod";
+    private string GetVirtualThresholdRulesPath() => GetLabelPath() + ".rules.json";
 
     /// <summary>
     ///     Converts the pixel size to meters based on the unit

@@ -152,6 +152,7 @@ public class ProjectManager
             if (dataset is CtImageStackDataset ctDataset)
             {
                 ctDataset.SaveLabelData();
+                ctDataset.SaveVirtualThresholdRules();
                 ctDataset.SaveMaterials();
             }
 

@@ -53,6 +53,7 @@ public sealed class PNMGeneratorOptions
     // Aggressiveness controls (number of erosions to split constrictions)
     public int ConservativeErosions { get; set; } = 1;
     public int AggressiveErosions { get; set; } = 3;
+    public int MaxWorkingSetMB { get; set; } = 2048;
 }
 
 #endregion
@@ -137,30 +138,51 @@ public static class PNMGenerator
         progressReporter.Report(0.01f, "Initializing PNM generation...");
 
         // Voxel geometry (µm) — we take geometric mean if anisotropic spacing
-        var vx = Math.Max(1e-9, ct.PixelSize);
-        var vy = Math.Max(1e-9, ct.PixelSize);
-        var vz = Math.Max(1e-9, ct.SliceThickness > 0 ? ct.SliceThickness : ct.PixelSize);
+        var sourceVoxelCount = (long)ct.Width * ct.Height * ct.Depth;
+        // Watershed/EDT/CC need several byte/int/float buffers. Bound their aggregate working
+        // set and stream a uniformly sampled mask instead of ever allocating the source volume.
+        var maxWorkingBytes = Math.Max(256L, opt.MaxWorkingSetMB) * 1024 * 1024;
+        var maxWorkingVoxels = Math.Max(1L, maxWorkingBytes / 20L);
+        var sampling = sourceVoxelCount > maxWorkingVoxels
+            ? Math.Max(1, (int)Math.Ceiling(Math.Pow(sourceVoxelCount / (double)maxWorkingVoxels, 1.0 / 3.0)))
+            : 1;
+        var vx = Math.Max(1e-9, ct.PixelSize) * sampling;
+        var vy = Math.Max(1e-9, ct.PixelSize) * sampling;
+        var vz = Math.Max(1e-9, ct.SliceThickness > 0 ? ct.SliceThickness : ct.PixelSize) * sampling;
         var vEdge = Math.Pow(vx * vy * vz, 1.0 / 3.0);
 
-        int W = ct.Width, H = ct.Height, D = ct.Depth;
+        int W = (ct.Width + sampling - 1) / sampling;
+        int H = (ct.Height + sampling - 1) / sampling;
+        int D = (ct.Depth + sampling - 1) / sampling;
         var labels = ct.LabelData;
+        if (sampling > 1)
+            progressReporter.Report(0.03f,
+                $"Large-volume mode: sampling 1/{sampling} per axis ({W}×{H}×{D})...");
 
         // Step 1: Extract material mask
         progressReporter.Report(0.05f, "Extracting material mask...");
-        var originalMask = new byte[W * H * D];
-        Parallel.For(0, D, z =>
+        var originalMask = new byte[checked(W * H * D)];
+        Parallel.For(0, D, new ParallelOptions
         {
-            var plane = W * H;
+            MaxDegreeOfParallelism = labels.IsMemoryMapped ? 2 : Math.Max(1, Environment.ProcessorCount - 1),
+            CancellationToken = token
+        }, () => new byte[ct.Width * ct.Height], (z, _, sourceSlice) =>
+        {
+            var sourceZ = Math.Min(ct.Depth - 1, z * sampling);
+            labels.ReadSliceZ(sourceZ, sourceSlice);
             for (var y = 0; y < H; y++)
             {
                 var row = (z * H + y) * W;
+                var sourceRow = Math.Min(ct.Height - 1, y * sampling) * ct.Width;
                 for (var x = 0; x < W; x++)
-                    originalMask[row + x] = labels[x, y, z] == (byte)opt.MaterialId ? (byte)1 : (byte)0;
+                    originalMask[row + x] = sourceSlice[sourceRow + Math.Min(ct.Width - 1, x * sampling)] ==
+                                            (byte)opt.MaterialId ? (byte)1 : (byte)0;
             }
 
             if (z % 10 == 0)
                 progressReporter.Report(0.05f + 0.05f * z / D, $"Extracting slice {z}/{D}...");
-        });
+            return sourceSlice;
+        }, _ => { });
 
         token.ThrowIfCancellationRequested();
 
@@ -207,9 +229,9 @@ public static class PNMGenerator
             {
                 VoxelSize = (float)vEdge,
                 Tortuosity = 0,
-                ImageWidth = ct.Width,
-                ImageHeight = ct.Height,
-                ImageDepth = ct.Depth
+                ImageWidth = W,
+                ImageHeight = H,
+                ImageDepth = D
             };
         }
 
@@ -318,7 +340,10 @@ public static class PNMGenerator
         var pnm = new PNMDataset($"PNM_{ct.Name}_Mat{opt.MaterialId}", "")
         {
             VoxelSize = (float)vEdge,
-            Tortuosity = tort
+            Tortuosity = tort,
+            ImageWidth = W,
+            ImageHeight = H,
+            ImageDepth = D
         };
 
         // Add non-null pores & throats
