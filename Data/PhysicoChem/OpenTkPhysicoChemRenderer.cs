@@ -147,11 +147,13 @@ internal sealed class OpenTkPhysicoChemRenderer : IDisposable
         GL.UseProgram(_program);
         SetMatrix("uMvp", view * projection);
         GL.BindVertexArray(_vao);
+        SetInt("uWireframePass", mode == RenderMode.Wireframe ? 1 : 0);
         GL.PolygonMode(MaterialFace.FrontAndBack, mode == RenderMode.Wireframe ? PolygonMode.Line : PolygonMode.Fill);
         GL.DrawElements(PrimitiveType.Triangles, _indexCount, DrawElementsType.UnsignedInt, 0);
         if (mode == RenderMode.SolidWireframe)
         {
             GL.ColorMask(1, false, false, false, false);
+            SetInt("uWireframePass", 1);
             GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
             GL.Enable(EnableCap.PolygonOffsetLine);
             GL.PolygonOffset(-1f, -1f);
@@ -202,6 +204,11 @@ internal sealed class OpenTkPhysicoChemRenderer : IDisposable
         GL.UniformMatrix4(GL.GetUniformLocation(_program, name), 1, false, a);
     }
 
+    private void SetInt(string name, int value)
+    {
+        GL.Uniform1(GL.GetUniformLocation(_program, name), value);
+    }
+
     private static int CreateProgram(string vs, string fs)
     {
         int Compile(ShaderType type, string source) { var s=GL.CreateShader(type);GL.ShaderSource(s,source);GL.CompileShader(s);GL.GetShader(s,ShaderParameter.CompileStatus,out var ok);if(ok==0)throw new InvalidOperationException(GL.GetShaderInfoLog(s));return s; }
@@ -221,5 +228,6 @@ uniform mat4 uMvp; out vec3 N; out vec4 C; flat out uint PickId;
 void main(){gl_Position=uMvp*vec4(p,1);N=n;C=c;PickId=uint(id+0.5);}";
     private const string FragmentShader = @"#version 330 core
 in vec3 N; in vec4 C; flat in uint PickId; layout(location=0) out vec4 Color; layout(location=1) out uint ObjectId;
-void main(){float d=.28+.72*abs(dot(normalize(N),normalize(vec3(.35,.65,1))));Color=vec4(C.rgb*d,C.a);ObjectId=PickId;}";
+uniform int uWireframePass;
+void main(){float d=.28+.72*abs(dot(normalize(N),normalize(vec3(.35,.65,1))));vec3 shaded=C.rgb*d;float luminance=dot(shaded,vec3(.2126,.7152,.0722));vec3 wireColor=luminance>.5?vec3(.04):vec3(.96);Color=vec4(uWireframePass!=0?wireColor:shaded,C.a);ObjectId=PickId;}";
 }
