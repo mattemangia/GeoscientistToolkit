@@ -202,6 +202,9 @@ public class CTStackLoaderWrapper : IDataLoader
         {
             EditablePartner = LegacyDataset
         };
+        // Populate dimensions and the LOD table now, while leaving all voxel payloads unloaded.
+        // The dataset list can then show correct information before the viewer is opened.
+        StreamingDataset.LoadMetadata();
 
         progressReporter?.Report((1.0f, "Optimized dataset and editable partner added to project!"));
     }

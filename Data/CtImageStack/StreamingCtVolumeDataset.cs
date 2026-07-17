@@ -15,6 +15,7 @@ public class GvtLodInfo
 
 public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
 {
+    private readonly object _loadLock = new();
     public StreamingCtVolumeDataset(string name, string filePath) : base(name, filePath)
     {
         Type = DatasetType.CtBinaryFile;
@@ -62,35 +63,15 @@ public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
 
     public override void Load()
     {
+        lock (_loadLock)
+        {
         if (BaseLodVolumeData != null) return;
-        Logger.Log($"[StreamingCtVolumeDataset] Loading header and base LOD from '{FilePath}'");
+        LoadMetadataCore();
+        Logger.Log($"[StreamingCtVolumeDataset] Loading base LOD from '{FilePath}'");
 
         using (var fs = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
         using (var reader = new BinaryReader(fs))
         {
-            FullWidth = reader.ReadInt32();
-            FullHeight = reader.ReadInt32();
-            FullDepth = reader.ReadInt32();
-            BrickSize = reader.ReadInt32();
-            LodCount = reader.ReadInt32();
-
-            Logger.Log(
-                $"[StreamingCtVolumeDataset] Header: {FullWidth}×{FullHeight}×{FullDepth}, BrickSize={BrickSize}, LODs={LodCount}");
-
-            LodInfos = new GvtLodInfo[LodCount];
-            for (var i = 0; i < LodCount; i++)
-            {
-                LodInfos[i] = new GvtLodInfo
-                {
-                    Width = reader.ReadInt32(),
-                    Height = reader.ReadInt32(),
-                    Depth = reader.ReadInt32(),
-                    FileOffset = reader.ReadInt64()
-                };
-                Logger.Log(
-                    $"[StreamingCtVolumeDataset] LOD {i}: {LodInfos[i].Width}×{LodInfos[i].Height}×{LodInfos[i].Depth} at offset {LodInfos[i].FileOffset}");
-            }
-
             var baseLodInfo = BaseLod;
             var bricksX = (baseLodInfo.Width + BrickSize - 1) / BrickSize;
             var bricksY = (baseLodInfo.Height + BrickSize - 1) / BrickSize;
@@ -123,6 +104,50 @@ public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
                     $"[StreamingCtVolumeDataset] Base LOD has {nonZeroCount} non-zero voxels " +
                     $"({100.0 * nonZeroCount / BaseLodVolumeData.LongLength:F1}% fill)");
         }
+        }
+    }
+
+    /// <summary>
+    /// Reads only the small GVT header and LOD table. This is safe to call immediately after
+    /// import and makes dataset-list metadata available without allocating any voxel buffers.
+    /// </summary>
+    public void LoadMetadata()
+    {
+        lock (_loadLock) LoadMetadataCore();
+    }
+
+    private void LoadMetadataCore()
+    {
+        if (LodInfos is { Length: > 0 }) return;
+        Logger.Log($"[StreamingCtVolumeDataset] Loading metadata from '{FilePath}'");
+        using var fs = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new BinaryReader(fs);
+        if (fs.Length < 20) throw new InvalidDataException($"GVT header is incomplete: {FilePath}");
+        FullWidth = reader.ReadInt32();
+        FullHeight = reader.ReadInt32();
+        FullDepth = reader.ReadInt32();
+        BrickSize = reader.ReadInt32();
+        LodCount = reader.ReadInt32();
+        if (FullWidth <= 0 || FullHeight <= 0 || FullDepth <= 0 || BrickSize <= 0 || LodCount <= 0 || LodCount > 64)
+            throw new InvalidDataException($"Invalid GVT metadata in '{FilePath}'.");
+        if (fs.Length < 20L + LodCount * 20L)
+            throw new InvalidDataException($"GVT LOD table is incomplete: {FilePath}");
+
+        Width = FullWidth; Height = FullHeight; Depth = FullDepth;
+        LodInfos = new GvtLodInfo[LodCount];
+        for (var i = 0; i < LodCount; i++)
+        {
+            LodInfos[i] = new GvtLodInfo
+            {
+                Width = reader.ReadInt32(), Height = reader.ReadInt32(), Depth = reader.ReadInt32(),
+                FileOffset = reader.ReadInt64()
+            };
+            var lod = LodInfos[i];
+            if (lod.Width <= 0 || lod.Height <= 0 || lod.Depth <= 0 || lod.FileOffset < 20L + LodCount * 20L)
+                throw new InvalidDataException($"Invalid GVT LOD {i} metadata in '{FilePath}'.");
+        }
+        Logger.Log($"[StreamingCtVolumeDataset] Metadata ready: {FullWidth}×{FullHeight}×{FullDepth}, " +
+                   $"BrickSize={BrickSize}, LODs={LodCount}");
     }
 
     /// <summary>Loads the finest complete LOD that fits the renderer's VRAM budget.</summary>

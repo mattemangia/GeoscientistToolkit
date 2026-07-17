@@ -12,6 +12,34 @@ namespace VerificationTests;
 public sealed class CtLabelStorageTests
 {
     [Fact]
+    public void StreamingCtMetadata_IsAvailableWithoutLoadingAnyLodPayload()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"gaia-metadata-{Guid.NewGuid():N}.gvt");
+        try
+        {
+            using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write))
+            using (var writer = new BinaryWriter(stream))
+            {
+                writer.Write(320); writer.Write(240); writer.Write(80); writer.Write(64); writer.Write(2);
+                writer.Write(320); writer.Write(240); writer.Write(80); writer.Write(60L);
+                writer.Write(160); writer.Write(120); writer.Write(40); writer.Write(60L);
+                stream.SetLength(60 + 64L * 64 * 64);
+            }
+
+            var dataset = new StreamingCtVolumeDataset("metadata", path);
+            dataset.LoadMetadata();
+
+            Assert.Equal(320, dataset.FullWidth);
+            Assert.Equal(240, dataset.Height);
+            Assert.Equal(2, dataset.LodCount);
+            Assert.Equal(160, dataset.BaseLod.Width);
+            Assert.Null(dataset.BaseLodVolumeData);
+            Assert.Null(dataset.RenderLodVolumeData);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
     public void SparseLabelVolume_RoundTripsDirtyChunksWithoutAllocatingTheEmptyVolume()
     {
         var path = Path.Combine(Path.GetTempPath(), $"gaia-labels-{Guid.NewGuid():N}.bin");

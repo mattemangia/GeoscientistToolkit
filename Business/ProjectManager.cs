@@ -415,14 +415,20 @@ public class ProjectManager
                 {
                     Logger.LogWarning($"Source file not found for streaming dataset: {sDto.Name} at {sDto.FilePath}");
                 }
-                else if (partners != null && partners.TryGetValue(sDto.PartnerFilePath, out var partner))
+                else
+                {
+                    // Restoring a project should expose dimensions in the dataset list immediately,
+                    // without forcing the much larger base LOD into memory.
+                    streamingDataset.LoadMetadata();
+                }
+                if (!streamingDataset.IsMissing && partners != null && partners.TryGetValue(sDto.PartnerFilePath, out var partner))
                 {
                     streamingDataset.EditablePartner = partner as CtImageStackDataset;
                     if (streamingDataset.EditablePartner == null)
                         Logger.LogError(
                             $"Could not link streaming dataset '{sDto.Name}'. Partner at '{sDto.PartnerFilePath}' is not an editable CtImageStackDataset.");
                 }
-                else
+                else if (!streamingDataset.IsMissing)
                 {
                     Logger.LogError(
                         $"Could not find editable partner for streaming dataset '{sDto.Name}' at path '{sDto.PartnerFilePath}'.");
