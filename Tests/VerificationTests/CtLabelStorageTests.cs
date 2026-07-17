@@ -578,6 +578,63 @@ public sealed class CtLabelStorageTests
         finally { if (File.Exists(path)) File.Delete(path); }
     }
 
+    [Fact]
+    public async Task CtWorkflow_OpensNavigatesSegmentsPreviewsPersistsAndReloads()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"gaia-e2e-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var storageName = Path.GetFileName(directory);
+        var volumePath = Path.Combine(directory, storageName + ".Volume.bin");
+        var labelPath = Path.Combine(directory, storageName + ".Labels.bin");
+        try
+        {
+            using (var source = new ChunkedVolume(18, 14, 6, 4))
+            {
+                for (var z = 0; z < source.Depth; z++)
+                {
+                    var slice = new byte[source.Width * source.Height];
+                    for (var i = 0; i < slice.Length; i++) slice[i] = (byte)((i + z * 31) % 256);
+                    source.WriteSliceZ(z, slice);
+                }
+                await source.SaveAsBinAsync(volumePath);
+            }
+            using (var emptyLabels = new ChunkedLabelVolume(18, 14, 6, 4, true, labelPath)) { }
+
+            var dataset = new CtImageStackDataset("workflow", directory);
+            await Task.Run(dataset.Load);
+            Assert.NotNull(dataset.VolumeData);
+            Assert.NotNull(dataset.LabelData);
+
+            CtSliceTextureResult Render(int z) => CtSliceTexturePipeline.Build(dataset,
+                new CtSliceTextureRequest(0, z, 18, 14, 128, 255, 0,
+                    new Dictionary<byte, (System.Numerics.Vector4, float)>(),
+                    (false, 0, 0, System.Numerics.Vector4.Zero), null, null,
+                    System.Numerics.Vector4.One, false, null, System.Numerics.Vector4.Zero),
+                CancellationToken.None);
+            Assert.Equal(18 * 14 * 4, Render(0).Rgba.Length);
+            Assert.Equal(18 * 14 * 4, Render(5).Rgba.Length);
+
+            await MaterialOperations.AddVoxelsByThresholdAsync(dataset.VolumeData, dataset.LabelData,
+                7, 100, 160, dataset);
+            var labels = new byte[18 * 14];
+            dataset.LabelData.ReadSliceZ(5, labels);
+            Assert.Contains((byte)7, labels);
+
+            var preview = new SparseSliceCtPreviewVolume(18, 14, 6,
+                new Dictionary<int, byte[]> { [5] = labels.Select(v => v == 7 ? (byte)255 : (byte)0).ToArray() });
+            Assert.Contains((byte)255, preview.ReadSlice(0, 5, 18, 14));
+            await dataset.PersistCtDataAsync();
+            dataset.Unload();
+
+            var reopened = new CtImageStackDataset("workflow-reopened", directory);
+            await Task.Run(reopened.Load);
+            Assert.Contains(reopened.VirtualThresholdRules, rule => rule.MaterialId == 7);
+            Assert.Equal(7, reopened.LabelData[0, 0, 5]);
+            reopened.Unload();
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
     {
         public void Report(T value) => report(value);
