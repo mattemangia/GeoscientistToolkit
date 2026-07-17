@@ -333,40 +333,14 @@ public class PNMDataset : Dataset, ISerializableDataset
 
     public void ExportToJson(string path)
     {
-        var dto = new PNMDatasetDTO
-        {
-            Name = Name,
-            FilePath = FilePath,
-            VoxelSize = VoxelSize,
-            ImageWidth = ImageWidth,
-            ImageHeight = ImageHeight,
-            ImageDepth = ImageDepth,
-            Tortuosity = Tortuosity,
-            DarcyPermeability = DarcyPermeability,
-            NavierStokesPermeability = NavierStokesPermeability,
-            LatticeBoltzmannPermeability = LatticeBoltzmannPermeability,
-            Pores = Pores.Select(p => new PoreDTO
-            {
-                ID = p.ID,
-                Position = p.Position,
-                Area = p.Area,
-                VolumeVoxels = p.VolumeVoxels,
-                VolumePhysical = p.VolumePhysical,
-                Connections = p.Connections,
-                Radius = p.Radius
-            }).ToList(),
-            Throats = Throats.Select(t => new ThroatDTO
-            {
-                ID = t.ID,
-                Pore1ID = t.Pore1ID,
-                Pore2ID = t.Pore2ID,
-                Radius = t.Radius
-            }).ToList()
-        };
-
+        var fullPath = Path.GetFullPath(path);
+        // Use the same complete DTO as project serialization. The previous export duplicated a
+        // reduced schema and silently omitted diffusivity/formation-factor fields. Original lists
+        // are intentional: an active viewer filter must never discard network data on disk.
+        var dto = (PNMDatasetDTO)ToSerializableObject();
+        dto.FilePath = fullPath;
         var options = new JsonSerializerOptions { WriteIndented = true };
         var jsonString = JsonSerializer.Serialize(dto, options);
-        var fullPath = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath) ?? ".");
         var temporaryPath = fullPath + $".{Guid.NewGuid():N}.tmp";
         try
@@ -580,13 +554,15 @@ public class PNMDataset : Dataset, ISerializableDataset
 
         var dto = new PNMDatasetDTO
         {
-            Name = Name,
-            FilePath = FilePath,
+            TypeName = nameof(PNMDataset), Name = Name, FilePath = FilePath,
             VoxelSize = VoxelSize,
+            ImageWidth = ImageWidth, ImageHeight = ImageHeight, ImageDepth = ImageDepth,
             Tortuosity = Tortuosity,
             DarcyPermeability = DarcyPermeability,
             NavierStokesPermeability = NavierStokesPermeability,
             LatticeBoltzmannPermeability = LatticeBoltzmannPermeability,
+            BulkDiffusivity = BulkDiffusivity, EffectiveDiffusivity = EffectiveDiffusivity,
+            FormationFactor = FormationFactor, TransportTortuosity = TransportTortuosity,
             Pores = poresToWrite.Select(p => new PoreDTO
             {
                 ID = p.ID, Position = p.Position, Area = p.Area,

@@ -381,11 +381,12 @@ public static class PNMGenerator
         if (string.IsNullOrWhiteSpace(baseDirectory))
             baseDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "GAIA", "PNM");
-        var outputDirectory = Path.Combine(baseDirectory, "PNM");
-        Directory.CreateDirectory(outputDirectory);
+        Directory.CreateDirectory(baseDirectory);
         var invalid = Path.GetInvalidFileNameChars();
         var safeName = new string(pnm.Name.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
-        var outputPath = Path.Combine(outputDirectory, $"{safeName}.pnm");
+        // Keep the generated network beside its CT source. The compound extension makes the
+        // JSON nature explicit and is also the canonical format shown by Import Data.
+        var outputPath = Path.Combine(baseDirectory, $"{safeName}.pnm.json");
         pnm.ExportToJson(outputPath);
         Logger.Log($"[PNMGenerator] Persisted PNM to '{pnm.FilePath}'");
 

@@ -1105,13 +1105,15 @@ public class ImportDataModal
         ImGui.Separator();
         ImGui.Spacing();
 
-        ImGui.Text("PNM File (.pnm.json):");
+        ImGui.Text("PNM File (.pnm.json or .pnm):");
         var path = _pnmLoader.FilePath ?? "";
         ImGui.InputText("##PNMPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
         ImGui.SameLine();
         if (ImGui.Button("Browse...##PNMFile"))
         {
-            string[] pnmExtensions = { ".pnm.json", ".json" };
+            // File dialogs compare the final extension returned by Path.GetExtension, so
+            // .pnm.json is covered by .json. Keep .pnm for networks created by older versions.
+            string[] pnmExtensions = { ".json", ".pnm" };
             _pnmDialog.Open(null, pnmExtensions);
         }
 

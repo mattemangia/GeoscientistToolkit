@@ -8,6 +8,9 @@ namespace GAIA.Data.Loaders;
 
 public class PNMLoader : IDataLoader
 {
+    public PNMLoader() { }
+    public PNMLoader(string filePath) => FilePath = filePath ?? "";
+
     public string FilePath { get; set; } = "";
     public string Name => "Pore Network Model";
     public string Description => "Import a Pore Network Model from a JSON file";

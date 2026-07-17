@@ -3,6 +3,7 @@ using System.Linq;
 using System.Numerics;
 using GAIA.Analysis.Pnm;
 using GAIA.Data.Pnm;
+using GAIA.Data.Loaders;
 using Xunit;
 
 namespace VerificationTests;
@@ -13,12 +14,14 @@ public class DualPNMVerificationTests
     public void PNM_AtomicDiskPersistence_ReloadsCompleteNetworkAndDimensions()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"gaia-pnm-{Guid.NewGuid():N}");
-        var path = Path.Combine(directory, "network.pnm");
+        var path = Path.Combine(directory, "network.pnm.json");
         try
         {
             var source = new PNMDataset("PersistentNetwork", "")
             {
-                VoxelSize = 2.5f, ImageWidth = 40, ImageHeight = 30, ImageDepth = 20
+                VoxelSize = 2.5f, ImageWidth = 40, ImageHeight = 30, ImageDepth = 20,
+                Tortuosity = 1.7f, DarcyPermeability = 12.5f, BulkDiffusivity = 2.3e-9f,
+                EffectiveDiffusivity = 8.1e-10f, FormationFactor = 2.84f, TransportTortuosity = 1.91f
             };
             source.Pores.Add(new Pore { ID = 1, Position = Vector3.Zero, Radius = 2 });
             source.Pores.Add(new Pore { ID = 2, Position = new Vector3(10, 0, 0), Radius = 3 });
@@ -34,7 +37,14 @@ public class DualPNMVerificationTests
             Assert.Single(reopened.Throats);
             Assert.Equal(40, reopened.ImageWidth);
             Assert.Equal(20, reopened.ImageDepth);
+            Assert.Equal(source.DarcyPermeability, reopened.DarcyPermeability);
+            Assert.Equal(source.EffectiveDiffusivity, reopened.EffectiveDiffusivity);
+            Assert.Equal(source.FormationFactor, reopened.FormationFactor);
             Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
+
+            var imported = Assert.IsType<PNMDataset>(new PNMLoader(path).LoadAsync(null).GetAwaiter().GetResult());
+            Assert.Equal(2, imported.Pores.Count);
+            Assert.Single(imported.Throats);
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
