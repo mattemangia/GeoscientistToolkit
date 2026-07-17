@@ -7,7 +7,7 @@ using ImGuiNET;
 namespace GAIA.Analysis.Transform;
 
 /// <summary>
-///     Integrates the Transform/Crop Tool overlay with the CtCombinedViewer / CtImageStackViewer.
+///     Integrates the Transform/Crop Tool overlay with the unified CtCombinedViewer.
 ///     Routes draw and mouse input to the currently selected overlay.
 /// </summary>
 public static class TransformIntegration

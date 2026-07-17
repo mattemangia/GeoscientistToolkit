@@ -118,27 +118,6 @@ public class ChunkedLabelVolume : ILabelVolumeData
 
     #region Public Methods
 
-    public byte[] GetAllData()
-    {
-        var requiredMemory = (long)Width * Height * Depth;
-        Logger.LogWarning(
-            $"[ChunkedLabelVolume] GetAllData() called. Allocating {requiredMemory / (1024 * 1024)} MB of RAM.");
-
-        var fullVolume = new byte[requiredMemory];
-
-        Parallel.For(0, Depth, z =>
-        {
-            var zOffset = (long)z * Width * Height;
-            for (var y = 0; y < Height; y++)
-            {
-                var yzOffset = zOffset + (long)y * Width;
-                for (var x = 0; x < Width; x++) fullVolume[yzOffset + x] = this[x, y, z];
-            }
-        });
-
-        return fullVolume;
-    }
-
     /// <summary>
     ///     Indexer for voxel data access.
     /// </summary>

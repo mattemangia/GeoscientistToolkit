@@ -541,6 +541,29 @@ public sealed class CtLabelStorageTests
         Assert.Equal(255, lod[^1]);
     }
 
+    [Fact]
+    public async Task StackRegistration_CombinesXAndYUsingBulkSlices()
+    {
+        using var firstVolume = new ChunkedVolume(4, 3, 2, 2);
+        using var secondVolume = new ChunkedVolume(4, 3, 2, 2);
+        firstVolume.Fill(11); secondVolume.Fill(22);
+        var first = new CtImageStackDataset("first", Path.GetTempPath())
+        { Width = 4, Height = 3, Depth = 2, VolumeData = firstVolume };
+        var second = new CtImageStackDataset("second", Path.GetTempPath())
+        { Width = 4, Height = 3, Depth = 2, VolumeData = secondVolume };
+        var registration = new StackRegistration(RegistrationMethod.CPU_SIMD);
+
+        using var alongX = await registration.RegisterStacksAsync(first, second,
+            RegistrationAlignment.AlongX, 0);
+        using var alongY = await registration.RegisterStacksAsync(first, second,
+            RegistrationAlignment.AlongY, 0);
+
+        Assert.Equal((byte)11, alongX[0, 0, 1]);
+        Assert.Equal((byte)22, alongX[7, 2, 1]);
+        Assert.Equal((byte)11, alongY[0, 0, 1]);
+        Assert.Equal((byte)22, alongY[3, 5, 1]);
+    }
+
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
     {
         public void Report(T value) => report(value);

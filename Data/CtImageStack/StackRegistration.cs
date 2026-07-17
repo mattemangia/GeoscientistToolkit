@@ -74,8 +74,17 @@ public class StackRegistration
         var (outWidth, outHeight, outDepth) = CalculateOutputDimensions(vol1, vol2, alignment);
         Logger.Log($"[StackRegistration] Output dimensions: {outWidth}x{outHeight}x{outDepth}");
 
-        // Create output volume
-        var outputVolume = new ChunkedVolume(outWidth, outHeight, outDepth);
+        var outputBytes = checked((long)outWidth * outHeight * outDepth);
+        ChunkedVolume outputVolume;
+        if (CtMemoryPolicy.ShouldUseMemoryMapping(outputBytes))
+        {
+            var temporaryDirectory = Path.Combine(Path.GetTempPath(), "GAIA", "Registration");
+            var temporaryPath = Path.Combine(temporaryDirectory, $"registered-{Guid.NewGuid():N}.Volume.bin");
+            outputVolume = ChunkedVolume.CreateMemoryMapped(temporaryPath, outWidth, outHeight, outDepth,
+                Math.Min(vol1.ChunkDim, vol2.ChunkDim), dataset1.PixelSize);
+        }
+        else outputVolume = new ChunkedVolume(outWidth, outHeight, outDepth,
+            Math.Min(vol1.ChunkDim, vol2.ChunkDim));
 
         // Perform registration based on alignment
         switch (alignment)
@@ -153,7 +162,7 @@ public class StackRegistration
         // Find optimal alignment using overlap region
         progress?.Report((0.3f, "Computing optimal alignment..."));
 
-        var overlapSize = Math.Min(20, Math.Min(vol1.Depth, vol2.Depth) / 2);
+        var overlapSize = Math.Max(1, Math.Min(20, Math.Min(vol1.Depth, vol2.Depth) / 2));
         var lastSliceVol1 = new byte[width * height];
         var firstSliceVol2 = new byte[width * height];
 
@@ -220,24 +229,27 @@ public class StackRegistration
         progress?.Report((0.1f, "Analyzing overlap region..."));
 
         // Get overlap slices for alignment (YZ plane)
-        var overlapSize = Math.Min(20, Math.Min(vol1.Width, vol2.Width) / 2);
+        var overlapSize = Math.Max(1, Math.Min(20, Math.Min(vol1.Width, vol2.Width) / 2));
         var avgSlice1 = new float[height * depth];
         var avgSlice2 = new float[height * depth];
 
         // Average last YZ slices of vol1
+        var yzSlice = new byte[height * depth];
         for (var x = vol1.Width - overlapSize; x < vol1.Width; x++)
-        for (var z = 0; z < depth; z++)
-        for (var y = 0; y < height; y++)
-            avgSlice1[z * height + y] += vol1[x, y, z];
+        {
+            vol1.ReadSliceYZ(x, yzSlice);
+            for (var i = 0; i < yzSlice.Length; i++) avgSlice1[i] += yzSlice[i];
+        }
 
         for (var i = 0; i < avgSlice1.Length; i++)
             avgSlice1[i] /= overlapSize;
 
         // Average first YZ slices of vol2
         for (var x = 0; x < overlapSize; x++)
-        for (var z = 0; z < depth; z++)
-        for (var y = 0; y < height; y++)
-            avgSlice2[z * height + y] += vol2[x, y, z];
+        {
+            vol2.ReadSliceYZ(x, yzSlice);
+            for (var i = 0; i < yzSlice.Length; i++) avgSlice2[i] += yzSlice[i];
+        }
 
         for (var i = 0; i < avgSlice2.Length; i++)
             avgSlice2[i] /= overlapSize;
@@ -255,20 +267,28 @@ public class StackRegistration
             for (var z = 0; z < depth; z++)
             {
                 if (ct.IsCancellationRequested) return;
-
+                var outputSlice = new byte[output.Width * output.Height];
+                var firstSlice = new byte[vol1.Width * vol1.Height];
+                vol1.ReadSliceZ(z, firstSlice);
                 for (var y = 0; y < height; y++)
                 {
-                    for (var x = 0; x < vol1.Width; x++) output[x, y, z] = vol1[x, y, z];
-
-                    for (var x = 0; x < vol2.Width; x++)
+                    firstSlice.AsSpan(y * vol1.Width, vol1.Width)
+                        .CopyTo(outputSlice.AsSpan(y * output.Width));
+                }
+                var srcZ = z - bestOffsetZ;
+                if (srcZ >= 0 && srcZ < vol2.Depth)
+                {
+                    var secondSlice = new byte[vol2.Width * vol2.Height];
+                    vol2.ReadSliceZ(srcZ, secondSlice);
+                    for (var y = 0; y < height; y++)
                     {
                         var srcY = y - bestOffsetY;
-                        var srcZ = z - bestOffsetZ;
-
-                        if (srcY >= 0 && srcY < vol2.Height && srcZ >= 0 && srcZ < vol2.Depth)
-                            output[vol1.Width + x, y, z] = vol2[x, srcY, srcZ];
+                        if (srcY >= 0 && srcY < vol2.Height)
+                            secondSlice.AsSpan(srcY * vol2.Width, vol2.Width)
+                                .CopyTo(outputSlice.AsSpan(y * output.Width + vol1.Width));
                     }
                 }
+                output.WriteSliceZ(z, outputSlice);
 
                 if (z % 10 == 0)
                     progress?.Report((0.5f + 0.5f * z / depth, $"Processing slice {z}/{depth}"));
@@ -288,24 +308,27 @@ public class StackRegistration
         progress?.Report((0.1f, "Analyzing overlap region..."));
 
         // Get overlap slices for alignment (XZ plane)
-        var overlapSize = Math.Min(20, Math.Min(vol1.Height, vol2.Height) / 2);
+        var overlapSize = Math.Max(1, Math.Min(20, Math.Min(vol1.Height, vol2.Height) / 2));
         var avgSlice1 = new float[width * depth];
         var avgSlice2 = new float[width * depth];
 
         // Average last XZ slices of vol1
+        var xzSlice = new byte[width * depth];
         for (var y = vol1.Height - overlapSize; y < vol1.Height; y++)
-        for (var z = 0; z < depth; z++)
-        for (var x = 0; x < width; x++)
-            avgSlice1[z * width + x] += vol1[x, y, z];
+        {
+            vol1.ReadSliceXZ(y, xzSlice);
+            for (var i = 0; i < xzSlice.Length; i++) avgSlice1[i] += xzSlice[i];
+        }
 
         for (var i = 0; i < avgSlice1.Length; i++)
             avgSlice1[i] /= overlapSize;
 
         // Average first XZ slices of vol2
         for (var y = 0; y < overlapSize; y++)
-        for (var z = 0; z < depth; z++)
-        for (var x = 0; x < width; x++)
-            avgSlice2[z * width + x] += vol2[x, y, z];
+        {
+            vol2.ReadSliceXZ(y, xzSlice);
+            for (var i = 0; i < xzSlice.Length; i++) avgSlice2[i] += xzSlice[i];
+        }
 
         for (var i = 0; i < avgSlice2.Length; i++)
             avgSlice2[i] /= overlapSize;
@@ -323,20 +346,24 @@ public class StackRegistration
             for (var z = 0; z < depth; z++)
             {
                 if (ct.IsCancellationRequested) return;
-
-                for (var y = 0; y < vol1.Height; y++)
-                for (var x = 0; x < width; x++)
-                    output[x, y, z] = vol1[x, y, z];
-
-                for (var y = 0; y < vol2.Height; y++)
-                for (var x = 0; x < width; x++)
+                var outputSlice = new byte[output.Width * output.Height];
+                var firstSlice = new byte[vol1.Width * vol1.Height];
+                vol1.ReadSliceZ(z, firstSlice);
+                firstSlice.CopyTo(outputSlice, 0);
+                var srcZ = z - bestOffsetZ;
+                if (srcZ >= 0 && srcZ < vol2.Depth)
                 {
-                    var srcX = x - bestOffsetX;
-                    var srcZ = z - bestOffsetZ;
-
-                    if (srcX >= 0 && srcX < vol2.Width && srcZ >= 0 && srcZ < vol2.Depth)
-                        output[x, vol1.Height + y, z] = vol2[srcX, y, srcZ];
+                    var secondSlice = new byte[vol2.Width * vol2.Height];
+                    vol2.ReadSliceZ(srcZ, secondSlice);
+                    for (var y = 0; y < vol2.Height; y++)
+                    for (var x = 0; x < width; x++)
+                    {
+                        var srcX = x - bestOffsetX;
+                        if (srcX >= 0 && srcX < vol2.Width)
+                            outputSlice[(vol1.Height + y) * width + x] = secondSlice[y * vol2.Width + srcX];
+                    }
                 }
+                output.WriteSliceZ(z, outputSlice);
 
                 if (z % 10 == 0)
                     progress?.Report((0.5f + 0.5f * z / depth, $"Processing slice {z}/{depth}"));

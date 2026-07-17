@@ -107,6 +107,28 @@ public class ChunkedVolume : IGrayscaleVolumeData
 
     #region Public Interface
 
+    public static ChunkedVolume CreateMemoryMapped(string path, int width, int height, int depth,
+        int chunkDim = DEFAULT_CHUNK_DIM, double pixelSize = 1e-6)
+    {
+        ValidateDimensions(width, height, depth, chunkDim);
+        var countX = (width + chunkDim - 1) / chunkDim;
+        var countY = (height + chunkDim - 1) / chunkDim;
+        var countZ = (depth + chunkDim - 1) / chunkDim;
+        var chunkSize = checked((long)chunkDim * chunkDim * chunkDim);
+        var totalSize = checked((long)HEADER_SIZE + (long)countX * countY * countZ * chunkSize);
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+        using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read))
+        using (var writer = new BinaryWriter(stream))
+        {
+            writer.Write(width); writer.Write(height); writer.Write(depth); writer.Write(chunkDim);
+            writer.Write(8); writer.Write(pixelSize); writer.Write(countX); writer.Write(countY); writer.Write(countZ);
+            stream.SetLength(totalSize);
+        }
+        var mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.ReadWrite);
+        return new ChunkedVolume(width, height, depth, chunkDim, mmf, totalSize, HEADER_SIZE, path)
+        { PixelSize = pixelSize };
+    }
+
     /// <summary>
     ///     Indexer for accessing voxel data
     /// </summary>
@@ -691,31 +713,6 @@ public class ChunkedVolume : IGrayscaleVolumeData
 
         if (chunkDim <= 0 || chunkDim > 1024)
             throw new ArgumentException("Chunk dimension must be between 1 and 1024");
-    }
-
-    /// <summary>
-    ///     Retrieves all volume data as a single flat byte array.
-    ///     WARNING: This is a memory-intensive operation and may fail for very large datasets.
-    /// </summary>
-    public byte[] GetAllData()
-    {
-        var requiredMemory = (long)Width * Height * Depth;
-        Logger.LogWarning(
-            $"[ChunkedVolume] GetAllData() called. Allocating {requiredMemory / (1024 * 1024)} MB of RAM. This may be slow or fail on large datasets.");
-
-        var fullVolume = new byte[requiredMemory];
-
-        Parallel.For(0, Depth, z =>
-        {
-            var zOffset = (long)z * Width * Height;
-            for (var y = 0; y < Height; y++)
-            {
-                var yzOffset = zOffset + (long)y * Width;
-                for (var x = 0; x < Width; x++) fullVolume[yzOffset + x] = this[x, y, z];
-            }
-        });
-
-        return fullVolume;
     }
 
     #endregion

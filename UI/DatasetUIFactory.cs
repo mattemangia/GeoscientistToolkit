@@ -43,7 +43,6 @@ public static class DatasetUIFactory
         null => string.Empty,
         CtCombinedViewer => "Composite CT Viewer",
         CtVolume3DViewer => "CT Volume Viewer",
-        CtImageStackViewer => "CT Image Stack Viewer",
         ImageViewer => "Image Viewer",
         Mesh3DViewer => "3D Mesh Viewer",
         PointCloudViewer => "Point Cloud Viewer",

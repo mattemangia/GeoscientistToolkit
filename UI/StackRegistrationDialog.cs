@@ -399,7 +399,7 @@ public class StackRegistrationDialog
 
         if (_loadDirectly)
         {
-            if (ImGui.Button("Load into Workspace", new Vector2(buttonWidth, 0))) LoadResultIntoWorkspace();
+            if (ImGui.Button("Load into Workspace", new Vector2(buttonWidth, 0))) _ = LoadResultIntoWorkspaceAsync();
             ImGui.SameLine();
         }
 
@@ -419,33 +419,30 @@ public class StackRegistrationDialog
 
     private (bool isValid, string errorMessage) ValidateConfiguration()
     {
-        // Ensure datasets are loaded
-        if (_dataset1.VolumeData == null)
-            _dataset1.Load();
-        if (_dataset2.VolumeData == null)
-            _dataset2.Load();
-
-        var vol1 = _dataset1.VolumeData;
-        var vol2 = _dataset2.VolumeData;
-
-        if (vol1 == null || vol2 == null)
-            return (false, "Failed to load volume data");
+        var width1 = _dataset1.VolumeData?.Width ?? _dataset1.Width;
+        var height1 = _dataset1.VolumeData?.Height ?? _dataset1.Height;
+        var depth1 = _dataset1.VolumeData?.Depth ?? _dataset1.Depth;
+        var width2 = _dataset2.VolumeData?.Width ?? _dataset2.Width;
+        var height2 = _dataset2.VolumeData?.Height ?? _dataset2.Height;
+        var depth2 = _dataset2.VolumeData?.Depth ?? _dataset2.Depth;
+        if (width1 <= 0 || height1 <= 0 || depth1 <= 0 || width2 <= 0 || height2 <= 0 || depth2 <= 0)
+            return (false, "Volume dimensions are unavailable");
 
         // Check dimension compatibility
         switch (_selectedAlignment)
         {
             case RegistrationAlignment.AlongZ:
-                if (vol1.Width != vol2.Width || vol1.Height != vol2.Height)
+                if (width1 != width2 || height1 != height2)
                     return (false, "For Z-alignment, both stacks must have the same Width and Height");
                 break;
 
             case RegistrationAlignment.AlongX:
-                if (vol1.Height != vol2.Height || vol1.Depth != vol2.Depth)
+                if (height1 != height2 || depth1 != depth2)
                     return (false, "For X-alignment, both stacks must have the same Height and Depth");
                 break;
 
             case RegistrationAlignment.AlongY:
-                if (vol1.Width != vol2.Width || vol1.Depth != vol2.Depth)
+                if (width1 != width2 || depth1 != depth2)
                     return (false, "For Y-alignment, both stacks must have the same Width and Depth");
                 break;
         }
@@ -474,13 +471,13 @@ public class StackRegistrationDialog
                 _progressStatus = update.status;
             });
 
-            _resultVolume = await registration.RegisterStacksAsync(
+            _resultVolume = await Task.Run(() => registration.RegisterStacksAsync(
                 _dataset1,
                 _dataset2,
                 _selectedAlignment,
                 _maxShift,
                 progressReporter,
-                _cancellationTokenSource.Token);
+                _cancellationTokenSource.Token)).ConfigureAwait(false);
 
             _isProcessing = false;
 
@@ -502,8 +499,10 @@ public class StackRegistrationDialog
         }
     }
 
-    private void LoadResultIntoWorkspace()
+    private async Task LoadResultIntoWorkspaceAsync()
     {
+        if (_isProcessing || _resultVolume == null) return;
+        _isProcessing = true;
         try
         {
             var combinedName = $"{_dataset1.Name}+{_dataset2.Name}";
@@ -511,10 +510,12 @@ public class StackRegistrationDialog
             // Create a temporary folder for the dataset
             var tempFolder = Path.Combine(Path.GetTempPath(), "GAIA", $"Registered_{Guid.NewGuid():N}");
             Directory.CreateDirectory(tempFolder);
+            var storageName = Path.GetFileName(tempFolder);
 
             // Save the volume
-            var volumePath = Path.Combine(tempFolder, $"{combinedName}.Volume.bin");
-            _resultVolume.SaveAsBin(volumePath);
+            var volumePath = Path.Combine(tempFolder, $"{storageName}.Volume.bin");
+            var saveProgress = new Progress<float>(value => _progress = value);
+            await _resultVolume.SaveAsBinAsync(volumePath, default, saveProgress).ConfigureAwait(false);
 
             // Create dataset
             var newDataset = new CtImageStackDataset(combinedName, tempFolder)
@@ -529,16 +530,15 @@ public class StackRegistrationDialog
             };
 
             // Create empty labels
-            var labelPath = Path.Combine(tempFolder, $"{combinedName}.Labels.bin");
+            var labelPath = Path.Combine(tempFolder, $"{storageName}.Labels.bin");
             var labels = new ChunkedLabelVolume(
                 _resultVolume.Width,
                 _resultVolume.Height,
                 _resultVolume.Depth,
                 _resultVolume.ChunkDim,
-                false,
+                true,
                 labelPath);
-            labels.SaveAsBin(labelPath);
-            labels.Dispose();
+            newDataset.LabelData = labels;
 
             // Add default material
             if (!newDataset.Materials.Any(m => m.ID == 0))
@@ -548,18 +548,20 @@ public class StackRegistrationDialog
             newDataset.SaveMaterials();
 
             // Remove original datasets and group
-            ProjectManager.Instance.RemoveDataset(_group);
-
-            // Add new dataset
-            ProjectManager.Instance.AddDataset(newDataset);
-
-            Logger.Log($"[StackRegistrationDialog] Loaded registered stack into workspace: {combinedName}");
-
-            _isOpen = false;
+            OpenTkManager.ExecuteOnMainThread(() =>
+            {
+                ProjectManager.Instance.RemoveDataset(_group);
+                ProjectManager.Instance.AddDataset(newDataset);
+                _resultVolume = null; // ownership transferred to the dataset
+                Logger.Log($"[StackRegistrationDialog] Loaded registered stack into workspace: {combinedName}");
+                _isOpen = false;
+                _isProcessing = false;
+            });
         }
         catch (Exception ex)
         {
             Logger.LogError($"[StackRegistrationDialog] Failed to load result: {ex.Message}");
+            _isProcessing = false;
         }
     }
 
