@@ -293,6 +293,8 @@ public class PhysicoChemTools : IDatasetTools
             if (ImGui.Selectable($"{label}##{cell.ID}", cell.ID == _selectedCellID))
             {
                 _selectedCellID = cell.ID;
+                dataset.SelectedCellIDs.Clear();
+                dataset.SelectedCellIDs.Add(cell.ID);
             }
         }
         ImGui.EndChild();
@@ -301,28 +303,37 @@ public class PhysicoChemTools : IDatasetTools
 
         // Cell properties
         ImGui.BeginChild("cell_properties", new Vector2(0, 200), ImGuiChildFlags.Border);
-        if (_selectedCellID != null && dataset.Mesh.Cells.TryGetValue(_selectedCellID, out var selectedCell))
+        var propertyCellIds = dataset.SelectedCellIDs.Where(dataset.Mesh.Cells.ContainsKey).ToList();
+        if (propertyCellIds.Count == 0 && _selectedCellID != null && dataset.Mesh.Cells.ContainsKey(_selectedCellID))
+            propertyCellIds.Add(_selectedCellID);
+
+        if (propertyCellIds.Count > 0 && dataset.Mesh.Cells.TryGetValue(propertyCellIds[0], out var selectedCell))
         {
-            ImGui.Text($"Properties for Cell: {selectedCell.ID}");
+            ImGui.Text(propertyCellIds.Count == 1
+                ? $"Properties for Cell: {selectedCell.ID}"
+                : $"Properties for {propertyCellIds.Count} selected cells");
             ImGui.Separator();
 
             bool isActive = selectedCell.IsActive;
             if (ImGui.Checkbox("Is Active", ref isActive))
             {
-                selectedCell.IsActive = isActive;
+                foreach (var cellId in propertyCellIds)
+                    dataset.Mesh.Cells[cellId].IsActive = isActive;
             }
 
             bool isVisible = selectedCell.IsVisible;
             if (ImGui.Checkbox("Is Visible", ref isVisible))
             {
-                selectedCell.IsVisible = isVisible;
+                foreach (var cellId in propertyCellIds)
+                    dataset.Mesh.Cells[cellId].IsVisible = isVisible;
             }
 
             var materialIDs = dataset.Materials.Select(m => m.MaterialID).ToArray();
             var currentMaterialIndex = Array.IndexOf(materialIDs, selectedCell.MaterialID);
             if (ImGui.Combo("Material", ref currentMaterialIndex, materialIDs, materialIDs.Length))
             {
-                selectedCell.MaterialID = materialIDs[currentMaterialIndex];
+                foreach (var cellId in propertyCellIds)
+                    dataset.Mesh.Cells[cellId].MaterialID = materialIDs[currentMaterialIndex];
             }
         }
         else

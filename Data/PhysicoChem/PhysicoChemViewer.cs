@@ -26,6 +26,12 @@ public class PhysicoChemViewer : IDatasetViewer
     private bool _isDragging;
     private bool _isPanning;
     private Vector2 _lastMousePos;
+    private bool _isBoxSelecting;
+    private bool _boxSelectionUsesCtrl;
+    private Vector2 _boxSelectionStart;
+    private Vector2 _boxSelectionEnd;
+    private HashSet<string> _selectionBeforeDrag = new();
+    private bool _selectThroughVolume = true;
 
     // Visualization options
     private readonly string[] _fieldOptions = new[]
@@ -138,6 +144,14 @@ public class PhysicoChemViewer : IDatasetViewer
             ImGui.SameLine();
             if (ImGui.RadioButton("Both", _renderMode == RenderMode.SolidWireframe))
                 _renderMode = RenderMode.SolidWireframe;
+
+            ImGui.SameLine();
+            if (ImGui.Button(_selectThroughVolume ? "Select: Through" : "Select: Surface"))
+                _selectThroughVolume = !_selectThroughVolume;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(_selectThroughVolume
+                    ? "Box selection includes hidden cells inside the volume"
+                    : "Box selection includes only cells visible on the surface");
 
             ImGui.SameLine();
             ImGui.Separator();
@@ -298,19 +312,40 @@ public class PhysicoChemViewer : IDatasetViewer
         var isHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         HandleMouseInput(isHovered || _isDragging || _isPanning);
         var io = ImGui.GetIO();
-        if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !io.KeyAlt)
+        if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !io.KeyAlt && (io.KeyShift || io.KeyCtrl))
+        {
+            _isBoxSelecting = true;
+            _boxSelectionUsesCtrl = io.KeyCtrl;
+            _boxSelectionStart = Vector2.Clamp(io.MousePos - cursorPos, Vector2.Zero, availableSize);
+            _boxSelectionEnd = _boxSelectionStart;
+            _selectionBeforeDrag = _dataset.SelectedCellIDs.ToHashSet();
+        }
+        else if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !io.KeyAlt)
         {
             var local = io.MousePos - cursorPos;
             var picked = _renderer.Pick((int)local.X, (int)local.Y);
-            if (!io.KeyCtrl && !io.KeyShift) _dataset.SelectedCellIDs.Clear();
+            _dataset.SelectedCellIDs.Clear();
             if (picked != null)
+                _dataset.SelectedCellIDs.Add(picked);
+        }
+
+        if (_isBoxSelecting)
+        {
+            _boxSelectionEnd = Vector2.Clamp(io.MousePos - cursorPos, Vector2.Zero, availableSize);
+            var dragDistance = Vector2.Distance(_boxSelectionStart, _boxSelectionEnd);
+            if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
             {
-                if (io.KeyCtrl && _dataset.SelectedCellIDs.Contains(picked)) _dataset.SelectedCellIDs.Remove(picked);
-                else if (!_dataset.SelectedCellIDs.Contains(picked)) _dataset.SelectedCellIDs.Add(picked);
+                if (dragDistance < 4.0f)
+                    ApplyModifiedClickSelection(_boxSelectionEnd);
+                else
+                    ApplyBoxSelection(view, projection, availableSize);
+                _isBoxSelecting = false;
             }
         }
 
         var drawList = ImGui.GetWindowDrawList();
+        if (_isBoxSelecting)
+            DrawSelectionRectangle(drawList, cursorPos, view, projection, availableSize);
         if (_showBoundaryConditions && !_builderMode)
             foreach (var bc in _dataset.BoundaryConditions) DrawBoundaryCondition(drawList, cursorPos + availableSize * .5f, bc);
         DrawAxes(drawList, cursorPos + availableSize - new Vector2(65, 65));
@@ -330,6 +365,76 @@ public class PhysicoChemViewer : IDatasetViewer
         {
             _builder.DrawPropertiesPanel();
         }
+    }
+
+    private void ApplyModifiedClickSelection(Vector2 localPosition)
+    {
+        var picked = _renderer.Pick((int)localPosition.X, (int)localPosition.Y);
+        _dataset.SelectedCellIDs = _selectionBeforeDrag.ToList();
+        if (picked == null) return;
+
+        if (_boxSelectionUsesCtrl && _dataset.SelectedCellIDs.Contains(picked))
+            _dataset.SelectedCellIDs.Remove(picked);
+        else if (!_dataset.SelectedCellIDs.Contains(picked))
+            _dataset.SelectedCellIDs.Add(picked);
+    }
+
+    private void ApplyBoxSelection(Matrix4x4 view, Matrix4x4 projection, Vector2 viewportSize)
+    {
+        var cellsInRectangle = (_selectThroughVolume
+                ? GetCellsInSelectionRectangle(view, projection, viewportSize)
+                : _renderer.PickRectangle(_boxSelectionStart, _boxSelectionEnd))
+            .ToHashSet();
+        var selection = _selectionBeforeDrag.ToHashSet();
+        if (_boxSelectionUsesCtrl)
+        {
+            foreach (var cellId in cellsInRectangle)
+                if (!selection.Add(cellId)) selection.Remove(cellId);
+        }
+        else
+        {
+            selection.UnionWith(cellsInRectangle);
+        }
+        _dataset.SelectedCellIDs = selection.ToList();
+    }
+
+    private IEnumerable<string> GetCellsInSelectionRectangle(Matrix4x4 view, Matrix4x4 projection,
+        Vector2 viewportSize)
+    {
+        var min = Vector2.Min(_boxSelectionStart, _boxSelectionEnd);
+        var max = Vector2.Max(_boxSelectionStart, _boxSelectionEnd);
+        var viewProjection = view * projection;
+
+        foreach (var cell in _dataset.Mesh.Cells.Values.Where(cell => cell.IsVisible))
+        {
+            var center = new Vector3((float)cell.Center.X, (float)cell.Center.Y, (float)cell.Center.Z);
+            var clip = Vector4.Transform(new Vector4(center, 1.0f), viewProjection);
+            if (clip.W <= 0.0f) continue;
+
+            var screen = new Vector2(
+                (clip.X / clip.W * 0.5f + 0.5f) * viewportSize.X,
+                (0.5f - clip.Y / clip.W * 0.5f) * viewportSize.Y);
+            if (screen.X >= min.X && screen.X <= max.X && screen.Y >= min.Y && screen.Y <= max.Y)
+                yield return cell.ID;
+        }
+    }
+
+    private void DrawSelectionRectangle(ImDrawListPtr drawList, Vector2 viewportOrigin, Matrix4x4 view,
+        Matrix4x4 projection, Vector2 viewportSize)
+    {
+        var min = viewportOrigin + Vector2.Min(_boxSelectionStart, _boxSelectionEnd);
+        var max = viewportOrigin + Vector2.Max(_boxSelectionStart, _boxSelectionEnd);
+        var fill = ImGui.GetColorU32(new Vector4(0.20f, 0.65f, 1.0f, 0.16f));
+        var border = ImGui.GetColorU32(new Vector4(0.35f, 0.75f, 1.0f, 0.95f));
+        drawList.AddRectFilled(min, max, fill);
+        drawList.AddRect(min, max, border, 0.0f, ImDrawFlags.None, 2.0f);
+
+        var selectionScope = _selectThroughVolume ? "through" : "surface";
+        var countText = _selectThroughVolume
+            ? $": {GetCellsInSelectionRectangle(view, projection, viewportSize).Count()} cells"
+            : string.Empty;
+        var action = _boxSelectionUsesCtrl ? "Toggle" : "Add";
+        drawList.AddText(max + new Vector2(6.0f, 4.0f), border, $"{action} {selectionScope}{countText}");
     }
 
     private void Draw2DSliceView(Vector2 cursorPos, Vector2 availableSize)

@@ -177,6 +177,28 @@ internal sealed class OpenTkPhysicoChemRenderer : IDisposable
         return value[0] > 0 && value[0] <= _pickIds.Count ? _pickIds[(int)value[0] - 1] : null;
     }
 
+    public IReadOnlyCollection<string> PickRectangle(Vector2 start, Vector2 end)
+    {
+        var minX = Math.Clamp((int)MathF.Floor(MathF.Min(start.X, end.X)), 0, Width - 1);
+        var maxX = Math.Clamp((int)MathF.Ceiling(MathF.Max(start.X, end.X)), 0, Width - 1);
+        var minY = Math.Clamp((int)MathF.Floor(MathF.Min(start.Y, end.Y)), 0, Height - 1);
+        var maxY = Math.Clamp((int)MathF.Ceiling(MathF.Max(start.Y, end.Y)), 0, Height - 1);
+        var readWidth = maxX - minX + 1;
+        var readHeight = maxY - minY + 1;
+        var values = new uint[readWidth * readHeight];
+
+        GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _fbo);
+        GL.ReadBuffer(ReadBufferMode.ColorAttachment1);
+        GL.ReadPixels(minX, Height - 1 - maxY, readWidth, readHeight,
+            PixelFormat.RedInteger, PixelType.UnsignedInt, values);
+        GL.ReadBuffer(ReadBufferMode.ColorAttachment0);
+        GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, 0);
+
+        return values.Where(value => value > 0 && value <= _pickIds.Count)
+            .Select(value => _pickIds[(int)value - 1])
+            .ToHashSet();
+    }
+
     private static void AddCube(List<float> v, List<uint> idx, Vector3 c, float size, Vector4 color, int pickId)
     {
         var h = size * .48f;
