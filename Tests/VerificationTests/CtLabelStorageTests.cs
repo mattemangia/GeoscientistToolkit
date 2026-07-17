@@ -4,6 +4,7 @@ using System.Diagnostics;
 using GAIA.Analysis.RemoveSmallIslands;
 using GAIA;
 using GAIA.Analysis.ParticleSeparator;
+using GAIA.Data.CtImageStack.Segmentation;
 
 namespace VerificationTests;
 
@@ -378,5 +379,32 @@ public sealed class CtLabelStorageTests
         var crossSlice = result.Particles.Single(p => p.VoxelCount == 4);
         Assert.Equal(1, crossSlice.Bounds.MinZ);
         Assert.Equal(3, crossSlice.Bounds.MaxZ);
+    }
+
+    [Fact]
+    public void MorphologicalInterpolation_UsesBoundedSignedDistanceSlices()
+    {
+        using var grayscale = new ChunkedVolume(24, 18, 6, 8);
+        using var labels = new ChunkedLabelVolume(24, 18, 6, 8, false);
+        var dataset = new CtImageStackDataset("interpolation", Path.GetTempPath())
+        {
+            Width = 24, Height = 18, Depth = 6, VolumeData = grayscale, LabelData = labels
+        };
+        using var manager = new SegmentationManager(dataset);
+        var interpolation = new InterpolationManager(dataset, manager);
+        var start = new byte[24 * 18];
+        var end = new byte[24 * 18];
+        for (var y = 5; y <= 11; y++)
+        for (var x = 3; x <= 9; x++) start[y * 24 + x] = 255;
+        for (var y = 5; y <= 11; y++)
+        for (var x = 13; x <= 19; x++) end[y * 24 + x] = 255;
+
+        var result = interpolation.InterpolateSlices(start, 0, end, 4, 0,
+            InterpolationManager.InterpolationType.Morphological3D);
+
+        Assert.Equal(3, result.Count);
+        var middle = result[(2, 0)];
+        Assert.True(middle.Any(value => value != 0));
+        Assert.True(middle.Skip(6 * 24).Take(6 * 24).Any(value => value != 0));
     }
 }

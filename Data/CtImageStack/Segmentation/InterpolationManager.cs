@@ -116,25 +116,22 @@ public class InterpolationManager
         var (width, height) = _segmentationManager.GetSliceDimensions(viewIndex);
         var depth = endSlice - startSlice + 1;
         var results = new ConcurrentDictionary<(int, int), byte[]>();
-
-        var volume = new byte[width, height, depth];
-
-        for (var y = 0; y < height; y++)
-        for (var x = 0; x < width; x++)
-        {
-            volume[x, y, 0] = startMask[y * width + x];
-            volume[x, y, depth - 1] = endMask[y * width + x];
-        }
-
-        var processedVolume = ApplyMorphologicalClosing3D(volume);
+        var startDistance = ComputeSignedDistance(startMask, width, height);
+        var endDistance = ComputeSignedDistance(endMask, width, height);
 
         Parallel.For(1, depth - 1, z =>
         {
+            var t = z / (float)(depth - 1);
             var interpolatedMask = new byte[width * height];
-            for (var y = 0; y < height; y++)
-            for (var x = 0; x < width; x++)
-                interpolatedMask[y * width + x] = processedVolume[x, y, z];
-
+            for (var i = 0; i < interpolatedMask.Length; i++)
+                if (startDistance[i] * (1 - t) + endDistance[i] * t <= 0) interpolatedMask[i] = 255;
+            // Widely translated disjoint objects can have no negative point at the exact
+            // midpoint. Preserve both limiting shapes there instead of producing an empty slice.
+            if (interpolatedMask.AsSpan().IndexOfAnyExcept((byte)0) < 0)
+                for (var i = 0; i < interpolatedMask.Length; i++)
+                    if (startMask[i] * (1 - t) + endMask[i] * t >= 127.5f) interpolatedMask[i] = 255;
+            // Signed-distance interpolation already performs the morphological transition.
+            // A closing pass here can erase a valid thin midpoint when two shapes translate.
             results.TryAdd((startSlice + z, viewIndex), interpolatedMask);
         });
         return new Dictionary<(int, int), byte[]>(results);
@@ -356,43 +353,41 @@ public class InterpolationManager
         }
     }
 
-    private byte[,,] ApplyMorphologicalClosing3D(byte[,,] volume)
+    private static float[] ComputeSignedDistance(byte[] mask, int width, int height)
     {
-        var width = volume.GetLength(0);
-        var height = volume.GetLength(1);
-        var depth = volume.GetLength(2);
-
-        var dilated = new byte[width, height, depth];
-        var closed = new byte[width, height, depth];
-
-        Parallel.For(1, depth - 1, z =>
-        {
-            for (var y = 1; y < height - 1; y++)
-            for (var x = 1; x < width - 1; x++)
-            {
-                byte maxVal = 0;
-                for (var dz = -1; dz <= 1; dz++)
-                for (var dy = -1; dy <= 1; dy++)
-                for (var dx = -1; dx <= 1; dx++)
-                    maxVal = Math.Max(maxVal, volume[x + dx, y + dy, z + dz]);
-                dilated[x, y, z] = maxVal;
-            }
-        });
-
-        Parallel.For(1, depth - 1, z =>
-        {
-            for (var y = 1; y < height - 1; y++)
-            for (var x = 1; x < width - 1; x++)
-            {
-                byte minVal = 255;
-                for (var dz = -1; dz <= 1; dz++)
-                for (var dy = -1; dy <= 1; dy++)
-                for (var dx = -1; dx <= 1; dx++)
-                    minVal = Math.Min(minVal, dilated[x + dx, y + dy, z + dz]);
-                closed[x, y, z] = minVal;
-            }
-        });
-
-        return closed;
+        var foreground = ChamferDistance(mask, width, height, true);
+        var background = ChamferDistance(mask, width, height, false);
+        for (var i = 0; i < foreground.Length; i++) foreground[i] -= background[i];
+        return foreground;
     }
+
+    private static float[] ChamferDistance(byte[] mask, int width, int height, bool targetForeground)
+    {
+        var distance = new float[checked(width * height)];
+        for (var i = 0; i < distance.Length; i++)
+            distance[i] = (mask[i] > 0) == targetForeground ? 0 : 1e20f;
+        const float diagonal = 1.41421356f;
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var i = y * width + x;
+            if (x > 0) distance[i] = Math.Min(distance[i], distance[i - 1] + 1);
+            if (y > 0) distance[i] = Math.Min(distance[i], distance[i - width] + 1);
+            if (x > 0 && y > 0) distance[i] = Math.Min(distance[i], distance[i - width - 1] + diagonal);
+            if (x + 1 < width && y > 0) distance[i] = Math.Min(distance[i], distance[i - width + 1] + diagonal);
+        }
+        for (var y = height - 1; y >= 0; y--)
+        for (var x = width - 1; x >= 0; x--)
+        {
+            var i = y * width + x;
+            if (x + 1 < width) distance[i] = Math.Min(distance[i], distance[i + 1] + 1);
+            if (y + 1 < height) distance[i] = Math.Min(distance[i], distance[i + width] + 1);
+            if (x + 1 < width && y + 1 < height)
+                distance[i] = Math.Min(distance[i], distance[i + width + 1] + diagonal);
+            if (x > 0 && y + 1 < height)
+                distance[i] = Math.Min(distance[i], distance[i + width - 1] + diagonal);
+        }
+        return distance;
+    }
+
 }
