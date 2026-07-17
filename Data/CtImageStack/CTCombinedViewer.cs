@@ -1142,13 +1142,20 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
         dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
 
-        if (needsUpdate || texture == null || !texture.IsValid)
+        if (needsUpdate)
         {
             if (CurrentSliceDisplayMode == SliceDisplayMode.Grayscale)
-                QueueSliceTexture(viewIndex);
+                QueueSliceTexture(viewIndex, true);
             else
                 UpdateTexture(viewIndex, ref texture);
             needsUpdate = false;
+        }
+        else if ((texture == null || !texture.IsValid) && CurrentSliceDisplayMode == SliceDisplayMode.Grayscale)
+        {
+            // A missing texture normally means that the first asynchronous request is still in
+            // flight. Do not supersede that request every frame: doing so continually changed its
+            // version, making every completed result stale and leaving the canvas permanently gray.
+            QueueSliceTexture(viewIndex, false);
         }
 
         dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
@@ -1285,11 +1292,15 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         }
     }
 
-    private void QueueSliceTexture(int viewIndex)
+    private void QueueSliceTexture(int viewIndex, bool supersede)
     {
+        if (!supersede && (_pendingSliceViews.Contains(viewIndex) ||
+                           (_buildingSliceView == viewIndex && _sliceTextureTask is { IsCompleted: false })))
+            return;
+
         _pendingSliceViews.Add(viewIndex);
         _sliceRequestVersions[viewIndex]++;
-        if (_buildingSliceView == viewIndex && _sliceTextureTask is { IsCompleted: false })
+        if (supersede && _buildingSliceView == viewIndex && _sliceTextureTask is { IsCompleted: false })
             _sliceTextureCancellation?.Cancel();
     }
 
