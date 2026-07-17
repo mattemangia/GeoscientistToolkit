@@ -31,6 +31,7 @@ namespace GAIA.Tools.CtImageStack.AISegmentation
         // Material assignment
         private byte _targetMaterialId = 1;
         private bool _autoApply = false;
+        private CtOperationHandle _applyOperation;
 
         // Performance tracking
         private float _lastInferenceTime;
@@ -197,6 +198,9 @@ namespace GAIA.Tools.CtImageStack.AISegmentation
                 ApplyMaskToMaterial(ct);
             }
 
+            if (_applyOperation?.IsActive == true)
+                ImGui.ProgressBar(_applyOperation.Progress, new Vector2(-1, 0), _applyOperation.Name);
+
             // Performance info
             if (_lastInferenceTime > 0)
             {
@@ -277,25 +281,23 @@ namespace GAIA.Tools.CtImageStack.AISegmentation
 
         private void ApplyMaskToMaterial(CtImageStackDataset dataset)
         {
-            if (_currentMask == null || _currentSliceIndex < 0) return;
-
-            // Apply mask to dataset labels
-            int width = dataset.Width;
-            int height = dataset.Height;
-
-            for (int y = 0; y < height && y < _currentMask.GetLength(0); y++)
+            if (_currentMask == null || _currentSliceIndex < 0 || _applyOperation?.IsActive == true) return;
+            var mask = (byte[,])_currentMask.Clone();
+            var sliceIndex = _currentSliceIndex;
+            var materialId = _targetMaterialId;
+            _applyOperation = CtOperationCoordinator.For(dataset).Enqueue("Applying SAM2 mask", async (token, progress) =>
             {
-                for (int x = 0; x < width && x < _currentMask.GetLength(1); x++)
-                {
-                    if (_currentMask[y, x] > 0)
-                    {
-                        dataset.LabelData[x, y, _currentSliceIndex] = _targetMaterialId;
-                    }
-                }
-            }
-
-            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
-            Console.WriteLine($"Applied SAM2 mask to material {_targetMaterialId}");
+                var labels = new byte[dataset.Width * dataset.Height];
+                dataset.LabelData.ReadSliceZ(sliceIndex, labels);
+                for (var y = 0; y < dataset.Height && y < mask.GetLength(0); y++)
+                for (var x = 0; x < dataset.Width && x < mask.GetLength(1); x++)
+                    if (mask[y, x] > 0) labels[y * dataset.Width + x] = materialId;
+                token.ThrowIfCancellationRequested();
+                dataset.LabelData.WriteSliceZ(sliceIndex, labels);
+                progress.Report(.8f);
+                await dataset.SaveLabelDataAsync(token).ConfigureAwait(false);
+                GAIA.Util.OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(dataset));
+            });
         }
 
         private void DrawMaterialSelector(CtImageStackDataset dataset)

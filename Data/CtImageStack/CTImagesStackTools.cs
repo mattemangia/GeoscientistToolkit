@@ -41,6 +41,7 @@ public class CtImageStackTools : IDatasetTools
     private bool _show3DThresholdPreview;
     private bool _preview3DPending;
     private byte[] _thresholdPreviewMask3D;
+    private CtOperationHandle _thresholdOperation;
 
     public void Draw(Dataset dataset)
     {
@@ -138,24 +139,45 @@ public class CtImageStackTools : IDatasetTools
 
         ImGui.Spacing();
         if (_selectedMaterialForThresholding == null) ImGui.BeginDisabled();
+        if (_thresholdOperation?.IsActive == true) ImGui.BeginDisabled();
 
         if (ImGui.Button("Add to Material", new Vector2(ImGui.GetContentRegionAvail().X, 0)))
         {
             Set2DPreviewState(false, null);
             if (_show3DThresholdPreview) Clear3DThresholdPreview();
-            _ = MaterialOperations.AddVoxelsByThresholdAsync(ctDataset.VolumeData, ctDataset.LabelData,
-                _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold, ctDataset);
+            var materialId = _selectedMaterialForThresholding.ID;
+            var minThreshold = _minThreshold;
+            var maxThreshold = _maxThreshold;
+            _thresholdOperation = CtOperationCoordinator.For(ctDataset).Enqueue("Adding threshold voxels",
+                (token, progress) => MaterialOperations.AddVoxelsByThresholdAsync(ctDataset.VolumeData,
+                    ctDataset.LabelData, materialId, minThreshold, maxThreshold, ctDataset, token, progress));
         }
 
         if (ImGui.Button("Remove from Material", new Vector2(ImGui.GetContentRegionAvail().X, 0)))
         {
             Set2DPreviewState(false, null);
             if (_show3DThresholdPreview) Clear3DThresholdPreview();
-            _ = MaterialOperations.RemoveVoxelsByThresholdAsync(ctDataset.VolumeData, ctDataset.LabelData,
-                _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold, ctDataset);
+            var materialId = _selectedMaterialForThresholding.ID;
+            var minThreshold = _minThreshold;
+            var maxThreshold = _maxThreshold;
+            _thresholdOperation = CtOperationCoordinator.For(ctDataset).Enqueue("Removing threshold voxels",
+                (token, progress) => MaterialOperations.RemoveVoxelsByThresholdAsync(ctDataset.VolumeData,
+                    ctDataset.LabelData, materialId, minThreshold, maxThreshold, ctDataset, token, progress));
         }
 
+        if (_thresholdOperation?.IsActive == true) ImGui.EndDisabled();
         if (_selectedMaterialForThresholding == null) ImGui.EndDisabled();
+
+        if (_thresholdOperation != null)
+        {
+            if (_thresholdOperation.IsActive)
+            {
+                ImGui.ProgressBar(_thresholdOperation.Progress, new Vector2(-1, 0), _thresholdOperation.Name);
+                if (ImGui.Button("Cancel CT operation", new Vector2(-1, 0))) _thresholdOperation.Cancel();
+            }
+            else if (_thresholdOperation.Status == CtOperationStatus.Failed)
+                ImGui.TextColored(new Vector4(1f, .35f, .35f, 1f), _thresholdOperation.Error);
+        }
 
         ImGui.Spacing();
         ImGui.Separator();

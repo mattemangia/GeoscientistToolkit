@@ -1,6 +1,8 @@
 // GAIA/UI/ImportDataModal.cs
 
 using System.Data;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Numerics;
 using GAIA.Business;
 using GAIA.Data;
@@ -117,6 +119,11 @@ public class ImportDataModal
     private int _selectedDatasetTypeIndex;
     private bool _shouldOpenOrganizer;
     private string _statusText = "";
+    private readonly ConcurrentQueue<string> _importLog = new();
+    private Stopwatch _importStopwatch;
+    private string _lastLoggedStatus = "";
+    private bool _importResultRegistered;
+    private int _lastHeartbeatSecond = -1;
 
     public ImportDataModal()
     {
@@ -1852,45 +1859,96 @@ public class ImportDataModal
         }
 
         _currentState = ImportState.Processing;
+        _importResultRegistered = false;
+        _lastHeartbeatSecond = -1;
+        while (_importLog.TryDequeue(out _)) { }
+        _importStopwatch = Stopwatch.StartNew();
+        AppendImportLog($"Starting {_datasetTypeNames[_selectedDatasetTypeIndex]} import");
+        AppendImportLog($"Loader selected: {loader.Name}");
         var progress = new Progress<(float progress, string message)>(p =>
         {
-            _progress = p.progress;
+            _progress = Math.Clamp(p.progress, 0f, 1f);
             _statusText = p.message;
+            if (!string.Equals(_lastLoggedStatus, p.message, StringComparison.Ordinal))
+            {
+                _lastLoggedStatus = p.message;
+                AppendImportLog($"{_progress * 100:0.0}% — {p.message}");
+            }
         });
 
+        _statusText = "Initializing loader...";
         _importTask = loader.LoadAsync(progress);
+    }
+
+    private void AppendImportLog(string message)
+    {
+        var elapsed = _importStopwatch?.Elapsed ?? TimeSpan.Zero;
+        _importLog.Enqueue($"[{elapsed:mm\\:ss\\.fff}] {message}");
+        while (_importLog.Count > 250) _importLog.TryDequeue(out _);
     }
 
     private void DrawProgress()
     {
-        ImGui.Text(_statusText);
-        ImGui.ProgressBar(_progress, new Vector2(-1, 0), $"{_progress * 100:0}%");
+        if (_importTask is { IsCompleted: false } && _importStopwatch != null)
+        {
+            var elapsedSecond = (int)_importStopwatch.Elapsed.TotalSeconds;
+            if (elapsedSecond != _lastHeartbeatSecond)
+            {
+                _lastHeartbeatSecond = elapsedSecond;
+                AppendImportLog($"Working — {_statusText} ({_progress * 100:0.0}%)");
+            }
+        }
+        ImGui.TextWrapped(string.IsNullOrWhiteSpace(_statusText) ? "Loading dataset..." : _statusText);
+        var complete = _importTask?.IsCompletedSuccessfully == true;
+        if (complete) ImGui.PushStyleColor(ImGuiCol.PlotHistogram, new Vector4(0.12f, 0.78f, 0.28f, 1f));
+        ImGui.ProgressBar(complete ? 1f : _progress, new Vector2(-1, 22), complete ? "100%" : $"{_progress * 100:0}%");
+        if (complete) ImGui.PopStyleColor();
+
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Import log");
+        ImGui.BeginChild("##ImportProgressLog", new Vector2(0, -ImGui.GetFrameHeightWithSpacing() * 2.2f),
+            ImGuiChildFlags.Border, ImGuiWindowFlags.HorizontalScrollbar);
+        foreach (var line in _importLog.ToArray()) ImGui.TextUnformatted(line);
+        if (ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 8f) ImGui.SetScrollHereY(1f);
+        ImGui.EndChild();
 
         if (_importTask.IsFaulted)
         {
+            if (!_importResultRegistered)
+            {
+                AppendImportLog($"FAILED — {_importTask.Exception?.GetBaseException().Message}");
+                _importResultRegistered = true;
+            }
             ImGui.TextColored(new Vector4(1, 0, 0, 1), "Error during import:");
             ImGui.TextWrapped(_importTask.Exception?.GetBaseException().Message);
             if (ImGui.Button("Close")) ResetState();
         }
         else if (_importTask.IsCompletedSuccessfully)
         {
-            var currentLoader = GetCurrentLoader();
+            if (!_importResultRegistered)
+            {
+                _progress = 1f;
+                _statusText = "Import completed";
+                AppendImportLog("100.0% — Dataset loaded successfully");
+                var currentLoader = GetCurrentLoader();
 
             // Handle special case for CT Stack Optimized mode
-            if (_selectedDatasetTypeIndex == 2 && _ctStackLoader.StreamingDataset != null)
-            {
-                ProjectManager.Instance.AddDataset(_ctStackLoader.LegacyDataset);
-                ProjectManager.Instance.AddDataset(_ctStackLoader.StreamingDataset);
-            }
-            else if (currentLoader is StratiFixDatasetFolderLoader stratiFixLoader &&
-                     stratiFixLoader.GeneratedDatasets.Count > 0)
-            {
-                foreach (var dataset in stratiFixLoader.GeneratedDatasets)
-                    ProjectManager.Instance.AddDataset(dataset);
-            }
-            else if (_importTask.Result != null)
-            {
-                ProjectManager.Instance.AddDataset(_importTask.Result);
+                if (_selectedDatasetTypeIndex == 2 && _ctStackLoader.StreamingDataset != null)
+                {
+                    ProjectManager.Instance.AddDataset(_ctStackLoader.LegacyDataset);
+                    ProjectManager.Instance.AddDataset(_ctStackLoader.StreamingDataset);
+                }
+                else if (currentLoader is StratiFixDatasetFolderLoader stratiFixLoader &&
+                         stratiFixLoader.GeneratedDatasets.Count > 0)
+                {
+                    foreach (var dataset in stratiFixLoader.GeneratedDatasets)
+                        ProjectManager.Instance.AddDataset(dataset);
+                }
+                else if (_importTask.Result != null)
+                {
+                    ProjectManager.Instance.AddDataset(_importTask.Result);
+                }
+                _importResultRegistered = true;
             }
 
             ImGui.TextColored(new Vector4(0, 1, 0, 1), "Import successful!");
@@ -1931,6 +1989,11 @@ public class ImportDataModal
         _importTask = null;
         _progress = 0;
         _statusText = "";
+        _lastLoggedStatus = "";
+        _importResultRegistered = false;
+        _lastHeartbeatSecond = -1;
+        _importStopwatch = null;
+        while (_importLog.TryDequeue(out _)) { }
         _currentState = ImportState.Idle;
         _pendingDataset = null;
         _shouldOpenOrganizer = false;

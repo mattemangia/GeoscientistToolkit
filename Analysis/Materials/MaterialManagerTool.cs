@@ -8,6 +8,7 @@ using GAIA.Data.Materials;
 using GAIA.UI.Interfaces;
 using GAIA.Util;
 using ImGuiNET;
+using System.Buffers;
 
 namespace GAIA.Analysis.MaterialManager;
 
@@ -26,6 +27,8 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
     };
 
     private readonly Dictionary<byte, int> _voxelCountCache = new();
+    private Task _voxelCountTask;
+    private CtOperationHandle _volumeOperation;
     private WeakReference<CtImageStackDataset> _currentDatasetRef;
     private string _materialSearchFilter = "";
     private string _newMaterialName = "New Material";
@@ -48,6 +51,14 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
         if (dataset is not CtImageStackDataset ct) return;
 
         ImGui.SeparatorText("Material Manager");
+
+        if (_volumeOperation?.IsActive == true)
+        {
+            ImGui.ProgressBar(_volumeOperation.Progress, new Vector2(-1, 0), _volumeOperation.Name);
+            if (ImGui.Button("Cancel material operation", new Vector2(-1, 0))) _volumeOperation.Cancel();
+        }
+        else if (_volumeOperation?.Status == CtOperationStatus.Failed)
+            ImGui.TextColored(new Vector4(1f, .35f, .35f, 1f), _volumeOperation.Error);
 
         // Quick actions bar
         if (ImGui.Button("Save All Materials", new Vector2(150, 0))) SaveMaterials(ct);
@@ -309,10 +320,10 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
             ImGui.Spacing();
             ImGui.SeparatorText("Statistics");
             var voxelCount = GetVoxelCount(ct, selectedMat.ID);
-            ImGui.Text($"Voxels: {voxelCount:N0}");
-            if (ct.PixelSize > 0 && ct.SliceThickness > 0)
+            ImGui.Text(voxelCount.HasValue ? $"Voxels: {voxelCount.Value:N0}" : "Voxels: calculating...");
+            if (voxelCount.HasValue && ct.PixelSize > 0 && ct.SliceThickness > 0)
             {
-                var volumeMm3 = voxelCount * ct.PixelSize * ct.PixelSize * ct.SliceThickness / 1000000.0;
+                var volumeMm3 = voxelCount.Value * ct.PixelSize * ct.PixelSize * ct.SliceThickness / 1000000.0;
                 ImGui.Text($"Volume: {volumeMm3:F2} mm³");
 
                 if (selectedMat.Density > 0)
@@ -325,9 +336,11 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
             ImGui.Separator();
 
             // Actions
-            if (ImGui.Button("Clear from Volume", new Vector2(150, 0))) ClearMaterialFromVolume(ct, selectedMat.ID);
+            if (_volumeOperation?.IsActive == true) ImGui.BeginDisabled();
+            if (ImGui.Button("Clear from Volume", new Vector2(150, 0))) QueueClearMaterial(ct, selectedMat.ID);
             ImGui.SameLine();
             if (ImGui.Button("Delete Material", new Vector2(150, 0))) DeleteMaterial(ct, selectedMat);
+            if (_volumeOperation?.IsActive == true) ImGui.EndDisabled();
         }
 
         // Auto-save pending changes
@@ -530,6 +543,7 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
         var material = new Material(newId, name, color) { IsVisible = true };
 
         ct.Materials.Add(material);
+        _voxelCountCache[newId] = 0;
         _selectedMaterialId = newId;
         _renameBuf = name;
         _newMaterialName = $"Material {ct.Materials.Count}";
@@ -545,6 +559,7 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
         var material = new Material(newId, name, color);
 
         ct.Materials.Add(material);
+        _voxelCountCache[newId] = 0;
         _selectedMaterialId = newId;
         _renameBuf = name;
         _pendingSave = true;
@@ -563,6 +578,7 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
         };
 
         ct.Materials.Add(duplicate);
+        _voxelCountCache[newId] = 0;
         _selectedMaterialId = newId;
         _renameBuf = duplicate.Name;
         _pendingSave = true;
@@ -570,59 +586,70 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
 
     private void DeleteMaterial(CtImageStackDataset ct, Material material)
     {
-        if (material == null || material.ID == 0) return;
-        ClearMaterialFromVolume(ct, material.ID);
-        ct.Materials.Remove(material);
-        if (_selectedMaterialId == material.ID) _selectedMaterialId = -1;
-        _pendingSave = true;
-    }
-
-    private void ClearMaterialFromVolume(CtImageStackDataset ct, byte materialId)
-    {
-        if (ct.LabelData == null) return;
-
-        var cleared = 0;
-        for (var z = 0; z < ct.Depth; z++)
+        if (material == null || material.ID == 0 || _volumeOperation?.IsActive == true) return;
+        var materialId = material.ID;
+        _volumeOperation = CtOperationCoordinator.For(ct).Enqueue($"Deleting {material.Name}", async (token, progress) =>
         {
-            var slice = new byte[ct.Width * ct.Height];
-            ct.LabelData.ReadSliceZ(z, slice);
-
-            var modified = false;
-            for (var i = 0; i < slice.Length; i++)
-                if (slice[i] == materialId)
-                {
-                    slice[i] = 0;
-                    modified = true;
-                    cleared++;
-                }
-
-            if (modified) ct.LabelData.WriteSliceZ(z, slice);
-        }
-
-        if (cleared > 0)
-        {
-            ct.SaveLabelData();
-            ProjectManager.Instance.NotifyDatasetDataChanged(ct);
-        }
+            await ClearMaterialFromVolumeAsync(ct, materialId, token, progress).ConfigureAwait(false);
+            OpenTkManager.ExecuteOnMainThread(() =>
+            {
+                ct.Materials.RemoveAll(candidate => candidate.ID == materialId);
+                if (_selectedMaterialId == materialId) _selectedMaterialId = -1;
+                ct.SaveMaterials();
+                ProjectManager.Instance.NotifyDatasetDataChanged(ct);
+            });
+        });
     }
 
     private void ClearAllLabels(CtImageStackDataset ct)
     {
         if (ct.LabelData == null) return;
-        var emptySlice = new byte[ct.Width * ct.Height];
-        for (var z = 0; z < ct.Depth; z++) ct.LabelData.WriteSliceZ(z, emptySlice);
-        ct.SaveLabelData();
-        ProjectManager.Instance.NotifyDatasetDataChanged(ct);
+        _volumeOperation = CtOperationCoordinator.For(ct).Enqueue("Clearing all labels", async (token, progress) =>
+        {
+            token.ThrowIfCancellationRequested();
+            ct.LabelData.Clear();
+            progress.Report(.8f);
+            await ct.SaveLabelDataAsync(token).ConfigureAwait(false);
+            OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(ct));
+        });
+    }
+
+    private void QueueClearMaterial(CtImageStackDataset ct, byte materialId)
+    {
+        _volumeOperation = CtOperationCoordinator.For(ct).Enqueue("Clearing material voxels",
+            (token, progress) => ClearMaterialFromVolumeAsync(ct, materialId, token, progress));
+    }
+
+    private static async Task ClearMaterialFromVolumeAsync(CtImageStackDataset ct, byte materialId,
+        CancellationToken token, IProgress<float> progress)
+    {
+        var length = ct.Width * ct.Height;
+        var slice = ArrayPool<byte>.Shared.Rent(length);
+        try
+        {
+            for (var z = 0; z < ct.Depth; z++)
+            {
+                token.ThrowIfCancellationRequested();
+                ct.LabelData.ReadSliceZ(z, slice);
+                var modified = false;
+                for (var i = 0; i < length; i++)
+                    if (slice[i] == materialId) { slice[i] = 0; modified = true; }
+                if (modified) ct.LabelData.WriteSliceZ(z, slice);
+                if ((z & 7) == 0 || z == ct.Depth - 1) progress.Report((z + 1f) / ct.Depth);
+            }
+        }
+        finally { ArrayPool<byte>.Shared.Return(slice); }
+        await ct.SaveLabelDataAsync(token).ConfigureAwait(false);
+        OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(ct));
     }
 
     private void SaveMaterials(CtImageStackDataset ct)
     {
         ct.SaveMaterials();
-        ct.SaveLabelData();
         _pendingSave = false;
     }
 
-    private int GetVoxelCount(CtImageStackDataset ct, byte materialId)
+    private int? GetVoxelCount(CtImageStackDataset ct, byte materialId)
     {
         if (_currentDatasetRef == null || !_currentDatasetRef.TryGetTarget(out var cachedDs) ||
             !ReferenceEquals(cachedDs, ct))
@@ -633,20 +660,26 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
 
         if (_voxelCountCache.TryGetValue(materialId, out var cachedCount)) return cachedCount;
         if (ct.LabelData == null) return 0;
-
-        var count = 0;
-        var slice = new byte[ct.Width * ct.Height];
-
-        for (var z = 0; z < ct.Depth; z++)
+        if (_voxelCountTask is not { IsCompleted: false })
         {
-            ct.LabelData.ReadSliceZ(z, slice);
-            for (var i = 0; i < slice.Length; i++)
-                if (slice[i] == materialId)
-                    count++;
+            _voxelCountTask = Task.Run(() =>
+            {
+                var counts = new long[256];
+                var slice = new byte[ct.Width * ct.Height];
+                for (var z = 0; z < ct.Depth; z++)
+                {
+                    ct.LabelData.ReadSliceZ(z, slice);
+                    foreach (var label in slice) counts[label]++;
+                }
+                OpenTkManager.ExecuteOnMainThread(() =>
+                {
+                    _voxelCountCache.Clear();
+                    foreach (var material in ct.Materials)
+                        _voxelCountCache[material.ID] = (int)Math.Min(int.MaxValue, counts[material.ID]);
+                });
+            });
         }
-
-        _voxelCountCache[materialId] = count;
-        return count;
+        return null;
     }
 
     private byte GetNextAvailableId(CtImageStackDataset ct)

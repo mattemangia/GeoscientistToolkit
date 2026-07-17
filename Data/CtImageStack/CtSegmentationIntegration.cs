@@ -16,6 +16,8 @@ public class CtSegmentationIntegration : IDisposable
     private readonly LassoTool _lassoTool;
     private readonly MagicWandTool _magicWandTool;
     private readonly SegmentationManager _segmentationManager;
+    private readonly CtImageStackDataset _dataset;
+    private CtOperationHandle _applyOperation;
     private byte[] _currentPreviewMask;
     private int _currentPreviewSlice;
     private int _currentPreviewView;
@@ -27,6 +29,7 @@ public class CtSegmentationIntegration : IDisposable
 
     private CtSegmentationIntegration(CtImageStackDataset dataset)
     {
+        _dataset = dataset;
         _segmentationManager = new SegmentationManager(dataset);
         _interpolationManager = new InterpolationManager(dataset, _segmentationManager);
         _brushTool = new BrushTool();
@@ -104,28 +107,41 @@ public class CtSegmentationIntegration : IDisposable
             ImGui.Separator();
             ImGui.Text("Actions:");
             var hasSelections = _segmentationManager.HasActiveSelections;
-            if (!hasSelections) ImGui.BeginDisabled();
+            if (!hasSelections || _applyOperation?.IsActive == true) ImGui.BeginDisabled();
             if (ImGui.Button("Add Selections to Material", new Vector2(-1, 0)))
             {
                 _segmentationManager.IsAddMode = true;
-                _ = _segmentationManager.ApplyActiveSelectionsToVolumeAsync();
+                _applyOperation = CtOperationCoordinator.For(_dataset).Enqueue("Applying selections",
+                    (token, progress) => _segmentationManager.ApplyActiveSelectionsToVolumeAsync(token, progress));
             }
 
             if (ImGui.Button("Remove Selections from Material", new Vector2(-1, 0)))
             {
                 _segmentationManager.IsAddMode = false;
-                _ = _segmentationManager.ApplyActiveSelectionsToVolumeAsync();
+                _applyOperation = CtOperationCoordinator.For(_dataset).Enqueue("Removing selections",
+                    (token, progress) => _segmentationManager.ApplyActiveSelectionsToVolumeAsync(token, progress));
             }
 
-            if (!hasSelections) ImGui.EndDisabled();
+            if (!hasSelections || _applyOperation?.IsActive == true) ImGui.EndDisabled();
+            if (_applyOperation?.IsActive == true)
+            {
+                ImGui.ProgressBar(_applyOperation.Progress, new Vector2(-1, 0), _applyOperation.Name);
+                if (ImGui.Button("Cancel selection operation", new Vector2(-1, 0))) _applyOperation.Cancel();
+            }
             if (ImGui.Button("Clear All Unapplied Selections", new Vector2(-1, 0)))
                 _segmentationManager.ClearActiveSelections();
             ImGui.Separator();
             DrawInterpolationControls(selectedMaterial);
             ImGui.Separator();
-            if (ImGui.Button("Undo")) _segmentationManager.Undo();
+            if (_applyOperation?.IsActive == true) ImGui.BeginDisabled();
+            if (ImGui.Button("Undo"))
+                _applyOperation = CtOperationCoordinator.For(_dataset).Enqueue("Undo segmentation",
+                    (token, progress) => _segmentationManager.UndoAsync(token, progress));
             ImGui.SameLine();
-            if (ImGui.Button("Redo")) _segmentationManager.Redo();
+            if (ImGui.Button("Redo"))
+                _applyOperation = CtOperationCoordinator.For(_dataset).Enqueue("Redo segmentation",
+                    (token, progress) => _segmentationManager.RedoAsync(token, progress));
+            if (_applyOperation?.IsActive == true) ImGui.EndDisabled();
             ImGui.Unindent();
         }
     }

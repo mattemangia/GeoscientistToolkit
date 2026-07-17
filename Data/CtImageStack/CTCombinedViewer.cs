@@ -65,6 +65,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private volatile float _loadingProgress;
     private volatile string _loadingStatus = "Preparing CT stack...";
     private string _loadingError;
+    private DateTime? _loadingCompletedAt;
     private string _volumeRenderError;
     private bool _isPoppedOut;
     private bool _needsUpdateXY = true;
@@ -90,6 +91,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private float _zoomXY = 1.0f;
     private float _zoomXZ = 1.0f;
     private float _zoomYZ = 1.0f;
+    private float _sliceWheelAccumulator;
 
     public CtCombinedViewer(CtImageStackDataset dataset)
     {
@@ -288,6 +290,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         {
             AdvanceViewerInitializationOnRenderThread();
             DrawLoadingState();
+            if (_loadingCompletedAt.HasValue && DateTime.UtcNow - _loadingCompletedAt.Value >= TimeSpan.FromMilliseconds(350))
+                _isInitialized = true;
             return;
         }
 
@@ -621,7 +625,11 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                     // The viewer derives MinThreshold from an Otsu split of the volume; adopting it
                     // here (instead of overwriting it with a fixed 0.05) gives both views the same
                     // auto contrast, and keeps the 3D from opening as a fog of air voxels.
-                    VolumeViewer = new CtVolume3DViewer(_streamingDataset)
+                    VolumeViewer = new CtVolume3DViewer(_streamingDataset, (progress, status) =>
+                    {
+                        _loadingProgress = 0.84f + progress * 0.15f;
+                        _loadingStatus = status;
+                    })
                     {
                         ShowGrayscale = ShowVolumeData,
                         StepSize = 2.0f
@@ -639,7 +647,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             }
             _loadingProgress = 1.0f;
             _loadingStatus = "Viewer ready";
-            _isInitialized = true;
+            _loadingCompletedAt = DateTime.UtcNow;
             Logger.Log($"[CtCombinedViewer] Dataset ready: {_dataset.Width}×{_dataset.Height}×{_dataset.Depth}");
         }
         catch (Exception ex)
@@ -658,7 +666,10 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         ImGui.BeginGroup();
         ImGui.TextUnformatted("Opening CT stack");
         ImGui.TextWrapped(string.IsNullOrWhiteSpace(_loadingError) ? _loadingStatus : "Unable to open the CT viewer");
+        var complete = _loadingProgress >= 0.999f && string.IsNullOrWhiteSpace(_loadingError);
+        if (complete) ImGui.PushStyleColor(ImGuiCol.PlotHistogram, new Vector4(0.12f, 0.78f, 0.28f, 1f));
         ImGui.ProgressBar(_loadingProgress, new Vector2(width, 22f), $"{_loadingProgress * 100:0}%");
+        if (complete) ImGui.PopStyleColor();
         if (!string.IsNullOrWhiteSpace(_loadingError))
             ImGui.TextColored(new Vector4(1f, 0.35f, 0.3f, 1f), _loadingError);
         ImGui.EndGroup();
@@ -1073,10 +1084,9 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             ImGui.EndPopup();
         }
 
-        if (isHovered && io.MouseWheel != 0)
+        if (isHovered && io.MouseWheel != 0 && !io.KeyCtrl)
         {
-            var zoomDelta = io.MouseWheel * 0.1f;
-            var newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.1f, 10.0f);
+            var newZoom = Math.Clamp(zoom * MathF.Pow(1.25f, io.MouseWheel), 0.1f, 10.0f);
             if (newZoom != zoom)
             {
                 var mouseCanvasPos = io.MousePos - canvasPos - canvasSize * 0.5f;
@@ -1099,12 +1109,17 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
         if (isHovered && io.MouseWheel != 0 && io.KeyCtrl)
         {
-            var wheel = (int)io.MouseWheel;
-            switch (viewIndex)
+            _sliceWheelAccumulator += io.MouseWheel;
+            var wheel = (int)MathF.Truncate(_sliceWheelAccumulator);
+            if (wheel != 0)
             {
-                case 0: SliceZ = Math.Clamp(_sliceZ + wheel, 0, _dataset.Depth - 1); break;
-                case 1: SliceY = Math.Clamp(_sliceY + wheel, 0, _dataset.Height - 1); break;
-                case 2: SliceX = Math.Clamp(_sliceX + wheel, 0, _dataset.Width - 1); break;
+                _sliceWheelAccumulator -= wheel;
+                switch (viewIndex)
+                {
+                    case 0: SliceZ = Math.Clamp(_sliceZ + wheel, 0, _dataset.Depth - 1); break;
+                    case 1: SliceY = Math.Clamp(_sliceY + wheel, 0, _dataset.Height - 1); break;
+                    case 2: SliceX = Math.Clamp(_sliceX + wheel, 0, _dataset.Width - 1); break;
+                }
             }
         }
 

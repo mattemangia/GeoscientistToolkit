@@ -20,6 +20,7 @@
 
 using System.Diagnostics;
 using System.Numerics;
+using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
@@ -273,7 +274,9 @@ public class AmbientOcclusionSegmentation : IDisposable
     public void ApplySegmentation(
         CtImageStackDataset dataset,
         AmbientOcclusionResult result,
-        byte targetMaterialId)
+        byte targetMaterialId,
+        CancellationToken cancellationToken = default,
+        IProgress<float> progress = null)
     {
         if (dataset.LabelData == null)
         {
@@ -287,19 +290,33 @@ public class AmbientOcclusionSegmentation : IDisposable
         var height = mask.GetLength(1);
         var depth = mask.GetLength(2);
 
-        for (int z = 0; z < depth; z++)
+        var completed = 0;
+        Parallel.For(0, depth, new ParallelOptions
         {
-            for (int y = 0; y < height; y++)
+            MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1),
+            CancellationToken = cancellationToken
+        }, z =>
+        {
+            var slice = ArrayPool<byte>.Shared.Rent(dataset.Width * dataset.Height);
+            try
             {
-                for (int x = 0; x < width; x++)
-                {
+            dataset.LabelData.ReadSliceZ(z, slice);
+            var modified = false;
+            for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
                     if (mask[x, y, z])
                     {
-                        dataset.LabelData[x, y, z] = targetMaterialId;
+                        slice[y * dataset.Width + x] = targetMaterialId;
+                        modified = true;
                     }
-                }
             }
-        }
+            if (modified) dataset.LabelData.WriteSliceZ(z, slice);
+            var done = Interlocked.Increment(ref completed);
+            if ((done & 7) == 0 || done == depth) progress?.Report(done / (float)depth);
+            }
+            finally { ArrayPool<byte>.Shared.Return(slice); }
+        });
     }
 
     #region Ray Direction Generation

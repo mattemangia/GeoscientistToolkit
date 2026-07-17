@@ -34,6 +34,7 @@ namespace GAIA.Tools.CtImageStack.AISegmentation
         // Material assignment
         private byte _targetMaterialId = 1;
         private bool _showResults;
+        private CtOperationHandle _applyOperation;
 
         // Error handling
         private string _initializationError;
@@ -211,6 +212,8 @@ namespace GAIA.Tools.CtImageStack.AISegmentation
             {
                 ApplyAllResultsToMaterial(ct);
             }
+            if (_applyOperation?.IsActive == true)
+                ImGui.ProgressBar(_applyOperation.Progress, new Vector2(-1, 0), _applyOperation.Name);
 
             // Performance info
             if (_lastProcessingTime > 0)
@@ -304,35 +307,38 @@ namespace GAIA.Tools.CtImageStack.AISegmentation
 
         private void ApplyResultToMaterial(CtImageStackDataset dataset, SegmentationResult result)
         {
-            if (result.Mask == null || _currentSliceIndex < 0) return;
-
-            int width = dataset.Width;
-            int height = dataset.Height;
-
-            for (int y = 0; y < height && y < result.Mask.GetLength(0); y++)
-            {
-                for (int x = 0; x < width && x < result.Mask.GetLength(1); x++)
-                {
-                    if (result.Mask[y, x] > 0)
-                    {
-                        dataset.LabelData[x, y, _currentSliceIndex] = _targetMaterialId;
-                    }
-                }
-            }
-
-            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+            if (result.Mask != null) QueueMaskApplication(dataset, new[] { result.Mask });
         }
 
         private void ApplyAllResultsToMaterial(CtImageStackDataset dataset)
         {
-            if (_results == null) return;
+            if (_results == null || _currentSliceIndex < 0 || _applyOperation?.IsActive == true) return;
+            var masks = _results.Where(result => result.Mask != null).Select(result => result.Mask).ToArray();
+            QueueMaskApplication(dataset, masks);
+        }
 
-            foreach (var result in _results)
+        private void QueueMaskApplication(CtImageStackDataset dataset, byte[][,] masks)
+        {
+            if (masks.Length == 0 || _currentSliceIndex < 0 || _applyOperation?.IsActive == true) return;
+            var sliceIndex = _currentSliceIndex;
+            var materialId = _targetMaterialId;
+            _applyOperation = CtOperationCoordinator.For(dataset).Enqueue("Applying detected masks", async (token, progress) =>
             {
-                ApplyResultToMaterial(dataset, result);
-            }
-
-            Console.WriteLine($"Applied {_results.Count} segmentation results to material {_targetMaterialId}");
+                var labels = new byte[dataset.Width * dataset.Height];
+                dataset.LabelData.ReadSliceZ(sliceIndex, labels);
+                for (var maskIndex = 0; maskIndex < masks.Length; maskIndex++)
+                {
+                    var mask = masks[maskIndex];
+                    for (var y = 0; y < dataset.Height && y < mask.GetLength(0); y++)
+                    for (var x = 0; x < dataset.Width && x < mask.GetLength(1); x++)
+                        if (mask[y, x] > 0) labels[y * dataset.Width + x] = materialId;
+                    progress.Report((maskIndex + 1f) / Math.Max(1, masks.Length) * .75f);
+                    token.ThrowIfCancellationRequested();
+                }
+                dataset.LabelData.WriteSliceZ(sliceIndex, labels);
+                await dataset.SaveLabelDataAsync(token).ConfigureAwait(false);
+                GAIA.Util.OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(dataset));
+            });
         }
 
         private void DrawMaterialSelector(CtImageStackDataset dataset)

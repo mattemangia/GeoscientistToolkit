@@ -159,13 +159,30 @@ public class ChunkedVolume : IGrayscaleVolumeData
     /// </summary>
     public void WriteSliceZ(int z, byte[] data)
     {
-        if (z < 0 || z >= Depth || data == null || data.Length != Width * Height)
+        if (z < 0 || z >= Depth || data == null || data.Length < Width * Height)
             throw new ArgumentException("Invalid slice index or data size");
 
-        var index = 0;
-        for (var y = 0; y < Height; y++)
-        for (var x = 0; x < Width; x++)
-            this[x, y, z] = data[index++];
+        var cz = z / ChunkDim;
+        var lz = z % ChunkDim;
+        for (var cy = 0; cy < _chunkCountY; cy++)
+        for (var cx = 0; cx < _chunkCountX; cx++)
+        {
+            var chunkIndex = GetChunkIndex(cx, cy, cz);
+            var xStart = cx * ChunkDim;
+            var yStart = cy * ChunkDim;
+            var xEnd = Math.Min(xStart + ChunkDim, Width);
+            var yEnd = Math.Min(yStart + ChunkDim, Height);
+            for (var y = yStart; y < yEnd; y++)
+            {
+                var sourceOffset = y * Width + xStart;
+                var targetOffset = lz * ChunkDim * ChunkDim + (y - yStart) * ChunkDim;
+                var length = xEnd - xStart;
+                if (_useMemoryMapping)
+                    _viewAccessor.WriteArray(CalculateGlobalOffset(chunkIndex, targetOffset), data, sourceOffset, length);
+                else
+                    Array.Copy(data, sourceOffset, Chunks[chunkIndex], targetOffset, length);
+            }
+        }
     }
 
     /// <summary>
@@ -173,13 +190,30 @@ public class ChunkedVolume : IGrayscaleVolumeData
     /// </summary>
     public void ReadSliceZ(int z, byte[] buffer)
     {
-        if (z < 0 || z >= Depth || buffer == null || buffer.Length != Width * Height)
+        if (z < 0 || z >= Depth || buffer == null || buffer.Length < Width * Height)
             throw new ArgumentException("Invalid slice index or buffer size");
 
-        var index = 0;
-        for (var y = 0; y < Height; y++)
-        for (var x = 0; x < Width; x++)
-            buffer[index++] = this[x, y, z];
+        var cz = z / ChunkDim;
+        var lz = z % ChunkDim;
+        for (var cy = 0; cy < _chunkCountY; cy++)
+        for (var cx = 0; cx < _chunkCountX; cx++)
+        {
+            var chunkIndex = GetChunkIndex(cx, cy, cz);
+            var xStart = cx * ChunkDim;
+            var yStart = cy * ChunkDim;
+            var xEnd = Math.Min(xStart + ChunkDim, Width);
+            var yEnd = Math.Min(yStart + ChunkDim, Height);
+            for (var y = yStart; y < yEnd; y++)
+            {
+                var sourceOffset = lz * ChunkDim * ChunkDim + (y - yStart) * ChunkDim;
+                var targetOffset = y * Width + xStart;
+                var length = xEnd - xStart;
+                if (_useMemoryMapping)
+                    _viewAccessor.ReadArray(CalculateGlobalOffset(chunkIndex, sourceOffset), buffer, targetOffset, length);
+                else
+                    Array.Copy(Chunks[chunkIndex], sourceOffset, buffer, targetOffset, length);
+            }
+        }
     }
 
     /// <summary>

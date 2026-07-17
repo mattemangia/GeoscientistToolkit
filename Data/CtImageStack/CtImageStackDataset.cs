@@ -247,9 +247,18 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
             if (!string.IsNullOrEmpty(labelPath))
             {
                 Logger.Log($"[CtImageStackDataset] Saving label data for '{Name}' to {labelPath}");
-                LabelData.SaveAsBin(labelPath);
+                LabelData.FlushDirtyChunks(labelPath);
             }
         }
+    }
+
+    public Task SaveLabelDataAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SaveLabelData();
+        }, cancellationToken);
     }
 
     // --- NEW METHOD: Save materials to a local JSON file ---

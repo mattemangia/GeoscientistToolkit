@@ -37,6 +37,8 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private readonly Dictionary<byte, bool> _materialVisibility = new();
     private int _program, _vao, _vbo, _ebo, _fbo, _colorTexture, _depthBuffer;
     private int _volumeTexture, _labelTexture, _previewTexture, _materialTexture;
+    private int _labelTextureWidth, _labelTextureHeight, _labelTextureDepth;
+    private Task<(int w, int h, int d, byte[] data)> _labelBuildTask;
     private int _lineProgram, _lineVao, _lineVbo, _lineBufferBytes;
     private readonly int[] _sliceTextures = new int[3];
     private readonly int[] _sliceTextureIndex = { -1, -1, -1 };
@@ -74,7 +76,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     public bool ShowBoundingBoxLabels { get; set; } = true;
     public List<ClippingPlane> ClippingPlanes { get; } = new();
 
-    public CtVolume3DViewer(StreamingCtVolumeDataset dataset)
+    public CtVolume3DViewer(StreamingCtVolumeDataset dataset, Action<float, string> loadingProgress = null)
     {
         if (!OpenTkManager.IsInitialized)
             throw new InvalidOperationException("The CT 3D viewer requires the OpenTK renderer.");
@@ -92,7 +94,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         _controlPanel = new CtVolume3DControlPanel(this, _editableDataset);
         _screenshotDialog = new ImGuiExportFileDialog("ScreenshotDialog3D", "Save Screenshot");
         _screenshotDialog.SetExtensions((".png", "PNG Image"));
-        CreateResources();
+        CreateResources(loadingProgress);
         ResetCamera();
         ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
         CtImageStackTools.Preview3DChanged += OnPreviewChanged;
@@ -117,8 +119,9 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         DrawOverlayLabels(origin, available);
     }
 
-    private void CreateResources()
+    private void CreateResources(Action<float, string> progress)
     {
+        progress?.Invoke(0.03f, "Compiling volume shaders...");
         _program = CreateProgram(VertexShader, FragmentShader);
         _lineProgram = CreateProgram(LineVertexShader, LineFragmentShader);
         float[] vertices =
@@ -135,19 +138,29 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo); GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * 4, indices, BufferUsageHint.StaticDraw);
         GL.EnableVertexAttribArray(0); GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 12, 0);
         CreateLineResources();
+        progress?.Invoke(0.12f, "Reconstructing the render volume...");
         var lod = _streamingDataset.RenderLod ?? _streamingDataset.BaseLod;
         var bricks = _streamingDataset.RenderLodVolumeData ?? _streamingDataset.BaseLodVolumeData;
-        var density = ReconstructVolume(lod, bricks, _streamingDataset.BrickSize);
+        var density = ReconstructVolume(lod, bricks, _streamingDataset.BrickSize,
+            p => progress?.Invoke(0.12f + p * 0.30f, $"Reconstructing density slices ({p * 100:0}%)..."));
+        progress?.Invoke(0.45f, "Calculating automatic density threshold...");
         MinThreshold = Math.Max(MinThreshold, CalculateOtsuThreshold(density) / 255f * 0.8f);
+        progress?.Invoke(0.52f, "Uploading density texture to the GPU...");
         _volumeTexture = CreateTexture3D(lod.Width, lod.Height, lod.Depth, density);
-        var aux = CreateDownsampledLabels(lod.Width, lod.Height, lod.Depth, 128L * 1024 * 1024);
+        progress?.Invoke(0.61f, "Preparing material labels...");
+        var aux = CreateDownsampledLabels(lod.Width, lod.Height, lod.Depth, 128L * 1024 * 1024,
+            p => progress?.Invoke(0.61f + p * 0.22f, $"Preparing label slices ({p * 100:0}%)..."));
         // Label IDs are categorical: linear filtering would blend id 1 and id 2 into a
         // non-existent id 2 at every boundary, so these two sample nearest.
         _labelTexture = CreateTexture3D(aux.w, aux.h, aux.d, aux.data, false);
+        _labelTextureWidth = aux.w; _labelTextureHeight = aux.h; _labelTextureDepth = aux.d;
         _previewTexture = CreateTexture3D(aux.w, aux.h, aux.d, new byte[aux.data.Length], false);
+        progress?.Invoke(0.90f, "Uploading material palette...");
         _materialTexture = CreateMaterialTexture();
         UploadMaterials();
+        progress?.Invoke(0.96f, "Creating render target...");
         ResizeTarget(_renderWidth, _renderHeight);
+        progress?.Invoke(1f, "3D volume resources ready");
     }
 
     private void CreateLineResources()
@@ -165,7 +178,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
 
     private void Render()
     {
-        if (_labelsDirty) { UploadLabels(); _labelsDirty = false; }
+        ProcessPendingLabelRefresh();
         if (_previewDirty) { UploadPreview(); _previewDirty = false; }
         if (_materialsDirty) { UploadMaterials(); _materialsDirty = false; }
         UpdateSlicePlaneTextures();
@@ -576,9 +589,24 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         GL.BindTexture(TextureTarget.Texture2D, _materialTexture);
         GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, 256, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data);
     }
-    private static byte[] ReconstructVolume(GvtLodInfo l, byte[] b, int bs) { var r=new byte[l.Width*l.Height*l.Depth]; var bx=(l.Width+bs-1)/bs; var by=(l.Height+bs-1)/bs; for(int z=0;z<l.Depth;z++) for(int y=0;y<l.Height;y++) for(int x=0;x<l.Width;x++){var bi=((z/bs)*by*bx+(y/bs)*bx+x/bs)*bs*bs*bs+(z%bs)*bs*bs+(y%bs)*bs+x%bs; if(bi<b.Length)r[(z*l.Height+y)*l.Width+x]=b[bi];} return r; }
-    private (int w,int h,int d,byte[] data) CreateDownsampledLabels(int w,int h,int d,long budget) { var n=(long)w*h*d; var s=n>budget?Math.Pow(budget/(double)n,1.0/3):1; var tw=Math.Max(1,(int)(w*s));var th=Math.Max(1,(int)(h*s));var td=Math.Max(1,(int)(d*s));var a=new byte[tw*th*td]; if(_editableDataset.LabelData!=null) Parallel.For(0,td,z=>{for(int y=0;y<th;y++)for(int x=0;x<tw;x++)a[(z*th+y)*tw+x]=_editableDataset.LabelData[Math.Min(_editableDataset.Width-1,x*_editableDataset.Width/tw),Math.Min(_editableDataset.Height-1,y*_editableDataset.Height/th),Math.Min(_editableDataset.Depth-1,z*_editableDataset.Depth/td)];}); return(tw,th,td,a); }
-    private void UploadLabels() { var a=CreateDownsampledLabels((int)TextureWidth(_labelTexture), (int)TextureHeight(_labelTexture), (int)TextureDepth(_labelTexture), long.MaxValue); GL.BindTexture(TextureTarget.Texture3D,_labelTexture); GL.TexSubImage3D(TextureTarget.Texture3D,0,0,0,0,a.w,a.h,a.d,PixelFormat.Red,PixelType.UnsignedByte,a.data); }
+    private static byte[] ReconstructVolume(GvtLodInfo l, byte[] b, int bs, Action<float> progress = null) { var r=new byte[l.Width*l.Height*l.Depth]; var bx=(l.Width+bs-1)/bs; var by=(l.Height+bs-1)/bs; for(int z=0;z<l.Depth;z++){for(int y=0;y<l.Height;y++)for(int x=0;x<l.Width;x++){var bi=((z/bs)*by*bx+(y/bs)*bx+x/bs)*bs*bs*bs+(z%bs)*bs*bs+(y%bs)*bs+x%bs; if(bi<b.Length)r[(z*l.Height+y)*l.Width+x]=b[bi];} if ((z & 7) == 0 || z == l.Depth - 1) progress?.Invoke((z + 1f) / l.Depth);} return r; }
+    private (int w,int h,int d,byte[] data) CreateDownsampledLabels(int w,int h,int d,long budget, Action<float> progress = null) { var n=(long)w*h*d; var s=n>budget?Math.Pow(budget/(double)n,1.0/3):1; var tw=Math.Max(1,(int)(w*s));var th=Math.Max(1,(int)(h*s));var td=Math.Max(1,(int)(d*s));var a=new byte[tw*th*td]; if(_editableDataset.LabelData!=null){var done=0; Parallel.For(0,td,z=>{for(int y=0;y<th;y++)for(int x=0;x<tw;x++)a[(z*th+y)*tw+x]=_editableDataset.LabelData[Math.Min(_editableDataset.Width-1,x*_editableDataset.Width/tw),Math.Min(_editableDataset.Height-1,y*_editableDataset.Height/th),Math.Min(_editableDataset.Depth-1,z*_editableDataset.Depth/td)]; var completed=Interlocked.Increment(ref done); if ((completed & 7) == 0 || completed == td) progress?.Invoke(completed/(float)td);});} else progress?.Invoke(1f); return(tw,th,td,a); }
+    private void ProcessPendingLabelRefresh()
+    {
+        if (_labelBuildTask == null && _labelsDirty)
+        {
+            _labelsDirty = false;
+            var w = _labelTextureWidth; var h = _labelTextureHeight; var d = _labelTextureDepth;
+            _labelBuildTask = Task.Run(() => CreateDownsampledLabels(w, h, d, long.MaxValue));
+            return;
+        }
+        if (_labelBuildTask?.IsCompletedSuccessfully != true) return;
+        var a = _labelBuildTask.Result;
+        _labelBuildTask = null;
+        GL.BindTexture(TextureTarget.Texture3D, _labelTexture);
+        GL.TexSubImage3D(TextureTarget.Texture3D, 0, 0, 0, 0, a.w, a.h, a.d,
+            PixelFormat.Red, PixelType.UnsignedByte, a.data);
+    }
     private void UploadPreview() { if(_previewMask==null)return; GL.BindTexture(TextureTarget.Texture3D,_previewTexture); var w=(int)TextureWidth(_previewTexture);var h=(int)TextureHeight(_previewTexture);var d=(int)TextureDepth(_previewTexture);var a=new byte[w*h*d];Parallel.For(0,d,z=>{for(int y=0;y<h;y++)for(int x=0;x<w;x++)a[(z*h+y)*w+x]=_previewMask[(Math.Min(_editableDataset.Depth-1,z*_editableDataset.Depth/d)*_editableDataset.Height+Math.Min(_editableDataset.Height-1,y*_editableDataset.Height/h))*_editableDataset.Width+Math.Min(_editableDataset.Width-1,x*_editableDataset.Width/w)];});GL.TexSubImage3D(TextureTarget.Texture3D,0,0,0,0,w,h,d,PixelFormat.Red,PixelType.UnsignedByte,a); }
     private static long TextureWidth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureWidth,out int v);return v;} private static long TextureHeight(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureHeight,out int v);return v;} private static long TextureDepth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureDepth,out int v);return v;}
     // Material colours can be edited outside the 3D panel (segmentation, material editor),

@@ -3,6 +3,7 @@
 using GAIA.Business;
 using GAIA.Data.VolumeData;
 using GAIA.Util;
+using System.Buffers;
 
 namespace GAIA.Data.CtImageStack;
 
@@ -31,20 +32,24 @@ public static class MaterialOperations
     ///     Labels every voxel whose grayscale value is within the specified threshold with the given material ID.
     /// </summary>
     public static Task AddVoxelsByThresholdAsync(IGrayscaleVolumeData grayscaleVolume, ILabelVolumeData labelVolume,
-        byte materialID, byte minVal, byte maxVal, CtImageStackDataset dataset = null)
+        byte materialID, byte minVal, byte maxVal, CtImageStackDataset dataset = null,
+        CancellationToken cancellationToken = default, IProgress<float> progress = null)
     {
         Logger.Log($"[MaterialOperations] Adding voxels to material {materialID} (Threshold: {minVal}-{maxVal})");
-        return ProcessVolumeByThresholdAsync(grayscaleVolume, labelVolume, materialID, minVal, maxVal, true, dataset);
+        return ProcessVolumeByThresholdAsync(grayscaleVolume, labelVolume, materialID, minVal, maxVal, true, dataset,
+            cancellationToken, progress);
     }
 
     /// <summary>
     ///     Clears voxels that belong to a specific material and are within a grayscale threshold.
     /// </summary>
     public static Task RemoveVoxelsByThresholdAsync(IGrayscaleVolumeData grayscaleVolume, ILabelVolumeData labelVolume,
-        byte materialID, byte minVal, byte maxVal, CtImageStackDataset dataset = null)
+        byte materialID, byte minVal, byte maxVal, CtImageStackDataset dataset = null,
+        CancellationToken cancellationToken = default, IProgress<float> progress = null)
     {
         Logger.Log($"[MaterialOperations] Removing voxels from material {materialID} (Threshold: {minVal}-{maxVal})");
-        return ProcessVolumeByThresholdAsync(grayscaleVolume, labelVolume, materialID, minVal, maxVal, false, dataset);
+        return ProcessVolumeByThresholdAsync(grayscaleVolume, labelVolume, materialID, minVal, maxVal, false, dataset,
+            cancellationToken, progress);
     }
 
     /// <summary>
@@ -52,7 +57,8 @@ public static class MaterialOperations
     /// </summary>
     private static Task ProcessVolumeByThresholdAsync(IGrayscaleVolumeData grayscaleVolume,
         ILabelVolumeData labelVolume,
-        byte materialID, byte minVal, byte maxVal, bool isAddOperation, CtImageStackDataset dataset)
+        byte materialID, byte minVal, byte maxVal, bool isAddOperation, CtImageStackDataset dataset,
+        CancellationToken cancellationToken, IProgress<float> progress)
     {
         if (grayscaleVolume == null || labelVolume == null)
         {
@@ -66,12 +72,17 @@ public static class MaterialOperations
 
         return Task.Run(() =>
         {
-            var anyModified = false;
+            var anyModified = 0;
+            var completedSlices = 0;
+            var sliceLength = width * height;
 
-            Parallel.For(0, depth, new ParallelOptions { MaxDegreeOfParallelism = _optimalThreadCount }, z =>
-            {
-                var graySlice = new byte[width * height];
-                var labelSlice = new byte[width * height];
+            Parallel.For(0, depth,
+                new ParallelOptions { MaxDegreeOfParallelism = _optimalThreadCount, CancellationToken = cancellationToken },
+                () => (Gray: ArrayPool<byte>.Shared.Rent(sliceLength), Labels: ArrayPool<byte>.Shared.Rent(sliceLength)),
+                (z, _, buffers) =>
+                {
+                var graySlice = buffers.Gray;
+                var labelSlice = buffers.Labels;
 
                 grayscaleVolume.ReadSliceZ(z, graySlice);
                 labelVolume.ReadSliceZ(z, labelSlice);
@@ -79,7 +90,7 @@ public static class MaterialOperations
                 var modified = false;
 
                 if (isAddOperation)
-                    for (var i = 0; i < graySlice.Length; i++)
+                    for (var i = 0; i < sliceLength; i++)
                     {
                         var gray = graySlice[i];
                         if (gray >= minVal && gray <= maxVal)
@@ -90,7 +101,7 @@ public static class MaterialOperations
                             }
                     }
                 else // Remove operation
-                    for (var i = 0; i < graySlice.Length; i++)
+                    for (var i = 0; i < sliceLength; i++)
                     {
                         var gray = graySlice[i];
                         if (labelSlice[i] == materialID && gray >= minVal && gray <= maxVal)
@@ -103,12 +114,19 @@ public static class MaterialOperations
                 if (modified)
                 {
                     labelVolume.WriteSliceZ(z, labelSlice);
-                    anyModified = true;
+                    Interlocked.Exchange(ref anyModified, 1);
                 }
-            });
+                var done = Interlocked.Increment(ref completedSlices);
+                if ((done & 7) == 0 || done == depth) progress?.Report(done / (float)depth);
+                return buffers;
+                }, buffers =>
+                {
+                    ArrayPool<byte>.Shared.Return(buffers.Gray);
+                    ArrayPool<byte>.Shared.Return(buffers.Labels);
+                });
 
             // FIXED: Auto-save label data after modification
-            if (anyModified && dataset != null)
+            if (anyModified != 0 && dataset != null)
             {
                 Logger.Log($"[MaterialOperations] Saving label data for material {materialID}...");
 
@@ -124,11 +142,12 @@ public static class MaterialOperations
                 }
 
                 dataset.SaveLabelData();
-                dataset.SaveMaterials();
 
-                // This notification should trigger the 3D viewer to update
-                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
-                ProjectManager.Instance.HasUnsavedChanges = true;
+                OpenTkManager.ExecuteOnMainThread(() =>
+                {
+                    ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+                    ProjectManager.Instance.HasUnsavedChanges = true;
+                });
             }
 
             Logger.Log($"[MaterialOperations] Finished processing for material {materialID}.");

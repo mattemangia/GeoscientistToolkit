@@ -50,6 +50,7 @@ public class CtImageStackViewer : IDatasetViewer
     private float _zoomXY = 1.0f;
     private float _zoomXZ = 1.0f;
     private float _zoomYZ = 1.0f;
+    private float _sliceWheelAccumulator;
 
     public CtImageStackViewer(CtImageStackDataset dataset)
     {
@@ -355,10 +356,9 @@ public class CtImageStackViewer : IDatasetViewer
         }
 
         // -------- Viewer interactions (zoom/pan/slice) --------
-        if (isHovered && io.MouseWheel != 0)
+        if (isHovered && io.MouseWheel != 0 && !io.KeyCtrl)
         {
-            var zoomDelta = io.MouseWheel * 0.1f;
-            var newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.1f, 10.0f);
+            var newZoom = Math.Clamp(zoom * MathF.Pow(1.25f, io.MouseWheel), 0.1f, 10.0f);
             if (newZoom != zoom)
             {
                 var mouseCanvasPos = io.MousePos - canvasPos - canvasSize * 0.5f;
@@ -381,21 +381,26 @@ public class CtImageStackViewer : IDatasetViewer
 
         if (!inputHandled && isHovered && io.MouseWheel != 0 && io.KeyCtrl)
         {
-            var wheel = (int)io.MouseWheel;
-            switch (viewIndex)
+            _sliceWheelAccumulator += io.MouseWheel;
+            var wheel = (int)MathF.Truncate(_sliceWheelAccumulator);
+            if (wheel != 0)
             {
-                case 0:
-                    _sliceZ = Math.Clamp(_sliceZ + wheel, 0, _dataset.Depth - 1);
-                    needsUpdate = true;
-                    break;
-                case 1:
-                    _sliceY = Math.Clamp(_sliceY + wheel, 0, _dataset.Height - 1);
-                    needsUpdate = true;
-                    break;
-                case 2:
-                    _sliceX = Math.Clamp(_sliceX + wheel, 0, _dataset.Width - 1);
-                    needsUpdate = true;
-                    break;
+                _sliceWheelAccumulator -= wheel;
+                switch (viewIndex)
+                {
+                    case 0:
+                        _sliceZ = Math.Clamp(_sliceZ + wheel, 0, _dataset.Depth - 1);
+                        needsUpdate = true;
+                        break;
+                    case 1:
+                        _sliceY = Math.Clamp(_sliceY + wheel, 0, _dataset.Height - 1);
+                        needsUpdate = true;
+                        break;
+                    case 2:
+                        _sliceX = Math.Clamp(_sliceX + wheel, 0, _dataset.Width - 1);
+                        needsUpdate = true;
+                        break;
+                }
             }
         }
 

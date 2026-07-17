@@ -110,8 +110,8 @@ public class SegmentationManager : IDisposable
             return existingMask;
         });
 
-        ProjectManager.Instance
-            .NotifyDatasetDataChanged(_dataset); // Notify viewers to redraw with the new committed mask
+        // This is only an unapplied overlay; do not invalidate the full 3D label texture.
+        SelectionPreviewChanged?.Invoke(clonedMask, sliceIndex, viewIndex);
     }
 
     public void CommitMultipleSelectionsToCache(Dictionary<(int slice, int view), byte[]> selections)
@@ -119,23 +119,36 @@ public class SegmentationManager : IDisposable
         foreach (var sel in selections) CommitSelectionToCache(sel.Value, sel.Key.slice, sel.Key.view);
     }
 
-    public async Task ApplyActiveSelectionsToVolumeAsync()
+    public Task ApplyActiveSelectionsToVolumeAsync(CancellationToken token = default,
+        IProgress<float> progress = null)
     {
-        if (_activeSelections.IsEmpty) return;
-        var compoundAction = new CompoundSegmentationAction();
-        compoundAction.StoreMultipleStates(_dataset, _activeSelections.Keys.ToList());
-
+        if (_activeSelections.IsEmpty) return Task.CompletedTask;
         var selectionsToApply = new Dictionary<(int slice, int view), byte[]>(_activeSelections);
-
-        foreach (var sel in selectionsToApply) await ApplyMaskToVolumeAsync(sel.Value, sel.Key.slice, sel.Key.view);
-
-        compoundAction.CaptureAfterStates(_dataset);
-        _undoStack.Push(compoundAction);
-        _redoStack.Clear();
-        Logger.Log(
-            $"[SegmentationManager] Applied {selectionsToApply.Count} selections to material {TargetMaterialId}");
-
-        ClearActiveSelections();
+        var addMode = IsAddMode;
+        var materialId = TargetMaterialId;
+        return Task.Run(async () =>
+        {
+            var compoundAction = new CompoundSegmentationAction();
+            compoundAction.StoreMultipleStates(_dataset, selectionsToApply.Keys.ToList());
+            var completed = 0;
+            foreach (var sel in selectionsToApply)
+            {
+                token.ThrowIfCancellationRequested();
+                ApplyMaskToVolume(sel.Value, sel.Key.slice, sel.Key.view, addMode, materialId);
+                progress?.Report(++completed / (float)selectionsToApply.Count * .85f);
+            }
+            compoundAction.CaptureAfterStates(_dataset);
+            _undoStack.Push(compoundAction);
+            _redoStack.Clear();
+            await _dataset.SaveLabelDataAsync(token).ConfigureAwait(false);
+            _activeSelections.Clear();
+            OpenTkManager.ExecuteOnMainThread(() =>
+            {
+                ProjectManager.Instance.NotifyDatasetDataChanged(_dataset);
+                SelectionCompleted?.Invoke();
+            });
+            Logger.Log($"[SegmentationManager] Applied {selectionsToApply.Count} selections to material {materialId}");
+        }, token);
     }
 
     public async Task MergeMaterialsAsync(byte sourceMaterialId, byte targetMaterialId)
@@ -182,68 +195,81 @@ public class SegmentationManager : IDisposable
     {
         if (_activeSelections.IsEmpty) return;
         _activeSelections.Clear();
-        ProjectManager.Instance.NotifyDatasetDataChanged(_dataset);
+        SelectionPreviewChanged?.Invoke(null, -1, -1);
         Logger.Log("[SegmentationManager] Cleared active selections");
     }
 
-    private async Task ApplyMaskToVolumeAsync(byte[] mask, int slice, int view)
+    private void ApplyMaskToVolume(byte[] mask, int slice, int view, bool addMode, byte materialId)
     {
-        await Task.Run(() =>
+        switch (view)
         {
-            switch (view)
-            {
-                case 0: ApplyMaskToXYSlice(mask, slice); break;
-                case 1: ApplyMaskToXZSlice(mask, slice); break;
-                case 2: ApplyMaskToYZSlice(mask, slice); break;
-            }
-        });
+            case 0: ApplyMaskToXYSlice(mask, slice, addMode, materialId); break;
+            case 1: ApplyMaskToXZSlice(mask, slice, addMode, materialId); break;
+            case 2: ApplyMaskToYZSlice(mask, slice, addMode, materialId); break;
+        }
     }
 
-    private void ApplyMaskToXYSlice(byte[] mask, int z)
+    private void ApplyMaskToXYSlice(byte[] mask, int z, bool addMode, byte materialId)
     {
         var s = new byte[_dataset.Width * _dataset.Height];
         _dataset.LabelData.ReadSliceZ(z, s);
         for (var i = 0; i < mask.Length; i++)
             if (mask[i] > 0)
-                s[i] = IsAddMode ? TargetMaterialId : (byte)0;
+                s[i] = addMode ? materialId : (byte)0;
         _dataset.LabelData.WriteSliceZ(z, s);
     }
 
-    private void ApplyMaskToXZSlice(byte[] mask, int y)
+    private void ApplyMaskToXZSlice(byte[] mask, int y, bool addMode, byte materialId)
     {
+        var slice = new byte[_dataset.Width * _dataset.Height];
         for (var z = 0; z < _dataset.Depth; z++)
-        for (var x = 0; x < _dataset.Width; x++)
-            if (mask[z * _dataset.Width + x] > 0)
-                _dataset.LabelData[x, y, z] = IsAddMode ? TargetMaterialId : (byte)0;
+        {
+            _dataset.LabelData.ReadSliceZ(z, slice);
+            var modified = false;
+            for (var x = 0; x < _dataset.Width; x++)
+                if (mask[z * _dataset.Width + x] > 0)
+                { slice[y * _dataset.Width + x] = addMode ? materialId : (byte)0; modified = true; }
+            if (modified) _dataset.LabelData.WriteSliceZ(z, slice);
+        }
     }
 
-    private void ApplyMaskToYZSlice(byte[] mask, int x)
+    private void ApplyMaskToYZSlice(byte[] mask, int x, bool addMode, byte materialId)
     {
+        var slice = new byte[_dataset.Width * _dataset.Height];
         for (var z = 0; z < _dataset.Depth; z++)
-        for (var y = 0; y < _dataset.Height; y++)
-            if (mask[z * _dataset.Height + y] > 0)
-                _dataset.LabelData[x, y, z] = IsAddMode ? TargetMaterialId : (byte)0;
+        {
+            _dataset.LabelData.ReadSliceZ(z, slice);
+            var modified = false;
+            for (var y = 0; y < _dataset.Height; y++)
+                if (mask[z * _dataset.Height + y] > 0)
+                { slice[y * _dataset.Width + x] = addMode ? materialId : (byte)0; modified = true; }
+            if (modified) _dataset.LabelData.WriteSliceZ(z, slice);
+        }
     }
 
-    public void Undo()
+    public async Task UndoAsync(CancellationToken token = default, IProgress<float> progress = null)
     {
         if (_undoStack.Any())
         {
             var a = _undoStack.Pop();
-            a.Restore(_dataset);
+            await Task.Run(() => a.Restore(_dataset), token).ConfigureAwait(false);
+            progress?.Report(.8f);
             _redoStack.Push(a);
-            ProjectManager.Instance.NotifyDatasetDataChanged(_dataset);
+            await _dataset.SaveLabelDataAsync(token).ConfigureAwait(false);
+            OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(_dataset));
         }
     }
 
-    public void Redo()
+    public async Task RedoAsync(CancellationToken token = default, IProgress<float> progress = null)
     {
         if (_redoStack.Any())
         {
             var a = _redoStack.Pop();
-            a.ReApply(_dataset);
+            await Task.Run(() => a.ReApply(_dataset), token).ConfigureAwait(false);
+            progress?.Report(.8f);
             _undoStack.Push(a);
-            ProjectManager.Instance.NotifyDatasetDataChanged(_dataset);
+            await _dataset.SaveLabelDataAsync(token).ConfigureAwait(false);
+            OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(_dataset));
         }
     }
 
@@ -360,14 +386,22 @@ public class CompoundSegmentationAction : SegmentationAction
         {
             case 0: dataset.LabelData.ReadSliceZ(sliceIndex, buffer); break;
             case 1:
+                var xzSlice = new byte[dataset.Width * dataset.Height];
                 for (var z = 0; z < dataset.Depth; z++)
-                for (var x = 0; x < dataset.Width; x++)
-                    buffer[z * dataset.Width + x] = dataset.LabelData[x, sliceIndex, z];
+                {
+                    dataset.LabelData.ReadSliceZ(z, xzSlice);
+                    for (var x = 0; x < dataset.Width; x++)
+                        buffer[z * dataset.Width + x] = xzSlice[sliceIndex * dataset.Width + x];
+                }
                 break;
             case 2:
+                var yzSlice = new byte[dataset.Width * dataset.Height];
                 for (var z = 0; z < dataset.Depth; z++)
-                for (var y = 0; y < dataset.Height; y++)
-                    buffer[z * dataset.Height + y] = dataset.LabelData[sliceIndex, y, z];
+                {
+                    dataset.LabelData.ReadSliceZ(z, yzSlice);
+                    for (var y = 0; y < dataset.Height; y++)
+                        buffer[z * dataset.Height + y] = yzSlice[y * dataset.Width + sliceIndex];
+                }
                 break;
         }
     }
@@ -378,14 +412,24 @@ public class CompoundSegmentationAction : SegmentationAction
         {
             case 0: dataset.LabelData.WriteSliceZ(sliceIndex, buffer); break;
             case 1:
+                var xzSlice = new byte[dataset.Width * dataset.Height];
                 for (var z = 0; z < dataset.Depth; z++)
-                for (var x = 0; x < dataset.Width; x++)
-                    dataset.LabelData[x, sliceIndex, z] = buffer[z * dataset.Width + x];
+                {
+                    dataset.LabelData.ReadSliceZ(z, xzSlice);
+                    for (var x = 0; x < dataset.Width; x++)
+                        xzSlice[sliceIndex * dataset.Width + x] = buffer[z * dataset.Width + x];
+                    dataset.LabelData.WriteSliceZ(z, xzSlice);
+                }
                 break;
             case 2:
+                var yzSlice = new byte[dataset.Width * dataset.Height];
                 for (var z = 0; z < dataset.Depth; z++)
-                for (var y = 0; y < dataset.Height; y++)
-                    dataset.LabelData[sliceIndex, y, z] = buffer[z * dataset.Height + y];
+                {
+                    dataset.LabelData.ReadSliceZ(z, yzSlice);
+                    for (var y = 0; y < dataset.Height; y++)
+                        yzSlice[y * dataset.Width + sliceIndex] = buffer[z * dataset.Height + y];
+                    dataset.LabelData.WriteSliceZ(z, yzSlice);
+                }
                 break;
         }
     }

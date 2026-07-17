@@ -1,6 +1,7 @@
 ﻿// GAIA/Data/VolumeData/ChunkedLabelVolume.cs
 
 using System.IO.MemoryMappedFiles;
+using System.Collections.Concurrent;
 using GAIA.Util;
 
 namespace GAIA.Data.VolumeData;
@@ -32,7 +33,8 @@ public class ChunkedLabelVolume : ILabelVolumeData
     public string FilePath { get; }
 
     // Header size constant
-    private const int HEADER_SIZE = 16; // 4 integers (ChunkDim, ChunkCountX, ChunkCountY, ChunkCountZ)
+    private const int HEADER_SIZE = 28; // Width, height, depth, chunk dim and three chunk counts
+    private readonly ConcurrentDictionary<int, byte> _dirtyChunks = new();
 
     private bool _disposed;
 
@@ -78,7 +80,8 @@ public class ChunkedLabelVolume : ILabelVolumeData
     /// <summary>
     ///     Constructor for memory-mapped mode when an MMF is already available.
     /// </summary>
-    public ChunkedLabelVolume(int width, int height, int depth, int chunkDim, MemoryMappedFile mmf)
+    public ChunkedLabelVolume(int width, int height, int depth, int chunkDim, MemoryMappedFile mmf,
+        string filePath = null)
     {
         ValidateDimensions(width, height, depth, chunkDim);
 
@@ -87,6 +90,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
         Depth = depth;
         ChunkDim = chunkDim;
         _useMemoryMapping = true;
+        FilePath = filePath;
 
         ChunkCountX = (width + chunkDim - 1) / chunkDim;
         ChunkCountY = (height + chunkDim - 1) / chunkDim;
@@ -141,7 +145,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
                     return _viewAccessor.ReadByte(globalOffset);
                 }
 
-                return _chunks[chunkIndex][offset];
+                return _chunks[chunkIndex]?[offset] ?? 0;
             }
             catch (Exception ex)
             {
@@ -163,7 +167,16 @@ public class ChunkedLabelVolume : ILabelVolumeData
                 }
                 else
                 {
-                    _chunks[chunkIndex][offset] = value;
+                    var chunk = _chunks[chunkIndex];
+                    if (chunk == null)
+                    {
+                        if (value == 0) return;
+                        var created = new byte[ChunkDim * ChunkDim * ChunkDim];
+                        chunk = Interlocked.CompareExchange(ref _chunks[chunkIndex], created, null) ?? created;
+                    }
+                    if (chunk[offset] == value) return;
+                    chunk[offset] = value;
+                    _dirtyChunks[chunkIndex] = 0;
                 }
             }
             catch (Exception ex)
@@ -178,15 +191,16 @@ public class ChunkedLabelVolume : ILabelVolumeData
     /// </summary>
     public void ReadSliceZ(int z, byte[] buffer)
     {
-        if (buffer == null || buffer.Length != Width * Height)
+        if (buffer == null || buffer.Length < Width * Height)
             throw new ArgumentException("Buffer size must match slice dimensions (Width * Height).");
 
         ValidateCoordinates(0, 0, z);
+        Array.Clear(buffer);
 
         var cz = z / ChunkDim;
         var lz = z % ChunkDim;
 
-        Parallel.For(0, ChunkCountY, cy =>
+        for (var cy = 0; cy < ChunkCountY; cy++)
         {
             for (var cx = 0; cx < ChunkCountX; cx++)
             {
@@ -211,11 +225,12 @@ public class ChunkedLabelVolume : ILabelVolumeData
                     }
                     else
                     {
-                        Array.Copy(_chunks[chunkIndex], srcOffsetInChunk, buffer, dstOffset, length);
+                        var chunk = _chunks[chunkIndex];
+                        if (chunk != null) Array.Copy(chunk, srcOffsetInChunk, buffer, dstOffset, length);
                     }
                 }
             }
-        });
+        }
     }
 
     /// <summary>
@@ -223,7 +238,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
     /// </summary>
     public void WriteSliceZ(int z, byte[] buffer)
     {
-        if (buffer == null || buffer.Length != Width * Height)
+        if (buffer == null || buffer.Length < Width * Height)
             throw new ArgumentException("Buffer size must match slice dimensions (Width * Height).");
 
         ValidateCoordinates(0, 0, z);
@@ -231,7 +246,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
         var cz = z / ChunkDim;
         var lz = z % ChunkDim;
 
-        Parallel.For(0, ChunkCountY, cy =>
+        for (var cy = 0; cy < ChunkCountY; cy++)
         {
             for (var cx = 0; cx < ChunkCountX; cx++)
             {
@@ -256,11 +271,22 @@ public class ChunkedLabelVolume : ILabelVolumeData
                     }
                     else
                     {
-                        Array.Copy(buffer, srcOffset, _chunks[chunkIndex], dstOffsetInChunk, length);
+                        var chunk = _chunks[chunkIndex];
+                        if (chunk == null)
+                        {
+                            var containsLabel = false;
+                            for (var i = 0; i < length; i++)
+                                if (buffer[srcOffset + i] != 0) { containsLabel = true; break; }
+                            if (!containsLabel) continue;
+                            var created = new byte[ChunkDim * ChunkDim * ChunkDim];
+                            chunk = Interlocked.CompareExchange(ref _chunks[chunkIndex], created, null) ?? created;
+                        }
+                        Array.Copy(buffer, srcOffset, chunk, dstOffsetInChunk, length);
+                        _dirtyChunks[chunkIndex] = 0;
                     }
                 }
             }
-        });
+        }
     }
 
     /// <summary>
@@ -288,7 +314,8 @@ public class ChunkedLabelVolume : ILabelVolumeData
 
                 if (!_useMemoryMapping)
                 {
-                    for (var i = 0; i < _chunks.Length; i++) bw.Write(_chunks[i]);
+                    var zeroChunk = new byte[chunkSize];
+                    for (var i = 0; i < _chunks.Length; i++) bw.Write(_chunks[i] ?? zeroChunk);
                 }
                 else
                 {
@@ -306,6 +333,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
             }
 
             Logger.Log($"[ChunkedLabelVolume] Saved label volume to {path}");
+            _dirtyChunks.Clear();
         }
         catch (Exception ex)
         {
@@ -314,45 +342,117 @@ public class ChunkedLabelVolume : ILabelVolumeData
         }
     }
 
+    /// <summary>Persists only chunks changed since the previous flush.</summary>
+    public void FlushDirtyChunks(string path)
+    {
+        if (_useMemoryMapping)
+        {
+            _viewAccessor?.Flush();
+            _dirtyChunks.Clear();
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(path) || _dirtyChunks.IsEmpty) return;
+
+        var chunkSize = checked(ChunkDim * ChunkDim * ChunkDim);
+        var totalChunks = ChunkCountX * ChunkCountY * ChunkCountZ;
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+        var isNew = !File.Exists(path);
+        using var stream = new FileStream(path, isNew ? FileMode.CreateNew : FileMode.Open,
+            FileAccess.ReadWrite, FileShare.Read, 1024 * 1024, FileOptions.RandomAccess);
+        if (isNew || stream.Length < HEADER_SIZE)
+        {
+            using var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true);
+            writer.Write(Width); writer.Write(Height); writer.Write(Depth); writer.Write(ChunkDim);
+            writer.Write(ChunkCountX); writer.Write(ChunkCountY); writer.Write(ChunkCountZ);
+            stream.SetLength(HEADER_SIZE + (long)totalChunks * chunkSize);
+        }
+
+        byte[] zeroChunk = null;
+        foreach (var chunkIndex in _dirtyChunks.Keys.OrderBy(index => index))
+        {
+            var chunk = _chunks[chunkIndex];
+            stream.Position = HEADER_SIZE + (long)chunkIndex * chunkSize;
+            if (chunk == null)
+            {
+                zeroChunk ??= new byte[chunkSize];
+                stream.Write(zeroChunk, 0, zeroChunk.Length);
+            }
+            else
+                stream.Write(chunk, 0, chunk.Length);
+            _dirtyChunks.TryRemove(chunkIndex, out _);
+        }
+        stream.Flush(false);
+        Logger.Log($"[ChunkedLabelVolume] Flushed modified chunks to {path}");
+    }
+
+    public void Clear()
+    {
+        if (_useMemoryMapping)
+        {
+            var zero = new byte[1024 * 1024];
+            var remaining = (long)ChunkCountX * ChunkCountY * ChunkCountZ * ChunkDim * ChunkDim * ChunkDim;
+            var offset = (long)HEADER_SIZE;
+            while (remaining > 0)
+            {
+                var count = (int)Math.Min(zero.Length, remaining);
+                _viewAccessor.WriteArray(offset, zero, 0, count);
+                offset += count; remaining -= count;
+            }
+            _viewAccessor.Flush();
+            return;
+        }
+        for (var i = 0; i < _chunks.Length; i++)
+        {
+            if (_chunks[i] == null) continue;
+            _chunks[i] = null;
+            _dirtyChunks[i] = 0;
+        }
+    }
+
     /// <summary>
     ///     Loads label volume from a binary file, reading the complete header.
     /// </summary>
     public static ChunkedLabelVolume LoadFromBin(string path, bool useMemoryMapping)
     {
+        int width, height, depth, chunkDim;
+        using (var headerStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (var headerReader = new BinaryReader(headerStream))
+        {
+            width = headerReader.ReadInt32(); height = headerReader.ReadInt32();
+            depth = headerReader.ReadInt32(); chunkDim = headerReader.ReadInt32();
+            headerReader.ReadInt32(); headerReader.ReadInt32(); headerReader.ReadInt32();
+        }
+
+        if (useMemoryMapping)
+        {
+            // Open the existing file directly. The create-from-scratch constructor deliberately
+            // truncates its target and must never be used by a load path.
+            var mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0,
+                MemoryMappedFileAccess.ReadWrite);
+            return new ChunkedLabelVolume(width, height, depth, chunkDim, mmf, path);
+        }
+
+        var volume = new ChunkedLabelVolume(width, height, depth, chunkDim, false, path);
         using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
         using (var br = new BinaryReader(fs))
         {
-            // Read the complete header
-            var width = br.ReadInt32();
-            var height = br.ReadInt32();
-            var depth = br.ReadInt32();
-            var chunkDim = br.ReadInt32();
-            // We can ignore the saved chunk counts as they can be recalculated
-            br.ReadInt32(); // cntX
-            br.ReadInt32(); // cntY
-            br.ReadInt32(); // cntZ
+            fs.Position = HEADER_SIZE;
+            var chunkSize = chunkDim * chunkDim * chunkDim;
+            var totalChunks = volume.ChunkCountX * volume.ChunkCountY * volume.ChunkCountZ;
 
-            var volume = new ChunkedLabelVolume(width, height, depth, chunkDim, useMemoryMapping, path);
-
-            // Read chunks if not memory mapping
-            if (!useMemoryMapping)
+            var chunkBuffer = new byte[chunkSize];
+            for (var i = 0; i < totalChunks; i++)
             {
-                var chunkSize = chunkDim * chunkDim * chunkDim;
-                var totalChunks = volume.ChunkCountX * volume.ChunkCountY * volume.ChunkCountZ;
-
-                for (var i = 0; i < totalChunks; i++)
-                {
-                    var bytesRead = br.Read(volume._chunks[i], 0, chunkSize);
-                    if (bytesRead < chunkSize && fs.Position != fs.Length)
-                        Logger.LogWarning(
-                            $"[ChunkedLabelVolume] Read fewer bytes than expected for chunk {i}. The file might be corrupt.");
-                }
+                Array.Clear(chunkBuffer);
+                var bytesRead = br.Read(chunkBuffer, 0, chunkSize);
+                if (chunkBuffer.AsSpan(0, bytesRead).IndexOfAnyExcept((byte)0) >= 0)
+                    volume._chunks[i] = (byte[])chunkBuffer.Clone();
+                if (bytesRead < chunkSize && fs.Position != fs.Length)
+                    Logger.LogWarning(
+                        $"[ChunkedLabelVolume] Read fewer bytes than expected for chunk {i}. The file might be corrupt.");
             }
-
-            // For memory mapping, data is already accessible through the file.
-            // The constructor handles setting up the MMF.
-            return volume;
         }
+        return volume;
     }
 
     /// <summary>
@@ -384,6 +484,9 @@ public class ChunkedLabelVolume : ILabelVolumeData
                 // Write header
                 using (var bw = new BinaryWriter(fs))
                 {
+                    bw.Write(Width);
+                    bw.Write(Height);
+                    bw.Write(Depth);
                     bw.Write(ChunkDim);
                     bw.Write(ChunkCountX);
                     bw.Write(ChunkCountY);
@@ -412,12 +515,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
     {
         var totalChunks = ChunkCountX * ChunkCountY * ChunkCountZ;
         _chunks = new byte[totalChunks][];
-        var chunkSize = ChunkDim * ChunkDim * ChunkDim;
-
-        // Initialize all chunks with zeros
-        Parallel.For(0, totalChunks, i => { _chunks[i] = new byte[chunkSize]; });
-
-        Logger.Log($"[ChunkedLabelVolume] Initialized {totalChunks} RAM chunks, each of {chunkSize} bytes.");
+        Logger.Log($"[ChunkedLabelVolume] Initialized sparse storage for {totalChunks} chunks.");
     }
 
     private (int chunkIndex, int offset) GetChunkIndexAndOffset(int x, int y, int z)

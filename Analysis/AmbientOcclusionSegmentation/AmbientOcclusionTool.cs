@@ -1,6 +1,7 @@
 // GAIA/Analysis/AmbientOcclusionSegmentation/AmbientOcclusionTool.cs
 
 using System.Numerics;
+using GAIA.Business;
 using GAIA.Data;
 using GAIA.Data.CtImageStack;
 using GAIA.UI.Interfaces;
@@ -20,6 +21,7 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
     private AmbientOcclusionPreview _preview = new();
 
     private CancellationTokenSource _cts;
+    private CtOperationHandle _applyOperation;
     private Task _computeTask;
     private bool _isProcessing;
     private string _statusMessage = "Ready";
@@ -434,7 +436,7 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
         ImGui.Spacing();
 
         // Apply to labels button
-        bool canApply = _currentResult != null && !_isProcessing && dataset.Materials.Count > 0;
+        bool canApply = _currentResult != null && !_isProcessing && _applyOperation?.IsActive != true && dataset.Materials.Count > 0;
 
         if (!canApply)
             ImGui.BeginDisabled();
@@ -446,6 +448,12 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
 
         if (!canApply)
             ImGui.EndDisabled();
+
+        if (_applyOperation?.IsActive == true)
+        {
+            ImGui.ProgressBar(_applyOperation.Progress, new Vector2(-1, 0), _applyOperation.Name);
+            if (ImGui.Button("Cancel label update")) _applyOperation.Cancel();
+        }
     }
 
     private void DrawStatus()
@@ -563,18 +571,19 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
     {
         if (_currentResult == null)
             return;
-
-        try
+        var result = _currentResult;
+        var materialId = _settings.TargetMaterialId;
+        _applyOperation = CtOperationCoordinator.For(dataset).Enqueue("Applying ambient occlusion labels",
+            async (token, progress) =>
         {
-            _processor.ApplySegmentation(dataset, _currentResult, _settings.TargetMaterialId);
-            _statusMessage = "Segmentation applied to labels";
-            Logger.Log($"[AmbientOcclusion] Applied segmentation to material ID {_settings.TargetMaterialId}");
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"Error applying: {ex.Message}";
-            Logger.LogError($"[AmbientOcclusion] Failed to apply segmentation: {ex.Message}");
-        }
+            _processor.ApplySegmentation(dataset, result, materialId, token, progress);
+            await dataset.SaveLabelDataAsync(token).ConfigureAwait(false);
+            OpenTkManager.ExecuteOnMainThread(() =>
+            {
+                _statusMessage = "Segmentation applied to labels";
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+            });
+        });
     }
 
     private void UpdateSegmentationMask()
