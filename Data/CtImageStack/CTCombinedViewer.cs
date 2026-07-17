@@ -289,10 +289,13 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         if (!_isInitialized)
         {
             AdvanceViewerInitializationOnRenderThread();
-            DrawLoadingState();
-            if (_loadingCompletedAt.HasValue && DateTime.UtcNow - _loadingCompletedAt.Value >= TimeSpan.FromMilliseconds(350))
+            if (_loadingCompletedAt.HasValue && string.IsNullOrWhiteSpace(_loadingError))
                 _isInitialized = true;
-            return;
+            else
+            {
+                DrawLoadingState();
+                return;
+            }
         }
 
         FlushDisplayUpdates();
