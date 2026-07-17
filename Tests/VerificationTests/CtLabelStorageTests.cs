@@ -3,6 +3,7 @@ using GAIA.Data.CtImageStack;
 using System.Diagnostics;
 using GAIA.Analysis.RemoveSmallIslands;
 using GAIA;
+using GAIA.Analysis.ParticleSeparator;
 
 namespace VerificationTests;
 
@@ -352,5 +353,30 @@ public sealed class CtLabelStorageTests
         Assert.Equal(0, labels[2, 1, 0]);
         Assert.Equal(5, labels[7, 5, 0]);
         Assert.Equal(5, labels[8, 5, 2]);
+    }
+
+    [Fact]
+    public void ParticleSeparator_StreamsComponentsWithoutAllocatingLabelVolume()
+    {
+        using var grayscale = new ChunkedVolume(12, 9, 4, 4);
+        using var labels = new ChunkedLabelVolume(12, 9, 4, 4, false);
+        labels[1, 1, 0] = 6; labels[2, 1, 0] = 6; labels[2, 2, 0] = 6;
+        labels[8, 6, 1] = 6; labels[8, 6, 2] = 6; labels[9, 6, 2] = 6; labels[9, 6, 3] = 6;
+        var dataset = new CtImageStackDataset("particles", Path.GetTempPath())
+        {
+            Width = 12, Height = 9, Depth = 4, PixelSize = 1,
+            VolumeData = grayscale, LabelData = labels
+        };
+        var material = new Material("particles", System.Numerics.Vector4.One, 0, 255, 6);
+        using var processor = new AcceleratedProcessor { SelectedAcceleration = AccelerationType.CPU };
+
+        var result = processor.SeparateParticles(dataset, material, true, false, 1, 0,
+            CancellationToken.None);
+
+        Assert.Null(result.LabelVolume);
+        Assert.Equal(new long[] { 3, 4 }, result.Particles.Select(p => p.VoxelCount).Order().ToArray());
+        var crossSlice = result.Particles.Single(p => p.VoxelCount == 4);
+        Assert.Equal(1, crossSlice.Bounds.MinZ);
+        Assert.Equal(3, crossSlice.Bounds.MaxZ);
     }
 }
