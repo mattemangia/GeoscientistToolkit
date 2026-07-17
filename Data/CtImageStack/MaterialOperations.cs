@@ -117,7 +117,7 @@ public static class MaterialOperations
                     Interlocked.Exchange(ref anyModified, 1);
                 }
                 var done = Interlocked.Increment(ref completedSlices);
-                if ((done & 7) == 0 || done == depth) progress?.Report(done / (float)depth);
+                if ((done & 7) == 0 || done == depth) progress?.Report(done / (float)depth * .82f);
                 return buffers;
                 }, buffers =>
                 {
@@ -141,7 +141,8 @@ public static class MaterialOperations
                     }
                 }
 
-                dataset.SaveLabelData();
+                dataset.SaveLabelData(cancellationToken,
+                    new Progress<float>(saveProgress => progress?.Report(.82f + saveProgress * .17f)));
 
                 OpenTkManager.ExecuteOnMainThread(() =>
                 {

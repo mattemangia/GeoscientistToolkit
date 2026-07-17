@@ -239,7 +239,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
     }
 
     // --- NEW METHOD: Save label data ---
-    public void SaveLabelData()
+    public void SaveLabelData(CancellationToken cancellationToken = default, IProgress<float> progress = null)
     {
         if (LabelData != null)
         {
@@ -247,17 +247,17 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
             if (!string.IsNullOrEmpty(labelPath))
             {
                 Logger.Log($"[CtImageStackDataset] Saving label data for '{Name}' to {labelPath}");
-                LabelData.FlushDirtyChunks(labelPath);
+                LabelData.FlushDirtyChunks(labelPath, cancellationToken, progress);
             }
         }
     }
 
-    public Task SaveLabelDataAsync(CancellationToken cancellationToken = default)
+    public Task SaveLabelDataAsync(CancellationToken cancellationToken = default, IProgress<float> progress = null)
     {
         return Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            SaveLabelData();
+            SaveLabelData(cancellationToken, progress);
         }, cancellationToken);
     }
 

@@ -2,6 +2,7 @@
 
 using System.IO.MemoryMappedFiles;
 using System.Collections.Concurrent;
+using System.Buffers;
 using GAIA.Util;
 
 namespace GAIA.Data.VolumeData;
@@ -35,6 +36,9 @@ public class ChunkedLabelVolume : ILabelVolumeData
     // Header size constant
     private const int HEADER_SIZE = 28; // Width, height, depth, chunk dim and three chunk counts
     private readonly ConcurrentDictionary<int, byte> _dirtyChunks = new();
+    public int DirtyChunkCount => _dirtyChunks.Count;
+    public int AllocatedChunkCount => _useMemoryMapping ? ChunkCountX * ChunkCountY * ChunkCountZ :
+        _chunks?.Count(chunk => chunk != null) ?? 0;
 
     private bool _disposed;
 
@@ -246,11 +250,15 @@ public class ChunkedLabelVolume : ILabelVolumeData
         var cz = z / ChunkDim;
         var lz = z % ChunkDim;
 
+        var mappedRow = _useMemoryMapping ? ArrayPool<byte>.Shared.Rent(ChunkDim) : null;
+        try
+        {
         for (var cy = 0; cy < ChunkCountY; cy++)
         {
             for (var cx = 0; cx < ChunkCountX; cx++)
             {
                 var chunkIndex = GetChunkIndex(cx, cy, cz);
+                var chunkModified = false;
 
                 var xStart = cx * ChunkDim;
                 var yStart = cy * ChunkDim;
@@ -267,7 +275,12 @@ public class ChunkedLabelVolume : ILabelVolumeData
                     if (_useMemoryMapping)
                     {
                         var chunkStartInFile = CalculateGlobalOffset(chunkIndex, 0);
-                        _viewAccessor.WriteArray(chunkStartInFile + dstOffsetInChunk, buffer, srcOffset, length);
+                        _viewAccessor.ReadArray(chunkStartInFile + dstOffsetInChunk, mappedRow, 0, length);
+                        if (!mappedRow.AsSpan(0, length).SequenceEqual(buffer.AsSpan(srcOffset, length)))
+                        {
+                            _viewAccessor.WriteArray(chunkStartInFile + dstOffsetInChunk, buffer, srcOffset, length);
+                            chunkModified = true;
+                        }
                     }
                     else
                     {
@@ -281,11 +294,20 @@ public class ChunkedLabelVolume : ILabelVolumeData
                             var created = new byte[ChunkDim * ChunkDim * ChunkDim];
                             chunk = Interlocked.CompareExchange(ref _chunks[chunkIndex], created, null) ?? created;
                         }
-                        Array.Copy(buffer, srcOffset, chunk, dstOffsetInChunk, length);
-                        _dirtyChunks[chunkIndex] = 0;
+                        if (!chunk.AsSpan(dstOffsetInChunk, length).SequenceEqual(buffer.AsSpan(srcOffset, length)))
+                        {
+                            Array.Copy(buffer, srcOffset, chunk, dstOffsetInChunk, length);
+                            chunkModified = true;
+                        }
                     }
                 }
+                if (chunkModified && !_useMemoryMapping) _dirtyChunks[chunkIndex] = 0;
             }
+        }
+        }
+        finally
+        {
+            if (mappedRow != null) ArrayPool<byte>.Shared.Return(mappedRow);
         }
     }
 
@@ -343,12 +365,14 @@ public class ChunkedLabelVolume : ILabelVolumeData
     }
 
     /// <summary>Persists only chunks changed since the previous flush.</summary>
-    public void FlushDirtyChunks(string path)
+    public void FlushDirtyChunks(string path, CancellationToken cancellationToken = default,
+        IProgress<float> progress = null)
     {
         if (_useMemoryMapping)
         {
             _viewAccessor?.Flush();
             _dirtyChunks.Clear();
+            progress?.Report(1f);
             return;
         }
         if (string.IsNullOrWhiteSpace(path) || _dirtyChunks.IsEmpty) return;
@@ -358,7 +382,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
         var isNew = !File.Exists(path);
         using var stream = new FileStream(path, isNew ? FileMode.CreateNew : FileMode.Open,
-            FileAccess.ReadWrite, FileShare.Read, 1024 * 1024, FileOptions.RandomAccess);
+            FileAccess.ReadWrite, FileShare.Read, 4 * 1024 * 1024, FileOptions.SequentialScan);
         if (isNew || stream.Length < HEADER_SIZE)
         {
             using var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true);
@@ -367,20 +391,43 @@ public class ChunkedLabelVolume : ILabelVolumeData
             stream.SetLength(HEADER_SIZE + (long)totalChunks * chunkSize);
         }
 
-        byte[] zeroChunk = null;
-        foreach (var chunkIndex in _dirtyChunks.Keys.OrderBy(index => index))
+        var dirtyChunks = _dirtyChunks.Keys.OrderBy(index => index).ToArray();
+        // Aggregate adjacent chunks into multi-megabyte sequential writes. A syscall/seek per
+        // chunk is extremely expensive on large volumes, especially when thresholding changes
+        // most of the dataset.
+        var chunksPerBatch = Math.Max(1, (8 * 1024 * 1024) / chunkSize);
+        var batchBuffer = ArrayPool<byte>.Shared.Rent(checked(chunksPerBatch * chunkSize));
+        try
         {
-            var chunk = _chunks[chunkIndex];
-            stream.Position = HEADER_SIZE + (long)chunkIndex * chunkSize;
-            if (chunk == null)
+            var dirtyIndex = 0;
+            while (dirtyIndex < dirtyChunks.Length)
             {
-                zeroChunk ??= new byte[chunkSize];
-                stream.Write(zeroChunk, 0, zeroChunk.Length);
+                cancellationToken.ThrowIfCancellationRequested();
+                var firstChunk = dirtyChunks[dirtyIndex];
+                var batchCount = 1;
+                while (batchCount < chunksPerBatch && dirtyIndex + batchCount < dirtyChunks.Length &&
+                       dirtyChunks[dirtyIndex + batchCount] == firstChunk + batchCount)
+                    batchCount++;
+
+                for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
+                {
+                    var chunkIndex = firstChunk + batchIndex;
+                    var destination = batchBuffer.AsSpan(batchIndex * chunkSize, chunkSize);
+                    var chunk = _chunks[chunkIndex];
+                    if (chunk == null) destination.Clear();
+                    else chunk.AsSpan().CopyTo(destination);
+                }
+
+                stream.Position = HEADER_SIZE + (long)firstChunk * chunkSize;
+                stream.Write(batchBuffer, 0, batchCount * chunkSize);
+                for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
+                    _dirtyChunks.TryRemove(firstChunk + batchIndex, out _);
+
+                dirtyIndex += batchCount;
+                progress?.Report(dirtyIndex / (float)dirtyChunks.Length);
             }
-            else
-                stream.Write(chunk, 0, chunk.Length);
-            _dirtyChunks.TryRemove(chunkIndex, out _);
         }
+        finally { ArrayPool<byte>.Shared.Return(batchBuffer); }
         stream.Flush(false);
         Logger.Log($"[ChunkedLabelVolume] Flushed modified chunks to {path}");
     }

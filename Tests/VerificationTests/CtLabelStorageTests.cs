@@ -58,4 +58,28 @@ public sealed class CtLabelStorageTests
             if (File.Exists(path)) File.Delete(path);
         }
     }
+
+    [Fact]
+    public void SliceWrite_DoesNotDirtyUnchangedChunks()
+    {
+        using var volume = new ChunkedLabelVolume(32, 24, 8, 8, false);
+        var slice = new byte[32 * 24];
+        slice[3] = 4;
+        volume.WriteSliceZ(2, slice);
+        Assert.Equal(1, volume.DirtyChunkCount);
+        Assert.Equal(1, volume.AllocatedChunkCount);
+
+        var path = Path.Combine(Path.GetTempPath(), $"gaia-labels-unchanged-{Guid.NewGuid():N}.bin");
+        try
+        {
+            volume.FlushDirtyChunks(path);
+            Assert.Equal(0, volume.DirtyChunkCount);
+            volume.WriteSliceZ(2, slice);
+            Assert.Equal(0, volume.DirtyChunkCount);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 }
