@@ -30,7 +30,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
     // Storage mode fields
     private byte[][] _chunks; // For in-memory mode
     private MemoryMappedFile _mmf; // For memory-mapped mode
-    private MemoryMappedViewAccessor _viewAccessor;
+    private ChunkMappedAccessor _viewAccessor;
     private readonly bool _useMemoryMapping;
     public string FilePath { get; }
 
@@ -43,6 +43,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
     public int AllocatedChunkCount => _useMemoryMapping ? ChunkCountX * ChunkCountY * ChunkCountZ :
         _chunks?.Count(chunk => chunk != null) ?? 0;
     public bool IsMemoryMapped => _useMemoryMapping;
+    public long MappedWindowSize => _useMemoryMapping ? checked((long)ChunkDim * ChunkDim * ChunkDim) : 0;
 
     private bool _disposed;
 
@@ -105,7 +106,9 @@ public class ChunkedLabelVolume : ILabelVolumeData
         ChunkCountZ = (depth + chunkDim - 1) / chunkDim;
 
         _mmf = mmf;
-        _viewAccessor = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+        var fileLength = new FileInfo(filePath ?? throw new ArgumentNullException(nameof(filePath))).Length;
+        _viewAccessor = new ChunkMappedAccessor(mmf, HEADER_SIZE,
+            checked((long)chunkDim * chunkDim * chunkDim), fileLength);
 
         Logger.Log($"[ChunkedLabelVolume] Initialized MM volume: {Width}x{Height}x{Depth}, ChunkDim={ChunkDim}");
     }
@@ -278,15 +281,11 @@ public class ChunkedLabelVolume : ILabelVolumeData
         finally { ArrayPool<byte>.Shared.Return(grayscale); }
     }
 
-    public unsafe void ReadSliceXZ(int y, byte[] destination)
+    public void ReadSliceXZ(int y, byte[] destination)
     {
         if (y < 0 || y >= Height || destination == null || destination.Length < Width * Depth)
             throw new ArgumentException("Invalid XZ slice buffer.");
-        byte* pointer = null;
-        if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
-        try
         {
-            if (pointer != null) pointer += _viewAccessor.PointerOffset;
             var cy = y / ChunkDim; var localY = y % ChunkDim;
             for (var z = 0; z < Depth; z++)
             {
@@ -296,9 +295,9 @@ public class ChunkedLabelVolume : ILabelVolumeData
                     var xStart = cx * ChunkDim; var length = Math.Min(ChunkDim, Width - xStart);
                     var chunkIndex = GetChunkIndex(cx, cy, cz);
                     var localOffset = localZ * ChunkDim * ChunkDim + localY * ChunkDim;
-                    if (pointer != null)
-                        new ReadOnlySpan<byte>(pointer + CalculateGlobalOffset(chunkIndex, localOffset), length)
-                            .CopyTo(destination.AsSpan(z * Width + xStart, length));
+                    if (_useMemoryMapping)
+                        _viewAccessor.ReadArray(CalculateGlobalOffset(chunkIndex, localOffset),
+                            destination, z * Width + xStart, length);
                     else
                     {
                         var chunk = _chunks[chunkIndex];
@@ -307,19 +306,14 @@ public class ChunkedLabelVolume : ILabelVolumeData
                 }
             }
         }
-        finally { if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.ReleasePointer(); }
         ApplyVirtualRulesOrthogonal(1, y, destination);
     }
 
-    public unsafe void ReadSliceYZ(int x, byte[] destination)
+    public void ReadSliceYZ(int x, byte[] destination)
     {
         if (x < 0 || x >= Width || destination == null || destination.Length < Height * Depth)
             throw new ArgumentException("Invalid YZ slice buffer.");
-        byte* pointer = null;
-        if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
-        try
         {
-            if (pointer != null) pointer += _viewAccessor.PointerOffset;
             var cx = x / ChunkDim; var localX = x % ChunkDim;
             for (var z = 0; z < Depth; z++)
             for (var y = 0; y < Height; y++)
@@ -327,12 +321,11 @@ public class ChunkedLabelVolume : ILabelVolumeData
                 var cz = z / ChunkDim; var cy = y / ChunkDim;
                 var localOffset = (z % ChunkDim) * ChunkDim * ChunkDim + (y % ChunkDim) * ChunkDim + localX;
                 var chunkIndex = GetChunkIndex(cx, cy, cz);
-                destination[z * Height + y] = pointer != null
-                    ? *(pointer + CalculateGlobalOffset(chunkIndex, localOffset))
+                destination[z * Height + y] = _useMemoryMapping
+                    ? _viewAccessor.ReadByte(CalculateGlobalOffset(chunkIndex, localOffset))
                     : _chunks[chunkIndex]?[localOffset] ?? 0;
             }
         }
-        finally { if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.ReleasePointer(); }
         ApplyVirtualRulesOrthogonal(2, x, destination);
     }
 
@@ -719,7 +712,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
 
             // Open memory-mapped file
             _mmf = MemoryMappedFile.CreateFromFile(FilePath, FileMode.Open, null, 0, MemoryMappedFileAccess.ReadWrite);
-            _viewAccessor = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+            _viewAccessor = new ChunkMappedAccessor(_mmf, HEADER_SIZE, chunkSize, totalSize);
         }
         catch (Exception ex)
         {

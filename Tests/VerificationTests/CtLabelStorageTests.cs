@@ -256,4 +256,52 @@ public sealed class CtLabelStorageTests
             if (File.Exists(path)) File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task MemoryMappedVolumes_MapOnlyOneChunkAndSupportConcurrentBoundaryReads()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"gaia-windowed-mmf-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var grayPath = Path.Combine(directory, "gray.bin");
+        var labelPath = Path.Combine(directory, "labels.bin");
+        try
+        {
+            using (var source = new ChunkedVolume(35, 29, 18, 8))
+            {
+                for (var z = 0; z < source.Depth; z++)
+                {
+                    var slice = new byte[source.Width * source.Height];
+                    for (var y = 0; y < source.Height; y++)
+                    for (var x = 0; x < source.Width; x++)
+                        slice[y * source.Width + x] = (byte)((x * 3 + y * 5 + z * 7) % 251);
+                    source.WriteSliceZ(z, slice);
+                }
+                await source.SaveAsBinAsync(grayPath);
+            }
+
+            using var gray = await ChunkedVolume.LoadFromBinAsync(grayPath, true);
+            using var labels = new ChunkedLabelVolume(35, 29, 18, 8, true, labelPath);
+            Assert.Equal(512, gray.MappedWindowSize);
+            Assert.Equal(512, labels.MappedWindowSize);
+
+            Parallel.For(0, 18, z =>
+            {
+                var slice = new byte[35 * 29];
+                gray.ReadSliceZ(z, slice);
+                Assert.Equal((byte)((34 * 3 + 28 * 5 + z * 7) % 251), slice[28 * 35 + 34]);
+                slice[28 * 35 + 34] = (byte)(z + 1);
+                labels.WriteSliceZChangedChunks(z, slice,
+                    Enumerable.Repeat(true, labels.ChunkCountX * labels.ChunkCountY).ToArray());
+            });
+
+            var yz = new byte[labels.Height * labels.Depth];
+            labels.ReadSliceYZ(34, yz);
+            for (var z = 0; z < labels.Depth; z++)
+                Assert.Equal((byte)(z + 1), yz[z * labels.Height + 28]);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
 }

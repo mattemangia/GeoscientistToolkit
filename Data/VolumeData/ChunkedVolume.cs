@@ -27,7 +27,7 @@ public class ChunkedVolume : IGrayscaleVolumeData
     // Data storage
     private readonly long _headerSize;
     private readonly MemoryMappedFile _mmf; // For memory-mapped mode
-    private readonly MemoryMappedViewAccessor _viewAccessor;
+    private readonly ChunkMappedAccessor _viewAccessor;
     private readonly bool _useMemoryMapping;
 
     // Metadata
@@ -43,6 +43,7 @@ public class ChunkedVolume : IGrayscaleVolumeData
 
     public int TotalChunks => _chunkCountX * _chunkCountY * _chunkCountZ;
     public bool IsMemoryMapped => _useMemoryMapping;
+    public long MappedWindowSize => _useMemoryMapping ? checked((long)ChunkDim * ChunkDim * ChunkDim) : 0;
     public byte[][] Chunks { get; private set; }
 
     #endregion
@@ -76,8 +77,7 @@ public class ChunkedVolume : IGrayscaleVolumeData
     ///     Creates a volume that uses memory-mapped file storage
     /// </summary>
     public ChunkedVolume(int width, int height, int depth, int chunkDim,
-        MemoryMappedFile mmf, MemoryMappedViewAccessor viewAccessor,
-        long headerSize = HEADER_SIZE)
+        MemoryMappedFile mmf, long fileLength, long headerSize = HEADER_SIZE)
     {
         ValidateDimensions(width, height, depth, chunkDim);
 
@@ -92,7 +92,8 @@ public class ChunkedVolume : IGrayscaleVolumeData
         _chunkCountZ = (depth + chunkDim - 1) / chunkDim;
 
         _mmf = mmf ?? throw new ArgumentNullException(nameof(mmf));
-        _viewAccessor = viewAccessor ?? throw new ArgumentNullException(nameof(viewAccessor));
+        _viewAccessor = new ChunkMappedAccessor(_mmf, headerSize,
+            checked((long)chunkDim * chunkDim * chunkDim), fileLength);
         _headerSize = headerSize;
         Chunks = null;
 
@@ -231,15 +232,11 @@ public class ChunkedVolume : IGrayscaleVolumeData
         finally { if (mappedPlane != null) ArrayPool<byte>.Shared.Return(mappedPlane); }
     }
 
-    public unsafe void ReadSliceXZ(int y, byte[] destination)
+    public void ReadSliceXZ(int y, byte[] destination)
     {
         if (y < 0 || y >= Height || destination == null || destination.Length < Width * Depth)
             throw new ArgumentException("Invalid XZ slice buffer.");
-        byte* pointer = null;
-        if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
-        try
         {
-            if (pointer != null) pointer += _viewAccessor.PointerOffset;
             var cy = y / ChunkDim; var localY = y % ChunkDim;
             for (var z = 0; z < Depth; z++)
             {
@@ -249,25 +246,20 @@ public class ChunkedVolume : IGrayscaleVolumeData
                     var xStart = cx * ChunkDim; var length = Math.Min(ChunkDim, Width - xStart);
                     var chunkIndex = GetChunkIndex(cx, cy, cz);
                     var localOffset = localZ * ChunkDim * ChunkDim + localY * ChunkDim;
-                    if (pointer != null)
-                        new ReadOnlySpan<byte>(pointer + CalculateGlobalOffset(chunkIndex, localOffset), length)
-                            .CopyTo(destination.AsSpan(z * Width + xStart, length));
+                    if (_useMemoryMapping)
+                        _viewAccessor.ReadArray(CalculateGlobalOffset(chunkIndex, localOffset),
+                            destination, z * Width + xStart, length);
                     else Array.Copy(Chunks[chunkIndex], localOffset, destination, z * Width + xStart, length);
                 }
             }
         }
-        finally { if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.ReleasePointer(); }
     }
 
-    public unsafe void ReadSliceYZ(int x, byte[] destination)
+    public void ReadSliceYZ(int x, byte[] destination)
     {
         if (x < 0 || x >= Width || destination == null || destination.Length < Height * Depth)
             throw new ArgumentException("Invalid YZ slice buffer.");
-        byte* pointer = null;
-        if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
-        try
         {
-            if (pointer != null) pointer += _viewAccessor.PointerOffset;
             var cx = x / ChunkDim; var localX = x % ChunkDim;
             for (var z = 0; z < Depth; z++)
             {
@@ -277,13 +269,12 @@ public class ChunkedVolume : IGrayscaleVolumeData
                     var cy = y / ChunkDim; var localY = y % ChunkDim;
                     var chunkIndex = GetChunkIndex(cx, cy, cz);
                     var localOffset = localZ * ChunkDim * ChunkDim + localY * ChunkDim + localX;
-                    destination[z * Height + y] = pointer != null
-                        ? *(pointer + CalculateGlobalOffset(chunkIndex, localOffset))
+                    destination[z * Height + y] = _useMemoryMapping
+                        ? _viewAccessor.ReadByte(CalculateGlobalOffset(chunkIndex, localOffset))
                         : Chunks[chunkIndex][localOffset];
                 }
             }
         }
-        finally { if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.ReleasePointer(); }
     }
 
     /// <summary>
@@ -351,9 +342,7 @@ public class ChunkedVolume : IGrayscaleVolumeData
             // Create memory mapped file
             var mmf = MemoryMappedFile.CreateFromFile(volumePath, FileMode.Open, null, 0,
                 MemoryMappedFileAccess.ReadWrite);
-            var accessor = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-
-            var volume = new ChunkedVolume(width, height, depth, chunkDim, mmf, accessor);
+            var volume = new ChunkedVolume(width, height, depth, chunkDim, mmf, totalSize);
             await ProcessImagesParallelAsync(volume, imageFiles, progress);
 
             return volume;
@@ -411,32 +400,27 @@ public class ChunkedVolume : IGrayscaleVolumeData
 
         {
             // Create memory-mapped volume
-            var mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.ReadWrite);
-            var accessor = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-
-            // Read header
-            var width = accessor.ReadInt32(0);
-            var height = accessor.ReadInt32(4);
-            var depth = accessor.ReadInt32(8);
-            var chunkDim = accessor.ReadInt32(12);
-            accessor.ReadInt32(16); // bits per pixel
-            var pixelSize = accessor.ReadDouble(20);
+            int width, height, depth, chunkDim;
+            double pixelSize;
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = new BinaryReader(stream))
+                (width, height, depth, chunkDim, pixelSize) = ReadHeader(reader);
 
             var countX = (width + chunkDim - 1) / chunkDim;
             var countY = (height + chunkDim - 1) / chunkDim;
             var countZ = (depth + chunkDim - 1) / chunkDim;
             var requiredLength = checked((long)HEADER_SIZE + (long)countX * countY * countZ *
                 chunkDim * chunkDim * chunkDim);
-            if (accessor.Capacity < requiredLength)
+            var fileLength = new FileInfo(path).Length;
+            if (fileLength < requiredLength)
             {
-                accessor.Dispose();
-                mmf.Dispose();
                 throw new InvalidDataException(
                     $"CT volume file is truncated or uses an incompatible chunk layout. " +
-                    $"Required {requiredLength:N0} bytes, found {new FileInfo(path).Length:N0}: {path}");
+                    $"Required {requiredLength:N0} bytes, found {fileLength:N0}: {path}");
             }
 
-            var volume = new ChunkedVolume(width, height, depth, chunkDim, mmf, accessor)
+            var mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.ReadWrite);
+            var volume = new ChunkedVolume(width, height, depth, chunkDim, mmf, fileLength)
             {
                 PixelSize = pixelSize
             };
