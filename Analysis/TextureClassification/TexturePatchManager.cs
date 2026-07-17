@@ -1,6 +1,7 @@
 // GAIA/Analysis/TextureClassification/TexturePatchManager.cs
 
 using GAIA.Data.CtImageStack;
+using GAIA.Data.VolumeData;
 using GAIA.Util;
 
 namespace GAIA.Analysis.TextureClassification;
@@ -177,14 +178,20 @@ public class TexturePatchManager : IDisposable
                 _dataset.VolumeData.ReadSliceZ(sliceIndex, buffer);
                 break;
             case 1:
-                for (var z = 0; z < _dataset.Depth; z++)
-                for (var x = 0; x < _dataset.Width; x++)
-                    buffer[z * _dataset.Width + x] = _dataset.VolumeData[x, sliceIndex, z];
+                if (_dataset.VolumeData is ChunkedVolume chunkedXz)
+                    chunkedXz.ReadSliceXZ(sliceIndex, buffer);
+                else
+                    for (var z = 0; z < _dataset.Depth; z++)
+                    for (var x = 0; x < _dataset.Width; x++)
+                        buffer[z * _dataset.Width + x] = _dataset.VolumeData[x, sliceIndex, z];
                 break;
             case 2:
-                for (var z = 0; z < _dataset.Depth; z++)
-                for (var y = 0; y < _dataset.Height; y++)
-                    buffer[z * _dataset.Height + y] = _dataset.VolumeData[sliceIndex, y, z];
+                if (_dataset.VolumeData is ChunkedVolume chunkedYz)
+                    chunkedYz.ReadSliceYZ(sliceIndex, buffer);
+                else
+                    for (var z = 0; z < _dataset.Depth; z++)
+                    for (var y = 0; y < _dataset.Height; y++)
+                        buffer[z * _dataset.Height + y] = _dataset.VolumeData[sliceIndex, y, z];
                 break;
         }
     }

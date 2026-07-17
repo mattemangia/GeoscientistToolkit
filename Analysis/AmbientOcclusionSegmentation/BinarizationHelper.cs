@@ -2,6 +2,7 @@
 
 using GAIA.Data.CtImageStack;
 using GAIA.Util;
+using System.Buffers;
 
 namespace GAIA.Analysis.AmbientOcclusionSegmentation;
 
@@ -21,17 +22,23 @@ public static class BinarizationHelper
         int height = dataset.Height;
         int depth = dataset.Depth;
 
+        var slice = ArrayPool<byte>.Shared.Rent(checked(width * height));
+        try
+        {
         for (int z = 0; z < depth; z += sampleRate)
         {
+            dataset.VolumeData.ReadSliceZ(z, slice);
             for (int y = 0; y < height; y += sampleRate)
             {
                 for (int x = 0; x < width; x += sampleRate)
                 {
-                    byte value = dataset.VolumeData[x, y, z];
+                    byte value = slice[y * width + x];
                     histogram[value]++;
                 }
             }
         }
+        }
+        finally { ArrayPool<byte>.Shared.Return(slice); }
 
         return histogram;
     }
@@ -43,17 +50,24 @@ public static class BinarizationHelper
     {
         var histogram = new int[256];
 
+        var width = dataset.Width;
+        var slice = ArrayPool<byte>.Shared.Rent(checked(width * dataset.Height));
+        try
+        {
         for (int z = region.MinZ; z < region.MaxZ; z += sampleRate)
         {
+            dataset.VolumeData.ReadSliceZ(z, slice);
             for (int y = region.MinY; y < region.MaxY; y += sampleRate)
             {
                 for (int x = region.MinX; x < region.MaxX; x += sampleRate)
                 {
-                    byte value = dataset.VolumeData[x, y, z];
+                    byte value = slice[y * width + x];
                     histogram[value]++;
                 }
             }
         }
+        }
+        finally { ArrayPool<byte>.Shared.Return(slice); }
 
         return histogram;
     }
