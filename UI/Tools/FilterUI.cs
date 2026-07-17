@@ -351,45 +351,10 @@ public class FilterUI : IDisposable
                 return;
             }
 
-            _statusMessage = "Reading source volume data...";
-            await Task.Delay(10);
-            var sourceData = dataset.VolumeData.GetAllData();
-            byte[] resultData;
-
             var width = dataset.Width;
             var height = dataset.Height;
             var depth = dataset.Depth;
-
-            if (_useGpu && _gpuProcessor != null && _gpuProcessor.IsInitialized)
-            {
-                _statusMessage = "Processing on GPU...";
-                resultData = _gpuProcessor.RunFilter(sourceData, width, height, depth, _selectedFilter, _kernelSize,
-                    _sigma, _sigmaColor, _nlmSearchRadius, _nlmPatchRadius, _unsharpAmount, _cannyLowThreshold,
-                    _cannyHighThreshold, _process3D, p => _progress = p, s => _statusMessage = s);
-
-                if (resultData == null)
-                {
-                    _statusMessage = "GPU not available for this config. Processing on CPU...";
-                    resultData = new byte[sourceData.Length];
-                    ApplyFilterCPU(sourceData, resultData, width, height, depth);
-                }
-            }
-            else
-            {
-                _statusMessage = "Processing on CPU...";
-                resultData = new byte[sourceData.Length];
-                ApplyFilterCPU(sourceData, resultData, width, height, depth);
-            }
-
-            _statusMessage = "Writing results back to volume...";
-            await Task.Delay(10);
-            for (var z = 0; z < depth; z++)
-            {
-                var sliceBuffer = new byte[width * height];
-                Buffer.BlockCopy(resultData, z * width * height, sliceBuffer, 0, sliceBuffer.Length);
-                dataset.VolumeData.WriteSliceZ(z, sliceBuffer);
-                _progress = (float)(z + 1) / depth;
-            }
+            await ApplyFilterStreamingAsync(dataset, width, height, depth);
 
             stopwatch.Stop();
             _statusMessage = $"Completed in {stopwatch.Elapsed.TotalSeconds:F2} seconds.";
@@ -405,6 +370,75 @@ public class FilterUI : IDisposable
         {
             _isProcessing = false;
             _progress = 0f;
+        }
+    }
+
+    private async Task ApplyFilterStreamingAsync(CtImageStackDataset dataset, int width, int height, int depth)
+    {
+        var sliceLength = checked(width * height);
+        var halo = _process3D ? Math.Max(1, _kernelSize / 2) : 0;
+        if (_process3D && _selectedFilter == FilterType.NonLocalMeans)
+            halo = Math.Max(halo, (int)Math.Ceiling(_nlmSearchRadius + _nlmPatchRadius));
+
+        // Source + result together stay near 256 MiB, independent of total volume depth.
+        const long workingBudget = 256L * 1024 * 1024;
+        var maximumSlabSlices = Math.Max(1L, workingBudget / Math.Max(1L, 2L * sliceLength));
+        var centralSlices = (int)Math.Clamp(maximumSlabSlices - 2L * halo, 1, 32);
+        var retainedOriginals = new Dictionary<int, byte[]>();
+        var gpuEnabled = _useGpu && _gpuProcessor is { IsInitialized: true };
+
+        for (var start = 0; start < depth; start += centralSlices)
+        {
+            var end = Math.Min(depth, start + centralSlices);
+            var sourceStart = Math.Max(0, start - halo);
+            var sourceEnd = Math.Min(depth, end + halo);
+            var slabDepth = sourceEnd - sourceStart;
+            var source = new byte[checked(sliceLength * slabDepth)];
+            _statusMessage = $"Reading filter slab {start + 1}-{end}/{depth}...";
+
+            for (var z = sourceStart; z < sourceEnd; z++)
+            {
+                var target = source.AsSpan((z - sourceStart) * sliceLength, sliceLength);
+                if (retainedOriginals.TryGetValue(z, out var retained)) retained.CopyTo(target);
+                else
+                {
+                    var slice = new byte[sliceLength];
+                    dataset.VolumeData.ReadSliceZ(z, slice);
+                    slice.CopyTo(target);
+                }
+            }
+
+            // Preserve the original tail before any output overwrites it; it is the left halo
+            // of the following slab.
+            retainedOriginals.Clear();
+            for (var z = Math.Max(sourceStart, end - halo); z < end; z++)
+                retainedOriginals[z] = source.AsSpan((z - sourceStart) * sliceLength, sliceLength).ToArray();
+
+            byte[] result = null;
+            if (gpuEnabled)
+            {
+                _statusMessage = $"Filtering slab {start + 1}-{end}/{depth} on GPU...";
+                result = _gpuProcessor.RunFilter(source, width, height, slabDepth, _selectedFilter, _kernelSize,
+                    _sigma, _sigmaColor, _nlmSearchRadius, _nlmPatchRadius, _unsharpAmount, _cannyLowThreshold,
+                    _cannyHighThreshold, _process3D, _ => { }, _ => { });
+                if (result == null) gpuEnabled = false;
+            }
+            if (result == null)
+            {
+                _statusMessage = $"Filtering slab {start + 1}-{end}/{depth} on CPU...";
+                result = new byte[source.Length];
+                ApplyFilterCPUToSubVolume(source, result, width, height, slabDepth);
+            }
+
+            _statusMessage = $"Writing filtered slices {start + 1}-{end}/{depth}...";
+            for (var z = start; z < end; z++)
+            {
+                var slice = new byte[sliceLength];
+                Buffer.BlockCopy(result, (z - sourceStart) * sliceLength, slice, 0, sliceLength);
+                dataset.VolumeData.WriteSliceZ(z, slice);
+                _progress = (z + 1f) / depth;
+            }
+            await Task.Yield();
         }
     }
 
