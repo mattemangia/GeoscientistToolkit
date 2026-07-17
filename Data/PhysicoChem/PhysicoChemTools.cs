@@ -283,18 +283,47 @@ public class PhysicoChemTools : IDatasetTools
         ImGui.Separator();
 
         ImGui.Text("Cell Management");
+        ImGui.TextDisabled("Click: select   Ctrl+click: toggle   Shift+click: range");
         ImGui.Separator();
 
         // Cell list
         ImGui.BeginChild("cell_list", new Vector2(200, 200), ImGuiChildFlags.Border);
-        foreach (var cell in dataset.Mesh.Cells.Values)
+        var cells = dataset.Mesh.Cells.Values.ToList();
+        for (var cellIndex = 0; cellIndex < cells.Count; cellIndex++)
         {
+            var cell = cells[cellIndex];
             var label = cell.IsVisible ? cell.ID : $"{cell.ID} (Hidden)";
-            if (ImGui.Selectable($"{label}##{cell.ID}", cell.ID == _selectedCellID))
+            var isSelected = dataset.SelectedCellIDs.Contains(cell.ID);
+            if (ImGui.Selectable($"{label}##{cell.ID}", isSelected))
             {
-                _selectedCellID = cell.ID;
-                dataset.SelectedCellIDs.Clear();
-                dataset.SelectedCellIDs.Add(cell.ID);
+                var io = ImGui.GetIO();
+                if (io.KeyShift && _selectedCellID != null)
+                {
+                    var anchorIndex = cells.FindIndex(candidate => candidate.ID == _selectedCellID);
+                    if (anchorIndex < 0) anchorIndex = cellIndex;
+                    if (!io.KeyCtrl) dataset.SelectedCellIDs.Clear();
+                    var first = Math.Min(anchorIndex, cellIndex);
+                    var last = Math.Max(anchorIndex, cellIndex);
+                    for (var index = first; index <= last; index++)
+                        if (!dataset.SelectedCellIDs.Contains(cells[index].ID))
+                            dataset.SelectedCellIDs.Add(cells[index].ID);
+                }
+                else if (io.KeyCtrl)
+                {
+                    if (!dataset.SelectedCellIDs.Remove(cell.ID))
+                        dataset.SelectedCellIDs.Add(cell.ID);
+                    _selectedCellID = cell.ID;
+                }
+                else
+                {
+                    dataset.SelectedCellIDs.Clear();
+                    dataset.SelectedCellIDs.Add(cell.ID);
+                    _selectedCellID = cell.ID;
+                }
+
+                // Shift keeps the original anchor, matching conventional range selection.
+                if (_selectedCellID == null)
+                    _selectedCellID = cell.ID;
             }
         }
         ImGui.EndChild();
