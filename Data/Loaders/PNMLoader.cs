@@ -26,8 +26,7 @@ public class PNMLoader : IDataLoader
                 progressReporter?.Report((0.1f, "Reading PNM file..."));
 
                 var jsonString = File.ReadAllText(FilePath);
-                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                var dto = JsonSerializer.Deserialize<PNMDatasetDTO>(jsonString, options);
+                var dto = JsonSerializer.Deserialize<PNMDatasetDTO>(jsonString, PnmJson.Indented);
 
                 if (dto == null)
                     throw new InvalidDataException("Failed to deserialize PNM file.");

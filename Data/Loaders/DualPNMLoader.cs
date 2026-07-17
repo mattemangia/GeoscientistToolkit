@@ -23,12 +23,7 @@ public class DualPNMLoader : IDataLoader
                 progressReporter?.Report((0.1f, "Reading Dual PNM file..."));
 
                 var jsonString = File.ReadAllText(FilePath);
-                var options = new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                };
-
-                var dto = JsonSerializer.Deserialize<DualPNMDatasetDTO>(jsonString, options);
+                var dto = JsonSerializer.Deserialize<DualPNMDatasetDTO>(jsonString, PnmJson.CamelCase);
 
                 if (dto == null)
                     throw new InvalidDataException("Failed to deserialize Dual PNM file.");

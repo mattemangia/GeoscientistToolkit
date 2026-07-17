@@ -462,13 +462,7 @@ public class DualPNMDataset : PNMDataset
             }
         };
 
-        var options = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
-
-        var json = JsonSerializer.Serialize(dualData, options);
+        var json = JsonSerializer.Serialize(dualData, PnmJson.CamelCase);
         File.WriteAllText(outputPath, json);
 
         Logger.Log($"Exported Dual PNM to: {outputPath}");

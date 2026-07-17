@@ -108,6 +108,14 @@ public class PNMViewer : IDatasetViewer
     private float _minColorValue;
     private float _maxColorValue = 1f;
 
+    // HUD overlays
+    private bool _showStatsOverlay = true;
+    private bool _showLegendOverlay = true;
+
+    // Derived network figures, recomputed only when the network changes rather than per frame.
+    private NetworkStatistics _statistics;
+    private readonly Dictionary<int, List<Throat>> _poreAdjacency = new();
+
     public PNMViewer(PNMDataset dataset)
     {
         _dataset = dataset;
@@ -408,26 +416,25 @@ public class PNMViewer : IDatasetViewer
 
     private void DrawScreenshotNotification(Vector2 viewPos, Vector2 viewSize)
     {
-        ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X / 2, viewPos.Y + 50), ImGuiCond.Always,
-            new Vector2(0.5f, 0));
-        ImGui.SetNextWindowBgAlpha(0.9f * (_screenshotNotificationTimer / 3.0f));
+        var size = new Vector2(Math.Min(320f, viewSize.X - 20f), 56f);
+        var position = viewPos + new Vector2((viewSize.X - size.X) * 0.5f, 50f);
+        var fade = Math.Clamp(_screenshotNotificationTimer / 3.0f, 0f, 1f);
 
-        ImGui.Begin("##ScreenshotNotification",
-            ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoFocusOnAppearing);
-
-        if (_lastScreenshotPath.StartsWith("Error"))
+        if (BeginOverlay("##PNMScreenshotNotification", position, size, false, 0.9f * fade))
         {
-            ImGui.TextColored(new Vector4(1.0f, 0.2f, 0.2f, 1.0f), "Screenshot failed!");
-            ImGui.Text(_lastScreenshotPath);
-        }
-        else
-        {
-            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Screenshot saved!");
-            ImGui.Text(Path.GetFileName(_lastScreenshotPath));
+            if (_lastScreenshotPath.StartsWith("Error"))
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.2f, 0.2f, fade), "Screenshot failed!");
+                ImGui.TextColored(new Vector4(1f, 1f, 1f, fade), _lastScreenshotPath);
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, fade), "Screenshot saved!");
+                ImGui.TextColored(new Vector4(1f, 1f, 1f, fade), Path.GetFileName(_lastScreenshotPath));
+            }
         }
 
-        ImGui.End();
+        EndOverlay();
     }
 
     private void TakeAndSaveScreenshot(string path)
@@ -612,6 +619,10 @@ public class PNMViewer : IDatasetViewer
         ImGui.Checkbox("Pores", ref _showPores);
         ImGui.SameLine();
         ImGui.Checkbox("Throats", ref _showThroats);
+        ImGui.SameLine();
+        ImGui.Checkbox("Legend", ref _showLegendOverlay);
+        ImGui.SameLine();
+        ImGui.Checkbox("Stats", ref _showStatsOverlay);
         ImGui.SameLine();
 
         if (_hasFlowData)
@@ -864,6 +875,8 @@ public class PNMViewer : IDatasetViewer
 
     private void RebuildGeometryFromDataset()
     {
+        RecomputeStatistics();
+
         var poreInstances = new List<OpenTkPnmRenderer.PoreGpuData>();
         foreach (var p in _dataset.Pores)
         {
@@ -1197,50 +1210,42 @@ public class PNMViewer : IDatasetViewer
         _projMatrix = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspectRatio, nearPlane, farPlane);
     }
 
+    /// <summary>
+    ///     Draws the HUD read-outs over the render target.
+    ///     These are child windows of the viewer, not top-level ones: as siblings they lost the
+    ///     z-order fight the instant a click focused the viewer, and the opaque render target then
+    ///     hid them. A child always draws above its parent's content and clips to it.
+    /// </summary>
     private void DrawOverlayWindows(Vector2 viewPos, Vector2 viewSize)
     {
-        var margin = 10f;
-        var legendWidth = Math.Clamp(viewSize.X - margin * 2, 120f, 180f);
-        var legendHeight = Math.Clamp(viewSize.Y - margin * 2, 100f, 280f);
-        ImGui.SetNextWindowPos(new Vector2(
-            Math.Max(viewPos.X + margin, viewPos.X + viewSize.X - legendWidth - margin), viewPos.Y + margin),
-            ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Vector2(legendWidth, legendHeight), ImGuiCond.Always);
-        ImGui.SetNextWindowBgAlpha(0.8f);
-        ImGui.Begin(_legendWindowId,
-            ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
-            ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoBringToFrontOnFocus);
-        DrawLegendContent();
-        ImGui.End();
+        const float margin = 10f;
+
+        if (_showLegendOverlay && viewSize.X >= 220 && viewSize.Y >= 140)
+        {
+            var legendWidth = Math.Clamp(viewSize.X - margin * 2, 120f, 190f);
+            var legendHeight = Math.Clamp(viewSize.Y - margin * 2, 100f, 300f);
+            var position = viewPos + new Vector2(viewSize.X - legendWidth - margin, margin);
+            if (BeginOverlay(_legendWindowId, position, new Vector2(legendWidth, legendHeight), false))
+                DrawLegendContent();
+            EndOverlay();
+        }
 
         if (_showFlowVisualization && _hasFlowData && viewSize.X >= 230 && viewSize.Y >= 310)
         {
-            ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X - 220, viewPos.Y + viewSize.Y - 150),
-                ImGuiCond.Always);
-            ImGui.SetNextWindowSize(new Vector2(200, 140), ImGuiCond.Always);
-            ImGui.SetNextWindowBgAlpha(0.85f);
-
-            ImGui.Begin(_flowLegendWindowId,
-                ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
-                ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoBringToFrontOnFocus);
-            DrawFlowLegend();
-            ImGui.End();
+            var position = viewPos + new Vector2(viewSize.X - 210 - margin, viewSize.Y - 140 - margin);
+            if (BeginOverlay(_flowLegendWindowId, position, new Vector2(210, 140), false))
+                DrawFlowLegend();
+            EndOverlay();
         }
 
-        if (viewSize.X >= 430 && viewSize.Y >= 220)
+        if (_showStatsOverlay && viewSize.X >= 460 && viewSize.Y >= 260)
         {
-            var statsWidth = Math.Min(400, viewSize.X - margin * 2);
-            ImGui.SetNextWindowPos(new Vector2(viewPos.X + margin, viewPos.Y + viewSize.Y - 180), ImGuiCond.Always);
-            ImGui.SetNextWindowSize(new Vector2(statsWidth, 170), ImGuiCond.Always);
-            ImGui.SetNextWindowBgAlpha(0.8f);
-            ImGui.Begin(_statsWindowId,
-                ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
-                ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoBringToFrontOnFocus);
-            DrawStatisticsContent();
-            ImGui.End();
+            var statsWidth = Math.Min(560f, viewSize.X - margin * 2);
+            const float statsHeight = 208f;
+            var position = viewPos + new Vector2(margin, viewSize.Y - statsHeight - margin);
+            if (BeginOverlay(_statsWindowId, position, new Vector2(statsWidth, statsHeight), false))
+                DrawStatisticsContent();
+            EndOverlay();
         }
 
         if (_selectedPoreId >= 0)
@@ -1252,17 +1257,40 @@ public class PNMViewer : IDatasetViewer
                 return;
             }
 
-            ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + 10), ImGuiCond.Always);
-            ImGui.SetNextWindowSize(new Vector2(Math.Min(320, viewSize.X - margin * 2),
-                Math.Min(280, viewSize.Y - margin * 2)), ImGuiCond.Always);
-            ImGui.SetNextWindowBgAlpha(0.85f);
-
-            ImGui.Begin(_selectedWindowId,
-                ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
-            DrawSelectedPoreContent();
-            ImGui.End();
+            var width = Math.Min(340f, viewSize.X - margin * 2);
+            var height = Math.Min(330f, viewSize.Y - margin * 2);
+            // The only interactive overlay: it carries the Deselect button.
+            if (BeginOverlay(_selectedWindowId, viewPos + new Vector2(margin, margin),
+                    new Vector2(width, height), true))
+                DrawSelectedPoreContent();
+            EndOverlay();
         }
+    }
+
+    private static bool BeginOverlay(string id, Vector2 position, Vector2 size, bool interactive,
+        float backgroundAlpha = 0.88f)
+    {
+        ImGui.SetCursorScreenPos(position);
+        ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(0.08f, 0.09f, 0.11f, backgroundAlpha));
+        ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 5f);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8f, 8f));
+
+        var flags = ImGuiWindowFlags.NoSavedSettings;
+        // Passive read-outs must not swallow hover, so a drag across them keeps orbiting the camera.
+        // Interactive panels keep their scrollbar: their content grows with the analyses that ran.
+        if (!interactive)
+            flags |= ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoScrollbar |
+                     ImGuiWindowFlags.NoScrollWithMouse;
+
+        return ImGui.BeginChild(id, size, ImGuiChildFlags.Border, flags);
+    }
+
+    private static void EndOverlay()
+    {
+        // EndChild pairs with BeginChild regardless of its return value.
+        ImGui.EndChild();
+        ImGui.PopStyleVar(2);
+        ImGui.PopStyleColor();
     }
 
     private void DrawFlowLegend()
@@ -1571,40 +1599,77 @@ public class PNMViewer : IDatasetViewer
         return new Vector4(r_default, g_default, b_default, 1.0f);
     }
 
+    /// <summary> Dimmed label followed by its value, so a column scans as a label/value pair. </summary>
+    private static void Metric(string label, string value)
+    {
+        ImGui.TextDisabled(label);
+        ImGui.SameLine();
+        ImGui.Text(value);
+    }
+
+    /// <summary> Renders a quantity, or an em dash when the analysis producing it has not been run. </summary>
+    private static void Metric(string label, float value, string format, string unit)
+    {
+        ImGui.TextDisabled(label);
+        ImGui.SameLine();
+        if (value > 0)
+            ImGui.Text($"{value.ToString(format)}{unit}");
+        else
+            ImGui.TextDisabled("—");
+    }
+
     private void DrawStatisticsContent()
     {
         if (_dataset == null) return;
 
-        ImGui.Columns(2);
+        var stats = _statistics;
 
         ImGui.Text("Network Statistics");
+        ImGui.SameLine();
+        ImGui.TextDisabled($"— {_dataset.Name}");
+        if (_dataset.ActiveFilter != null)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(1f, 0.75f, 0.2f, 1f), "[filtered]");
+        }
+
         ImGui.Separator();
-        ImGui.Text($"Pores: {_dataset.Pores.Count:N0}");
-        ImGui.Text($"Throats: {_dataset.Throats.Count:N0}");
-        ImGui.Text($"Voxel Size: {_dataset.VoxelSize:F2} μm");
-        ImGui.Text($"Tortuosity: {_dataset.Tortuosity:F3}");
+        ImGui.Columns(3, "##PNMStatsColumns", false);
+
+        // --- Topology ---
+        ImGui.TextColored(new Vector4(0.45f, 0.75f, 1f, 1f), "Topology");
+        Metric("Pores:", $"{stats.PoreCount:N0}");
+        Metric("Throats:", $"{stats.ThroatCount:N0}");
+        var isolatedFraction = stats.PoreCount > 0 ? stats.IsolatedPoreCount / (float)stats.PoreCount : 0f;
+        Metric("Isolated:", $"{stats.IsolatedPoreCount:N0} ({isolatedFraction:P1})");
+        Metric("Coord. number:", $"{stats.MeanCoordination:F2}");
+        Metric("  range:", $"{stats.MinCoordination:F0} – {stats.MaxCoordination:F0}");
 
         ImGui.NextColumn();
 
-        ImGui.Text("Transport Properties:");
+        // --- Geometry ---
+        ImGui.TextColored(new Vector4(0.45f, 0.75f, 1f, 1f), "Geometry");
+        Metric("Voxel size:", $"{_dataset.VoxelSize:F3} μm");
+        Metric("Volume:", $"{_dataset.ImageWidth}×{_dataset.ImageHeight}×{_dataset.ImageDepth} vox");
+        Metric("Centre extent:", $"{stats.ExtentUm.X:F0}×{stats.ExtentUm.Y:F0}×{stats.ExtentUm.Z:F0} μm");
+        Metric("Porosity:", stats.BulkVolumeUm3 > 0 ? $"{stats.Porosity:P2}" : "—");
+        Metric("Pore r:", $"{stats.MinPoreRadiusUm:F2} / {stats.MeanPoreRadiusUm:F2} / {stats.MaxPoreRadiusUm:F2} μm");
+        Metric("Throat r:",
+            $"{stats.MinThroatRadiusUm:F2} / {stats.MeanThroatRadiusUm:F2} / {stats.MaxThroatRadiusUm:F2} μm");
 
-        // Show diffusivity if available
-        if (_dataset.EffectiveDiffusivity > 0)
-        {
-            ImGui.Text($"D_eff: {_dataset.EffectiveDiffusivity:E3} m²/s");
-            ImGui.Text($"Form. Factor: {_dataset.FormationFactor:F2}");
-        }
+        ImGui.NextColumn();
 
-        // Show permeability if available
-        if (_dataset.DarcyPermeability > 0)
-        {
-            ImGui.Text($"Perm: {_dataset.DarcyPermeability:F2} mD");
-            if (_dataset.Tortuosity > 0)
-            {
-                var corrected = _dataset.DarcyPermeability / (_dataset.Tortuosity * _dataset.Tortuosity);
-                ImGui.Text($"  τ² Corr: {corrected:F2} mD");
-            }
-        }
+        // --- Transport ---
+        ImGui.TextColored(new Vector4(0.45f, 0.75f, 1f, 1f), "Transport");
+        Metric("Tortuosity:", _dataset.Tortuosity, "F3", "");
+        Metric("k Darcy:", _dataset.DarcyPermeability, "F2", " mD");
+        Metric("k N-S:", _dataset.NavierStokesPermeability, "F2", " mD");
+        Metric("k LBM:", _dataset.LatticeBoltzmannPermeability, "F2", " mD");
+        if (_dataset.DarcyPermeability > 0 && _dataset.Tortuosity > 0)
+            Metric("  τ² corrected:",
+                $"{_dataset.DarcyPermeability / (_dataset.Tortuosity * _dataset.Tortuosity):F2} mD");
+        Metric("D_eff:", _dataset.EffectiveDiffusivity, "E3", " m²/s");
+        Metric("Form. factor:", _dataset.FormationFactor, "F2", "");
 
         ImGui.Columns(1);
     }
@@ -1621,19 +1686,37 @@ public class PNMViewer : IDatasetViewer
             return;
         }
 
+        var voxelSize = EffectiveVoxelSize;
+
         ImGui.Text($"Selected Pore #{_selectedPore.ID}");
         ImGui.Separator();
 
-        ImGui.Text("Position:");
-        ImGui.Text($"  X: {_selectedPore.Position.X:F2}");
-        ImGui.Text($"  Y: {_selectedPore.Position.Y:F2}");
-        ImGui.Text($"  Z: {_selectedPore.Position.Z:F2}");
+        var position = _selectedPore.Position;
+        Metric("Position:", $"{position.X:F1}, {position.Y:F1}, {position.Z:F1} vox");
+        Metric("", $"{position.X * voxelSize:F1}, {position.Y * voxelSize:F1}, {position.Z * voxelSize:F1} μm");
+        Metric("Radius:", $"{_selectedPore.Radius:F3} vox ({_selectedPore.Radius * voxelSize:F2} μm)");
+        Metric("Volume:", $"{_selectedPore.VolumeVoxels:F0} vox³ ({PhysicalVolume(_selectedPore):F2} μm³)");
+        Metric("Surface area:", $"{_selectedPore.Area:F1} vox² ({_selectedPore.Area * voxelSize * voxelSize:F1} μm²)");
+        Metric("Connections:", $"{_selectedPore.Connections}");
 
-        ImGui.Text($"Radius: {_selectedPore.Radius:F3} vox ({_selectedPore.Radius * _dataset.VoxelSize:F2} μm)");
-        ImGui.Text($"Volume: {_selectedPore.VolumeVoxels:F0} vox³");
-        ImGui.Text($"        ({_selectedPore.VolumePhysical:F2} μm³)");
-        ImGui.Text($"Surface Area: {_selectedPore.Area:F1} vox²");
-        ImGui.Text($"Connections: {_selectedPore.Connections}");
+        var equivalentDiameter = 2f * _selectedPore.Radius * voxelSize;
+        Metric("Equiv. diameter:", $"{equivalentDiameter:F2} μm");
+
+        if (_poreAdjacency.TryGetValue(_selectedPore.ID, out var connectedThroats) && connectedThroats.Count > 0)
+        {
+            ImGui.Separator();
+            ImGui.Text($"Connected Throats ({connectedThroats.Count})");
+            if (ImGui.BeginChild("##PNMConnectedThroats", new Vector2(0, 74), ImGuiChildFlags.None))
+                foreach (var throat in connectedThroats)
+                {
+                    var neighbour = throat.Pore1ID == _selectedPore.ID ? throat.Pore2ID : throat.Pore1ID;
+                    ImGui.TextDisabled($"#{throat.ID}");
+                    ImGui.SameLine();
+                    ImGui.Text($"→ pore {neighbour}, r {throat.Radius * voxelSize:F2} μm");
+                }
+
+            ImGui.EndChild();
+        }
 
         if (_hasFlowData && _porePressures.TryGetValue(_selectedPore.ID, out var pressure))
         {
@@ -1715,6 +1798,144 @@ public class PNMViewer : IDatasetViewer
 
     private static float SafeRadius(Pore pore) =>
         float.IsFinite(pore.Radius) && pore.Radius > 0 ? pore.Radius : 0.1f;
+
+    #endregion
+
+    #region Derived Statistics
+
+    /// <summary>
+    ///     Network figures derived from the visible pores/throats. Radii and volumes are stored in
+    ///     physical units here: pores and throats carry voxel coordinates, and the conversion to
+    ///     micrometres belongs at the presentation boundary.
+    /// </summary>
+    private readonly struct NetworkStatistics
+    {
+        public int PoreCount { get; init; }
+        public int ThroatCount { get; init; }
+        public int IsolatedPoreCount { get; init; }
+
+        public float MinCoordination { get; init; }
+        public float MeanCoordination { get; init; }
+        public float MaxCoordination { get; init; }
+
+        public float MinPoreRadiusUm { get; init; }
+        public float MeanPoreRadiusUm { get; init; }
+        public float MaxPoreRadiusUm { get; init; }
+
+        public float MinThroatRadiusUm { get; init; }
+        public float MeanThroatRadiusUm { get; init; }
+        public float MaxThroatRadiusUm { get; init; }
+
+        public double PoreVolumeUm3 { get; init; }
+        public double BulkVolumeUm3 { get; init; }
+        public double Porosity { get; init; }
+
+        /// <summary> Bounding box of the pore centres; it excludes the pore radii at either end. </summary>
+        public Vector3 ExtentUm { get; init; }
+    }
+
+    /// <summary> Voxel edge in µm, falling back to 1 so unscaled datasets read out in voxel units. </summary>
+    private float EffectiveVoxelSize => _dataset.VoxelSize > 0 ? _dataset.VoxelSize : 1f;
+
+    /// <summary>
+    ///     Physical pore volume, falling back to voxel counting when the generator left it unset.
+    ///     VoxelSize is the geometric mean of the three voxel edges, so VoxelSize³ equals vx·vy·vz
+    ///     and this fallback agrees exactly with the VolumePhysical the generator computes.
+    /// </summary>
+    private double PhysicalVolume(Pore pore)
+    {
+        if (pore.VolumePhysical > 0) return pore.VolumePhysical;
+        return pore.VolumeVoxels * Math.Pow(EffectiveVoxelSize, 3);
+    }
+
+    private void RecomputeStatistics()
+    {
+        _poreAdjacency.Clear();
+
+        var pores = _dataset.Pores;
+        var throats = _dataset.Throats;
+        if (pores == null || pores.Count == 0)
+        {
+            _statistics = default;
+            return;
+        }
+
+        foreach (var throat in throats ?? new List<Throat>())
+        {
+            if (!_poreAdjacency.TryGetValue(throat.Pore1ID, out var first))
+                _poreAdjacency[throat.Pore1ID] = first = new List<Throat>();
+            first.Add(throat);
+
+            if (!_poreAdjacency.TryGetValue(throat.Pore2ID, out var second))
+                _poreAdjacency[throat.Pore2ID] = second = new List<Throat>();
+            second.Add(throat);
+        }
+
+        var voxelSize = EffectiveVoxelSize;
+        double poreVolume = 0;
+        double radiusSum = 0;
+        long connectionSum = 0;
+        var isolated = 0;
+        var minRadius = float.MaxValue;
+        var maxRadius = 0f;
+        var minConnections = int.MaxValue;
+        var maxConnections = 0;
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+
+        foreach (var pore in pores)
+        {
+            // Coordination is counted from the visible throats rather than from Pore.Connections:
+            // the generator sets that field to the degree in the complete network and ApplyFilter
+            // never recomputes it, so under a filter it would contradict the throats on screen.
+            var degree = _poreAdjacency.TryGetValue(pore.ID, out var incident) ? incident.Count : 0;
+
+            poreVolume += PhysicalVolume(pore);
+            radiusSum += pore.Radius;
+            connectionSum += degree;
+            if (degree == 0) isolated++;
+            minRadius = Math.Min(minRadius, pore.Radius);
+            maxRadius = Math.Max(maxRadius, pore.Radius);
+            minConnections = Math.Min(minConnections, degree);
+            maxConnections = Math.Max(maxConnections, degree);
+            min = Vector3.Min(min, pore.Position);
+            max = Vector3.Max(max, pore.Position);
+        }
+
+        double throatRadiusSum = 0;
+        var minThroat = float.MaxValue;
+        var maxThroat = 0f;
+        foreach (var throat in throats ?? new List<Throat>())
+        {
+            throatRadiusSum += throat.Radius;
+            minThroat = Math.Min(minThroat, throat.Radius);
+            maxThroat = Math.Max(maxThroat, throat.Radius);
+        }
+
+        var throatCount = throats?.Count ?? 0;
+        var bulkVolume = (double)_dataset.ImageWidth * _dataset.ImageHeight * _dataset.ImageDepth *
+                         Math.Pow(voxelSize, 3);
+
+        _statistics = new NetworkStatistics
+        {
+            PoreCount = pores.Count,
+            ThroatCount = throatCount,
+            IsolatedPoreCount = isolated,
+            MinCoordination = minConnections == int.MaxValue ? 0 : minConnections,
+            MeanCoordination = (float)connectionSum / pores.Count,
+            MaxCoordination = maxConnections,
+            MinPoreRadiusUm = (minRadius == float.MaxValue ? 0 : minRadius) * voxelSize,
+            MeanPoreRadiusUm = (float)(radiusSum / pores.Count) * voxelSize,
+            MaxPoreRadiusUm = maxRadius * voxelSize,
+            MinThroatRadiusUm = (minThroat == float.MaxValue ? 0 : minThroat) * voxelSize,
+            MeanThroatRadiusUm = throatCount > 0 ? (float)(throatRadiusSum / throatCount) * voxelSize : 0,
+            MaxThroatRadiusUm = maxThroat * voxelSize,
+            PoreVolumeUm3 = poreVolume,
+            BulkVolumeUm3 = bulkVolume,
+            Porosity = bulkVolume > 0 ? poreVolume / bulkVolume : 0,
+            ExtentUm = (max - min) * voxelSize
+        };
+    }
 
     #endregion
 }

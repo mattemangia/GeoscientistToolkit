@@ -187,8 +187,7 @@ public class PNMDataset : Dataset, ISerializableDataset
             try
             {
                 var jsonString = File.ReadAllText(FilePath);
-                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                var dto = JsonSerializer.Deserialize<PNMDatasetDTO>(jsonString, options);
+                var dto = JsonSerializer.Deserialize<PNMDatasetDTO>(jsonString, PnmJson.Indented);
 
                 if (dto != null)
                 {
@@ -339,8 +338,7 @@ public class PNMDataset : Dataset, ISerializableDataset
         // are intentional: an active viewer filter must never discard network data on disk.
         var dto = (PNMDatasetDTO)ToSerializableObject();
         dto.FilePath = fullPath;
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        var jsonString = JsonSerializer.Serialize(dto, options);
+        var jsonString = JsonSerializer.Serialize(dto, PnmJson.Indented);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath) ?? ".");
         var temporaryPath = fullPath + $".{Guid.NewGuid():N}.tmp";
         try
@@ -547,37 +545,4 @@ public class PNMDataset : Dataset, ISerializableDataset
         InitializeFromCurrentLists();
     }
 
-    public void ExportToJson(string path, bool exportOriginal = false, bool indented = true)
-    {
-        var poresToWrite = exportOriginal ? _poresOriginal : Pores;
-        var throatsToWrite = exportOriginal ? _throatsOriginal : Throats;
-
-        var dto = new PNMDatasetDTO
-        {
-            TypeName = nameof(PNMDataset), Name = Name, FilePath = FilePath,
-            VoxelSize = VoxelSize,
-            ImageWidth = ImageWidth, ImageHeight = ImageHeight, ImageDepth = ImageDepth,
-            Tortuosity = Tortuosity,
-            DarcyPermeability = DarcyPermeability,
-            NavierStokesPermeability = NavierStokesPermeability,
-            LatticeBoltzmannPermeability = LatticeBoltzmannPermeability,
-            BulkDiffusivity = BulkDiffusivity, EffectiveDiffusivity = EffectiveDiffusivity,
-            FormationFactor = FormationFactor, TransportTortuosity = TransportTortuosity,
-            Pores = poresToWrite.Select(p => new PoreDTO
-            {
-                ID = p.ID, Position = p.Position, Area = p.Area,
-                VolumeVoxels = p.VolumeVoxels, VolumePhysical = p.VolumePhysical,
-                Connections = p.Connections, Radius = p.Radius
-            }).ToList(),
-            Throats = throatsToWrite.Select(t => new ThroatDTO
-            {
-                ID = t.ID, Pore1ID = t.Pore1ID, Pore2ID = t.Pore2ID, Radius = t.Radius
-            }).ToList()
-        };
-        var options = new JsonSerializerOptions { WriteIndented = indented };
-        File.WriteAllText(path, JsonSerializer.Serialize(dto, options));
-
-        // Update the FilePath after successful export
-        FilePath = path;
-    }
 }

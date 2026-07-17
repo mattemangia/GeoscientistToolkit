@@ -23,8 +23,13 @@ public class DualPNMVerificationTests
                 Tortuosity = 1.7f, DarcyPermeability = 12.5f, BulkDiffusivity = 2.3e-9f,
                 EffectiveDiffusivity = 8.1e-10f, FormationFactor = 2.84f, TransportTortuosity = 1.91f
             };
-            source.Pores.Add(new Pore { ID = 1, Position = Vector3.Zero, Radius = 2 });
-            source.Pores.Add(new Pore { ID = 2, Position = new Vector3(10, 0, 0), Radius = 3 });
+            // Distinct non-zero coordinates on every axis: Vector3 exposes X/Y/Z as fields, which
+            // System.Text.Json drops without a converter, and the network then collapses onto the
+            // origin. Positions left at Vector3.Zero would let that regression pass unnoticed.
+            var firstPosition = new Vector3(12.5f, 7.25f, 31f);
+            var secondPosition = new Vector3(22.5f, 17.75f, 3f);
+            source.Pores.Add(new Pore { ID = 1, Position = firstPosition, Radius = 2 });
+            source.Pores.Add(new Pore { ID = 2, Position = secondPosition, Radius = 3 });
             source.Throats.Add(new Throat { ID = 1, Pore1ID = 1, Pore2ID = 2, Radius = 1 });
             source.InitializeFromCurrentLists();
 
@@ -37,14 +42,19 @@ public class DualPNMVerificationTests
             Assert.Single(reopened.Throats);
             Assert.Equal(40, reopened.ImageWidth);
             Assert.Equal(20, reopened.ImageDepth);
+            Assert.Equal(2.5f, reopened.VoxelSize);
             Assert.Equal(source.DarcyPermeability, reopened.DarcyPermeability);
             Assert.Equal(source.EffectiveDiffusivity, reopened.EffectiveDiffusivity);
             Assert.Equal(source.FormationFactor, reopened.FormationFactor);
+            Assert.Equal(firstPosition, reopened.Pores.Single(p => p.ID == 1).Position);
+            Assert.Equal(secondPosition, reopened.Pores.Single(p => p.ID == 2).Position);
             Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
 
             var imported = Assert.IsType<PNMDataset>(new PNMLoader(path).LoadAsync(null).GetAwaiter().GetResult());
             Assert.Equal(2, imported.Pores.Count);
             Assert.Single(imported.Throats);
+            Assert.Equal(firstPosition, imported.Pores.Single(p => p.ID == 1).Position);
+            Assert.Equal(secondPosition, imported.Pores.Single(p => p.ID == 2).Position);
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }

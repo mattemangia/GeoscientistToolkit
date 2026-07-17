@@ -33,6 +33,7 @@ public static class ProjectSerializer
             new DatasetDTOConverter(),
             new Vector4JsonConverter(),
             new Vector3JsonConverter(),
+            new Vector2JsonConverter(),
             new QuaternionJsonConverter()
         }
     };
