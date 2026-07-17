@@ -575,7 +575,16 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         if (ImGui.IsMouseReleased(ImGuiMouseButton.Middle)) _panning = false;
         var delta = mouse - _lastMouse; _lastMouse = mouse;
         if (_dragging) { _cameraYaw += delta.X * 0.008f; _cameraPitch = Math.Clamp(_cameraPitch - delta.Y * 0.008f, -1.5f, 1.5f); }
-        if (_panning) _cameraTarget += new Vector3(-delta.X, delta.Y, 0) * (_cameraDistance * 0.001f);
+        if (_panning)
+        {
+            // Pan in the camera's image plane. Moving along global X/Y made a vertical drag turn
+            // into a dolly movement after orbiting the volume, while lateral movement could almost
+            // disappear depending on yaw.
+            var forward = Vector3.Normalize(_cameraTarget - CameraPosition);
+            var right = Vector3.Normalize(Vector3.Cross(forward, Vector3.UnitY));
+            var up = Vector3.Normalize(Vector3.Cross(right, forward));
+            _cameraTarget += (-delta.X * right + delta.Y * up) * (_cameraDistance * 0.001f);
+        }
         if (Math.Abs(io.MouseWheel) > 0) _cameraDistance = Math.Clamp(_cameraDistance * MathF.Pow(0.88f, io.MouseWheel), 0.15f, 20f);
         UpdateCamera();
     }

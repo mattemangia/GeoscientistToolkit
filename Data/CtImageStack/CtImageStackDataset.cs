@@ -403,8 +403,24 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
         {
             SaveVirtualThresholdRules();
             SaveMaterials();
+            InvalidateLabelRenderCache();
         }, cancellationToken).ConfigureAwait(false);
         progress?.Report(1f);
+    }
+
+    private void InvalidateLabelRenderCache()
+    {
+        var cachePath = GetLabelRenderCachePath();
+        try
+        {
+            if (File.Exists(cachePath)) File.Delete(cachePath);
+        }
+        catch (Exception ex)
+        {
+            // The canonical Labels.bin is already safely persisted. Do not report the complete
+            // save as failed solely because an optional derived cache is temporarily locked.
+            Logger.LogWarning($"[CT] Could not invalidate stale label render cache '{cachePath}': {ex.Message}");
+        }
     }
 
     // --- NEW METHOD: Save materials to a local JSON file ---

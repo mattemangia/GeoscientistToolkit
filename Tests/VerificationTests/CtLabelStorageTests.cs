@@ -478,6 +478,45 @@ public sealed class CtLabelStorageTests
     }
 
     [Fact]
+    public async Task ExplicitPersistence_PreservesEditsAddedAfterExistingLabelImportAndInvalidates3DCache()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"gaia-persist-edit-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var storageName = Path.GetFileName(directory);
+        var volumePath = Path.Combine(directory, storageName + ".Volume.bin");
+        var labelPath = Path.Combine(directory, storageName + ".Labels.bin");
+        var renderCachePath = labelPath + ".renderlod";
+        try
+        {
+            using (var grayscale = new ChunkedVolume(12, 9, 5, 4))
+            {
+                grayscale.Fill(120);
+                await grayscale.SaveAsBinAsync(volumePath);
+            }
+            using (var imported = new ChunkedLabelVolume(12, 9, 5, 4, false))
+            {
+                imported[1, 1, 1] = 3;
+                imported.SaveAsBin(labelPath);
+            }
+            await File.WriteAllBytesAsync(renderCachePath, new byte[] { 1, 2, 3, 4 });
+
+            var dataset = new CtImageStackDataset("existing-label-edit", directory);
+            dataset.Load();
+            dataset.LabelData[10, 7, 4] = 8;
+            await dataset.PersistCtDataAsync();
+            dataset.Unload();
+
+            Assert.False(File.Exists(renderCachePath));
+            var reopened = new CtImageStackDataset("existing-label-reopened", directory);
+            reopened.Load();
+            Assert.Equal(3, reopened.LabelData[1, 1, 1]);
+            Assert.Equal(8, reopened.LabelData[10, 7, 4]);
+            reopened.Unload();
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public async Task CtOperationCoordinator_AlwaysRunsOffCallerAndSerializesOperations()
     {
         using var grayscale = new ChunkedVolume(2, 2, 1, 2);
