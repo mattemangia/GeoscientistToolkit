@@ -288,6 +288,13 @@ public class PhysicoChemViewer : IDatasetViewer
 
         ImGui.SetCursorScreenPos(cursorPos);
         ImGui.Image((IntPtr)_renderer.ColorTexture, availableSize, new Vector2(0, 1), new Vector2(1, 0));
+
+        // Image is display-only and does not acquire an active ImGui ID. Without an
+        // interactive item here, dragging over the viewport moves the parent window.
+        // Overlay a hit area so picking and camera gestures remain owned by the reactor.
+        ImGui.SetCursorScreenPos(cursorPos);
+        ImGui.InvisibleButton("##PhysicoChem3DViewport", availableSize,
+            ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
         var isHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         HandleMouseInput(isHovered || _isDragging || _isPanning);
         var io = ImGui.GetIO();
