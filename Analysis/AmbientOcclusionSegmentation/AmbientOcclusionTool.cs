@@ -577,7 +577,6 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
             async (token, progress) =>
         {
             _processor.ApplySegmentation(dataset, result, materialId, token, progress);
-            await dataset.SaveLabelDataAsync(token).ConfigureAwait(false);
             OpenTkManager.ExecuteOnMainThread(() =>
             {
                 _statusMessage = "Segmentation applied to labels";

@@ -295,7 +295,6 @@ namespace GAIA.Tools.CtImageStack.AISegmentation
                 token.ThrowIfCancellationRequested();
                 dataset.LabelData.WriteSliceZ(sliceIndex, labels);
                 progress.Report(.8f);
-                await dataset.SaveLabelDataAsync(token).ConfigureAwait(false);
                 GAIA.Util.OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(dataset));
             });
         }

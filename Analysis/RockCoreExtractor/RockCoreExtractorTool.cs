@@ -483,9 +483,8 @@ public class RockCoreExtractorTool
                 // Step 3: Finalize, save, and notify the application
                 if (dataWasModified)
                 {
-                    _statusMessage = "Saving changes...";
+                    _statusMessage = "Finalizing changes...";
                     _progress = 0.95f;
-                    _currentDataset.SaveLabelData();
                     ProjectManager.Instance.NotifyDatasetDataChanged(_currentDataset);
                     ProjectManager.Instance.HasUnsavedChanges = true;
                     _statusMessage = "Extraction complete. Voxels outside the core have been set to Exterior.";

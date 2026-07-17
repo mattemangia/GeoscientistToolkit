@@ -609,7 +609,6 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
             token.ThrowIfCancellationRequested();
             ct.LabelData.Clear();
             progress.Report(.8f);
-            await ct.SaveLabelDataAsync(token).ConfigureAwait(false);
             OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(ct));
         });
     }
@@ -639,7 +638,6 @@ public class MaterialManagerTool : IDatasetTools, IDisposable
             }
         }
         finally { ArrayPool<byte>.Shared.Return(slice); }
-        await ct.SaveLabelDataAsync(token).ConfigureAwait(false);
         OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(ct));
     }
 

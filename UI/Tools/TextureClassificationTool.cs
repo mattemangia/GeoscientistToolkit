@@ -429,9 +429,7 @@ public class TextureClassificationTool : IDatasetTools, IDisposable
                 });
             });
 
-            // Save and notify
-            dataset.SaveLabelData();
-            dataset.SaveMaterials();
+            // Keep edits interactive; binary persistence happens on explicit project save.
             ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             ProjectManager.Instance.HasUnsavedChanges = true;
 
@@ -509,9 +507,7 @@ public class TextureClassificationTool : IDatasetTools, IDisposable
                 });
             });
 
-            // Save and notify
-            dataset.SaveLabelData();
-            dataset.SaveMaterials();
+            // Keep edits interactive; binary persistence happens on explicit project save.
             ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             ProjectManager.Instance.HasUnsavedChanges = true;
 

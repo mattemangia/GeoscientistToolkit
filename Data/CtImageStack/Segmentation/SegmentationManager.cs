@@ -140,7 +140,6 @@ public class SegmentationManager : IDisposable
             compoundAction.CaptureAfterStates(_dataset);
             _undoStack.Push(compoundAction);
             _redoStack.Clear();
-            await _dataset.SaveLabelDataAsync(token).ConfigureAwait(false);
             _activeSelections.Clear();
             OpenTkManager.ExecuteOnMainThread(() =>
             {
@@ -255,7 +254,6 @@ public class SegmentationManager : IDisposable
             await Task.Run(() => a.Restore(_dataset), token).ConfigureAwait(false);
             progress?.Report(.8f);
             _redoStack.Push(a);
-            await _dataset.SaveLabelDataAsync(token).ConfigureAwait(false);
             OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(_dataset));
         }
     }
@@ -268,7 +266,6 @@ public class SegmentationManager : IDisposable
             await Task.Run(() => a.ReApply(_dataset), token).ConfigureAwait(false);
             progress?.Report(.8f);
             _undoStack.Push(a);
-            await _dataset.SaveLabelDataAsync(token).ConfigureAwait(false);
             OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(_dataset));
         }
     }

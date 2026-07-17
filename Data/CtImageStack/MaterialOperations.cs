@@ -128,7 +128,7 @@ public static class MaterialOperations
             // FIXED: Auto-save label data after modification
             if (anyModified != 0 && dataset != null)
             {
-                Logger.Log($"[MaterialOperations] Saving label data for material {materialID}...");
+                Logger.Log($"[MaterialOperations] Label changes for material {materialID} are ready; persistence deferred until project save.");
 
                 // Ensure material exists and is visible if we're adding voxels
                 if (isAddOperation)
@@ -140,9 +140,6 @@ public static class MaterialOperations
                         Logger.Log($"[MaterialOperations] Set material {materialID} ({material.Name}) to visible");
                     }
                 }
-
-                dataset.SaveLabelData(cancellationToken,
-                    new Progress<float>(saveProgress => progress?.Report(.82f + saveProgress * .17f)));
 
                 OpenTkManager.ExecuteOnMainThread(() =>
                 {
@@ -200,9 +197,6 @@ public static class MaterialOperations
             // FIXED: Auto-save after interactive segmentation
             if (dataset != null)
             {
-                Logger.Log($"[MaterialOperations] Auto-saving segmentation for material {materialID}...");
-                dataset.SaveLabelData();
-                dataset.SaveMaterials();
                 ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             }
         });
