@@ -46,6 +46,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
     public ChunkedLabelVolume LabelData { get; set; }
     public List<Material> Materials { get; set; } = new();
     public List<VirtualThresholdLabelRule> VirtualThresholdRules { get; private set; } = new();
+    public int VirtualLabelRevision { get; private set; }
 
     // --- NEW PROPERTIES FOR STORING ANALYSIS RESULTS ---
     public NMRResults NmrResults { get; set; }
@@ -243,6 +244,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
     public void AddVirtualThresholdRule(byte materialId, byte min, byte max, bool add)
     {
         VirtualThresholdRules.Add(new VirtualThresholdLabelRule(materialId, min, max, add));
+        VirtualLabelRevision++;
         LabelData?.SetVirtualThresholdRules(VolumeData, VirtualThresholdRules);
         SaveVirtualThresholdRules();
     }
@@ -250,6 +252,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
     public void RemoveVirtualThresholdRules(byte materialId)
     {
         VirtualThresholdRules.RemoveAll(rule => rule.MaterialId == materialId);
+        VirtualLabelRevision++;
         LabelData?.SetVirtualThresholdRules(VolumeData, VirtualThresholdRules);
         SaveVirtualThresholdRules();
     }

@@ -43,6 +43,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private volatile float _labelBuildProgress;
     private volatile string _labelBuildStatus;
     private volatile bool _labelCacheInvalidated;
+    private int _observedVirtualLabelRevision;
     private int _lineProgram, _lineVao, _lineVbo, _lineBufferBytes;
     private readonly int[] _sliceTextures = new int[3];
     private readonly int[] _sliceTextureIndex = { -1, -1, -1 };
@@ -86,6 +87,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
             throw new InvalidOperationException("The CT 3D viewer requires the OpenTK renderer.");
         _streamingDataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
         _editableDataset = dataset.EditablePartner ?? throw new InvalidOperationException("Missing editable CT partner.");
+        _observedVirtualLabelRevision = _editableDataset.VirtualLabelRevision;
         dataset.Load();
         _editableDataset.Load();
         VolumeScale = CalculateNormalizedPhysicalScale(_editableDataset.Width, _editableDataset.Height,
@@ -239,6 +241,15 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         GL.Uniform2(GL.GetUniformLocation(_program, "uThresholdRange"),
             thresholdPreview.Min / 255f, thresholdPreview.Max / 255f);
         Set4("uThresholdColor", thresholdPreview.Color);
+        var virtualRules = _editableDataset.VirtualThresholdRules;
+        var virtualRuleCount = Math.Min(32, virtualRules.Count);
+        Set1("uVirtualRuleCount", virtualRuleCount);
+        for (var ruleIndex = 0; ruleIndex < virtualRuleCount; ruleIndex++)
+        {
+            var rule = virtualRules[ruleIndex];
+            Set4($"uVirtualRules[{ruleIndex}]", new Vector4(rule.Min / 255f, rule.Max / 255f,
+                rule.MaterialId / 255f, rule.Add ? 1f : 0f));
+        }
         Bind3D(0, _volumeTexture, "uVolume"); Bind3D(1, _labelTexture, "uLabels"); Bind3D(2, _previewTexture, "uPreview");
         GL.ActiveTexture(TextureUnit.Texture3); GL.BindTexture(TextureTarget.Texture2D, _materialTexture); Set1("uMaterials", 3);
         for (var axis = 0; axis < 3; axis++)
@@ -727,7 +738,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private static long TextureWidth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureWidth,out int v);return v;} private static long TextureHeight(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureHeight,out int v);return v;} private static long TextureDepth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureDepth,out int v);return v;}
     // Material colours can be edited outside the 3D panel (segmentation, material editor),
     // so refresh the lookup alongside the labels rather than only on visibility/opacity changes.
-    private void OnDatasetDataChanged(Dataset d){if(d==_editableDataset){_labelsDirty=true;_labelCacheInvalidated=true;_materialsDirty=true;InvalidateSlicePlaneTextures();}} private void OnPreviewChanged(CtImageStackDataset d,byte[] m,Vector4 c){if(d!=_editableDataset)return;_previewMask=m;_previewColor=c;_showPreview=m!=null;_previewDirty=true;}
+    private void OnDatasetDataChanged(Dataset d){if(d==_editableDataset){var virtualOnly=_observedVirtualLabelRevision!=_editableDataset.VirtualLabelRevision;_observedVirtualLabelRevision=_editableDataset.VirtualLabelRevision;if(!virtualOnly){_labelsDirty=true;_labelCacheInvalidated=true;}_materialsDirty=true;InvalidateSlicePlaneTextures();}} private void OnPreviewChanged(CtImageStackDataset d,byte[] m,Vector4 c){if(d!=_editableDataset)return;_previewMask=m;_previewColor=c;_showPreview=m!=null;_previewDirty=true;}
     private void Bind3D(int unit,int tex,string name){GL.ActiveTexture(TextureUnit.Texture0+unit);GL.BindTexture(TextureTarget.Texture3D,tex);Set1(name,unit);} private void Set1(string n,int v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set1(string n,float v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set3(string n,Vector3 v)=>GL.Uniform3(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z);private void Set4(string n,Vector4 v)=>GL.Uniform4(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z,v.W);
     // System.Numerics is row-vector (v*M); GLSL is column-vector (M*v). Passing the row-major
     // array with transpose=false makes GL read it column-major, which is the transpose GLSL needs.
@@ -762,9 +773,10 @@ uniform sampler2D uMaterials;
 uniform sampler2D uSliceX,uSliceY,uSliceZ;   // full-resolution slice at each plane
 uniform vec3 uScale,uCamera,uVolumeSize;
 uniform float uMin,uMax,uStep;
-uniform int uShowGray,uColorMap,uShowPreview,uShowThresholdPreview,uPlaneCount;
+uniform int uShowGray,uColorMap,uShowPreview,uShowThresholdPreview,uPlaneCount,uVirtualRuleCount;
 uniform vec2 uThresholdRange;
 uniform vec4 uCutX,uCutY,uCutZ,uPlanes[8],uPreviewColor,uThresholdColor;
+uniform vec4 uVirtualRules[32];
 uniform float uPlaneMirror[8];
 uniform vec3 uSlicePlanePos;   // normalized position of the textured plane, per axis
 uniform vec3 uSlicePlaneOn;    // 1 = that axis has a textured plane
@@ -854,6 +866,11 @@ void main(){
             if(length(g)>.0001)col*=.3+.7*abs(dot(normalize(g),normalize(vec3(.4,.6,1))));
         }
         int mid=int(texture(uLabels,p).r*255.0+0.5);
+        for(int ri=0;ri<uVirtualRuleCount;ri++){
+            vec4 rule=uVirtualRules[ri];
+            int rid=int(rule.z*255.0+0.5);
+            if(den>=rule.x&&den<=rule.y){if(rule.w>.5)mid=rid;else if(mid==rid)mid=0;}
+        }
         if(mid>0){
             vec4 mat=texelFetch(uMaterials,ivec2(mid,0),0);
             if(mat.a>.002){col=mix(col,mat.rgb,mat.a);al=max(al,mat.a);}
@@ -869,6 +886,10 @@ void main(){
         float planeDensity=samplePlane(planeAxis,planeP);
         vec3 col=cmap(window(planeDensity));
         int mid=int(texture(uLabels,planeP).r*255.0+0.5);
+        for(int ri=0;ri<uVirtualRuleCount;ri++){
+            vec4 rule=uVirtualRules[ri];int rid=int(rule.z*255.0+0.5);
+            if(planeDensity>=rule.x&&planeDensity<=rule.y){if(rule.w>.5)mid=rid;else if(mid==rid)mid=0;}
+        }
         if(mid>0){
             vec4 mat=texelFetch(uMaterials,ivec2(mid,0),0);
             if(mat.a>.002)col=mix(col,mat.rgb,mat.a*.65);

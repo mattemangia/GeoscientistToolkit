@@ -306,16 +306,12 @@ public class SegmentationManager : IDisposable
 
     private void ExtractXZSlice(byte[] b, int y)
     {
-        for (var z = 0; z < _dataset.Depth; z++)
-        for (var x = 0; x < _dataset.Width; x++)
-            b[z * _dataset.Width + x] = _dataset.VolumeData[x, y, z];
+        _dataset.VolumeData.ReadSliceXZ(y, b);
     }
 
     private void ExtractYZSlice(byte[] b, int x)
     {
-        for (var z = 0; z < _dataset.Depth; z++)
-        for (var y = 0; y < _dataset.Height; y++)
-            b[z * _dataset.Height + y] = _dataset.VolumeData[x, y, z];
+        _dataset.VolumeData.ReadSliceYZ(x, b);
     }
 }
 

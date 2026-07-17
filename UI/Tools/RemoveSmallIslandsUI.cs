@@ -224,11 +224,17 @@ internal class IslandAnalysisProcessor : IDisposable
     private byte[,,] ExtractMaterialMask(CtImageStackDataset d, Material m, CancellationToken t)
     {
         var mask = new byte[d.Width, d.Height, d.Depth];
-        Parallel.For(0, d.Depth, new ParallelOptions { CancellationToken = t }, z =>
+        Parallel.For(0, d.Depth, new ParallelOptions
         {
+            CancellationToken = t,
+            MaxDegreeOfParallelism = d.LabelData.IsMemoryMapped ? 2 : Math.Max(1, Environment.ProcessorCount - 1)
+        }, z =>
+        {
+            var slice = new byte[d.Width * d.Height];
+            d.LabelData.ReadSliceZ(z, slice);
             for (var y = 0; y < d.Height; y++)
             for (var x = 0; x < d.Width; x++)
-                if (d.LabelData[x, y, z] == m.ID)
+                if (slice[y * d.Width + x] == m.ID)
                     mask[x, y, z] = 1;
             Progress = 0.2f * (z + 1) / d.Depth;
         });
