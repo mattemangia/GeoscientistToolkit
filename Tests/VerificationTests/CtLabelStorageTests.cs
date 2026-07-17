@@ -304,4 +304,20 @@ public sealed class CtLabelStorageTests
             if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
+
+    [Fact]
+    public void BulkLabelWrites_ReportOnlyChangedSlicesForIncrementalCaches()
+    {
+        using var labels = new ChunkedLabelVolume(17, 13, 5, 8, false);
+        var changed = new List<int>();
+        labels.SliceChanged += changed.Add;
+        var slice = new byte[17 * 13];
+
+        labels.WriteSliceZ(1, slice); // all-zero sparse slice remains unchanged
+        slice[7] = 4;
+        labels.WriteSliceZ(3, slice);
+        labels.WriteSliceZ(3, slice); // identical rewrite remains unchanged
+
+        Assert.Equal(new[] { 3 }, changed);
+    }
 }

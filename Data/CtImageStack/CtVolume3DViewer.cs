@@ -1,6 +1,8 @@
 using System.Numerics;
 using System.Buffers;
+using System.Collections.Concurrent;
 using GAIA.Business;
+using GAIA.Data.VolumeData;
 using GAIA.UI.Interfaces;
 using GAIA.UI.Utils;
 using GAIA.Util;
@@ -40,6 +42,11 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private int _volumeTexture, _labelTexture, _previewTexture, _materialTexture;
     private int _labelTextureWidth, _labelTextureHeight, _labelTextureDepth;
     private Task<(int w, int h, int d, byte[] data)> _labelBuildTask;
+    private Task<List<(int z, byte[] data)>> _labelPatchTask;
+    private byte[] _labelCacheData;
+    private readonly ConcurrentDictionary<int, byte> _dirtyLabelSlices = new();
+    private volatile bool _incrementalLabelsPending;
+    private ChunkedLabelVolume _observedLabelVolume;
     private volatile float _labelBuildProgress;
     private volatile string _labelBuildStatus;
     private volatile bool _labelCacheInvalidated;
@@ -104,6 +111,8 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         ResetCamera();
         ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
         CtImageStackTools.Preview3DChanged += OnPreviewChanged;
+        _observedLabelVolume = _editableDataset.LabelData;
+        if (_observedLabelVolume != null) _observedLabelVolume.SliceChanged += OnLabelSliceChanged;
     }
 
     public void DrawToolbarControls() { }
@@ -666,6 +675,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     }
     private void ProcessPendingLabelRefresh()
     {
+        ProcessIncrementalLabelPatches();
         if (_labelBuildTask == null && _labelsDirty)
         {
             _labelsDirty = false;
@@ -695,9 +705,82 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         if (_labelBuildTask?.IsCompletedSuccessfully != true) return;
         var a = _labelBuildTask.Result;
         _labelBuildTask = null;
+        _labelCacheData = a.data;
         GL.BindTexture(TextureTarget.Texture3D, _labelTexture);
         GL.TexSubImage3D(TextureTarget.Texture3D, 0, 0, 0, 0, a.w, a.h, a.d,
             PixelFormat.Red, PixelType.UnsignedByte, a.data);
+    }
+
+    private void OnLabelSliceChanged(int z)
+    {
+        _incrementalLabelsPending = true;
+        _dirtyLabelSlices[z] = 0;
+    }
+
+    private void ProcessIncrementalLabelPatches()
+    {
+        if (_labelBuildTask != null || _labelCacheData == null) return;
+        if (_labelPatchTask == null && !_dirtyLabelSlices.IsEmpty)
+        {
+            var changed = _dirtyLabelSlices.Keys.ToHashSet();
+            foreach (var z in changed) _dirtyLabelSlices.TryRemove(z, out _);
+            var tw = _labelTextureWidth; var th = _labelTextureHeight; var td = _labelTextureDepth;
+            _labelPatchTask = Task.Run(() =>
+            {
+                var patches = new List<(int z, byte[] data)>();
+                var source = ArrayPool<byte>.Shared.Rent(checked(_editableDataset.Width * _editableDataset.Height));
+                try
+                {
+                    for (var targetZ = 0; targetZ < td; targetZ++)
+                    {
+                        var sourceZ = Math.Min(_editableDataset.Depth - 1,
+                            targetZ * _editableDataset.Depth / td);
+                        if (!changed.Contains(sourceZ)) continue;
+                        _editableDataset.LabelData.ReadSliceZ(sourceZ, source);
+                        var layer = new byte[tw * th];
+                        for (var y = 0; y < th; y++)
+                        {
+                            var sourceY = Math.Min(_editableDataset.Height - 1,
+                                y * _editableDataset.Height / th);
+                            for (var x = 0; x < tw; x++)
+                                layer[y * tw + x] = source[sourceY * _editableDataset.Width +
+                                    Math.Min(_editableDataset.Width - 1, x * _editableDataset.Width / tw)];
+                        }
+                        patches.Add((targetZ, layer));
+                    }
+                }
+                finally { ArrayPool<byte>.Shared.Return(source); }
+                return patches;
+            });
+            return;
+        }
+        if (_labelPatchTask?.IsCompletedSuccessfully != true) return;
+        var completed = _labelPatchTask.Result;
+        _labelPatchTask = null;
+        _incrementalLabelsPending = !_dirtyLabelSlices.IsEmpty;
+        if (completed.Count == 0) return;
+        GL.BindTexture(TextureTarget.Texture3D, _labelTexture);
+        foreach (var patch in completed)
+        {
+            patch.data.CopyTo(_labelCacheData, patch.z * patch.data.Length);
+            GL.TexSubImage3D(TextureTarget.Texture3D, 0, 0, 0, patch.z,
+                _labelTextureWidth, _labelTextureHeight, 1, PixelFormat.Red, PixelType.UnsignedByte, patch.data);
+            PatchLabelRenderCache(patch.z, patch.data);
+        }
+    }
+
+    private void PatchLabelRenderCache(int z, byte[] layer)
+    {
+        try
+        {
+            var path = _editableDataset.GetLabelRenderCachePath();
+            if (!File.Exists(path)) return;
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read,
+                1024 * 1024, FileOptions.RandomAccess);
+            stream.Position = 16L + (long)z * layer.Length;
+            stream.Write(layer);
+        }
+        catch (Exception ex) { Logger.LogWarning($"[CtVolume3DViewer] Cannot patch label render cache: {ex.Message}"); }
     }
 
     private bool TryLoadLabelRenderCache(int w, int h, int d, out byte[] data)
@@ -738,7 +821,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private static long TextureWidth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureWidth,out int v);return v;} private static long TextureHeight(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureHeight,out int v);return v;} private static long TextureDepth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureDepth,out int v);return v;}
     // Material colours can be edited outside the 3D panel (segmentation, material editor),
     // so refresh the lookup alongside the labels rather than only on visibility/opacity changes.
-    private void OnDatasetDataChanged(Dataset d){if(d==_editableDataset){var virtualOnly=_observedVirtualLabelRevision!=_editableDataset.VirtualLabelRevision;_observedVirtualLabelRevision=_editableDataset.VirtualLabelRevision;if(!virtualOnly){_labelsDirty=true;_labelCacheInvalidated=true;}_materialsDirty=true;InvalidateSlicePlaneTextures();}} private void OnPreviewChanged(CtImageStackDataset d,byte[] m,Vector4 c){if(d!=_editableDataset)return;_previewMask=m;_previewColor=c;_showPreview=m!=null;_previewDirty=true;}
+    private void OnDatasetDataChanged(Dataset d){if(d==_editableDataset){if(_observedLabelVolume!=_editableDataset.LabelData){if(_observedLabelVolume!=null)_observedLabelVolume.SliceChanged-=OnLabelSliceChanged;_observedLabelVolume=_editableDataset.LabelData;if(_observedLabelVolume!=null)_observedLabelVolume.SliceChanged+=OnLabelSliceChanged;_labelsDirty=true;_labelCacheInvalidated=true;}var virtualOnly=_observedVirtualLabelRevision!=_editableDataset.VirtualLabelRevision;_observedVirtualLabelRevision=_editableDataset.VirtualLabelRevision;if(!virtualOnly&&!_incrementalLabelsPending){_labelsDirty=true;_labelCacheInvalidated=true;}_materialsDirty=true;InvalidateSlicePlaneTextures();}} private void OnPreviewChanged(CtImageStackDataset d,byte[] m,Vector4 c){if(d!=_editableDataset)return;_previewMask=m;_previewColor=c;_showPreview=m!=null;_previewDirty=true;}
     private void Bind3D(int unit,int tex,string name){GL.ActiveTexture(TextureUnit.Texture0+unit);GL.BindTexture(TextureTarget.Texture3D,tex);Set1(name,unit);} private void Set1(string n,int v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set1(string n,float v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set3(string n,Vector3 v)=>GL.Uniform3(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z);private void Set4(string n,Vector4 v)=>GL.Uniform4(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z,v.W);
     // System.Numerics is row-vector (v*M); GLSL is column-vector (M*v). Passing the row-major
     // array with transpose=false makes GL read it column-major, which is the transpose GLSL needs.
@@ -752,7 +835,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
 
     public static Vector3 CalculateNormalizedPhysicalScale(int w,int h,int d,float px,float st){var xy=px>0&&float.IsFinite(px)?px:1;var z=st>0&&float.IsFinite(st)?st:xy;var p=new Vector3(Math.Max(1,w)*xy,Math.Max(1,h)*xy,Math.Max(1,d)*z);return p/Math.Max(p.X,Math.Max(p.Y,p.Z));}
     public static byte CalculateOtsuThreshold(byte[] data){if(data==null||data.Length==0)return 0;var h=new long[256];foreach(var v in data)h[v]++;double sum=0,sb=0,best=-1;long wb=0;for(int i=0;i<256;i++)sum+=i*h[i];byte t=0;for(int i=0;i<255;i++){wb+=h[i];if(wb==0)continue;var wf=data.LongLength-wb;if(wf==0)break;sb+=i*h[i];var mb=sb/wb;var mf=(sum-sb)/wf;var v=wb*(double)wf*(mb-mf)*(mb-mf);if(v>best){best=v;t=(byte)i;}}return t;}
-    public void Dispose(){if(_disposed)return;_disposed=true;ProjectManager.Instance.DatasetDataChanged-=OnDatasetDataChanged;CtImageStackTools.Preview3DChanged-=OnPreviewChanged;_controlPanel?.Dispose();foreach(var t in new[]{_volumeTexture,_labelTexture,_previewTexture,_materialTexture,_colorTexture,_sliceTextures[0],_sliceTextures[1],_sliceTextures[2]})if(t!=0)GL.DeleteTexture(t);if(_depthBuffer!=0)GL.DeleteRenderbuffer(_depthBuffer);if(_fbo!=0)GL.DeleteFramebuffer(_fbo);if(_vbo!=0)GL.DeleteBuffer(_vbo);if(_ebo!=0)GL.DeleteBuffer(_ebo);if(_vao!=0)GL.DeleteVertexArray(_vao);if(_lineVbo!=0)GL.DeleteBuffer(_lineVbo);if(_lineVao!=0)GL.DeleteVertexArray(_lineVao);if(_program!=0)GL.DeleteProgram(_program);if(_lineProgram!=0)GL.DeleteProgram(_lineProgram);}
+    public void Dispose(){if(_disposed)return;_disposed=true;ProjectManager.Instance.DatasetDataChanged-=OnDatasetDataChanged;CtImageStackTools.Preview3DChanged-=OnPreviewChanged;if(_observedLabelVolume!=null)_observedLabelVolume.SliceChanged-=OnLabelSliceChanged;_controlPanel?.Dispose();foreach(var t in new[]{_volumeTexture,_labelTexture,_previewTexture,_materialTexture,_colorTexture,_sliceTextures[0],_sliceTextures[1],_sliceTextures[2]})if(t!=0)GL.DeleteTexture(t);if(_depthBuffer!=0)GL.DeleteRenderbuffer(_depthBuffer);if(_fbo!=0)GL.DeleteFramebuffer(_fbo);if(_vbo!=0)GL.DeleteBuffer(_vbo);if(_ebo!=0)GL.DeleteBuffer(_ebo);if(_vao!=0)GL.DeleteVertexArray(_vao);if(_lineVbo!=0)GL.DeleteBuffer(_lineVbo);if(_lineVao!=0)GL.DeleteVertexArray(_lineVao);if(_program!=0)GL.DeleteProgram(_program);if(_lineProgram!=0)GL.DeleteProgram(_lineProgram);}
 
     private const string VertexShader=@"#version 330 core
 layout(location=0) in vec3 p; uniform mat4 uView,uProjection; uniform vec3 uScale; out vec3 world; void main(){world=p*uScale;gl_Position=uProjection*uView*vec4(world,1);}";

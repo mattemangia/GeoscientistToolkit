@@ -44,6 +44,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
         _chunks?.Count(chunk => chunk != null) ?? 0;
     public bool IsMemoryMapped => _useMemoryMapping;
     public long MappedWindowSize => _useMemoryMapping ? checked((long)ChunkDim * ChunkDim * ChunkDim) : 0;
+    public event Action<int> SliceChanged;
 
     private bool _disposed;
 
@@ -357,12 +358,14 @@ public class ChunkedLabelVolume : ILabelVolumeData
         ValidateCoordinates(0, 0, z);
         var cz = z / ChunkDim; var lz = z % ChunkDim; var planeSize = ChunkDim * ChunkDim;
         var plane = _useMemoryMapping ? ArrayPool<byte>.Shared.Rent(planeSize) : null;
+        var wroteAny = false;
         try
         {
             for (var cy = 0; cy < ChunkCountY; cy++)
             for (var cx = 0; cx < ChunkCountX; cx++)
             {
                 if (!changedChunks[cy * ChunkCountX + cx]) continue;
+                wroteAny = true;
                 var chunkIndex = GetChunkIndex(cx, cy, cz);
                 var xStart = cx * ChunkDim; var yStart = cy * ChunkDim;
                 var xEnd = Math.Min(xStart + ChunkDim, Width);
@@ -386,6 +389,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
             }
         }
         finally { if (plane != null) ArrayPool<byte>.Shared.Return(plane); }
+        if (wroteAny) SliceChanged?.Invoke(z);
     }
 
     /// <summary>
@@ -403,6 +407,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
 
         var planeSize = ChunkDim * ChunkDim;
         var mappedPlane = _useMemoryMapping ? ArrayPool<byte>.Shared.Rent(planeSize) : null;
+        var wroteAny = false;
         try
         {
         for (var cy = 0; cy < ChunkCountY; cy++)
@@ -449,6 +454,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
                 }
                 if (chunkModified)
                 {
+                    wroteAny = true;
                     if (_useMemoryMapping)
                         _viewAccessor.WriteArray(CalculateGlobalOffset(chunkIndex, lz * planeSize),
                             mappedPlane, 0, planeSize);
@@ -461,6 +467,7 @@ public class ChunkedLabelVolume : ILabelVolumeData
         {
             if (mappedPlane != null) ArrayPool<byte>.Shared.Return(mappedPlane);
         }
+        if (wroteAny) SliceChanged?.Invoke(z);
     }
 
     /// <summary>
