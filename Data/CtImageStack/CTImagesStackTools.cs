@@ -39,6 +39,7 @@ public class CtImageStackTools : IDatasetTools
 
     // --- 3D Threshold preview state ---
     private bool _show3DThresholdPreview;
+    private bool _preview3DPending;
     private byte[] _thresholdPreviewMask3D;
 
     public void Draw(Dataset dataset)
@@ -121,8 +122,18 @@ public class CtImageStackTools : IDatasetTools
             ImGui.SameLine();
             if (_isGenerating3DPreview) ImGui.TextColored(new Vector4(1, 1, 0, 1), "Generating...");
             else ImGui.TextColored(new Vector4(0, 1, 0, 1), "Preview Active");
-            if (thresholdChanged && (DateTime.Now - _lastPreviewUpdate).TotalMilliseconds > PREVIEW_UPDATE_DELAY_MS)
+
+            // Each refresh rescans the whole volume, so coalesce a drag into one run per interval.
+            // The request has to outlive the frame it was made on: firing only when a change and
+            // an elapsed interval coincide dropped the value the drag settled on, leaving the
+            // preview showing a threshold the user had already moved past.
+            if (thresholdChanged) _preview3DPending = true;
+            if (_preview3DPending && !_isGenerating3DPreview &&
+                (DateTime.Now - _lastPreviewUpdate).TotalMilliseconds > PREVIEW_UPDATE_DELAY_MS)
+            {
+                _preview3DPending = false;
                 _ = Update3DThresholdPreviewAsync(ctDataset);
+            }
         }
 
         ImGui.Spacing();
@@ -176,7 +187,11 @@ public class CtImageStackTools : IDatasetTools
                 _isExternalPreviewActive = true;
             }
 
-            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+            // Deliberately not NotifyDatasetDataChanged: a preview mask leaves the voxels and
+            // labels untouched, and that signal makes every listener drop its slice caches and
+            // rebuild at once — defeating any throttling, on a path that runs while a threshold
+            // is dragged or an acoustic simulation streams frames. The two preview events below
+            // are what viewers actually listen to for this.
             Preview3DChanged?.Invoke(dataset, mask, color);
             PreviewChanged?.Invoke(dataset);
         }

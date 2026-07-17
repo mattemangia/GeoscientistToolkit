@@ -21,7 +21,10 @@ public class CtImageStackPropertiesRenderer : IDatasetPropertiesRenderer
 
     public void Draw(Dataset dataset)
     {
-        if (dataset is not CtImageStackDataset ct) return;
+        // The factory routes the streaming dataset here too, and it keeps the dimensions and
+        // calibration on its editable partner: without resolving it the panel stayed blank.
+        var ct = dataset as CtImageStackDataset ?? (dataset as StreamingCtVolumeDataset)?.EditablePartner;
+        if (ct == null) return;
 
         if (ImGui.CollapsingHeader("CT Stack Properties", ImGuiTreeNodeFlags.DefaultOpen))
         {

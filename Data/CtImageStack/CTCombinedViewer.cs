@@ -21,6 +21,13 @@ namespace GAIA.Data.CtImageStack;
 
 public class CtCombinedViewer : IDatasetViewer, IDisposable
 {
+    /// <summary>
+    ///     Upper bound on how often a dragged display control rebuilds the slice textures. Short
+    ///     enough to read as live, long enough that a drag costs a few rebuilds instead of one per
+    ///     frame.
+    /// </summary>
+    private const int DISPLAY_REFRESH_INTERVAL_MS = 90;
+
     public enum SliceDisplayMode
     {
         Grayscale,
@@ -78,6 +85,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private float _windowWidth = 255;
     private bool _linkThresholds = true;
     private bool _showVolumeData = true;
+    private bool _displayDirty;
+    private DateTime _lastDisplayRefresh = DateTime.MinValue;
     private float _zoomXY = 1.0f;
     private float _zoomXZ = 1.0f;
     private float _zoomYZ = 1.0f;
@@ -92,7 +101,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         _renderingPanelOpen = true;
 
         ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
-        CalibrationIntegration.PreviewChanged += _ => { _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true; };
+        CalibrationIntegration.PreviewChanged += _ => MarkDisplayDirty();
         CtImageStackTools.Preview3DChanged += OnPreview3DChanged;
         CtImageStackTools.PreviewChanged += OnGenericPreviewChanged;
         AcousticIntegration.OnPositionsChanged += OnAcousticPositionsChanged;
@@ -149,7 +158,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         set
         {
             _windowLevel = value;
-            _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+            MarkDisplayDirty();
             if (_linkThresholds) PushWindowLevelTo3D();
         }
     }
@@ -160,7 +169,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         set
         {
             _windowWidth = value;
-            _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+            MarkDisplayDirty();
             if (_linkThresholds) PushWindowLevelTo3D();
         }
     }
@@ -245,7 +254,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         var max = VolumeViewer.MaxThreshold * 255f;
         _windowWidth = Math.Max(1f, max - min);
         _windowLevel = (min + max) * 0.5f;
-        _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+        MarkDisplayDirty();
     }
 
     public int ColorMapIndex
@@ -254,7 +263,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         set
         {
             if (VolumeViewer != null) VolumeViewer.ColorMapIndex = value;
-            _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+            MarkDisplayDirty();
         }
     }
 
@@ -273,6 +282,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             DrawLoadingState();
             return;
         }
+
+        FlushDisplayUpdates();
 
         // Thermal visualization options
         if (_dataset.ThermalResults != null)
@@ -495,9 +506,27 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         return new Vector3(r, g, b);
     }
 
+    /// <summary>
+    ///     Marks the slice textures as needing a rebuild from a display parameter, without doing it
+    ///     this frame. Rebuilding maps and uploads width*height pixels for three views, and a
+    ///     dragged threshold or a live segmentation preview would ask for that on every frame.
+    ///     The dirty flag survives until <see cref="FlushDisplayUpdates" /> honours it, so the value
+    ///     the drag settles on is always the one displayed.
+    /// </summary>
+    private void MarkDisplayDirty() => _displayDirty = true;
+
+    private void FlushDisplayUpdates()
+    {
+        if (!_displayDirty) return;
+        if ((DateTime.UtcNow - _lastDisplayRefresh).TotalMilliseconds < DISPLAY_REFRESH_INTERVAL_MS) return;
+        _lastDisplayRefresh = DateTime.UtcNow;
+        _displayDirty = false;
+        _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+    }
+
     private void OnGenericPreviewChanged(Dataset dataset)
     {
-        if (dataset == _dataset) _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+        if (dataset == _dataset) MarkDisplayDirty();
     }
 
     private void OnAcousticPositionsChanged()
@@ -507,12 +536,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
     private void OnPreview3DChanged(CtImageStackDataset dataset, byte[] previewMask, Vector4 color)
     {
-        if (dataset == _dataset)
-        {
-            _needsUpdateXY = true;
-            _needsUpdateXZ = true;
-            _needsUpdateYZ = true;
-        }
+        if (dataset == _dataset) MarkDisplayDirty();
     }
 
     private void OnDatasetDataChanged(Dataset dataset)
