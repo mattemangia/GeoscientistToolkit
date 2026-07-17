@@ -50,7 +50,7 @@ public class DatasetViewPanel : BasePanel
         // This allows child panels to manage their own state.
         // --- FIX END ---
 
-        _viewer.DrawToolbarControls();
+        DrawScrollableToolbar();
         ImGui.Separator();
 
         var contentSize = ImGui.GetContentRegionAvail();
@@ -104,7 +104,7 @@ public class DatasetViewPanel : BasePanel
 
     private void DrawToolbar()
     {
-        _viewer.DrawToolbarControls();
+        DrawScrollableToolbar();
 
         // Add some spacing if the viewer has controls
         if (ImGui.GetCursorPosX() > 10) // Simple check if anything was drawn
@@ -126,6 +126,18 @@ public class DatasetViewPanel : BasePanel
             _zoom = 1.0f;
             _pan = Vector2.Zero;
         }
+    }
+
+    private void DrawScrollableToolbar()
+    {
+        var style = ImGui.GetStyle();
+        var toolbarHeight = ImGui.GetFrameHeight() + style.ScrollbarSize + style.WindowPadding.Y * 2.0f;
+        var toolbarVisible = ImGui.BeginChild("##DatasetViewerToolbar", new Vector2(0, toolbarHeight),
+            ImGuiChildFlags.None,
+            ImGuiWindowFlags.HorizontalScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+        if (toolbarVisible)
+            _viewer.DrawToolbarControls();
+        ImGui.EndChild();
     }
 
     private void DrawStatusBar()
