@@ -27,7 +27,9 @@ public class PhysicoChemViewer : IDatasetViewer
     private bool _isPanning;
     private Vector2 _lastMousePos;
     private bool _isBoxSelecting;
+    private bool _boxSelectionDragged;
     private bool _boxSelectionUsesCtrl;
+    private bool _boxSelectionUsesShift;
     private Vector2 _boxSelectionStart;
     private Vector2 _boxSelectionEnd;
     private HashSet<string> _selectionBeforeDrag = new();
@@ -312,41 +314,36 @@ public class PhysicoChemViewer : IDatasetViewer
         var isHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         HandleMouseInput(isHovered || _isDragging || _isPanning || _isBoxSelecting);
         var io = ImGui.GetIO();
-        var selectionModifierDown = io.KeyShift || io.KeyCtrl;
         if (!_isBoxSelecting && isHovered && ImGui.IsMouseDown(ImGuiMouseButton.Left) &&
-            !io.KeyAlt && selectionModifierDown)
+            !io.KeyAlt)
         {
             _isBoxSelecting = true;
+            _boxSelectionDragged = false;
             _boxSelectionUsesCtrl = io.KeyCtrl;
+            _boxSelectionUsesShift = io.KeyShift;
             _boxSelectionStart = Vector2.Clamp(io.MousePos - cursorPos, Vector2.Zero, availableSize);
             _boxSelectionEnd = _boxSelectionStart;
             _selectionBeforeDrag = _dataset.SelectedCellIDs.ToHashSet();
         }
-        else if (!_isBoxSelecting && isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !io.KeyAlt)
-        {
-            var local = io.MousePos - cursorPos;
-            var picked = _renderer.Pick((int)local.X, (int)local.Y);
-            _dataset.SelectedCellIDs.Clear();
-            if (picked != null)
-                _dataset.SelectedCellIDs.Add(picked);
-        }
 
         if (_isBoxSelecting)
         {
-            _boxSelectionEnd = Vector2.Clamp(io.MousePos - cursorPos, Vector2.Zero, availableSize);
-            var dragDistance = Vector2.Distance(_boxSelectionStart, _boxSelectionEnd);
-            if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            if (ImGui.IsMouseDown(ImGuiMouseButton.Left))
             {
-                if (dragDistance < 4.0f)
-                    ApplyModifiedClickSelection(_boxSelectionEnd);
-                else
-                    ApplyBoxSelection(view, projection, availableSize);
+                _boxSelectionEnd = Vector2.Clamp(io.MousePos - cursorPos, Vector2.Zero, availableSize);
+                if (ImGui.IsMouseDragging(ImGuiMouseButton.Left, 4.0f))
+                    _boxSelectionDragged = true;
+            }
+            else
+            {
+                if (_boxSelectionDragged) ApplyBoxSelection(view, projection, availableSize);
+                else ApplyModifiedClickSelection(_boxSelectionEnd);
                 _isBoxSelecting = false;
             }
         }
 
         var drawList = ImGui.GetWindowDrawList();
-        if (_isBoxSelecting)
+        if (_isBoxSelecting && _boxSelectionDragged)
             DrawSelectionRectangle(drawList, cursorPos, view, projection, availableSize);
         if (_showBoundaryConditions && !_builderMode)
             foreach (var bc in _dataset.BoundaryConditions) DrawBoundaryCondition(drawList, cursorPos + availableSize * .5f, bc);
@@ -372,7 +369,9 @@ public class PhysicoChemViewer : IDatasetViewer
     private void ApplyModifiedClickSelection(Vector2 localPosition)
     {
         var picked = _renderer.Pick((int)localPosition.X, (int)localPosition.Y);
-        _dataset.SelectedCellIDs = _selectionBeforeDrag.ToList();
+        _dataset.SelectedCellIDs = (_boxSelectionUsesCtrl || _boxSelectionUsesShift)
+            ? _selectionBeforeDrag.ToList()
+            : new List<string>();
         if (picked == null) return;
 
         if (_boxSelectionUsesCtrl && _dataset.SelectedCellIDs.Contains(picked))
@@ -387,7 +386,9 @@ public class PhysicoChemViewer : IDatasetViewer
                 ? GetCellsInSelectionRectangle(view, projection, viewportSize)
                 : _renderer.PickRectangle(_boxSelectionStart, _boxSelectionEnd))
             .ToHashSet();
-        var selection = _selectionBeforeDrag.ToHashSet();
+        var selection = (_boxSelectionUsesCtrl || _boxSelectionUsesShift)
+            ? _selectionBeforeDrag.ToHashSet()
+            : new HashSet<string>();
         if (_boxSelectionUsesCtrl)
         {
             foreach (var cellId in cellsInRectangle)
@@ -410,13 +411,29 @@ public class PhysicoChemViewer : IDatasetViewer
         foreach (var cell in _dataset.Mesh.Cells.Values.Where(cell => cell.IsVisible))
         {
             var center = new Vector3((float)cell.Center.X, (float)cell.Center.Y, (float)cell.Center.Z);
-            var clip = Vector4.Transform(new Vector4(center, 1.0f), viewProjection);
-            if (clip.W <= 0.0f) continue;
+            var halfSize = (float)Math.Cbrt(Math.Max(cell.Volume, 1e-18)) * 0.48f;
+            var projectedMin = new Vector2(float.MaxValue);
+            var projectedMax = new Vector2(float.MinValue);
+            var hasProjectedCorner = false;
 
-            var screen = new Vector2(
-                (clip.X / clip.W * 0.5f + 0.5f) * viewportSize.X,
-                (0.5f - clip.Y / clip.W * 0.5f) * viewportSize.Y);
-            if (screen.X >= min.X && screen.X <= max.X && screen.Y >= min.Y && screen.Y <= max.Y)
+            for (var x = -1; x <= 1; x += 2)
+            for (var y = -1; y <= 1; y += 2)
+            for (var z = -1; z <= 1; z += 2)
+            {
+                var corner = center + new Vector3(x * halfSize, y * halfSize, z * halfSize);
+                var clip = Vector4.Transform(new Vector4(corner, 1.0f), viewProjection);
+                if (clip.W <= 0.0f) continue;
+
+                var screen = new Vector2(
+                    (clip.X / clip.W * 0.5f + 0.5f) * viewportSize.X,
+                    (0.5f - clip.Y / clip.W * 0.5f) * viewportSize.Y);
+                projectedMin = Vector2.Min(projectedMin, screen);
+                projectedMax = Vector2.Max(projectedMax, screen);
+                hasProjectedCorner = true;
+            }
+
+            if (hasProjectedCorner && projectedMax.X >= min.X && projectedMin.X <= max.X &&
+                projectedMax.Y >= min.Y && projectedMin.Y <= max.Y)
                 yield return cell.ID;
         }
     }
@@ -435,7 +452,7 @@ public class PhysicoChemViewer : IDatasetViewer
         var countText = _selectThroughVolume
             ? $": {GetCellsInSelectionRectangle(view, projection, viewportSize).Count()} cells"
             : string.Empty;
-        var action = _boxSelectionUsesCtrl ? "Toggle" : "Add";
+        var action = _boxSelectionUsesCtrl ? "Toggle" : _boxSelectionUsesShift ? "Add" : "Select";
         drawList.AddText(max + new Vector2(6.0f, 4.0f), border, $"{action} {selectionScope}{countText}");
     }
 
