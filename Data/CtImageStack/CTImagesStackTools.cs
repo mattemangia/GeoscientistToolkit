@@ -15,7 +15,7 @@ public class CtImageStackTools : IDatasetTools
     // --- Static members for 3D preview control ---
     private static readonly object _previewLock = new();
     private static WeakReference<Dataset> _previewDatasetRef;
-    private static byte[] _external3DPreviewMask;
+    private static CtPreviewVolume _external3DPreview;
     private static Vector4 _externalPreviewColor;
     private static bool _isExternalPreviewActive;
 
@@ -178,23 +178,27 @@ public class CtImageStackTools : IDatasetTools
     }
 
     // --- Static events for external preview control ---
-    public static event Action<CtImageStackDataset, byte[], Vector4> Preview3DChanged;
+    public static event Action<CtImageStackDataset, CtPreviewVolume, Vector4> Preview3DChanged;
     public static event Action<CtImageStackDataset> PreviewChanged;
 
     public static void Update3DPreviewFromExternal(CtImageStackDataset dataset, byte[] mask, Vector4 color)
+        => UpdatePreviewVolumeFromExternal(dataset, mask == null ? null :
+            new DenseCtPreviewVolume(dataset.Width, dataset.Height, dataset.Depth, mask), color);
+
+    public static void UpdatePreviewVolumeFromExternal(CtImageStackDataset dataset, CtPreviewVolume preview, Vector4 color)
     {
         lock (_previewLock)
         {
-            if (mask == null)
+            if (preview == null)
             {
                 _isExternalPreviewActive = false;
-                _external3DPreviewMask = null;
+                _external3DPreview = null;
                 _previewDatasetRef = null;
             }
             else
             {
                 _previewDatasetRef = new WeakReference<Dataset>(dataset);
-                _external3DPreviewMask = mask;
+                _external3DPreview = preview;
                 _externalPreviewColor = color;
                 _isExternalPreviewActive = true;
             }
@@ -204,18 +208,18 @@ public class CtImageStackTools : IDatasetTools
             // rebuild at once — defeating any throttling, on a path that runs while a threshold
             // is dragged or an acoustic simulation streams frames. The two preview events below
             // are what viewers actually listen to for this.
-            Preview3DChanged?.Invoke(dataset, mask, color);
+            Preview3DChanged?.Invoke(dataset, preview, color);
             PreviewChanged?.Invoke(dataset);
         }
     }
 
-    public static (bool isActive, byte[] mask, Vector4 color) GetPreviewData(Dataset dataset)
+    public static (bool isActive, CtPreviewVolume preview, Vector4 color) GetPreviewData(Dataset dataset)
     {
         lock (_previewLock)
         {
             if (_isExternalPreviewActive && _previewDatasetRef != null &&
                 _previewDatasetRef.TryGetTarget(out var target) &&
-                target == dataset) return (true, _external3DPreviewMask, _externalPreviewColor);
+                target == dataset) return (true, _external3DPreview, _externalPreviewColor);
             return (false, null, Vector4.Zero);
         }
     }

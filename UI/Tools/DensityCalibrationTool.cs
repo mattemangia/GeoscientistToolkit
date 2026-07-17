@@ -611,27 +611,16 @@ public class DensityCalibrationTool : IDatasetTools, IDisposable
         if (_ds == null) return;
 
         int w = _ds.Width, h = _ds.Height, d = _ds.Depth;
-        var mask = new byte[w * h * d];
-
-        foreach (var r in _regions)
-        {
-            if (r.SliceZ < 0 || r.SliceZ >= d) continue;
-            var zOff = r.SliceZ * w * h;
-            var x0 = Math.Clamp(r.X0, 0, w - 1);
-            var x1 = Math.Clamp(r.X1, 0, w - 1);
-            var y0 = Math.Clamp(r.Y0, 0, h - 1);
-            var y1 = Math.Clamp(r.Y1, 0, h - 1);
-
-            for (var y = y0; y <= y1; y++)
-            {
-                var row = zOff + y * w;
-                for (var x = x0; x <= x1; x++)
-                    mask[row + x] = 255;
-            }
-        }
+        var rectangles = _regions.Where(r => r.SliceZ >= 0 && r.SliceZ < d)
+            .GroupBy(r => r.SliceZ).ToDictionary(group => group.Key, group => group.Select(r => (
+                X0: Math.Clamp(r.X0, 0, w - 1), X1: Math.Clamp(r.X1, 0, w - 1),
+                Y0: Math.Clamp(r.Y0, 0, h - 1), Y1: Math.Clamp(r.Y1, 0, h - 1))).ToArray());
+        var preview = new FunctionalCtPreviewVolume(w, h, d, (x, y, z) =>
+            rectangles.TryGetValue(z, out var areas) && areas.Any(area =>
+                x >= area.X0 && x <= area.X1 && y >= area.Y0 && y <= area.Y1) ? (byte)255 : (byte)0);
 
         // publish preview via integration shim (and CtImageStackTools if present)
-        CalibrationIntegration.SetPreview(_ds, mask, new Vector4(0, 1, 1, 1));
+        CalibrationIntegration.SetPreview(_ds, preview, new Vector4(0, 1, 1, 1));
     }
 
     // ---------- Models ----------
@@ -686,7 +675,7 @@ public static class CalibrationIntegration
         Dictionary<CtImageStackDataset, (bool enabled, ViewerClickHandler handler, int? targetIndex)> _sel
             = new();
 
-    private static readonly Dictionary<CtImageStackDataset, (byte[] mask3D, Vector4 color, bool active)> _preview
+    private static readonly Dictionary<CtImageStackDataset, (CtPreviewVolume preview, Vector4 color, bool active)> _preview
         = new();
 
     public static event Action<CtImageStackDataset> PreviewChanged;
@@ -724,19 +713,19 @@ public static class CalibrationIntegration
     }
 
     // ---- Preview publishing ----
-    public static void SetPreview(CtImageStackDataset ds, byte[] mask3D, Vector4 color)
+    public static void SetPreview(CtImageStackDataset ds, CtPreviewVolume preview, Vector4 color)
     {
         if (ds == null) return;
-        _preview[ds] = (mask3D, color, mask3D != null);
+        _preview[ds] = (preview, color, preview != null);
         PreviewChanged?.Invoke(ds);
 
         // Mirror to CtImageStackTools if your viewers already listen there
-        TryMirrorToCtImageStackTools(ds, mask3D, color);
+        CtImageStackTools.UpdatePreviewVolumeFromExternal(ds, preview, color);
     }
 
-    public static (bool active, byte[] mask3D, Vector4 color) GetPreview(CtImageStackDataset ds)
+    public static (bool active, CtPreviewVolume preview, Vector4 color) GetPreview(CtImageStackDataset ds)
     {
-        if (ds != null && _preview.TryGetValue(ds, out var p) && p.active) return (true, p.mask3D, p.color);
+        if (ds != null && _preview.TryGetValue(ds, out var p) && p.active) return (true, p.preview, p.color);
         return (false, null, default);
     }
 
@@ -746,28 +735,7 @@ public static class CalibrationIntegration
         _preview[ds] = (null, default, false);
         PreviewChanged?.Invoke(ds);
 
-        TryMirrorToCtImageStackTools(ds, null, default);
+        CtImageStackTools.UpdatePreviewVolumeFromExternal(ds, null, default);
     }
 
-    // ---- Optional mirror to CtImageStackTools ----
-    private static void TryMirrorToCtImageStackTools(CtImageStackDataset ds, byte[] mask, Vector4 color)
-    {
-        // If your project defines GAIA.CtImageStackTools with SetPreviewData & RaisePreviewChanged,
-        // reflectively call those so existing viewers keep working with zero code changes.
-        var toolsType = Type.GetType("GAIA.CtImageStackTools, GAIA");
-        if (toolsType == null) return;
-
-        try
-        {
-            var setPrev = toolsType.GetMethod("SetPreviewData",
-                new[] { typeof(CtImageStackDataset), typeof(byte[]), typeof(Vector4) });
-            var raise = toolsType.GetMethod("RaisePreviewChanged", new[] { typeof(CtImageStackDataset) });
-            setPrev?.Invoke(null, new object[] { ds, mask, color });
-            raise?.Invoke(null, new object[] { ds });
-        }
-        catch
-        {
-            /* best-effort mirror */
-        }
-    }
 }

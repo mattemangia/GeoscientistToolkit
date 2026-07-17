@@ -111,7 +111,8 @@ public class RemoveSmallIslandsUI : IDisposable
                 var previewMask =
                     await Task.Run(() => _processor.GeneratePreviewMask(dataset, _lastAnalysisResult,
                         smallParticleIds, token), token);
-                CtImageStackTools.Update3DPreviewFromExternal(dataset, previewMask, new Vector4(1, 0, 0, 0.5f));
+                CtImageStackTools.UpdatePreviewVolumeFromExternal(dataset, previewMask,
+                    new Vector4(1, 0, 0, 0.5f));
             }
             else
             {
@@ -202,22 +203,18 @@ internal class IslandAnalysisProcessor : IDisposable
         };
     }
 
-    public byte[] GeneratePreviewMask(CtImageStackDataset dataset, IslandAnalysisResult analysis,
+    public CtPreviewVolume GeneratePreviewMask(CtImageStackDataset dataset, IslandAnalysisResult analysis,
         HashSet<int> selectedRoots, CancellationToken token)
     {
-        var length = checked((long)dataset.Width * dataset.Height * dataset.Depth);
-        if (length > int.MaxValue)
-            throw new InvalidOperationException(
-                "The selected volume is too large for the legacy full-resolution preview. " +
-                "Cleaning remains out-of-core and can be applied directly.");
-        var preview = new byte[(int)length];
+        var slices = new Dictionary<int, byte[]>();
         ScanRuns(dataset, analysis.MaterialId, analysis.Components, run =>
         {
             if (!selectedRoots.Contains(analysis.Components.Find(run.Label))) return;
-            preview.AsSpan((run.Z * dataset.Height + run.Y) * dataset.Width + run.StartX,
-                run.EndX - run.StartX).Fill(255);
+            if (!slices.TryGetValue(run.Z, out var slice))
+                slices[run.Z] = slice = new byte[checked(dataset.Width * dataset.Height)];
+            slice.AsSpan(run.Y * dataset.Width + run.StartX, run.EndX - run.StartX).Fill(255);
         }, token, value => Progress = .8f + value * .2f);
-        return preview;
+        return new SparseSliceCtPreviewVolume(dataset.Width, dataset.Height, dataset.Depth, slices);
     }
 
     public void ApplyCleaning(CtImageStackDataset dataset, IslandAnalysisResult analysis,

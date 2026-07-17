@@ -17,7 +17,7 @@ internal sealed record CtSliceTextureRequest(
     byte[] LiveSelection,
     Vector4 SelectionColor,
     bool ExternalPreviewActive,
-    byte[] ExternalPreview,
+    CtPreviewVolume ExternalPreview,
     Vector4 ExternalPreviewColor);
 
 internal sealed record CtSliceTextureResult(int View, int Slice, int Width, int Height, byte[] Rgba);
@@ -150,7 +150,6 @@ internal static class CtSliceTexturePipeline
             case 1: x = sourceX; y = request.Slice; z = sourceY; break;
             default: x = request.Slice; y = sourceX; z = sourceY; break;
         }
-        var index = ((long)z * dataset.Height + y) * dataset.Width + x;
-        return index >= 0 && index < request.ExternalPreview.LongLength && request.ExternalPreview[index] > 0;
+        return request.ExternalPreview.GetVoxel(x, y, z) > 0;
     }
 }

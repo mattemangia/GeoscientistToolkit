@@ -349,6 +349,10 @@ public sealed class CtLabelStorageTests
         var result = processor.Analyze(dataset, material, CancellationToken.None);
         Assert.Equal(new long[] { 2, 4 }, result.Particles.Select(p => p.VoxelCount).Order().ToArray());
         var small = result.Particles.Where(p => p.VoxelCount < 3).Select(p => p.Id).ToHashSet();
+        var preview = processor.GeneratePreviewMask(dataset, result, small, CancellationToken.None);
+        Assert.IsType<SparseSliceCtPreviewVolume>(preview);
+        Assert.Equal(255, preview.GetVoxel(1, 1, 0));
+        Assert.Equal(0, preview.GetVoxel(7, 5, 0));
         processor.ApplyCleaning(dataset, result, small, CancellationToken.None);
 
         Assert.Equal(0, labels[1, 1, 0]);
@@ -519,6 +523,22 @@ public sealed class CtLabelStorageTests
             Interlocked.Increment(ref PostCount);
             throw new InvalidOperationException("CT operation attempted to resume on the caller synchronization context.");
         }
+    }
+
+    [Fact]
+    public void VirtualPreviewVolume_ExtractsOrthogonalSlicesAndCompleteLod()
+    {
+        var preview = new FunctionalCtPreviewVolume(20, 16, 12,
+            (x, y, z) => x >= 15 && y >= 12 && z >= 9 ? (byte)255 : (byte)0);
+        var xy = preview.ReadSlice(0, 10, 20, 16);
+        var xz = preview.ReadSlice(1, 14, 20, 12);
+        var yz = preview.ReadSlice(2, 18, 16, 12);
+        var lod = preview.BuildLod(10, 8, 6);
+
+        Assert.Equal(255, xy[15 * 20 + 19]);
+        Assert.Equal(255, xz[11 * 20 + 19]);
+        Assert.Equal(255, yz[11 * 16 + 15]);
+        Assert.Equal(255, lod[^1]);
     }
 
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>

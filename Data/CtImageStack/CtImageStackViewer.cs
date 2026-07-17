@@ -593,7 +593,7 @@ public class CtImageStackViewer : IDatasetViewer
             _segmentationManager?.GetCommittedSelectionMask(slice, view),
             _segmentationManager?.GetPreviewMask(slice, view),
             _selectedMaterialForSegmentation?.Color ?? new Vector4(1, 0, 0, 1),
-            external.isActive, external.mask, external.color);
+            external.isActive, external.preview, external.color);
         _sliceTextureCancellation = new CancellationTokenSource();
         var token = _sliceTextureCancellation.Token;
         _sliceTextureTask = Task.Run(() => CtSliceTexturePipeline.Build(_dataset, request, token), token);

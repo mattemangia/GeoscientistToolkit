@@ -559,7 +559,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
     }
 
-    private void OnPreview3DChanged(CtImageStackDataset dataset, byte[] previewMask, Vector4 color)
+    private void OnPreview3DChanged(CtImageStackDataset dataset, CtPreviewVolume previewMask, Vector4 color)
     {
         if (dataset == _dataset) MarkDisplayDirty();
     }
@@ -1340,7 +1340,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             VolumeViewer?.ColorMapIndex ?? 1, materials, threshold,
             _interactiveSegmentation?.GetCommittedSelectionMask(slice, view),
             _interactiveSegmentation?.GetPreviewMask(slice, view),
-            targetMaterial?.Color ?? new Vector4(1, 0, 0, 1), external.isActive, external.mask, external.color);
+            targetMaterial?.Color ?? new Vector4(1, 0, 0, 1), external.isActive, external.preview, external.color);
         _sliceTextureCancellation = new CancellationTokenSource();
         var token = _sliceTextureCancellation.Token;
         _sliceTextureTask = Task.Run(() => CtSliceTexturePipeline.Build(_dataset, request, token), token);
@@ -1447,9 +1447,9 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             if (_dataset.LabelData != null) labelData = ExtractLabelSliceData(viewIndex, width, height);
 
             var currentSlice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => -1 };
-            var (isExternalPreviewActive, full3DPreviewMask, previewColor) = CtImageStackTools.GetPreviewData(_dataset);
+            var (isExternalPreviewActive, previewVolume, previewColor) = CtImageStackTools.GetPreviewData(_dataset);
             var externalPreviewMask = isExternalPreviewActive
-                ? ExtractPreviewSlice(full3DPreviewMask, viewIndex, width, height)
+                ? previewVolume.ReadSlice(viewIndex, currentSlice, width, height)
                 : null;
             var (is2DThresholdPreview, minThreshold, maxThreshold, thresholdColor) =
                 CtImageStackTools.Get2DThresholdPreviewState();
@@ -1608,46 +1608,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 y0 += sy;
             }
         }
-    }
-
-    private byte[] ExtractPreviewSlice(byte[] full3DMask, int viewIndex, int sliceWidth, int sliceHeight)
-    {
-        if (full3DMask == null) return null;
-
-        var sliceMask = new byte[sliceWidth * sliceHeight];
-        var fullWidth = _dataset.Width;
-        var fullHeight = _dataset.Height;
-
-        try
-        {
-            switch (viewIndex)
-            {
-                case 0:
-                    var offset = _sliceZ * fullWidth * fullHeight;
-                    if (offset + sliceMask.Length <= full3DMask.Length)
-                        Buffer.BlockCopy(full3DMask, offset, sliceMask, 0, sliceMask.Length);
-                    break;
-                case 1:
-                    for (var z = 0; z < sliceHeight; z++)
-                    for (var x = 0; x < sliceWidth; x++)
-                        sliceMask[z * sliceWidth + x] =
-                            full3DMask[z * fullWidth * fullHeight + _sliceY * fullWidth + x];
-                    break;
-                case 2:
-                    for (var z = 0; z < sliceHeight; z++)
-                    for (var y = 0; y < sliceWidth; y++)
-                        sliceMask[z * sliceWidth + y] =
-                            full3DMask[z * fullWidth * fullHeight + y * fullWidth + _sliceX];
-                    break;
-            }
-        }
-        catch (IndexOutOfRangeException ex)
-        {
-            Logger.LogError($"[CtCombinedViewer] Error extracting preview slice for view {viewIndex}: {ex.Message}");
-            return null;
-        }
-
-        return sliceMask;
     }
 
     private byte[] ExtractSliceData(int viewIndex, int width, int height)

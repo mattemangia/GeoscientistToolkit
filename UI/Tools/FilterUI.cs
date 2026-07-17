@@ -40,7 +40,8 @@ public class FilterUI : IDisposable
     private DateTime _lastPreviewUpdate = DateTime.MinValue;
     private float _nlmPatchRadius = 3;
     private float _nlmSearchRadius = 7;
-    private byte[] _previewMask;
+    private CtPreviewVolume _previewMask;
+    private CtImageStackDataset _previewDataset;
     private bool _process3D;
     private float _progress;
     private FilterType _selectedFilter = FilterType.Gaussian;
@@ -303,14 +304,15 @@ public class FilterUI : IDisposable
                     ApplyFilterCPUToSubVolume(previewData, resultData, width, height, previewDepth);
                 }
 
-                // Create full volume preview mask showing difference
-                _previewMask = new byte[width * height * depth];
                 var midSlice = previewDepth / 2;
-                Buffer.BlockCopy(resultData, midSlice * width * height, _previewMask,
-                    (startZ + midSlice) * width * height, width * height);
+                var previewSlice = new byte[width * height];
+                Buffer.BlockCopy(resultData, midSlice * width * height, previewSlice, 0, previewSlice.Length);
+                _previewMask = new SparseSliceCtPreviewVolume(width, height, depth,
+                    new Dictionary<int, byte[]> { [startZ + midSlice] = previewSlice });
             });
 
-            CtImageStackTools.Update3DPreviewFromExternal(dataset, _previewMask, new Vector4(0, 1, 1, 0.5f));
+            _previewDataset = dataset;
+            CtImageStackTools.UpdatePreviewVolumeFromExternal(dataset, _previewMask, new Vector4(0, 1, 1, 0.5f));
             _lastPreviewUpdate = DateTime.Now;
         }
         finally
@@ -323,6 +325,9 @@ public class FilterUI : IDisposable
     {
         _previewMask = null;
         _showPreview = false;
+        if (_previewDataset != null)
+            CtImageStackTools.UpdatePreviewVolumeFromExternal(_previewDataset, null, Vector4.Zero);
+        _previewDataset = null;
     }
 
     private void ApplyFilterCPUToSubVolume(byte[] source, byte[] result, int width, int height, int depth)
