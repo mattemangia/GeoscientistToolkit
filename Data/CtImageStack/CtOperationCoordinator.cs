@@ -35,7 +35,8 @@ public sealed class CtOperationCoordinator
         var handle = new CtOperationHandle(name);
         lock (_gate)
         {
-            handle.Completion = _tail = RunAfterAsync(_tail, handle, operation);
+            var predecessor = _tail;
+            handle.Completion = _tail = Task.Run(() => RunAfterAsync(predecessor, handle, operation));
         }
         return handle;
     }
@@ -45,8 +46,6 @@ public sealed class CtOperationCoordinator
     {
         try { await predecessor.ConfigureAwait(false); }
         catch { /* Each handle records its own failure; the queue must continue. */ }
-        await Task.Yield();
-
         if (handle.Token.IsCancellationRequested)
         {
             handle.Status = CtOperationStatus.Cancelled;

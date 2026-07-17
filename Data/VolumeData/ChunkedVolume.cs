@@ -359,6 +359,15 @@ public class ChunkedVolume : IGrayscaleVolumeData
         IProgress<float> progress = null)
     {
         Logger.Log($"[ChunkedVolume] Saving volume to: {path}");
+        if (_useMemoryMapping && !string.IsNullOrWhiteSpace(BackingFilePath) &&
+            string.Equals(Path.GetFullPath(path), Path.GetFullPath(BackingFilePath),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Flush();
+            progress?.Report(1);
+            return;
+        }
 
         using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write))
         using (var bw = new BinaryWriter(fs))

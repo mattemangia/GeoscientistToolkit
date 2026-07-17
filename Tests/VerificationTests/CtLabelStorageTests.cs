@@ -473,6 +473,54 @@ public sealed class CtLabelStorageTests
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
+    [Fact]
+    public async Task CtOperationCoordinator_AlwaysRunsOffCallerAndSerializesOperations()
+    {
+        using var grayscale = new ChunkedVolume(2, 2, 1, 2);
+        using var labels = new ChunkedLabelVolume(2, 2, 1, 2, false);
+        var dataset = new CtImageStackDataset("queue", Path.GetTempPath())
+        { Width = 2, Height = 2, Depth = 1, VolumeData = grayscale, LabelData = labels };
+        var order = new List<int>();
+        var gate = new object();
+        var context = new RejectingSynchronizationContext();
+        var previousContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(context);
+        CtOperationHandle first;
+        CtOperationHandle second;
+        try
+        {
+            first = CtOperationCoordinator.For(dataset).Enqueue("first", async (_, progress) =>
+            {
+                lock (gate) order.Add(1);
+                progress.Report(.5f);
+                await Task.Delay(20).ConfigureAwait(false);
+                lock (gate) order.Add(2);
+            });
+            second = CtOperationCoordinator.For(dataset).Enqueue("second", (_, _) =>
+            {
+                lock (gate) order.Add(3);
+                return Task.CompletedTask;
+            });
+        }
+        finally { SynchronizationContext.SetSynchronizationContext(previousContext); }
+
+        await Task.WhenAll(first.Completion, second.Completion);
+        Assert.Equal(0, context.PostCount);
+        Assert.Equal(new[] { 1, 2, 3 }, order);
+        Assert.Equal(CtOperationStatus.Completed, second.Status);
+        Assert.Equal(1, first.Progress);
+    }
+
+    private sealed class RejectingSynchronizationContext : SynchronizationContext
+    {
+        public int PostCount;
+        public override void Post(SendOrPostCallback d, object state)
+        {
+            Interlocked.Increment(ref PostCount);
+            throw new InvalidOperationException("CT operation attempted to resume on the caller synchronization context.");
+        }
+    }
+
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
     {
         public void Report(T value) => report(value);

@@ -477,6 +477,14 @@ public class ChunkedLabelVolume : ILabelVolumeData
     {
         try
         {
+            if (_useMemoryMapping && !string.IsNullOrWhiteSpace(FilePath) &&
+                string.Equals(Path.GetFullPath(path), Path.GetFullPath(FilePath),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _viewAccessor.Flush();
+                _dirtyChunks.Clear();
+                return;
+            }
             using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write))
             using (var bw = new BinaryWriter(fs))
             {
