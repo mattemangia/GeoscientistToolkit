@@ -310,9 +310,11 @@ public class PhysicoChemViewer : IDatasetViewer
         ImGui.InvisibleButton("##PhysicoChem3DViewport", availableSize,
             ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
         var isHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
-        HandleMouseInput(isHovered || _isDragging || _isPanning);
+        HandleMouseInput(isHovered || _isDragging || _isPanning || _isBoxSelecting);
         var io = ImGui.GetIO();
-        if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !io.KeyAlt && (io.KeyShift || io.KeyCtrl))
+        var selectionModifierDown = io.KeyShift || io.KeyCtrl;
+        if (!_isBoxSelecting && isHovered && ImGui.IsMouseDown(ImGuiMouseButton.Left) &&
+            !io.KeyAlt && selectionModifierDown)
         {
             _isBoxSelecting = true;
             _boxSelectionUsesCtrl = io.KeyCtrl;
@@ -320,7 +322,7 @@ public class PhysicoChemViewer : IDatasetViewer
             _boxSelectionEnd = _boxSelectionStart;
             _selectionBeforeDrag = _dataset.SelectedCellIDs.ToHashSet();
         }
-        else if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !io.KeyAlt)
+        else if (!_isBoxSelecting && isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !io.KeyAlt)
         {
             var local = io.MousePos - cursorPos;
             var picked = _renderer.Pick((int)local.X, (int)local.Y);
@@ -333,7 +335,7 @@ public class PhysicoChemViewer : IDatasetViewer
         {
             _boxSelectionEnd = Vector2.Clamp(io.MousePos - cursorPos, Vector2.Zero, availableSize);
             var dragDistance = Vector2.Distance(_boxSelectionStart, _boxSelectionEnd);
-            if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+            if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
             {
                 if (dragDistance < 4.0f)
                     ApplyModifiedClickSelection(_boxSelectionEnd);
