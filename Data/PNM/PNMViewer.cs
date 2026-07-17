@@ -1128,9 +1128,10 @@ public class PNMViewer : IDatasetViewer
 
         if (io.MouseWheel != 0)
         {
-            var zoomSpeed = 0.1f * _cameraDistance;
-            _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * zoomSpeed / _cameraDistance),
-                0.1f, _modelRadius * 10.0f);
+            var maximumDistance = Math.Max(1f, _modelRadius * 10.0f);
+            var candidate = _cameraDistance * MathF.Pow(0.9f, io.MouseWheel);
+            if (!float.IsFinite(candidate)) candidate = maximumDistance;
+            _cameraDistance = Math.Clamp(candidate, 0.1f, maximumDistance);
             UpdateCameraMatrices();
         }
 
@@ -1681,18 +1682,21 @@ public class PNMViewer : IDatasetViewer
     {
         if (_dataset.Pores.Any())
         {
+            // Include the largest possible rendered pore extent (the UI scale reaches 5x and the
+            // shader applies a 0.1 radius factor). Position-only bounds collapse to zero for a
+            // one-pore PNM, placing the camera inside a giant sphere and making zoom's clamp invalid.
+            const float maximumRenderedRadiusFactor = 0.5f;
             var min = new Vector3(
-                _dataset.Pores.Min(p => p.Position.X),
-                _dataset.Pores.Min(p => p.Position.Y),
-                _dataset.Pores.Min(p => p.Position.Z));
+                _dataset.Pores.Min(p => p.Position.X - SafeRadius(p) * maximumRenderedRadiusFactor),
+                _dataset.Pores.Min(p => p.Position.Y - SafeRadius(p) * maximumRenderedRadiusFactor),
+                _dataset.Pores.Min(p => p.Position.Z - SafeRadius(p) * maximumRenderedRadiusFactor));
             var max = new Vector3(
-                _dataset.Pores.Max(p => p.Position.X),
-                _dataset.Pores.Max(p => p.Position.Y),
-                _dataset.Pores.Max(p => p.Position.Z));
+                _dataset.Pores.Max(p => p.Position.X + SafeRadius(p) * maximumRenderedRadiusFactor),
+                _dataset.Pores.Max(p => p.Position.Y + SafeRadius(p) * maximumRenderedRadiusFactor),
+                _dataset.Pores.Max(p => p.Position.Z + SafeRadius(p) * maximumRenderedRadiusFactor));
             _modelCenter = (min + max) / 2.0f;
-            _modelRadius = Vector3.Distance(min, max) / 2.0f;
+            _modelRadius = Math.Max(0.1f, Vector3.Distance(min, max) / 2.0f);
             _cameraDistance = _modelRadius * 2.5f;
-            if (_cameraDistance < 0.1f) _cameraDistance = 5.0f;
         }
         else
         {
@@ -1706,6 +1710,9 @@ public class PNMViewer : IDatasetViewer
         _cameraPitch = MathF.PI / 6f;
         UpdateCameraMatrices();
     }
+
+    private static float SafeRadius(Pore pore) =>
+        float.IsFinite(pore.Radius) && pore.Radius > 0 ? pore.Radius : 0.1f;
 
     #endregion
 }
