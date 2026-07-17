@@ -14,12 +14,16 @@ namespace GAIA.Data.CtImageStack;
 /// </summary>
 public class CtRenderingPanel : BasePanel
 {
+    private const int WindowLevelDebounceMs = 200;
     private readonly CtImageStackDataset _dataset;
     private readonly CtCombinedViewer _viewer;
     private int _currentViewMode;
     private int? _pendingSliceX;
     private int? _pendingSliceY;
     private int? _pendingSliceZ;
+    private float? _pendingWindowLevel;
+    private float? _pendingWindowWidth;
+    private long _lastWindowLevelEditMs;
 
     public CtRenderingPanel(CtCombinedViewer viewer, CtImageStackDataset dataset)
         : base("CT Rendering Controls", new Vector2(400, 600))
@@ -105,14 +109,32 @@ public class CtRenderingPanel : BasePanel
         ImGui.Separator();
 
         ImGui.Text("Window/Level:");
-        var windowLevel = _viewer.WindowLevel;
-        var windowWidth = _viewer.WindowWidth;
+        var windowLevel = _pendingWindowLevel ?? _viewer.WindowLevel;
+        var windowWidth = _pendingWindowWidth ?? _viewer.WindowWidth;
 
         if (ImGui.DragFloat("Level", ref windowLevel, 1f, 0f, 255f))
-            _viewer.WindowLevel = windowLevel;
+        {
+            _pendingWindowLevel = windowLevel;
+            _lastWindowLevelEditMs = Environment.TickCount64;
+        }
+        var levelEditFinished = ImGui.IsItemDeactivatedAfterEdit();
 
         if (ImGui.DragFloat("Width", ref windowWidth, 1f, 1f, 255f))
-            _viewer.WindowWidth = windowWidth;
+        {
+            _pendingWindowWidth = windowWidth;
+            _lastWindowLevelEditMs = Environment.TickCount64;
+        }
+        var widthEditFinished = ImGui.IsItemDeactivatedAfterEdit();
+
+        if ((_pendingWindowLevel.HasValue || _pendingWindowWidth.HasValue) &&
+            (levelEditFinished || widthEditFinished ||
+             Environment.TickCount64 - _lastWindowLevelEditMs >= WindowLevelDebounceMs))
+        {
+            _viewer.SetWindowLevel(_pendingWindowLevel ?? _viewer.WindowLevel,
+                _pendingWindowWidth ?? _viewer.WindowWidth);
+            _pendingWindowLevel = null;
+            _pendingWindowWidth = null;
+        }
 
         var linkThresholds = _viewer.LinkThresholds;
         if (ImGui.Checkbox("Link 3D thresholds", ref linkThresholds))
@@ -124,8 +146,9 @@ public class CtRenderingPanel : BasePanel
 
         if (ImGui.Button("Auto W/L"))
         {
-            _viewer.WindowLevel = 128;
-            _viewer.WindowWidth = 255;
+            _pendingWindowLevel = null;
+            _pendingWindowWidth = null;
+            _viewer.SetWindowLevel(128, 255);
         }
 
         ImGui.Separator();

@@ -174,6 +174,14 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         }
     }
 
+    public void SetWindowLevel(float level, float width)
+    {
+        _windowLevel = level;
+        _windowWidth = width;
+        MarkDisplayDirty();
+        if (_linkThresholds) PushWindowLevelTo3D();
+    }
+
     /// <summary>
     ///     Keeps the 2D window/level and the 3D grayscale thresholds describing the same
     ///     intensity range, so a feature visible on a slice is visible in the volume.
