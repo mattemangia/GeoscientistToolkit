@@ -1209,7 +1209,8 @@ public class PNMViewer : IDatasetViewer
         ImGui.SetNextWindowBgAlpha(0.8f);
         ImGui.Begin(_legendWindowId,
             ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoBringToFrontOnFocus);
         DrawLegendContent();
         ImGui.End();
 
@@ -1222,7 +1223,8 @@ public class PNMViewer : IDatasetViewer
 
             ImGui.Begin(_flowLegendWindowId,
                 ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
+                ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoBringToFrontOnFocus);
             DrawFlowLegend();
             ImGui.End();
         }
@@ -1235,7 +1237,8 @@ public class PNMViewer : IDatasetViewer
             ImGui.SetNextWindowBgAlpha(0.8f);
             ImGui.Begin(_statsWindowId,
                 ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
+                ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoBringToFrontOnFocus);
             DrawStatisticsContent();
             ImGui.End();
         }
@@ -1253,7 +1256,6 @@ public class PNMViewer : IDatasetViewer
             ImGui.SetNextWindowSize(new Vector2(Math.Min(320, viewSize.X - margin * 2),
                 Math.Min(280, viewSize.Y - margin * 2)), ImGuiCond.Always);
             ImGui.SetNextWindowBgAlpha(0.85f);
-            ImGui.SetNextWindowFocus();
 
             ImGui.Begin(_selectedWindowId,
                 ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |

@@ -265,7 +265,7 @@ public static class PNMGenerator
             edt = DistanceTransformApproxCPU(originalMask, W, H, D);
         }
 
-        AssignPoreRadiiFromEDT(pores, fullPoreLabels, edt, (float)vEdge);
+        AssignPoreRadiiFromEDT(pores, fullPoreLabels, edt);
 
         token.ThrowIfCancellationRequested();
 
@@ -919,7 +919,7 @@ public static class PNMGenerator
         return dist;
     }
 
-    private static void AssignPoreRadiiFromEDT(Pore[] pores, int[] ccl, float[] edt, float vEdge)
+    private static void AssignPoreRadiiFromEDT(Pore[] pores, int[] ccl, float[] edt)
     {
         if (edt == null) return;
         var maxByComp = new float[pores.Length];
@@ -933,7 +933,9 @@ public static class PNMGenerator
 
         for (var id = 1; id < pores.Length; id++)
             if (pores[id] != null)
-                pores[id].Radius = maxByComp[id] * vEdge;
+                // Pore positions and radii share voxel coordinates. Physical size is obtained by
+                // multiplying by PNMDataset.VoxelSize at presentation/simulation boundaries.
+                pores[id].Radius = maxByComp[id];
     }
 
     #endregion
@@ -971,7 +973,7 @@ public static class PNMGenerator
 
                         // Calculate throat radius at this interface point
                         // Use MINIMUM of the two EDT values (constriction point)
-                        var r = MathF.Min(edt[idx], edt[nidx]) * vEdge;
+                        var r = MathF.Min(edt[idx], edt[nidx]);
 
                         edges.AddOrUpdate(key,
                             k => (r, 1, r),
@@ -1005,16 +1007,14 @@ public static class PNMGenerator
             var (a, b) = kv.Key;
             var (maxRadius, count, minRadius) = kv.Value;
 
-            // These radii are already in micrometers from EDT * vEdge
             var finalRadius = minRadius * 0.7f + maxRadius * 0.3f;
 
             // Apply reduction factor for realism
             finalRadius *= 0.35f;
 
-            // Ensure minimum radius (in micrometers)
-            finalRadius = Math.Max(0.01f * vEdge, finalRadius); // At least 0.01 voxels
+            // Radii use the same voxel-coordinate system as pore positions.
+            finalRadius = Math.Max(0.01f, finalRadius);
 
-            // Store radius IN MICROMETERS
             list.Add(new Throat { ID = tid++, Pore1ID = a, Pore2ID = b, Radius = finalRadius });
 
             if (!adjacency.TryGetValue(a, out var la)) adjacency[a] = la = new List<(int nb, float w)>();
@@ -1024,7 +1024,7 @@ public static class PNMGenerator
         }
 
         Logger.Log($"[BuildThroats] Found {list.Count} unique throats with radius range " +
-                   $"{list.Min(t => t.Radius):F3} to {list.Max(t => t.Radius):F3} µm");
+                   $"{list.Min(t => t.Radius):F3} to {list.Max(t => t.Radius):F3} voxels");
 
         return list;
     }
