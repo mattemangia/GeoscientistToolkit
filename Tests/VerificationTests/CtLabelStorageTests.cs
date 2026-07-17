@@ -439,4 +439,42 @@ public sealed class CtLabelStorageTests
         Assert.Equal(9, labels[0, 0, 0]);
         Assert.Equal(9, labels[63, 63, 19]);
     }
+
+    [Fact]
+    public async Task ExplicitPersistence_SavesManagedGrayscaleAndLabelsWithProgress()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"gaia-persist-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            using var grayscale = new ChunkedVolume(15, 11, 4, 4);
+            var graySlice = Enumerable.Range(0, 15 * 11).Select(i => (byte)(i % 251)).ToArray();
+            for (var z = 0; z < 4; z++) grayscale.WriteSliceZ(z, graySlice);
+            using var labels = new ChunkedLabelVolume(15, 11, 4, 4, false);
+            labels[14, 10, 3] = 12;
+            var dataset = new CtImageStackDataset("persist", directory)
+            {
+                Width = 15, Height = 11, Depth = 4, VolumeData = grayscale, LabelData = labels
+            };
+            var reported = new List<float>();
+            await dataset.PersistCtDataAsync(progress: new InlineProgress<float>(reported.Add));
+            var baseName = Path.GetFileName(directory);
+            var volumePath = Path.Combine(directory, baseName + ".Volume.bin");
+            var labelPath = Path.Combine(directory, baseName + ".Labels.bin");
+
+            Assert.True(File.Exists(volumePath));
+            Assert.True(File.Exists(labelPath));
+            using var reloadedGray = await ChunkedVolume.LoadFromBinAsync(volumePath, true);
+            using var reloadedLabels = ChunkedLabelVolume.LoadFromBin(labelPath, true);
+            Assert.Equal(graySlice[10 * 15 + 14], reloadedGray[14, 10, 3]);
+            Assert.Equal(12, reloadedLabels[14, 10, 3]);
+            Assert.Contains(reported, value => value >= 1);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
 }

@@ -44,6 +44,7 @@ public class ChunkedVolume : IGrayscaleVolumeData
     public int TotalChunks => _chunkCountX * _chunkCountY * _chunkCountZ;
     public bool IsMemoryMapped => _useMemoryMapping;
     public long MappedWindowSize => _useMemoryMapping ? checked((long)ChunkDim * ChunkDim * ChunkDim) : 0;
+    public string BackingFilePath { get; }
     public byte[][] Chunks { get; private set; }
 
     #endregion
@@ -77,7 +78,7 @@ public class ChunkedVolume : IGrayscaleVolumeData
     ///     Creates a volume that uses memory-mapped file storage
     /// </summary>
     public ChunkedVolume(int width, int height, int depth, int chunkDim,
-        MemoryMappedFile mmf, long fileLength, long headerSize = HEADER_SIZE)
+        MemoryMappedFile mmf, long fileLength, long headerSize = HEADER_SIZE, string backingFilePath = null)
     {
         ValidateDimensions(width, height, depth, chunkDim);
 
@@ -95,6 +96,7 @@ public class ChunkedVolume : IGrayscaleVolumeData
         _viewAccessor = new ChunkMappedAccessor(_mmf, headerSize,
             checked((long)chunkDim * chunkDim * chunkDim), fileLength);
         _headerSize = headerSize;
+        BackingFilePath = backingFilePath;
         Chunks = null;
 
         Logger.Log($"[ChunkedVolume] Created memory-mapped volume: {Width}x{Height}x{Depth}, " +
@@ -342,7 +344,8 @@ public class ChunkedVolume : IGrayscaleVolumeData
             // Create memory mapped file
             var mmf = MemoryMappedFile.CreateFromFile(volumePath, FileMode.Open, null, 0,
                 MemoryMappedFileAccess.ReadWrite);
-            var volume = new ChunkedVolume(width, height, depth, chunkDim, mmf, totalSize);
+            var volume = new ChunkedVolume(width, height, depth, chunkDim, mmf, totalSize,
+                HEADER_SIZE, volumePath);
             await ProcessImagesParallelAsync(volume, imageFiles, progress);
 
             return volume;
@@ -352,7 +355,8 @@ public class ChunkedVolume : IGrayscaleVolumeData
     /// <summary>
     ///     Saves the volume to a binary file
     /// </summary>
-    public async Task SaveAsBinAsync(string path)
+    public async Task SaveAsBinAsync(string path, CancellationToken cancellationToken = default,
+        IProgress<float> progress = null)
     {
         Logger.Log($"[ChunkedVolume] Saving volume to: {path}");
 
@@ -360,7 +364,7 @@ public class ChunkedVolume : IGrayscaleVolumeData
         using (var bw = new BinaryWriter(fs))
         {
             WriteHeader(bw);
-            await WriteChunksAsync(bw);
+            await WriteChunksAsync(bw, cancellationToken, progress);
         }
 
         Logger.Log("[ChunkedVolume] Volume saved successfully");
@@ -420,7 +424,8 @@ public class ChunkedVolume : IGrayscaleVolumeData
             }
 
             var mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.ReadWrite);
-            var volume = new ChunkedVolume(width, height, depth, chunkDim, mmf, fileLength)
+            var volume = new ChunkedVolume(width, height, depth, chunkDim, mmf, fileLength,
+                HEADER_SIZE, path)
             {
                 PixelSize = pixelSize
             };
@@ -478,6 +483,8 @@ public class ChunkedVolume : IGrayscaleVolumeData
 
         Logger.Log($"[ChunkedVolume] Filled volume with value: {value}");
     }
+
+    public void Flush() => _viewAccessor?.Flush();
 
     /// <summary>
     ///     Gets the index of a chunk from its coordinates
@@ -556,22 +563,30 @@ public class ChunkedVolume : IGrayscaleVolumeData
         return (width, height, depth, chunkDim, pixelSize);
     }
 
-    private async Task WriteChunksAsync(BinaryWriter bw)
+    private async Task WriteChunksAsync(BinaryWriter bw, CancellationToken cancellationToken = default,
+        IProgress<float> progress = null)
     {
         var chunkSize = ChunkDim * ChunkDim * ChunkDim;
 
         if (!_useMemoryMapping)
         {
-            foreach (var chunk in Chunks) await bw.BaseStream.WriteAsync(chunk, 0, chunkSize);
+            for (var i = 0; i < Chunks.Length; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await bw.BaseStream.WriteAsync(Chunks[i].AsMemory(0, chunkSize), cancellationToken);
+                if ((i & 15) == 0 || i == Chunks.Length - 1) progress?.Report((i + 1f) / Chunks.Length);
+            }
         }
         else
         {
             var buffer = new byte[chunkSize];
             for (var i = 0; i < TotalChunks; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var offset = CalculateGlobalOffset(i, 0);
                 _viewAccessor.ReadArray(offset, buffer, 0, chunkSize);
-                await bw.BaseStream.WriteAsync(buffer, 0, chunkSize);
+                await bw.BaseStream.WriteAsync(buffer.AsMemory(0, chunkSize), cancellationToken);
+                if ((i & 15) == 0 || i == TotalChunks - 1) progress?.Report((i + 1f) / TotalChunks);
             }
         }
     }

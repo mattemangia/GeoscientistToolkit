@@ -376,7 +376,27 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
     public async Task PersistCtDataAsync(CancellationToken cancellationToken = default,
         IProgress<float> progress = null)
     {
-        var labelProgress = new Progress<float>(value => progress?.Report(value * .9f));
+        cancellationToken.ThrowIfCancellationRequested();
+        var volumePath = GetVolumePath();
+        if (VolumeData != null)
+        {
+            if (VolumeData.IsMemoryMapped && Path.GetFullPath(VolumeData.BackingFilePath ?? "") ==
+                Path.GetFullPath(volumePath))
+            {
+                await Task.Run(VolumeData.Flush, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                var temporaryPath = volumePath + ".persisting";
+                var volumeProgress = new Progress<float>(value => progress?.Report(value * .45f));
+                await VolumeData.SaveAsBinAsync(temporaryPath, cancellationToken, volumeProgress)
+                    .ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                File.Move(temporaryPath, volumePath, true);
+            }
+        }
+        progress?.Report(.45f);
+        var labelProgress = new Progress<float>(value => progress?.Report(.45f + value * .45f));
         await SaveLabelDataAsync(cancellationToken, labelProgress).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         await Task.Run(() =>
