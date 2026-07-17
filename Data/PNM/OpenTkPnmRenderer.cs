@@ -52,15 +52,16 @@ internal sealed class OpenTkPnmRenderer : IDisposable
         if (_fbo != 0 && width == Width && height == Height) return;
         Width = width; Height = height;
         if (_fbo == 0) _fbo = GL.GenFramebuffer();
-        if (_color != 0) GL.DeleteTexture(_color);
-        if (_depth != 0) GL.DeleteRenderbuffer(_depth);
-        _color = GL.GenTexture();
+        // Keep the GL object names stable across resize. ImGui draw data can outlive the resize
+        // call by a frame; deleting and recreating the texture made the PNM image disappear while
+        // the window was being dragged.
+        if (_color == 0) _color = GL.GenTexture();
         GL.BindTexture(TextureTarget.Texture2D, _color);
         GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, width, height, 0,
             PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-        _depth = GL.GenRenderbuffer();
+        if (_depth == 0) _depth = GL.GenRenderbuffer();
         GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _depth);
         GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.DepthComponent24, width, height);
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);

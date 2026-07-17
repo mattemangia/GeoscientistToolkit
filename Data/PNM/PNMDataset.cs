@@ -366,10 +366,21 @@ public class PNMDataset : Dataset, ISerializableDataset
 
         var options = new JsonSerializerOptions { WriteIndented = true };
         var jsonString = JsonSerializer.Serialize(dto, options);
-        File.WriteAllText(path, jsonString);
+        var fullPath = Path.GetFullPath(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath) ?? ".");
+        var temporaryPath = fullPath + $".{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temporaryPath, jsonString);
+            File.Move(temporaryPath, fullPath, true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
 
         // Update the FilePath after successful export
-        FilePath = path;
+        FilePath = fullPath;
     }
 
     // -------------------- TABLE BUILDERS & CSV EXPORT --------------------

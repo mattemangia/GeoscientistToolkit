@@ -769,6 +769,17 @@ public class PNMViewer : IDatasetViewer
         ImGui.SetCursorScreenPos(imagePos);
         ImGui.InvisibleButton("PNMViewInteraction", availableSize);
 
+        if (_dataset.Pores.Count == 0)
+        {
+            var message = "The generated PNM contains no pores. Try a less aggressive erosion or verify the selected segmented material.";
+            var drawList = ImGui.GetWindowDrawList();
+            var textSize = ImGui.CalcTextSize(message, false, Math.Max(180, availableSize.X - 60));
+            var textPos = imagePos + new Vector2(Math.Max(20, (availableSize.X - textSize.X) * .5f),
+                Math.Max(20, (availableSize.Y - textSize.Y) * .5f));
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), textPos, 0xFF66AAFF, message,
+                Math.Max(180, availableSize.X - 60));
+        }
+
         var isHovered = ImGui.IsItemHovered();
         if (isHovered)
         {
@@ -1177,13 +1188,23 @@ public class PNMViewer : IDatasetViewer
         _viewMatrix = Matrix4x4.CreateLookAt(_cameraPosition, _cameraTarget, Vector3.UnitY);
 
         var aspectRatio = _openTkRenderer.Width / (float)Math.Max(1, _openTkRenderer.Height);
-        _projMatrix = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspectRatio, 0.01f, 1000f);
+        // PNM coordinates are expressed in source voxels. Large CT networks routinely span well
+        // beyond 1000 units, so a fixed far plane clipped the complete network and left only the
+        // UI overlays visible. Scale the depth range with the fitted model and camera distance.
+        var nearPlane = Math.Max(0.001f, _modelRadius * 0.0001f);
+        var farPlane = Math.Max(1000f, _cameraDistance + _modelRadius * 4f);
+        _projMatrix = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspectRatio, nearPlane, farPlane);
     }
 
     private void DrawOverlayWindows(Vector2 viewPos, Vector2 viewSize)
     {
-        ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X - 200, viewPos.Y + 10), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Vector2(180, 280), ImGuiCond.Always);
+        var margin = 10f;
+        var legendWidth = Math.Clamp(viewSize.X - margin * 2, 120f, 180f);
+        var legendHeight = Math.Clamp(viewSize.Y - margin * 2, 100f, 280f);
+        ImGui.SetNextWindowPos(new Vector2(
+            Math.Max(viewPos.X + margin, viewPos.X + viewSize.X - legendWidth - margin), viewPos.Y + margin),
+            ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new Vector2(legendWidth, legendHeight), ImGuiCond.Always);
         ImGui.SetNextWindowBgAlpha(0.8f);
         ImGui.Begin(_legendWindowId,
             ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
@@ -1191,7 +1212,7 @@ public class PNMViewer : IDatasetViewer
         DrawLegendContent();
         ImGui.End();
 
-        if (_showFlowVisualization && _hasFlowData)
+        if (_showFlowVisualization && _hasFlowData && viewSize.X >= 230 && viewSize.Y >= 310)
         {
             ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X - 220, viewPos.Y + viewSize.Y - 150),
                 ImGuiCond.Always);
@@ -1205,14 +1226,18 @@ public class PNMViewer : IDatasetViewer
             ImGui.End();
         }
 
-        ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + viewSize.Y - 180), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Vector2(400, 170), ImGuiCond.Always);
-        ImGui.SetNextWindowBgAlpha(0.8f);
-        ImGui.Begin(_statsWindowId,
-            ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
-        DrawStatisticsContent();
-        ImGui.End();
+        if (viewSize.X >= 430 && viewSize.Y >= 220)
+        {
+            var statsWidth = Math.Min(400, viewSize.X - margin * 2);
+            ImGui.SetNextWindowPos(new Vector2(viewPos.X + margin, viewPos.Y + viewSize.Y - 180), ImGuiCond.Always);
+            ImGui.SetNextWindowSize(new Vector2(statsWidth, 170), ImGuiCond.Always);
+            ImGui.SetNextWindowBgAlpha(0.8f);
+            ImGui.Begin(_statsWindowId,
+                ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
+            DrawStatisticsContent();
+            ImGui.End();
+        }
 
         if (_selectedPoreId >= 0)
         {
@@ -1224,7 +1249,8 @@ public class PNMViewer : IDatasetViewer
             }
 
             ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + 10), ImGuiCond.Always);
-            ImGui.SetNextWindowSize(new Vector2(320, 280), ImGuiCond.Always); // Increased height for diffusivity
+            ImGui.SetNextWindowSize(new Vector2(Math.Min(320, viewSize.X - margin * 2),
+                Math.Min(280, viewSize.Y - margin * 2)), ImGuiCond.Always);
             ImGui.SetNextWindowBgAlpha(0.85f);
             ImGui.SetNextWindowFocus();
 

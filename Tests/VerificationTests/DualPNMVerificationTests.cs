@@ -10,6 +10,36 @@ namespace VerificationTests;
 public class DualPNMVerificationTests
 {
     [Fact]
+    public void PNM_AtomicDiskPersistence_ReloadsCompleteNetworkAndDimensions()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"gaia-pnm-{Guid.NewGuid():N}");
+        var path = Path.Combine(directory, "network.pnm");
+        try
+        {
+            var source = new PNMDataset("PersistentNetwork", "")
+            {
+                VoxelSize = 2.5f, ImageWidth = 40, ImageHeight = 30, ImageDepth = 20
+            };
+            source.Pores.Add(new Pore { ID = 1, Position = Vector3.Zero, Radius = 2 });
+            source.Pores.Add(new Pore { ID = 2, Position = new Vector3(10, 0, 0), Radius = 3 });
+            source.Throats.Add(new Throat { ID = 1, Pore1ID = 1, Pore2ID = 2, Radius = 1 });
+            source.InitializeFromCurrentLists();
+
+            source.ExportToJson(path);
+            var reopened = new PNMDataset("Reopened", path);
+            reopened.Load();
+
+            Assert.Equal(Path.GetFullPath(path), source.FilePath);
+            Assert.Equal(2, reopened.Pores.Count);
+            Assert.Single(reopened.Throats);
+            Assert.Equal(40, reopened.ImageWidth);
+            Assert.Equal(20, reopened.ImageDepth);
+            Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public void DualPNM_MicroPermeability_UsesFullSimulation()
     {
         // Arrange

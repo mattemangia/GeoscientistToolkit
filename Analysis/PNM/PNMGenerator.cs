@@ -225,7 +225,7 @@ public static class PNMGenerator
         if (poreCount == 0)
         {
             Logger.LogWarning("[PNMGenerator] No pores found. Try reducing erosion count or using a different mode.");
-            return new PNMDataset($"PNM_{ct.Name}_{opt.MaterialId}_Empty", "")
+            var empty = new PNMDataset($"PNM_{ct.Name}_{opt.MaterialId}_Empty", "")
             {
                 VoxelSize = (float)vEdge,
                 Tortuosity = 0,
@@ -233,6 +233,9 @@ public static class PNMGenerator
                 ImageHeight = H,
                 ImageDepth = D
             };
+            empty.InitializeFromCurrentLists();
+            PersistAndRegister(ct, empty, progressReporter);
+            return empty;
         }
 
         token.ThrowIfCancellationRequested();
@@ -361,21 +364,40 @@ public static class PNMGenerator
         pnm.InitializeFromCurrentLists();
         pnm.CalculateBounds();
 
-        // Register with ProjectManager
-        try
-        {
-            ProjectManager.Instance.AddDataset(pnm);
-            ProjectManager.Instance.NotifyDatasetDataChanged(pnm);
-            Logger.Log(
-                $"[PNMGenerator] Successfully created PNM with {pnm.Pores.Count} pores and {pnm.Throats.Count} throats");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning($"[PNMGenerator] Could not auto-add PNMDataset to ProjectManager: {ex.Message}");
-        }
+        PersistAndRegister(ct, pnm, progressReporter);
 
         progressReporter.Report(1.0f, "PNM generation complete!");
         return pnm;
+    }
+
+    private static void PersistAndRegister(CtImageStackDataset source, PNMDataset pnm,
+        DetailedProgressReporter progress)
+    {
+        progress.Report(0.98f, "Saving PNM to disk...");
+        var sourcePath = source.FilePath;
+        var baseDirectory = Directory.Exists(sourcePath)
+            ? sourcePath
+            : Path.GetDirectoryName(sourcePath);
+        if (string.IsNullOrWhiteSpace(baseDirectory))
+            baseDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "GAIA", "PNM");
+        var outputDirectory = Path.Combine(baseDirectory, "PNM");
+        Directory.CreateDirectory(outputDirectory);
+        var invalid = Path.GetInvalidFileNameChars();
+        var safeName = new string(pnm.Name.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
+        var outputPath = Path.Combine(outputDirectory, $"{safeName}.pnm");
+        pnm.ExportToJson(outputPath);
+        Logger.Log($"[PNMGenerator] Persisted PNM to '{pnm.FilePath}'");
+
+        void Register()
+        {
+            ProjectManager.Instance.AddDataset(pnm);
+            ProjectManager.Instance.NotifyDatasetDataChanged(pnm);
+            Logger.Log($"[PNMGenerator] Created persistent PNM with {pnm.Pores.Count} pores and " +
+                       $"{pnm.Throats.Count} throats");
+        }
+        if (OpenTkManager.IsInitialized) OpenTkManager.ExecuteOnMainThread(Register);
+        else Register();
     }
 
     // ALGORITHM: Watershed Segmentation with Seeded Region Growing
