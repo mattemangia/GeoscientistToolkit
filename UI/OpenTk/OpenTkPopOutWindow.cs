@@ -176,7 +176,20 @@ internal sealed class OpenTkPopOutWindow : GAIA.UI.IPopOutWindow
         {
             if (opened)
             {
-                _bodyRenderer();
+                // Dataset viewers own framebuffer objects and VAOs created by the main
+                // OpenGL context. Those objects are not shared between contexts, even
+                // though textures and buffers are. Build the panel while the main
+                // context is current so native viewers render into their valid targets;
+                // the resulting shared textures can then be sampled by this window.
+                _mainWindow.MakeCurrent();
+                try
+                {
+                    _bodyRenderer();
+                }
+                finally
+                {
+                    _window.Context.MakeCurrent();
+                }
             }
         }
         finally
