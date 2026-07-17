@@ -488,6 +488,8 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
         return Path.Combine(FilePath, $"{folderName}.Labels.bin");
     }
 
+    public string GetLabelRenderCachePath() => GetLabelPath() + ".renderlod";
+
     /// <summary>
     ///     Converts the pixel size to meters based on the unit
     /// </summary>

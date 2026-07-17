@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Buffers;
 using GAIA.Business;
 using GAIA.UI.Interfaces;
 using GAIA.UI.Utils;
@@ -39,6 +40,9 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private int _volumeTexture, _labelTexture, _previewTexture, _materialTexture;
     private int _labelTextureWidth, _labelTextureHeight, _labelTextureDepth;
     private Task<(int w, int h, int d, byte[] data)> _labelBuildTask;
+    private volatile float _labelBuildProgress;
+    private volatile string _labelBuildStatus;
+    private volatile bool _labelCacheInvalidated;
     private int _lineProgram, _lineVao, _lineVbo, _lineBufferBytes;
     private readonly int[] _sliceTextures = new int[3];
     private readonly int[] _sliceTextureIndex = { -1, -1, -1 };
@@ -117,6 +121,17 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
             ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
         HandleInput(ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem) || _dragging || _panning);
         DrawOverlayLabels(origin, available);
+        if (_labelBuildTask is { IsCompleted: false })
+        {
+            var savedCursor = ImGui.GetCursorScreenPos();
+            ImGui.SetCursorScreenPos(origin + new Vector2(16, 16));
+            ImGui.BeginGroup();
+            ImGui.TextUnformatted(_labelBuildStatus ?? "Loading material labels...");
+            ImGui.ProgressBar(_labelBuildProgress, new Vector2(Math.Min(360, available.X - 32), 18),
+                $"{_labelBuildProgress * 100:0}%");
+            ImGui.EndGroup();
+            ImGui.SetCursorScreenPos(savedCursor);
+        }
     }
 
     private void CreateResources(Action<float, string> progress)
@@ -147,14 +162,18 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         MinThreshold = Math.Max(MinThreshold, CalculateOtsuThreshold(density) / 255f * 0.8f);
         progress?.Invoke(0.52f, "Uploading density texture to the GPU...");
         _volumeTexture = CreateTexture3D(lod.Width, lod.Height, lod.Depth, density);
-        progress?.Invoke(0.61f, "Preparing material labels...");
-        var aux = CreateDownsampledLabels(lod.Width, lod.Height, lod.Depth, 128L * 1024 * 1024,
-            p => progress?.Invoke(0.61f + p * 0.22f, $"Preparing label slices ({p * 100:0}%)..."));
+        progress?.Invoke(0.61f, "Allocating label texture...");
+        var (labelWidth, labelHeight, labelDepth) = CalculateLabelTextureDimensions(
+            lod.Width, lod.Height, lod.Depth, 32L * 1024 * 1024);
+        var emptyLabels = new byte[labelWidth * labelHeight * labelDepth];
         // Label IDs are categorical: linear filtering would blend id 1 and id 2 into a
         // non-existent id 2 at every boundary, so these two sample nearest.
-        _labelTexture = CreateTexture3D(aux.w, aux.h, aux.d, aux.data, false);
-        _labelTextureWidth = aux.w; _labelTextureHeight = aux.h; _labelTextureDepth = aux.d;
-        _previewTexture = CreateTexture3D(aux.w, aux.h, aux.d, new byte[aux.data.Length], false);
+        _labelTexture = CreateTexture3D(labelWidth, labelHeight, labelDepth, emptyLabels, false);
+        _labelTextureWidth = labelWidth; _labelTextureHeight = labelHeight; _labelTextureDepth = labelDepth;
+        _previewTexture = CreateTexture3D(labelWidth, labelHeight, labelDepth, new byte[emptyLabels.Length], false);
+        // Never scan a potentially multi-terabyte label MMF while constructing the viewer.
+        // Existing labels are streamed into this texture by a below-normal background worker.
+        _labelsDirty = _editableDataset.Materials.Any(material => material.ID != 0);
         progress?.Invoke(0.90f, "Uploading material palette...");
         _materialTexture = CreateMaterialTexture();
         UploadMaterials();
@@ -595,14 +614,71 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, 256, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data);
     }
     private static byte[] ReconstructVolume(GvtLodInfo l, byte[] b, int bs, Action<float> progress = null) { var r=new byte[l.Width*l.Height*l.Depth]; var bx=(l.Width+bs-1)/bs; var by=(l.Height+bs-1)/bs; for(int z=0;z<l.Depth;z++){for(int y=0;y<l.Height;y++)for(int x=0;x<l.Width;x++){var bi=((z/bs)*by*bx+(y/bs)*bx+x/bs)*bs*bs*bs+(z%bs)*bs*bs+(y%bs)*bs+x%bs; if(bi<b.Length)r[(z*l.Height+y)*l.Width+x]=b[bi];} if ((z & 7) == 0 || z == l.Depth - 1) progress?.Invoke((z + 1f) / l.Depth);} return r; }
-    private (int w,int h,int d,byte[] data) CreateDownsampledLabels(int w,int h,int d,long budget, Action<float> progress = null) { var n=(long)w*h*d; var s=n>budget?Math.Pow(budget/(double)n,1.0/3):1; var tw=Math.Max(1,(int)(w*s));var th=Math.Max(1,(int)(h*s));var td=Math.Max(1,(int)(d*s));var a=new byte[tw*th*td]; if(_editableDataset.LabelData!=null){var done=0; Parallel.For(0,td,z=>{for(int y=0;y<th;y++)for(int x=0;x<tw;x++)a[(z*th+y)*tw+x]=_editableDataset.LabelData[Math.Min(_editableDataset.Width-1,x*_editableDataset.Width/tw),Math.Min(_editableDataset.Height-1,y*_editableDataset.Height/th),Math.Min(_editableDataset.Depth-1,z*_editableDataset.Depth/td)]; var completed=Interlocked.Increment(ref done); if ((completed & 7) == 0 || completed == td) progress?.Invoke(completed/(float)td);});} else progress?.Invoke(1f); return(tw,th,td,a); }
+    private static (int w, int h, int d) CalculateLabelTextureDimensions(int w, int h, int d, long budget)
+    {
+        var voxelCount = (long)w * h * d;
+        var scale = voxelCount > budget ? Math.Pow(budget / (double)voxelCount, 1.0 / 3) : 1;
+        return (Math.Max(1, (int)(w * scale)), Math.Max(1, (int)(h * scale)),
+            Math.Max(1, (int)(d * scale)));
+    }
+
+    private (int w, int h, int d, byte[] data) CreateDownsampledLabels(int w, int h, int d,
+        long budget, Action<float> progress = null)
+    {
+        var (tw, th, td) = CalculateLabelTextureDimensions(w, h, d, budget);
+        var result = new byte[tw * th * td];
+        if (_editableDataset.LabelData == null) return (tw, th, td, result);
+
+        var sourceLength = checked(_editableDataset.Width * _editableDataset.Height);
+        var sourceSlice = ArrayPool<byte>.Shared.Rent(sourceLength);
+        try
+        {
+            for (var z = 0; z < td; z++)
+            {
+                var sourceZ = Math.Min(_editableDataset.Depth - 1, z * _editableDataset.Depth / td);
+                _editableDataset.LabelData.ReadSliceZ(sourceZ, sourceSlice);
+                for (var y = 0; y < th; y++)
+                {
+                    var sourceY = Math.Min(_editableDataset.Height - 1, y * _editableDataset.Height / th);
+                    var sourceRow = sourceY * _editableDataset.Width;
+                    var targetRow = (z * th + y) * tw;
+                    for (var x = 0; x < tw; x++)
+                        result[targetRow + x] = sourceSlice[sourceRow +
+                            Math.Min(_editableDataset.Width - 1, x * _editableDataset.Width / tw)];
+                }
+                if ((z & 3) == 0 || z == td - 1) progress?.Invoke((z + 1f) / td);
+                Thread.Sleep(1); // Yield I/O bandwidth to interactive slice rendering.
+            }
+        }
+        finally { ArrayPool<byte>.Shared.Return(sourceSlice); }
+        return (tw, th, td, result);
+    }
     private void ProcessPendingLabelRefresh()
     {
         if (_labelBuildTask == null && _labelsDirty)
         {
             _labelsDirty = false;
             var w = _labelTextureWidth; var h = _labelTextureHeight; var d = _labelTextureDepth;
-            _labelBuildTask = Task.Run(() => CreateDownsampledLabels(w, h, d, long.MaxValue));
+            var allowCachedLabels = !_labelCacheInvalidated;
+            _labelBuildProgress = 0;
+            _labelBuildStatus = "Checking label render cache...";
+            _labelBuildTask = Task.Factory.StartNew(() =>
+            {
+                try { Thread.CurrentThread.Priority = ThreadPriority.BelowNormal; } catch { }
+                if (allowCachedLabels && TryLoadLabelRenderCache(w, h, d, out var cached))
+                {
+                    _labelBuildStatus = "Loading cached material labels...";
+                    _labelBuildProgress = 1;
+                    return (w, h, d, cached);
+                }
+                _labelBuildStatus = "Building label render cache (one-time)...";
+                var built = CreateDownsampledLabels(w, h, d, long.MaxValue, value => _labelBuildProgress = value);
+                _labelBuildStatus = "Saving label render cache...";
+                SaveLabelRenderCache(built);
+                _labelCacheInvalidated = false;
+                _labelBuildProgress = 1;
+                return built;
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             return;
         }
         if (_labelBuildTask?.IsCompletedSuccessfully != true) return;
@@ -612,11 +688,46 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         GL.TexSubImage3D(TextureTarget.Texture3D, 0, 0, 0, 0, a.w, a.h, a.d,
             PixelFormat.Red, PixelType.UnsignedByte, a.data);
     }
+
+    private bool TryLoadLabelRenderCache(int w, int h, int d, out byte[] data)
+    {
+        data = null;
+        var path = _editableDataset.GetLabelRenderCachePath();
+        if (!File.Exists(path)) return false;
+        try
+        {
+            using var reader = new BinaryReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read));
+            if (reader.ReadInt32() != 0x47414C52 || reader.ReadInt32() != w || reader.ReadInt32() != h ||
+                reader.ReadInt32() != d) return false;
+            var length = checked(w * h * d);
+            data = reader.ReadBytes(length);
+            return data.Length == length;
+        }
+        catch { data = null; return false; }
+    }
+
+    private void SaveLabelRenderCache((int w, int h, int d, byte[] data) cache)
+    {
+        try
+        {
+            var path = _editableDataset.GetLabelRenderCachePath();
+            Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+            var temporaryPath = path + ".tmp";
+            using (var writer = new BinaryWriter(new FileStream(temporaryPath, FileMode.Create, FileAccess.Write,
+                       FileShare.None, 4 * 1024 * 1024, FileOptions.SequentialScan)))
+            {
+                writer.Write(0x47414C52); writer.Write(cache.w); writer.Write(cache.h); writer.Write(cache.d);
+                writer.Write(cache.data);
+            }
+            File.Move(temporaryPath, path, true);
+        }
+        catch (Exception ex) { Logger.LogWarning($"[CtVolume3DViewer] Cannot save label render cache: {ex.Message}"); }
+    }
     private void UploadPreview() { if(_previewMask==null)return; GL.BindTexture(TextureTarget.Texture3D,_previewTexture); var w=(int)TextureWidth(_previewTexture);var h=(int)TextureHeight(_previewTexture);var d=(int)TextureDepth(_previewTexture);var a=new byte[w*h*d];Parallel.For(0,d,z=>{for(int y=0;y<h;y++)for(int x=0;x<w;x++)a[(z*h+y)*w+x]=_previewMask[(Math.Min(_editableDataset.Depth-1,z*_editableDataset.Depth/d)*_editableDataset.Height+Math.Min(_editableDataset.Height-1,y*_editableDataset.Height/h))*_editableDataset.Width+Math.Min(_editableDataset.Width-1,x*_editableDataset.Width/w)];});GL.TexSubImage3D(TextureTarget.Texture3D,0,0,0,0,w,h,d,PixelFormat.Red,PixelType.UnsignedByte,a); }
     private static long TextureWidth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureWidth,out int v);return v;} private static long TextureHeight(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureHeight,out int v);return v;} private static long TextureDepth(int t){GL.BindTexture(TextureTarget.Texture3D,t);GL.GetTexLevelParameter(TextureTarget.Texture3D,0,GetTextureParameter.TextureDepth,out int v);return v;}
     // Material colours can be edited outside the 3D panel (segmentation, material editor),
     // so refresh the lookup alongside the labels rather than only on visibility/opacity changes.
-    private void OnDatasetDataChanged(Dataset d){if(d==_editableDataset){_labelsDirty=true;_materialsDirty=true;InvalidateSlicePlaneTextures();}} private void OnPreviewChanged(CtImageStackDataset d,byte[] m,Vector4 c){if(d!=_editableDataset)return;_previewMask=m;_previewColor=c;_showPreview=m!=null;_previewDirty=true;}
+    private void OnDatasetDataChanged(Dataset d){if(d==_editableDataset){_labelsDirty=true;_labelCacheInvalidated=true;_materialsDirty=true;InvalidateSlicePlaneTextures();}} private void OnPreviewChanged(CtImageStackDataset d,byte[] m,Vector4 c){if(d!=_editableDataset)return;_previewMask=m;_previewColor=c;_showPreview=m!=null;_previewDirty=true;}
     private void Bind3D(int unit,int tex,string name){GL.ActiveTexture(TextureUnit.Texture0+unit);GL.BindTexture(TextureTarget.Texture3D,tex);Set1(name,unit);} private void Set1(string n,int v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set1(string n,float v)=>GL.Uniform1(GL.GetUniformLocation(_program,n),v);private void Set3(string n,Vector3 v)=>GL.Uniform3(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z);private void Set4(string n,Vector4 v)=>GL.Uniform4(GL.GetUniformLocation(_program,n),v.X,v.Y,v.Z,v.W);
     // System.Numerics is row-vector (v*M); GLSL is column-vector (M*v). Passing the row-major
     // array with transpose=false makes GL read it column-major, which is the transpose GLSL needs.
