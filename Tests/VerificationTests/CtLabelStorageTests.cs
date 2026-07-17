@@ -200,4 +200,60 @@ public sealed class CtLabelStorageTests
             if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
+
+    [Fact]
+    public async Task AdaptiveStorage_MigratesManagedVolumesToMemoryMappedWithoutLosingData()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"gaia-adaptive-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var baseName = Path.GetFileName(directory);
+        var volumePath = Path.Combine(directory, $"{baseName}.Volume.bin");
+        try
+        {
+            var grayscale = new ChunkedVolume(12, 10, 4, 4);
+            var graySlice = Enumerable.Range(0, 120).Select(value => (byte)value).ToArray();
+            for (var z = 0; z < 4; z++) grayscale.WriteSliceZ(z, graySlice);
+            await grayscale.SaveAsBinAsync(volumePath);
+            var labels = new ChunkedLabelVolume(12, 10, 4, 4, false,
+                Path.Combine(directory, $"{baseName}.Labels.bin"));
+            labels[7, 6, 3] = 12;
+            var dataset = new CtImageStackDataset("adaptive", directory)
+            {
+                Width = 12, Height = 10, Depth = 4, VolumeData = grayscale, LabelData = labels
+            };
+
+            await dataset.ForceMemoryMappedStorageAsync();
+
+            Assert.True(dataset.VolumeData.IsMemoryMapped);
+            Assert.True(dataset.LabelData.IsMemoryMapped);
+            Assert.Equal(graySlice[6 * 12 + 7], dataset.VolumeData[7, 6, 3]);
+            Assert.Equal(12, dataset.LabelData[7, 6, 3]);
+            dataset.Unload();
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void TruncatedLabelMmf_FailsAtOpenWithLayoutErrorInsteadOfAccessorAggregateException()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"gaia-labels-truncated-{Guid.NewGuid():N}.bin");
+        try
+        {
+            using (var writer = new BinaryWriter(File.Create(path)))
+            {
+                writer.Write(32); writer.Write(32); writer.Write(8); writer.Write(8);
+                writer.Write(4); writer.Write(4); writer.Write(1);
+                writer.Write(new byte[10]);
+            }
+            var error = Assert.Throws<InvalidDataException>(() => ChunkedLabelVolume.LoadFromBin(path, true));
+            Assert.Contains("truncated", error.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 }

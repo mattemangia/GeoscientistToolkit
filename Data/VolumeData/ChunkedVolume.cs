@@ -422,6 +422,20 @@ public class ChunkedVolume : IGrayscaleVolumeData
             accessor.ReadInt32(16); // bits per pixel
             var pixelSize = accessor.ReadDouble(20);
 
+            var countX = (width + chunkDim - 1) / chunkDim;
+            var countY = (height + chunkDim - 1) / chunkDim;
+            var countZ = (depth + chunkDim - 1) / chunkDim;
+            var requiredLength = checked((long)HEADER_SIZE + (long)countX * countY * countZ *
+                chunkDim * chunkDim * chunkDim);
+            if (accessor.Capacity < requiredLength)
+            {
+                accessor.Dispose();
+                mmf.Dispose();
+                throw new InvalidDataException(
+                    $"CT volume file is truncated or uses an incompatible chunk layout. " +
+                    $"Required {requiredLength:N0} bytes, found {new FileInfo(path).Length:N0}: {path}");
+            }
+
             var volume = new ChunkedVolume(width, height, depth, chunkDim, mmf, accessor)
             {
                 PixelSize = pixelSize

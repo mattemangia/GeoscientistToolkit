@@ -631,6 +631,16 @@ public class ChunkedLabelVolume : ILabelVolumeData
 
         if (useMemoryMapping)
         {
+            var countX = (width + chunkDim - 1) / chunkDim;
+            var countY = (height + chunkDim - 1) / chunkDim;
+            var countZ = (depth + chunkDim - 1) / chunkDim;
+            var requiredLength = checked((long)HEADER_SIZE + (long)countX * countY * countZ *
+                chunkDim * chunkDim * chunkDim);
+            var actualLength = new FileInfo(path).Length;
+            if (actualLength < requiredLength)
+                throw new InvalidDataException(
+                    $"CT label file is truncated or uses an incompatible chunk layout. " +
+                    $"Required {requiredLength:N0} bytes, found {actualLength:N0}: {path}");
             // Open the existing file directly. The create-from-scratch constructor deliberately
             // truncates its target and must never be used by a load path.
             var mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0,

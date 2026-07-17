@@ -13,6 +13,8 @@ namespace GAIA.Data.CtImageStack;
 
 public class CtImageStackDataset : Dataset, ISerializableDataset
 {
+    private Timer _memoryPressureMonitor;
+    private int _migrationQueued;
     // Volume data
 
     public CtImageStackDataset(string name, string folderPath) : base(name, folderPath)
@@ -239,7 +241,64 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
         }
         LoadVirtualThresholdRules();
         LabelData?.SetVirtualThresholdRules(VolumeData, VirtualThresholdRules);
+        StartMemoryPressureMonitor();
     }
+
+    private void StartMemoryPressureMonitor()
+    {
+        _memoryPressureMonitor ??= new Timer(_ =>
+        {
+            if (!CtMemoryPolicy.IsUnderPressure() ||
+                (VolumeData?.IsMemoryMapped != false && LabelData?.IsMemoryMapped != false) ||
+                Interlocked.Exchange(ref _migrationQueued, 1) != 0) return;
+            CtOperationCoordinator.For(this).Enqueue("Migrating CT storage to MMF", async (token, progress) =>
+            {
+                try { await MigrateToMemoryMappedAsync(token, progress).ConfigureAwait(false); }
+                finally { Interlocked.Exchange(ref _migrationQueued, 0); }
+            });
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private async Task MigrateToMemoryMappedAsync(CancellationToken token, IProgress<float> progress)
+    {
+        Logger.LogWarning($"[CT Memory] Pressure detected; migrating '{Name}' from managed RAM to MMF.");
+        var volumePath = GetVolumePath();
+        var labelPath = GetLabelPath();
+        ChunkedVolume mappedVolume = VolumeData;
+        ChunkedLabelVolume mappedLabels = LabelData;
+        if (VolumeData is { IsMemoryMapped: false } && File.Exists(volumePath))
+        {
+            mappedVolume = await ChunkedVolume.LoadFromBinAsync(volumePath, true).ConfigureAwait(false);
+            progress?.Report(.35f);
+        }
+        token.ThrowIfCancellationRequested();
+        if (LabelData is { IsMemoryMapped: false })
+        {
+            if (!File.Exists(labelPath))
+            {
+                if (LabelData.DirtyChunkCount > 0) LabelData.FlushDirtyChunks(labelPath, token);
+                else
+                {
+                    using var emptyMapped = new ChunkedLabelVolume(Width, Height, Depth,
+                        LabelData.ChunkDim, true, labelPath);
+                }
+            }
+            else LabelData.FlushDirtyChunks(labelPath, token);
+            mappedLabels = ChunkedLabelVolume.LoadFromBin(labelPath, true);
+            progress?.Report(.8f);
+        }
+        token.ThrowIfCancellationRequested();
+        mappedLabels?.SetVirtualThresholdRules(mappedVolume, VirtualThresholdRules);
+        // Atomic reference replacement: in-flight readers retain valid old objects; once they
+        // finish, managed chunks are reclaimed naturally without use-after-dispose races.
+        VolumeData = mappedVolume;
+        LabelData = mappedLabels;
+        progress?.Report(1f);
+        Logger.Log($"[CT Memory] '{Name}' now uses memory-mapped storage.");
+    }
+
+    public Task ForceMemoryMappedStorageAsync(CancellationToken token = default, IProgress<float> progress = null) =>
+        MigrateToMemoryMappedAsync(token, progress);
 
     public void AddVirtualThresholdRule(byte materialId, byte min, byte max, bool add)
     {
@@ -283,6 +342,8 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
 
     public override void Unload()
     {
+        _memoryPressureMonitor?.Dispose();
+        _memoryPressureMonitor = null;
         VolumeData?.Dispose();
         VolumeData = null;
         LabelData?.Dispose();
