@@ -237,6 +237,62 @@ public class ChunkedLabelVolume : ILabelVolumeData
         finally { if (mappedPlane != null) ArrayPool<byte>.Shared.Return(mappedPlane); }
     }
 
+    public unsafe void ReadSliceXZ(int y, byte[] destination)
+    {
+        if (y < 0 || y >= Height || destination == null || destination.Length < Width * Depth)
+            throw new ArgumentException("Invalid XZ slice buffer.");
+        byte* pointer = null;
+        if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+        try
+        {
+            if (pointer != null) pointer += _viewAccessor.PointerOffset;
+            var cy = y / ChunkDim; var localY = y % ChunkDim;
+            for (var z = 0; z < Depth; z++)
+            {
+                var cz = z / ChunkDim; var localZ = z % ChunkDim;
+                for (var cx = 0; cx < ChunkCountX; cx++)
+                {
+                    var xStart = cx * ChunkDim; var length = Math.Min(ChunkDim, Width - xStart);
+                    var chunkIndex = GetChunkIndex(cx, cy, cz);
+                    var localOffset = localZ * ChunkDim * ChunkDim + localY * ChunkDim;
+                    if (pointer != null)
+                        new ReadOnlySpan<byte>(pointer + CalculateGlobalOffset(chunkIndex, localOffset), length)
+                            .CopyTo(destination.AsSpan(z * Width + xStart, length));
+                    else
+                    {
+                        var chunk = _chunks[chunkIndex];
+                        if (chunk != null) Array.Copy(chunk, localOffset, destination, z * Width + xStart, length);
+                    }
+                }
+            }
+        }
+        finally { if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.ReleasePointer(); }
+    }
+
+    public unsafe void ReadSliceYZ(int x, byte[] destination)
+    {
+        if (x < 0 || x >= Width || destination == null || destination.Length < Height * Depth)
+            throw new ArgumentException("Invalid YZ slice buffer.");
+        byte* pointer = null;
+        if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+        try
+        {
+            if (pointer != null) pointer += _viewAccessor.PointerOffset;
+            var cx = x / ChunkDim; var localX = x % ChunkDim;
+            for (var z = 0; z < Depth; z++)
+            for (var y = 0; y < Height; y++)
+            {
+                var cz = z / ChunkDim; var cy = y / ChunkDim;
+                var localOffset = (z % ChunkDim) * ChunkDim * ChunkDim + (y % ChunkDim) * ChunkDim + localX;
+                var chunkIndex = GetChunkIndex(cx, cy, cz);
+                destination[z * Height + y] = pointer != null
+                    ? *(pointer + CalculateGlobalOffset(chunkIndex, localOffset))
+                    : _chunks[chunkIndex]?[localOffset] ?? 0;
+            }
+        }
+        finally { if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.ReleasePointer(); }
+    }
+
     /// <summary>Writes explicitly changed chunk planes using one contiguous MMF call per chunk.</summary>
     public void WriteSliceZChangedChunks(int z, byte[] buffer, bool[] changedChunks)
     {

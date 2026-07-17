@@ -10,6 +10,7 @@ using GAIA.Analysis.TextureClassification;
 using GAIA.Analysis.Transform;
 using GAIA.Business;
 using GAIA.Data.CtImageStack.Segmentation;
+using GAIA.Data.VolumeData;
 using GAIA.UI;
 using GAIA.UI.Interfaces;
 using GAIA.UI.Tools;
@@ -1594,14 +1595,14 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             {
                 case 0: volume.ReadSliceZ(_sliceZ, data); break;
                 case 1:
-                    for (var z = 0; z < height; z++)
-                    for (var x = 0; x < width; x++)
-                        data[z * width + x] = volume[x, _sliceY, z];
+                    if (volume is ChunkedVolume chunkedVolumeXZ) chunkedVolumeXZ.ReadSliceXZ(_sliceY, data);
+                    else for (var z = 0; z < height; z++)
+                        for (var x = 0; x < width; x++) data[z * width + x] = volume[x, _sliceY, z];
                     break;
                 case 2:
-                    for (var z = 0; z < height; z++)
-                    for (var y = 0; y < width; y++)
-                        data[z * width + y] = volume[_sliceX, y, z];
+                    if (volume is ChunkedVolume chunkedVolumeYZ) chunkedVolumeYZ.ReadSliceYZ(_sliceX, data);
+                    else for (var z = 0; z < height; z++)
+                        for (var y = 0; y < width; y++) data[z * width + y] = volume[_sliceX, y, z];
                     break;
             }
         }
@@ -1629,14 +1630,14 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         {
             case 0: labels.ReadSliceZ(_sliceZ, data); break;
             case 1:
-                for (var z = 0; z < height; z++)
-                for (var x = 0; x < width; x++)
-                    data[z * width + x] = labels[x, _sliceY, z];
+                if (labels is ChunkedLabelVolume chunkedLabelsXZ) chunkedLabelsXZ.ReadSliceXZ(_sliceY, data);
+                else for (var z = 0; z < height; z++)
+                    for (var x = 0; x < width; x++) data[z * width + x] = labels[x, _sliceY, z];
                 break;
             case 2:
-                for (var z = 0; z < height; z++)
-                for (var y = 0; y < width; y++)
-                    data[z * width + y] = labels[_sliceX, y, z];
+                if (labels is ChunkedLabelVolume chunkedLabelsYZ) chunkedLabelsYZ.ReadSliceYZ(_sliceX, data);
+                else for (var z = 0; z < height; z++)
+                    for (var y = 0; y < width; y++) data[z * width + y] = labels[_sliceX, y, z];
                 break;
         }
 

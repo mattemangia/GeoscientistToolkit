@@ -132,4 +132,34 @@ public sealed class CtLabelStorageTests
             if (File.Exists(path)) File.Delete(path);
         }
     }
+
+    [Fact]
+    public void MemoryMappedOrthogonalSlices_MatchVoxelCoordinates()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"gaia-labels-orthogonal-{Guid.NewGuid():N}.bin");
+        try
+        {
+            using var volume = new ChunkedLabelVolume(13, 11, 9, 4, true, path);
+            for (var z = 0; z < volume.Depth; z++)
+            for (var y = 0; y < volume.Height; y++)
+            for (var x = 0; x < volume.Width; x++)
+                volume[x, y, z] = (byte)((x + y * 3 + z * 7) % 251);
+
+            var xz = new byte[volume.Width * volume.Depth];
+            volume.ReadSliceXZ(6, xz);
+            for (var z = 0; z < volume.Depth; z++)
+            for (var x = 0; x < volume.Width; x++)
+                Assert.Equal(volume[x, 6, z], xz[z * volume.Width + x]);
+
+            var yz = new byte[volume.Height * volume.Depth];
+            volume.ReadSliceYZ(8, yz);
+            for (var z = 0; z < volume.Depth; z++)
+            for (var y = 0; y < volume.Height; y++)
+                Assert.Equal(volume[8, y, z], yz[z * volume.Height + y]);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 }

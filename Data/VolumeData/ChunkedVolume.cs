@@ -231,6 +231,61 @@ public class ChunkedVolume : IGrayscaleVolumeData
         finally { if (mappedPlane != null) ArrayPool<byte>.Shared.Return(mappedPlane); }
     }
 
+    public unsafe void ReadSliceXZ(int y, byte[] destination)
+    {
+        if (y < 0 || y >= Height || destination == null || destination.Length < Width * Depth)
+            throw new ArgumentException("Invalid XZ slice buffer.");
+        byte* pointer = null;
+        if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+        try
+        {
+            if (pointer != null) pointer += _viewAccessor.PointerOffset;
+            var cy = y / ChunkDim; var localY = y % ChunkDim;
+            for (var z = 0; z < Depth; z++)
+            {
+                var cz = z / ChunkDim; var localZ = z % ChunkDim;
+                for (var cx = 0; cx < _chunkCountX; cx++)
+                {
+                    var xStart = cx * ChunkDim; var length = Math.Min(ChunkDim, Width - xStart);
+                    var chunkIndex = GetChunkIndex(cx, cy, cz);
+                    var localOffset = localZ * ChunkDim * ChunkDim + localY * ChunkDim;
+                    if (pointer != null)
+                        new ReadOnlySpan<byte>(pointer + CalculateGlobalOffset(chunkIndex, localOffset), length)
+                            .CopyTo(destination.AsSpan(z * Width + xStart, length));
+                    else Array.Copy(Chunks[chunkIndex], localOffset, destination, z * Width + xStart, length);
+                }
+            }
+        }
+        finally { if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.ReleasePointer(); }
+    }
+
+    public unsafe void ReadSliceYZ(int x, byte[] destination)
+    {
+        if (x < 0 || x >= Width || destination == null || destination.Length < Height * Depth)
+            throw new ArgumentException("Invalid YZ slice buffer.");
+        byte* pointer = null;
+        if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+        try
+        {
+            if (pointer != null) pointer += _viewAccessor.PointerOffset;
+            var cx = x / ChunkDim; var localX = x % ChunkDim;
+            for (var z = 0; z < Depth; z++)
+            {
+                var cz = z / ChunkDim; var localZ = z % ChunkDim;
+                for (var y = 0; y < Height; y++)
+                {
+                    var cy = y / ChunkDim; var localY = y % ChunkDim;
+                    var chunkIndex = GetChunkIndex(cx, cy, cz);
+                    var localOffset = localZ * ChunkDim * ChunkDim + localY * ChunkDim + localX;
+                    destination[z * Height + y] = pointer != null
+                        ? *(pointer + CalculateGlobalOffset(chunkIndex, localOffset))
+                        : Chunks[chunkIndex][localOffset];
+                }
+            }
+        }
+        finally { if (_useMemoryMapping) _viewAccessor.SafeMemoryMappedViewHandle.ReleasePointer(); }
+    }
+
     /// <summary>
     ///     Creates a volume from a folder of image slices
     /// </summary>

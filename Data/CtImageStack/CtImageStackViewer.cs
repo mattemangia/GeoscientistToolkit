@@ -5,6 +5,7 @@ using System.Numerics;
 using GAIA.Analysis.RockCoreExtractor;
 using GAIA.Analysis.Transform;
 using GAIA.Business;
+using GAIA.Data.VolumeData;
 using GAIA.UI.Interfaces;
 using GAIA.UI.Utils;
 using GAIA.Util;
@@ -612,14 +613,14 @@ public class CtImageStackViewer : IDatasetViewer
         {
             case 0: volume.ReadSliceZ(_sliceZ, data); break;
             case 1:
-                for (var z = 0; z < height; z++)
-                for (var x = 0; x < width; x++)
-                    data[z * width + x] = volume[x, _sliceY, z];
+                if (volume is ChunkedVolume chunkedVolumeXZ) chunkedVolumeXZ.ReadSliceXZ(_sliceY, data);
+                else for (var z = 0; z < height; z++)
+                    for (var x = 0; x < width; x++) data[z * width + x] = volume[x, _sliceY, z];
                 break;
             case 2:
-                for (var z = 0; z < height; z++)
-                for (var y = 0; y < width; y++)
-                    data[z * width + y] = volume[_sliceX, y, z];
+                if (volume is ChunkedVolume chunkedVolumeYZ) chunkedVolumeYZ.ReadSliceYZ(_sliceX, data);
+                else for (var z = 0; z < height; z++)
+                    for (var y = 0; y < width; y++) data[z * width + y] = volume[_sliceX, y, z];
                 break;
         }
 
