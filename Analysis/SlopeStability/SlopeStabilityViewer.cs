@@ -269,6 +269,9 @@ namespace GAIA.Analysis.SlopeStability
             var drawList = ImGui.GetWindowDrawList();
             var windowPos = ImGui.GetCursorScreenPos();
 
+            ImGui.InvisibleButton("##SlopeStability3DViewport", availableSize,
+                ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
+
             DrawScene(drawList, windowPos, availableSize);
 
             // Handle mouse interaction

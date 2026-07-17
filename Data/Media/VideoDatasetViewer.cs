@@ -130,6 +130,9 @@ public class VideoDatasetViewer : IDatasetViewer
             var dl = ImGui.GetWindowDrawList();
             var io = ImGui.GetIO();
 
+            ImGui.InvisibleButton("##VideoViewerCanvas", canvasSize,
+                ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
+
             // Draw background (theme-aware)
             var bgColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg]);
             dl.AddRectFilled(canvasPos, canvasPos + canvasSize, bgColor);

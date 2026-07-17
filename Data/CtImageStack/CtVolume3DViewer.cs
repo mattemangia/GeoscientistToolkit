@@ -107,10 +107,13 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         var desiredW = Math.Clamp((int)available.X, 320, 1920);
         var desiredH = Math.Clamp((int)available.Y, 240, 1080);
         if (desiredW != _renderWidth || desiredH != _renderHeight) ResizeTarget(desiredW, desiredH);
-        HandleInput();
         Render();
         var origin = ImGui.GetCursorScreenPos();
         ImGui.Image((IntPtr)_colorTexture, available, new Vector2(0, 1), new Vector2(1, 0));
+        ImGui.SetCursorScreenPos(origin);
+        ImGui.InvisibleButton("##CtVolume3DViewport", available,
+            ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
+        HandleInput(ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem) || _dragging || _panning);
         DrawOverlayLabels(origin, available);
     }
 
@@ -503,9 +506,9 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
 
     private Vector3 CameraPosition => _cameraTarget + new Vector3(MathF.Cos(_cameraYaw) * MathF.Cos(_cameraPitch), MathF.Sin(_cameraPitch), MathF.Sin(_cameraYaw) * MathF.Cos(_cameraPitch)) * _cameraDistance;
 
-    private void HandleInput()
+    private void HandleInput(bool isHovered)
     {
-        if (!ImGui.IsWindowHovered()) { _dragging = _panning = false; return; }
+        if (!isHovered) { _dragging = _panning = false; return; }
         var io = ImGui.GetIO(); var mouse = io.MousePos;
         if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) { _dragging = true; _lastMouse = mouse; }
         if (ImGui.IsMouseReleased(ImGuiMouseButton.Left)) _dragging = false;

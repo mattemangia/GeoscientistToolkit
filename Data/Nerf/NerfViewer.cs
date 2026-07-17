@@ -162,6 +162,11 @@ public class NerfViewer : IDatasetViewer
     public void DrawContent(ref float zoom, ref Vector2 pan)
     {
         var contentRegion = ImGui.GetContentRegionAvail();
+        var contentOrigin = ImGui.GetCursorScreenPos();
+
+        ImGui.InvisibleButton("##NerfViewerCanvas", contentRegion,
+            ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
+        ImGui.SetCursorScreenPos(contentOrigin);
 
         // Handle auto-rotation
         if (_autoRotate && _dataset.TrainingState != NerfTrainingState.Training)

@@ -54,6 +54,10 @@ public class DatasetViewPanel : BasePanel
         ImGui.Separator();
 
         var contentSize = ImGui.GetContentRegionAvail();
+        // BeginChild contributes ItemSpacing after its own size. Using the full remaining
+        // height therefore overflows the parent by a few pixels and forces a permanent
+        // outer scrollbar whenever the shared pop-out header is present.
+        var viewerHeight = MathF.Max(1f, contentSize.Y - ImGui.GetStyle().ItemSpacing.Y);
 
         if (_viewer is BoreholeViewer boreholeViewer && boreholeViewer.ShowLegend)
         {
@@ -69,7 +73,7 @@ public class DatasetViewPanel : BasePanel
                     ImGui.TableSetColumnIndex(0);
 
                     // BeginChild must ALWAYS be followed by EndChild, regardless of return value
-                    var childVisible = ImGui.BeginChild("ViewerContent", new Vector2(0, contentSize.Y));
+                    var childVisible = ImGui.BeginChild("ViewerContent", new Vector2(0, viewerHeight));
                     if (childVisible)
                     {
                         _viewer.DrawContent(ref _zoom, ref _pan);
@@ -77,7 +81,7 @@ public class DatasetViewPanel : BasePanel
                     ImGui.EndChild(); // Must always be called after BeginChild
 
                     ImGui.TableSetColumnIndex(1);
-                    boreholeViewer.DrawLegendPanel(new Vector2(0, contentSize.Y));
+                    boreholeViewer.DrawLegendPanel(new Vector2(0, viewerHeight));
                 }
                 finally
                 {
@@ -89,7 +93,7 @@ public class DatasetViewPanel : BasePanel
         else
         {
             // BeginChild must ALWAYS be followed by EndChild, regardless of return value
-            var childVisible = ImGui.BeginChild("ViewerContent", contentSize);
+            var childVisible = ImGui.BeginChild("ViewerContent", new Vector2(contentSize.X, viewerHeight));
             if (childVisible)
             {
                 _viewer.DrawContent(ref _zoom, ref _pan);

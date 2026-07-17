@@ -92,6 +92,7 @@ public sealed class ImGuiController : IDisposable
         var io = ImGui.GetIO();
         io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
         io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
+        io.ConfigWindowsMoveFromTitleBarOnly = true;
         ConfigureFonts(io);
 
         // Padding, rounding and the rest are in pixels too, so they have to follow the font.
@@ -588,4 +589,3 @@ void main()
         GL.ActiveTexture((TextureUnit)lastActiveTexture);
     }
 }
-

@@ -234,6 +234,8 @@ namespace GAIA.Analysis.SlopeStability
             var drawList = ImGui.GetWindowDrawList();
             var windowPos = ImGui.GetWindowPos();
             var windowSize = ImGui.GetWindowSize();
+            ImGui.InvisibleButton("##SlopeStability2DViewport", ImGui.GetContentRegionAvail(),
+                ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
             Vector2 center = new Vector2(windowPos.X + windowSize.X / 2, windowPos.Y + windowSize.Y / 2);
 
             // Draw grid

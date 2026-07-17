@@ -94,6 +94,9 @@ public class ImageViewer : IDatasetViewer
         var dl = ImGui.GetWindowDrawList();
         var io = ImGui.GetIO();
 
+        ImGui.InvisibleButton("##ImageViewerCanvas", canvasSize,
+            ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
+
         dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
         dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
 
