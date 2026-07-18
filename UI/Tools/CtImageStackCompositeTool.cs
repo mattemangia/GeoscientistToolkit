@@ -68,7 +68,7 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
             { ToolCategory.AI, "AI-powered segmentation with SAM2, MicroSAM, and Grounding DINO" },
             { ToolCategory.PhysicalProperties, "Assign density and other physical material properties" },
             { ToolCategory.Analysis, "Quantitative analysis and measurements" },
-            { ToolCategory.Export, "3D model and simulation data generation" }
+            { ToolCategory.Export, "Image stack, 3D model and simulation data generation" }
         };
 
         // Initialize tools by category
@@ -249,6 +249,13 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
                 ToolCategory.Export,
                 new List<ToolEntry>
                 {
+                    new()
+                    {
+                        Name = "Image Stack Export",
+                        Description = "Export grayscale (BW) slices as TIFF/PNG and label stacks as colored images",
+                        Tool = new CtImageStackExportTool(),
+                        Category = ToolCategory.Export
+                    },
                     new()
                     {
                         Name = "Mesh Extraction",
