@@ -52,6 +52,23 @@ To create a pore network, you need:
 | Max Throat Length | Maximum throat length | 10-100 µm |
 | Connectivity | Minimum coordination number | 1-3 |
 
+### Out-of-Core Streaming (Large Stacks, Low RAM)
+
+For segmented stacks larger than the working-set budget, enable **Out-of-core streaming
+(low RAM, full quality)** in the PNM Generator panel. The volume is then streamed through
+RAM in overlapping blocks sized to the budget instead of being loaded whole:
+
+- Every block runs the exact same per-voxel pipeline (erosion, seed labelling, watershed,
+  distance transform) with a halo of context voxels, and the per-block networks are
+  stitched on the shared block faces — seed identity across a cut is reconstructed
+  exactly, so nothing is decimated and porosity is conserved to the voxel.
+- Any region generates at **full resolution**, which makes this the defensible
+  alternative to *Allow downsampling* (which erases pore throats) on low-memory machines.
+- Cost: block halos are processed twice, so generation is somewhat slower than the
+  in-RAM path. Pore bodies wider than the halo that touch a block cut are flagged in the
+  log because their radii may be slightly overestimated there; raising the budget removes
+  the warning.
+
 ### Network Statistics
 
 Generated networks include:
