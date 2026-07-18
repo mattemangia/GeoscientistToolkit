@@ -61,6 +61,17 @@ public static partial class PNMGenerator
         var H = (int)roi.Height;
         var D = (int)roi.Depth;
 
+        // Streaming never allocates a full-volume array, so the total voxel count is unbounded by
+        // array limits (PnmRegion counts in long). The one whole-slice allocation left is the
+        // ReadSliceZ buffer the label volume API requires; guard it with long arithmetic so an
+        // extreme slice fails with a diagnosis instead of an overflowed negative array length.
+        var sliceVoxels = (long)ct.Width * ct.Height;
+        if (sliceVoxels > Array.MaxLength)
+            throw new InvalidOperationException(
+                $"Slices of {ct.Width}×{ct.Height} voxels ({sliceVoxels:N0}) exceed the largest .NET array " +
+                $"({Array.MaxLength:N0} elements). Reading a label slice requires one slice-sized buffer, " +
+                "so stacks this wide cannot be streamed; split the stack laterally first.");
+
         var erosions = opt.Mode == GenerationMode.Conservative ? opt.ConservativeErosions : opt.AggressiveErosions;
         var halo = Math.Max(Math.Max(1, opt.OutOfCoreHaloVoxels), erosions + 2);
 
@@ -76,7 +87,14 @@ public static partial class PNMGenerator
         var nbx = (W + cx - 1) / cx;
         var nby = (H + cy - 1) / cy;
         var nbz = (D + cz - 1) / cz;
-        var totalBlocks = nbx * nby * nbz;
+        // Block ids are packed into the upper 32 bits of a gid, so the grid itself must stay
+        // int-addressable. Hitting this needs a tera-voxel region with a pathologically small
+        // budget; the cure is a bigger budget, so say so.
+        var totalBlocks = (long)nbx * nby * nbz;
+        if (totalBlocks > int.MaxValue)
+            throw new InvalidOperationException(
+                $"The region would stream as {totalBlocks:N0} blocks, more than the block grid can address. " +
+                "Raise the working-set budget so blocks are cut larger.");
 
         progress.Report(0.02f,
             $"Out-of-core streaming: {totalBlocks} block(s) of {cx}×{cy}×{cz} core voxels " +
@@ -572,14 +590,20 @@ public static partial class PNMGenerator
     #region Face stitching
 
     /// <summary>
-    ///     One block's labelling of a shared face plane: watershed labels plus mask/eroded flags.
-    ///     Two adjacent blocks label the same physical plane; reconciling the two labellings is what
-    ///     joins pores that span the cut.
+    ///     One block's labelling of a shared face plane: watershed labels plus eroded flags and the
+    ///     distance transform. Two adjacent blocks label the same physical plane; reconciling the two
+    ///     labellings is what joins pores that span the cut.
+    ///     <para>
+    ///         Stored sparsely: only mask voxels, in plane scan order. The mask is a deterministic
+    ///         function of the source labels, so both sides of a cut compact to the same entry
+    ///         sequence and the arrays align index-for-index. A whole layer of pending Z faces then
+    ///         costs a porosity-fraction of a slice instead of a dense multiple of it, which is what
+    ///         keeps very wide stacks within a low-RAM footprint.
+    ///     </para>
     /// </summary>
     private sealed class OocFacePlane
     {
-        public const byte MaskFlag = 1;
-        public const byte ErodedFlag = 2;
+        public const byte ErodedFlag = 1;
 
         public int BlockId;
         public float[] Edt;
@@ -602,10 +626,10 @@ public static partial class PNMGenerator
         var plane = NewFacePlane((ly1 - ly0) * (lz1 - lz0), blockId, nativeSeeded);
         var o = 0;
         for (var z = lz0; z < lz1; z++)
-        for (var y = ly0; y < ly1; y++, o++)
-            CopyFaceVoxel(plane, o, (z * eH + y) * eW + planeX, expanded, mask, eroded, edt);
+        for (var y = ly0; y < ly1; y++)
+            AppendFaceVoxel(plane, ref o, (z * eH + y) * eW + planeX, expanded, mask, eroded, edt);
 
-        return plane;
+        return TrimFacePlane(plane, o);
     }
 
     private static OocFacePlane ExtractFacePlaneY(int[] expanded, byte[] mask, byte[] eroded, float[] edt,
@@ -622,11 +646,11 @@ public static partial class PNMGenerator
         for (var z = lz0; z < lz1; z++)
         {
             var row = (z * eH + planeY) * eW;
-            for (var x = lx0; x < lx1; x++, o++)
-                CopyFaceVoxel(plane, o, row + x, expanded, mask, eroded, edt);
+            for (var x = lx0; x < lx1; x++)
+                AppendFaceVoxel(plane, ref o, row + x, expanded, mask, eroded, edt);
         }
 
-        return plane;
+        return TrimFacePlane(plane, o);
     }
 
     private static OocFacePlane ExtractFacePlaneZ(int[] expanded, byte[] mask, byte[] eroded, float[] edt,
@@ -643,11 +667,11 @@ public static partial class PNMGenerator
         for (var y = ly0; y < ly1; y++)
         {
             var row = (planeZ * eH + y) * eW;
-            for (var x = lx0; x < lx1; x++, o++)
-                CopyFaceVoxel(plane, o, row + x, expanded, mask, eroded, edt);
+            for (var x = lx0; x < lx1; x++)
+                AppendFaceVoxel(plane, ref o, row + x, expanded, mask, eroded, edt);
         }
 
-        return plane;
+        return TrimFacePlane(plane, o);
     }
 
     private static OocFacePlane NewFacePlane(int size, int blockId, HashSet<int> nativeSeeded)
@@ -662,13 +686,22 @@ public static partial class PNMGenerator
         };
     }
 
-    private static void CopyFaceVoxel(OocFacePlane plane, int o, int idx,
+    private static void AppendFaceVoxel(OocFacePlane plane, ref int o, int idx,
         int[] expanded, byte[] mask, byte[] eroded, float[] edt)
     {
+        if (mask[idx] == 0) return;
         plane.Labels[o] = expanded[idx];
         plane.Edt[o] = edt[idx];
-        plane.Flags[o] = (byte)((mask[idx] > 0 ? OocFacePlane.MaskFlag : 0) |
-                                (eroded[idx] > 0 ? OocFacePlane.ErodedFlag : 0));
+        plane.Flags[o] = eroded[idx] > 0 ? OocFacePlane.ErodedFlag : (byte)0;
+        o++;
+    }
+
+    private static OocFacePlane TrimFacePlane(OocFacePlane plane, int count)
+    {
+        Array.Resize(ref plane.Labels, count);
+        Array.Resize(ref plane.Flags, count);
+        Array.Resize(ref plane.Edt, count);
+        return plane;
     }
 
     /// <summary>
@@ -697,12 +730,17 @@ public static partial class PNMGenerator
         Dictionary<(long a, long b), OocEdgeAccumulator> edgeAgg)
     {
         if (a == null || b == null) return;
+        // Both sides compact the same physical plane with the same mask in the same scan order, so
+        // the sparse entries align index-for-index. A length mismatch would mean the two blocks read
+        // different source data — impossible short of a bug, but degrade loudly rather than misalign.
+        if (a.Labels.Length != b.Labels.Length)
+            Logger.LogError($"[PNMGenerator] Out-of-core: face plane mask mismatch " +
+                            $"({a.Labels.Length} vs {b.Labels.Length} pore voxels); stitching what aligns.");
         var n = Math.Min(a.Labels.Length, b.Labels.Length);
         var counts = new Dictionary<(long ga, long gb), int>();
 
         for (var i = 0; i < n; i++)
         {
-            if ((a.Flags[i] & OocFacePlane.MaskFlag) == 0 || (b.Flags[i] & OocFacePlane.MaskFlag) == 0) continue;
             var la = a.Labels[i];
             var lb = b.Labels[i];
             if (la <= 0 || lb <= 0) continue;
