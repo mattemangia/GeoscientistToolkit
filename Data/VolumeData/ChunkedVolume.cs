@@ -700,11 +700,20 @@ public class ChunkedVolume : IGrayscaleVolumeData
         {
             var imageData = ImageLoader.LoadGrayscaleImage(imagePath, out var width, out var height);
 
-            // Write image data to volume
-            var index = 0;
-            for (var y = 0; y < volume.Height && y < height; y++)
-            for (var x = 0; x < volume.Width && x < width; x++)
-                volume[x, y, z] = imageData[index++];
+            if (width == volume.Width && height == volume.Height)
+            {
+                // Fast path: write the whole slice with bulk copies instead of per-voxel access
+                volume.WriteSliceZ(z, imageData);
+                return;
+            }
+
+            // Slice dimensions differ from the volume: crop/pad row by row, then bulk-write
+            var slice = new byte[volume.Width * volume.Height];
+            var copyWidth = Math.Min(width, volume.Width);
+            var copyHeight = Math.Min(height, volume.Height);
+            for (var y = 0; y < copyHeight; y++)
+                Array.Copy(imageData, y * width, slice, y * volume.Width, copyWidth);
+            volume.WriteSliceZ(z, slice);
         });
     }
 

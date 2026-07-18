@@ -138,11 +138,8 @@ public static class CTStackLoader
         }
 
         // Load from multi-page TIFF
-        // Get dimensions and page count
-        var pageCount = ImageLoader.GetTiffPageCount(tiffPath);
-        var firstPageInfo = ImageLoader.LoadImageInfo(tiffPath);
-        var width = firstPageInfo.Width;
-        var height = firstPageInfo.Height;
+        // Get dimensions and page count in a single file open
+        var (pageCount, width, height) = ImageLoader.GetTiffStackInfo(tiffPath);
         var depth = pageCount;
 
         Logger.Log($"[CTStackLoader] Multi-page TIFF dimensions: {width}×{height}×{depth}");
@@ -165,27 +162,42 @@ public static class CTStackLoader
             };
         }
 
-        // Load pages directly into the volume
+        // Decode page ranges in parallel: each worker opens its own TIFF handle, seeks once
+        // to the start of its range and then walks pages sequentially (no per-page reopen).
         await Task.Run(() =>
         {
-            for (var z = 0; z < pageCount; z++)
+            var processed = 0;
+            var workers = Math.Clamp(Environment.ProcessorCount, 1, pageCount);
+            var pagesPerWorker = (pageCount + workers - 1) / workers;
+            var tasks = new List<Task>();
+
+            for (var w = 0; w < workers; w++)
             {
-                var pageData = ImageLoader.LoadTiffPageAsGrayscale(tiffPath, z, out var pageWidth, out var pageHeight);
+                var firstPage = w * pagesPerWorker;
+                var lastPage = Math.Min(firstPage + pagesPerWorker, pageCount);
+                if (firstPage >= lastPage) break;
 
-                // Ensure page dimensions match
-                if (pageWidth != width || pageHeight != height)
-                {
-                    Logger.LogError(
-                        $"[CTStackLoader] Page {z} has different dimensions ({pageWidth}×{pageHeight}) than expected ({width}×{height})");
-                    continue;
-                }
+                tasks.Add(Task.Run(() =>
+                    ImageLoader.ReadTiffPageRangeAsGrayscale(tiffPath, firstPage, lastPage,
+                        (z, pageData, pageWidth, pageHeight) =>
+                        {
+                            // Ensure page dimensions match
+                            if (pageWidth != width || pageHeight != height)
+                            {
+                                Logger.LogError(
+                                    $"[CTStackLoader] Page {z} has different dimensions ({pageWidth}×{pageHeight}) than expected ({width}×{height})");
+                                return;
+                            }
 
-                // Write the page data directly to the volume using WriteSliceZ
-                newVolume.WriteSliceZ(z, pageData);
+                            // Write the page data directly to the volume using WriteSliceZ
+                            newVolume.WriteSliceZ(z, pageData);
 
-                // Report progress
-                progress?.Report((float)(z + 1) / pageCount);
+                            var done = Interlocked.Increment(ref processed);
+                            progress?.Report((float)done / pageCount);
+                        })));
             }
+
+            Task.WaitAll(tasks.ToArray());
         });
 
         // Save for future use (only if not memory mapped - it's already saved)
@@ -233,11 +245,8 @@ public static class CTStackLoader
 
         return await Task.Run(async () =>
         {
-            // Get original dimensions
-            var pageCount = ImageLoader.GetTiffPageCount(tiffPath);
-            var firstPageInfo = ImageLoader.LoadImageInfo(tiffPath);
-            var origWidth = firstPageInfo.Width;
-            var origHeight = firstPageInfo.Height;
+            // Get original dimensions in a single file open
+            var (pageCount, origWidth, origHeight) = ImageLoader.GetTiffStackInfo(tiffPath);
             var origDepth = pageCount;
 
             // Calculate binned dimensions - true 3D binning
@@ -268,7 +277,7 @@ public static class CTStackLoader
             }
 
             // Process TIFF pages with 3D binning
-            await ProcessMultiPageTiff3DBinningAsync(binnedVolume, tiffPath, binningFactor, progress);
+            await ProcessMultiPageTiff3DBinningAsync(binnedVolume, tiffPath, binningFactor, pageCount, progress);
 
             // Save the binned volume (if not memory mapped)
             if (!useMemoryMapping) await binnedVolume.SaveAsBinAsync(volumePath);
@@ -287,93 +296,105 @@ public static class CTStackLoader
     }
 
     /// <summary>
-    ///     Process multi-page TIFF with true 3D binning
+    ///     Process multi-page TIFF with true 3D binning. Workers decode disjoint page ranges in
+    ///     parallel (one TIFF handle each, sequential directory walk) and emit binned slices.
     /// </summary>
     private static async Task ProcessMultiPageTiff3DBinningAsync(
         ChunkedVolume volume,
         string tiffPath,
         int binFactor,
+        int pageCount,
         IProgress<float> progress)
     {
         var newDepth = volume.Depth;
-        var pageCount = ImageLoader.GetTiffPageCount(tiffPath);
+        var newWidth = volume.Width;
+        var newHeight = volume.Height;
 
-        // Process each output slice
-        for (var newZ = 0; newZ < newDepth; newZ++)
+        var processed = 0;
+        var workers = Math.Clamp(Environment.ProcessorCount, 1, newDepth);
+        var slicesPerWorker = (newDepth + workers - 1) / workers;
+        var tasks = new List<Task>();
+
+        for (var w = 0; w < workers; w++)
         {
-            var srcZStart = newZ * binFactor;
-            var srcZEnd = Math.Min(srcZStart + binFactor, pageCount);
+            var firstOut = w * slicesPerWorker;
+            var lastOut = Math.Min(firstOut + slicesPerWorker, newDepth);
+            if (firstOut >= lastOut) break;
 
-            // Create accumulator for this slice
-            var accumulator = new float[volume.Width, volume.Height];
-            var counts = new int[volume.Width, volume.Height];
-
-            // Process each source slice in the Z bin
-            for (var srcZ = srcZStart; srcZ < srcZEnd; srcZ++)
+            tasks.Add(Task.Run(() =>
             {
-                var pageData = ImageLoader.LoadTiffPageAsGrayscale(tiffPath, srcZ, out var width, out var height);
-                AccumulateSliceData(pageData, width, height, accumulator, counts, binFactor);
-            }
+                var accumulator = new float[newWidth * newHeight];
+                var counts = new int[newWidth * newHeight];
+                var slice = new byte[newWidth * newHeight];
+                var currentOut = firstOut;
 
-            // Average and write to volume
-            for (var y = 0; y < volume.Height; y++)
-            for (var x = 0; x < volume.Width; x++)
+                var firstSrc = firstOut * binFactor;
+                var lastSrc = Math.Min(lastOut * binFactor, pageCount);
+
+                ImageLoader.ReadTiffPageRangeAsGrayscale(tiffPath, firstSrc, lastSrc,
+                    (page, pageData, width, height) =>
+                    {
+                        AccumulateBinnedSlice(pageData, width, height, accumulator, counts,
+                            newWidth, newHeight, binFactor);
+
+                        // Finalize the output slice when its Z bin is complete (or the stack ends)
+                        if ((page + 1) % binFactor == 0 || page + 1 == lastSrc)
+                        {
+                            FinalizeBinnedSlice(accumulator, counts, slice);
+                            volume.WriteSliceZ(currentOut, slice);
+                            Array.Clear(accumulator);
+                            Array.Clear(counts);
+                            currentOut++;
+
+                            var done = Interlocked.Increment(ref processed);
+                            progress?.Report((float)done / newDepth);
+                        }
+                    });
+            }));
+        }
+
+        await Task.WhenAll(tasks);
+    }
+
+    /// <summary>
+    ///     Accumulate a source slice into flat XY binning accumulators (row-major, cache friendly)
+    /// </summary>
+    private static void AccumulateBinnedSlice(
+        byte[] imageData,
+        int imageWidth,
+        int imageHeight,
+        float[] accumulator,
+        int[] counts,
+        int newWidth,
+        int newHeight,
+        int binFactor)
+    {
+        var maxY = Math.Min(imageHeight, newHeight * binFactor);
+        var maxX = Math.Min(imageWidth, newWidth * binFactor);
+
+        for (var srcY = 0; srcY < maxY; srcY++)
+        {
+            var dstRow = srcY / binFactor * newWidth;
+            var srcRow = srcY * imageWidth;
+
+            for (var srcX = 0; srcX < maxX; srcX++)
             {
-                byte value = 0;
-                if (counts[x, y] > 0)
-                    value = (byte)Math.Min(255, Math.Max(0,
-                        Math.Round(accumulator[x, y] / counts[x, y])));
-                volume[x, y, newZ] = value;
+                var dst = dstRow + srcX / binFactor;
+                accumulator[dst] += imageData[srcRow + srcX];
+                counts[dst]++;
             }
-
-            progress?.Report((float)(newZ + 1) / newDepth);
         }
     }
 
     /// <summary>
-    ///     Accumulate slice data into the binning accumulator
+    ///     Average the accumulated values into an 8-bit output slice
     /// </summary>
-    private static void AccumulateSliceData(
-        byte[] imageData,
-        int imageWidth,
-        int imageHeight,
-        float[,] accumulator,
-        int[,] counts,
-        int binFactor)
+    private static void FinalizeBinnedSlice(float[] accumulator, int[] counts, byte[] slice)
     {
-        var newWidth = accumulator.GetLength(0);
-        var newHeight = accumulator.GetLength(1);
-
-        // Accumulate binned pixels
-        for (var y = 0; y < newHeight; y++)
-        for (var x = 0; x < newWidth; x++)
-        {
-            // Sum pixels in the XY bin
-            float sum = 0;
-            var count = 0;
-
-            for (var by = 0; by < binFactor; by++)
-            {
-                var srcY = y * binFactor + by;
-                if (srcY >= imageHeight) continue;
-
-                for (var bx = 0; bx < binFactor; bx++)
-                {
-                    var srcX = x * binFactor + bx;
-                    if (srcX >= imageWidth) continue;
-
-                    var index = srcY * imageWidth + srcX;
-                    sum += imageData[index];
-                    count++;
-                }
-            }
-
-            if (count > 0)
-            {
-                accumulator[x, y] += sum;
-                counts[x, y] += count;
-            }
-        }
+        for (var i = 0; i < slice.Length; i++)
+            slice[i] = counts[i] > 0
+                ? (byte)Math.Clamp((int)MathF.Round(accumulator[i] / counts[i]), 0, 255)
+                : (byte)0;
     }
 
     /// <summary>
@@ -554,76 +575,30 @@ public static class CTStackLoader
         int newZ,
         int binFactor)
     {
-        var srcZStart = newZ * binFactor;
-        var srcZEnd = Math.Min(srcZStart + binFactor, imageFiles.Count);
-
-        // Create accumulator for this slice
-        var accumulator = new float[volume.Width, volume.Height];
-        var counts = new int[volume.Width, volume.Height];
-
-        // Process each source slice in the Z bin
-        for (var srcZ = srcZStart; srcZ < srcZEnd; srcZ++)
-            await AccumulateSliceAsync(imageFiles[srcZ], accumulator, counts, binFactor);
-
-        // Average and write to volume
-        for (var y = 0; y < volume.Height; y++)
-        for (var x = 0; x < volume.Width; x++)
-        {
-            byte value = 0;
-            if (counts[x, y] > 0)
-                value = (byte)Math.Min(255, Math.Max(0,
-                    Math.Round(accumulator[x, y] / counts[x, y])));
-            volume[x, y, newZ] = value;
-        }
-    }
-
-    /// <summary>
-    ///     Accumulate a source image into the binning accumulator
-    /// </summary>
-    private static async Task AccumulateSliceAsync(
-        string imagePath,
-        float[,] accumulator,
-        int[,] counts,
-        int binFactor)
-    {
         await Task.Run(() =>
         {
-            // Use the new ImageLoader that supports TIF
-            var imageData = ImageLoader.LoadGrayscaleImage(imagePath, out var imageWidth, out var imageHeight);
+            var newWidth = volume.Width;
+            var newHeight = volume.Height;
+            var srcZStart = newZ * binFactor;
+            var srcZEnd = Math.Min(srcZStart + binFactor, imageFiles.Count);
 
-            var newWidth = accumulator.GetLength(0);
-            var newHeight = accumulator.GetLength(1);
+            // Flat accumulators for this slice
+            var accumulator = new float[newWidth * newHeight];
+            var counts = new int[newWidth * newHeight];
 
-            // Accumulate binned pixels
-            for (var y = 0; y < newHeight; y++)
-            for (var x = 0; x < newWidth; x++)
+            // Process each source slice in the Z bin
+            for (var srcZ = srcZStart; srcZ < srcZEnd; srcZ++)
             {
-                // Sum pixels in the XY bin
-                float sum = 0;
-                var count = 0;
-
-                for (var by = 0; by < binFactor; by++)
-                {
-                    var srcY = y * binFactor + by;
-                    if (srcY >= imageHeight) continue;
-
-                    for (var bx = 0; bx < binFactor; bx++)
-                    {
-                        var srcX = x * binFactor + bx;
-                        if (srcX >= imageWidth) continue;
-
-                        var index = srcY * imageWidth + srcX;
-                        sum += imageData[index];
-                        count++;
-                    }
-                }
-
-                if (count > 0)
-                {
-                    accumulator[x, y] += sum;
-                    counts[x, y] += count;
-                }
+                var imageData = ImageLoader.LoadGrayscaleImage(imageFiles[srcZ],
+                    out var imageWidth, out var imageHeight);
+                AccumulateBinnedSlice(imageData, imageWidth, imageHeight, accumulator, counts,
+                    newWidth, newHeight, binFactor);
             }
+
+            // Average and bulk-write to volume
+            var slice = new byte[newWidth * newHeight];
+            FinalizeBinnedSlice(accumulator, counts, slice);
+            volume.WriteSliceZ(newZ, slice);
         });
     }
 
