@@ -2356,6 +2356,12 @@ public sealed class PNMGenerationTool : IDatasetTools
         ImGui.SetNextItemWidth(160);
         if (ImGui.InputInt("Working set budget (MB)", ref _maxWorkingSetMB, 256, 1024))
             _maxWorkingSetMB = Math.Max(256, _maxWorkingSetMB);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Auto"))
+            _maxWorkingSetMB = SuggestedBudgetMB();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Sets the budget to about an eighth of this machine's RAM, which leaves\n" +
+                             "room for the rest of GAIA, the OS and the network being accumulated.");
 
         ImGui.Checkbox("Out-of-core streaming (low RAM, full quality)", ref _outOfCoreStreaming);
         if (ImGui.IsItemHovered())
@@ -2376,6 +2382,10 @@ public sealed class PNMGenerationTool : IDatasetTools
         {
             ImGui.TextColored(new Vector4(0.4f, 0.9f, 0.4f, 1f),
                 $"Streaming in blocks of ≤ {budgetGb:F2} GB: the full volume never resides in RAM.");
+            var machineGb = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / (1024.0 * 1024 * 1024);
+            ImGui.TextDisabled(
+                $"Machine RAM: {machineGb:F0} GB. Peak use stays near the budget plus the network itself;\n" +
+                "a quarter to an eighth of RAM is a good budget.");
         }
         else
         {
@@ -2434,6 +2444,17 @@ public sealed class PNMGenerationTool : IDatasetTools
         _roiMaxX = _roiMinX + sizeX;
         _roiMaxY = _roiMinY + sizeY;
         _roiMaxZ = _roiMinZ + sizeZ;
+    }
+
+    /// <summary>
+    ///     About an eighth of physical RAM, clamped to [512 MB, 8 GB]: 2 GB on a 16 GB machine,
+    ///     4 GB on 32 GB. Leaves headroom for the rest of GAIA, the OS, the per-thread slice
+    ///     buffers and the accumulated network alongside the block working set.
+    /// </summary>
+    private static int SuggestedBudgetMB()
+    {
+        var totalMb = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / (1024L * 1024L);
+        return (int)Math.Clamp(totalMb / 8, 512, 8192);
     }
 
     private int LargestEdgeWithinBudget()
