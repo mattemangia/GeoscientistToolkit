@@ -27,7 +27,9 @@ internal sealed class OpenTkApplication : GameWindow
     public OpenTkApplication(bool graphicsSelfTest = false)
         : base(GameWindowSettings.Default, new NativeWindowSettings
         {
+            // Fallback size when the user un-maximizes the window.
             ClientSize = new Vector2i(1700, 950),
+            WindowState = WindowState.Maximized,
             // Plain hyphen: the em dash renders as a white box in some Linux title bars.
             Title = "GAIA - Geoscience Analysis, Imaging & Automation",
             APIVersion = new Version(3, 3),
