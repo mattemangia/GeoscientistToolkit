@@ -102,13 +102,30 @@ public sealed class PNMGeneratorOptions
     public int ConservativeErosions { get; set; } = 1;
     public int AggressiveErosions { get; set; } = 3;
     public int MaxWorkingSetMB { get; set; } = 2048;
+
+    /// <summary>
+    ///     Streams the volume through RAM in overlapping blocks instead of holding it whole, so a
+    ///     stack far larger than <see cref="MaxWorkingSetMB" /> still generates at full resolution.
+    ///     Each block carries a halo of <see cref="OutOfCoreHaloVoxels" /> context voxels and the
+    ///     per-block networks are stitched exactly on the shared block faces, so nothing is
+    ///     decimated: this is the low-memory alternative to <see cref="AllowDownsampling" />.
+    /// </summary>
+    public bool OutOfCoreStreaming { get; set; }
+
+    /// <summary>
+    ///     Context voxels read around each streamed block. Erosion and connectivity are exact as long
+    ///     as this exceeds the erosion count; pore radii near a block cut are exact for pores whose
+    ///     inscribed radius fits inside the halo, and the generator logs a warning when it sees one
+    ///     that does not.
+    /// </summary>
+    public int OutOfCoreHaloVoxels { get; set; } = 16;
 }
 
 #endregion
 
 #region Generator (CPU with optional OpenCL assist)
 
-public static class PNMGenerator
+public static partial class PNMGenerator
 {
     // GPU kernels (small, well-scoped): binary erosion & 1-pass EDT relax
     private const string OpenCLKernels = @"
@@ -214,7 +231,8 @@ public static class PNMGenerator
                 $"The selected region is {roi.Width}×{roi.Height}×{roi.Depth} voxels ({regionVoxels:N0}) and needs " +
                 $"about {EstimateWorkingSetBytes(regionVoxels) / (1024.0 * 1024 * 1024):F1} GB of working memory, " +
                 $"above the {opt.MaxWorkingSetMB} MB budget.\n\n" +
-                "Crop a smaller region, or raise the working-set budget if you have the memory. " +
+                "Crop a smaller region, raise the working-set budget if you have the memory, or enable " +
+                "out-of-core streaming to generate any region at full resolution within the budget. " +
                 "For a sandstone a representative elementary volume of roughly 1000³ voxels is standard " +
                 "and runs at full resolution.\n\n" +
                 "'Allow downsampling' lets generation proceed, but it samples the mask down and erases the " +
@@ -242,6 +260,12 @@ public static class PNMGenerator
 
         var roi = (opt.Roi ?? PnmRegion.FullVolume(ct.Width, ct.Height, ct.Depth))
             .Clamped(ct.Width, ct.Height, ct.Depth);
+
+        // Streaming path: the volume never sits in RAM whole, so there is nothing to downsample and
+        // the budget only sizes the per-block working set.
+        if (opt.OutOfCoreStreaming)
+            return GenerateOutOfCore(ct, opt, roi, progressReporter, token);
+
         var sampling = ResolveSampling(roi, opt, progressReporter);
 
         // Voxel geometry (µm) — we take geometric mean if anisotropic spacing
@@ -1295,6 +1319,27 @@ public static class PNMGenerator
             }
         }
 
+        EnforceInOutConnectivityGraph(pores, throats, inletIdx, outletIdx, poreIdToIndex, phys,
+            axis, axisLength, minBoundaryPores);
+    }
+
+    /// <summary>
+    ///     Graph-side half of the connectivity enforcement: fallback boundary selection, boundary
+    ///     meshing, component analysis and bridge building. Shared between the in-RAM path, which
+    ///     picks boundary pores by scanning the label volume, and the out-of-core path, which picks
+    ///     them from per-pore voxel extents without any label volume in memory.
+    /// </summary>
+    private static void EnforceInOutConnectivityGraph(
+        Pore[] pores,
+        List<Throat> throats,
+        HashSet<int> inletIdx,
+        HashSet<int> outletIdx,
+        Dictionary<int, int> poreIdToIndex,
+        Vector3[] phys,
+        FlowAxis axis,
+        float axisLength,
+        int minBoundaryPores)
+    {
         // Fallback: use percentile-based selection if still not enough pores
         if (inletIdx.Count < minBoundaryPores || outletIdx.Count < minBoundaryPores)
         {
@@ -2183,6 +2228,7 @@ public sealed class PNMGenerationTool : IDatasetTools
 
     private int _maxWorkingSetMB = 2048;
     private bool _allowDownsampling;
+    private bool _outOfCoreStreaming;
     private string _lastError = "";
 
     /// <summary> Cube edge, in voxels, offered as a starting representative elementary volume. </summary>
@@ -2262,7 +2308,8 @@ public sealed class PNMGenerationTool : IDatasetTools
                     OutletIsMaxSide = _outMax,
                     Roi = CurrentRegion(),
                     MaxWorkingSetMB = _maxWorkingSetMB,
-                    AllowDownsampling = _allowDownsampling
+                    AllowDownsampling = _allowDownsampling,
+                    OutOfCoreStreaming = _outOfCoreStreaming
                 };
 
                 _lastError = "";
@@ -2309,6 +2356,20 @@ public sealed class PNMGenerationTool : IDatasetTools
         ImGui.SetNextItemWidth(160);
         if (ImGui.InputInt("Working set budget (MB)", ref _maxWorkingSetMB, 256, 1024))
             _maxWorkingSetMB = Math.Max(256, _maxWorkingSetMB);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Auto"))
+            _maxWorkingSetMB = SuggestedBudgetMB();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Sets the budget to about an eighth of this machine's RAM, which leaves\n" +
+                             "room for the rest of GAIA, the OS and the network being accumulated.");
+
+        ImGui.Checkbox("Out-of-core streaming (low RAM, full quality)", ref _outOfCoreStreaming);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Streams the volume through RAM in overlapping blocks sized to the working-set\n" +
+                             "budget instead of loading it whole, and stitches the per-block networks exactly\n" +
+                             "on the shared faces. Any region generates at full resolution, so this is the\n" +
+                             "way to run large stacks on low-memory machines. Slower than in-RAM generation\n" +
+                             "because block halos are processed twice.");
 
         var region = CurrentRegion().Clamped(ct.Width, ct.Height, ct.Depth);
         var workingSetGb = PNMGenerator.EstimateWorkingSetBytes(region.VoxelCount) / (1024.0 * 1024 * 1024);
@@ -2316,18 +2377,32 @@ public sealed class PNMGenerationTool : IDatasetTools
         var fits = workingSetGb <= budgetGb;
 
         ImGui.TextDisabled($"Region: {region.Width}×{region.Height}×{region.Depth} = {region.VoxelCount:N0} voxels");
-        ImGui.TextColored(fits ? new Vector4(0.4f, 0.9f, 0.4f, 1f) : new Vector4(1f, 0.5f, 0.3f, 1f),
-            $"Estimated working set: {workingSetGb:F2} GB / {budgetGb:F2} GB budget");
 
-        if (!fits)
+        if (_outOfCoreStreaming)
         {
-            ImGui.Checkbox("Allow downsampling", ref _allowDownsampling);
-            if (_allowDownsampling)
-                ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f),
-                    "Downsampling erases pore throats. Porosity, coordination number and\n" +
-                    "permeability from this network are not petrophysically valid.");
-            else
-                ImGui.TextDisabled("Crop the region or raise the budget to generate at full resolution.");
+            ImGui.TextColored(new Vector4(0.4f, 0.9f, 0.4f, 1f),
+                $"Streaming in blocks of ≤ {budgetGb:F2} GB: the full volume never resides in RAM.");
+            var machineGb = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / (1024.0 * 1024 * 1024);
+            ImGui.TextDisabled(
+                $"Machine RAM: {machineGb:F0} GB. Peak use stays near the budget plus the network itself;\n" +
+                "a quarter to an eighth of RAM is a good budget.");
+        }
+        else
+        {
+            ImGui.TextColored(fits ? new Vector4(0.4f, 0.9f, 0.4f, 1f) : new Vector4(1f, 0.5f, 0.3f, 1f),
+                $"Estimated working set: {workingSetGb:F2} GB / {budgetGb:F2} GB budget");
+
+            if (!fits)
+            {
+                ImGui.Checkbox("Allow downsampling", ref _allowDownsampling);
+                if (_allowDownsampling)
+                    ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f),
+                        "Downsampling erases pore throats. Porosity, coordination number and\n" +
+                        "permeability from this network are not petrophysically valid.");
+                else
+                    ImGui.TextDisabled("Crop the region, raise the budget, or enable out-of-core streaming\n" +
+                                       "to generate at full resolution.");
+            }
         }
 
         if (!string.IsNullOrEmpty(_lastError))
@@ -2369,6 +2444,17 @@ public sealed class PNMGenerationTool : IDatasetTools
         _roiMaxX = _roiMinX + sizeX;
         _roiMaxY = _roiMinY + sizeY;
         _roiMaxZ = _roiMinZ + sizeZ;
+    }
+
+    /// <summary>
+    ///     About an eighth of physical RAM, clamped to [512 MB, 8 GB]: 2 GB on a 16 GB machine,
+    ///     4 GB on 32 GB. Leaves headroom for the rest of GAIA, the OS, the per-thread slice
+    ///     buffers and the accumulated network alongside the block working set.
+    /// </summary>
+    private static int SuggestedBudgetMB()
+    {
+        var totalMb = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / (1024L * 1024L);
+        return (int)Math.Clamp(totalMb / 8, 512, 8192);
     }
 
     private int LargestEdgeWithinBudget()
