@@ -76,6 +76,32 @@ public sealed class ParticleSeparationTests
     }
 
     [Fact]
+    public void SingleSliceMode_AppliesFiltersInPlane()
+    {
+        var dataset = CreateDataset(20, 14, 4, out var grayscale, out var labels);
+        using var _ = grayscale;
+        using var __ = labels;
+        // Two 4x4 squares on slice z=2 joined by a 1-voxel-wide bridge, plus a speck.
+        FillBox(labels, 7, 2, 5, 4, 7, 2, 2);
+        FillBox(labels, 7, 12, 15, 4, 7, 2, 2);
+        for (var x = 5; x <= 12; x++) labels[x, 5, 2] = 7;
+        labels[18, 12, 2] = 7;
+        var material = new Material("grains", System.Numerics.Vector4.One, 0, 255, 7);
+        using var processor = new AcceleratedProcessor();
+        var filters = new ParticleSeparationFilters { MorphologicalOpening = true, OpeningRadius = 1 };
+
+        using var raw = processor.SeparateParticles(dataset, material, false, false, 1, 2,
+            null, CancellationToken.None);
+        using var opened = processor.SeparateParticles(dataset, material, false, false, 1, 2,
+            filters, CancellationToken.None);
+
+        Assert.Equal(2, raw.Particles.Count); // bridged pair + speck
+        Assert.Equal(2, opened.Particles.Count); // pair split in-plane, speck eroded away
+        Assert.All(opened.Particles, particle => Assert.True(particle.VoxelCount >= 4));
+        Assert.All(opened.Particles, particle => Assert.Equal(2, particle.Center.Z));
+    }
+
+    [Fact]
     public void ApplyParticleLabels_WritesEachParticleOutOfCore()
     {
         var dataset = CreateDataset(20, 10, 6, out var grayscale, out var labels);
