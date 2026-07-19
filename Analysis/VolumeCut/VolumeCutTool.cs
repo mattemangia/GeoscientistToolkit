@@ -95,6 +95,19 @@ public class VolumeCutTool : IDatasetTools, IDisposable
             State.ResetToVolume(dataset.Width, dataset.Height, dataset.Depth);
             RefreshPreview();
         }
+
+        if (State.Shape != VolumeCutShapeKind.Sphere)
+        {
+            var lockAspect = State.LockAspectRatio;
+            if (ImGui.Checkbox("Lock aspect ratio", ref lockAspect)) State.LockAspectRatio = lockAspect;
+            ImGui.SameLine();
+            ImGui.TextDisabled("(?)");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("When enabled, dragging a resize handle scales the whole shape\n" +
+                                 "proportionally: a box edge rescales the other two axes about their\n" +
+                                 "centers, and the cylinder radius and extent stay linked. Moving the\n" +
+                                 "shape is unaffected. Off by default: every handle resizes freely.");
+        }
     }
 
     private void DrawShapeParameters(CtImageStackDataset dataset)

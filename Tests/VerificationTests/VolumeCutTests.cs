@@ -134,6 +134,73 @@ public sealed class VolumeCutTests
     }
 
     [Fact]
+    public void LockAspectRatio_BoxEdgeDragRescalesOtherAxesAboutTheirCenters()
+    {
+        var start = new VolumeCutState
+        {
+            BoxMin = new Vector3(10, 20, 30),
+            BoxMax = new Vector3(30, 40, 50) // 20 voxels per axis
+        };
+        var state = new VolumeCutState
+        {
+            LockAspectRatio = true,
+            BoxMin = start.BoxMin,
+            BoxMax = start.BoxMax
+        };
+
+        // Drag the X-max edge from 30 to 50: X size 20 -> 40, factor 2.
+        state.BoxMax = state.BoxMax with { X = 50 };
+        state.ApplyBoxAspect(start, 0);
+
+        Assert.Equal(50, state.BoxMax.X);
+        Assert.Equal(10, state.BoxMin.X); // dragged axis keeps its opposite edge
+        Assert.Equal(10, state.BoxMin.Y); // Y: center 30, half 10*2 -> [10, 50]
+        Assert.Equal(50, state.BoxMax.Y);
+        Assert.Equal(20, state.BoxMin.Z); // Z: center 40, half 10*2 -> [20, 60]
+        Assert.Equal(60, state.BoxMax.Z);
+
+        // Without the lock nothing else moves.
+        var free = new VolumeCutState { BoxMin = start.BoxMin, BoxMax = start.BoxMax };
+        free.BoxMax = free.BoxMax with { X = 50 };
+        free.ApplyBoxAspect(start, 0);
+        Assert.Equal(start.BoxMin.Y, free.BoxMin.Y);
+        Assert.Equal(start.BoxMax.Z, free.BoxMax.Z);
+    }
+
+    [Fact]
+    public void LockAspectRatio_CylinderRadiusAndExtentStayLinked()
+    {
+        var start = new VolumeCutState
+        {
+            Shape = VolumeCutShapeKind.Cylinder,
+            CylinderRadius = 10,
+            CylinderAxisMin = 20,
+            CylinderAxisMax = 60 // extent 40, center 40
+        };
+
+        var fromRadius = new VolumeCutState
+        {
+            LockAspectRatio = true,
+            CylinderRadius = 20, // doubled by a drag
+            CylinderAxisMin = start.CylinderAxisMin,
+            CylinderAxisMax = start.CylinderAxisMax
+        };
+        fromRadius.ApplyCylinderAspectFromRadius(start);
+        Assert.Equal(0, fromRadius.CylinderAxisMin);  // center 40, half 20*2
+        Assert.Equal(80, fromRadius.CylinderAxisMax);
+
+        var fromExtent = new VolumeCutState
+        {
+            LockAspectRatio = true,
+            CylinderRadius = start.CylinderRadius,
+            CylinderAxisMin = 30,
+            CylinderAxisMax = 50 // extent halved: 40 -> 20
+        };
+        fromExtent.ApplyCylinderAspectFromExtent(start);
+        Assert.Equal(5, fromExtent.CylinderRadius);
+    }
+
+    [Fact]
     public void TargetSelection_LabelsOnlyLeavesGrayscaleUntouched()
     {
         var dataset = CreateDataset(16, 16, 8, out var grayscale, out var labels);

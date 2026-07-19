@@ -220,10 +220,22 @@ public sealed class VolumeCutOverlay
                         _state.BoxMax = min + size;
                         break;
                     }
-                    case Handle.UMin: SetBoxEdge(u, true, VolumeCutState.Component(s.BoxMin, u) + du); break;
-                    case Handle.UMax: SetBoxEdge(u, false, VolumeCutState.Component(s.BoxMax, u) + du); break;
-                    case Handle.VMin: SetBoxEdge(v, true, VolumeCutState.Component(s.BoxMin, v) + dv); break;
-                    case Handle.VMax: SetBoxEdge(v, false, VolumeCutState.Component(s.BoxMax, v) + dv); break;
+                    case Handle.UMin:
+                        SetBoxEdge(u, true, VolumeCutState.Component(s.BoxMin, u) + du);
+                        _state.ApplyBoxAspect(s, u);
+                        break;
+                    case Handle.UMax:
+                        SetBoxEdge(u, false, VolumeCutState.Component(s.BoxMax, u) + du);
+                        _state.ApplyBoxAspect(s, u);
+                        break;
+                    case Handle.VMin:
+                        SetBoxEdge(v, true, VolumeCutState.Component(s.BoxMin, v) + dv);
+                        _state.ApplyBoxAspect(s, v);
+                        break;
+                    case Handle.VMax:
+                        SetBoxEdge(v, false, VolumeCutState.Component(s.BoxMax, v) + dv);
+                        _state.ApplyBoxAspect(s, v);
+                        break;
                 }
 
                 break;
@@ -262,6 +274,7 @@ public sealed class VolumeCutOverlay
                     else if (_active == Handle.Radius)
                     {
                         _state.CylinderRadius = MathF.Max(1f, s.CylinderRadius + du);
+                        _state.ApplyCylinderAspectFromRadius(s);
                     }
                 }
                 else
@@ -285,10 +298,12 @@ public sealed class VolumeCutOverlay
                         case Handle.AxisMin:
                             _state.CylinderAxisMin = MathF.Min(s.CylinderAxisMin + dAxis,
                                 _state.CylinderAxisMax - 1);
+                            _state.ApplyCylinderAspectFromExtent(s);
                             break;
                         case Handle.AxisMax:
                             _state.CylinderAxisMax = MathF.Max(s.CylinderAxisMax + dAxis,
                                 _state.CylinderAxisMin + 1);
+                            _state.ApplyCylinderAspectFromExtent(s);
                             break;
                         case Handle.Radius:
                         {
@@ -297,6 +312,7 @@ public sealed class VolumeCutOverlay
                                 s.CylinderRadius * s.CylinderRadius - offset * offset));
                             var chord = MathF.Max(1f, startChord + dCross);
                             _state.CylinderRadius = MathF.Sqrt(chord * chord + offset * offset);
+                            _state.ApplyCylinderAspectFromRadius(s);
                             break;
                         }
                     }

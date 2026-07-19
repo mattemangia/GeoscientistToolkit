@@ -21,6 +21,11 @@ public sealed class VolumeCutState
     public bool ApplyToLabels = true;
     public bool ShowOverlay = true;
 
+    /// <summary>When set, resize handles scale the whole shape proportionally: a box drag
+    /// rescales the other two axes about their centers, and cylinder radius/extent stay linked.
+    /// Moves are unaffected; a sphere is inherently uniform.</summary>
+    public bool LockAspectRatio;
+
     // Box (inclusive voxel bounds)
     public Vector3 BoxMin;
     public Vector3 BoxMax;
@@ -228,4 +233,55 @@ public sealed class VolumeCutState
         var dy = MathF.Max(cy, height - 1 - cy);
         return dx * dx + dy * dy;
     }
+
+    #region Aspect-ratio-locked resizing
+
+    /// <summary>
+    ///     After a box edge on <paramref name="draggedAxis" /> was resized, rescales the other two
+    ///     axes about their drag-start centers by the same factor. <paramref name="dragStart" />
+    ///     holds the geometry captured when the drag began.
+    /// </summary>
+    public void ApplyBoxAspect(VolumeCutState dragStart, int draggedAxis)
+    {
+        if (!LockAspectRatio) return;
+        var startSize = Component(dragStart.BoxMax, draggedAxis) - Component(dragStart.BoxMin, draggedAxis);
+        if (startSize <= 0) return;
+        var factor = (Component(BoxMax, draggedAxis) - Component(BoxMin, draggedAxis)) / startSize;
+        for (var axis = 0; axis < 3; axis++)
+        {
+            if (axis == draggedAxis) continue;
+            var center = (Component(dragStart.BoxMin, axis) + Component(dragStart.BoxMax, axis)) * 0.5f;
+            var half = MathF.Max(0.5f,
+                (Component(dragStart.BoxMax, axis) - Component(dragStart.BoxMin, axis)) * 0.5f * factor);
+            var min = BoxMin;
+            var max = BoxMax;
+            SetComponent(ref min, axis, center - half);
+            SetComponent(ref max, axis, center + half);
+            BoxMin = min;
+            BoxMax = max;
+        }
+    }
+
+    /// <summary>After the cylinder radius changed, rescales the axis extent about its center.</summary>
+    public void ApplyCylinderAspectFromRadius(VolumeCutState dragStart)
+    {
+        if (!LockAspectRatio || dragStart.CylinderRadius <= 0) return;
+        var factor = CylinderRadius / dragStart.CylinderRadius;
+        var center = (dragStart.CylinderAxisMin + dragStart.CylinderAxisMax) * 0.5f;
+        var half = MathF.Max(0.5f, (dragStart.CylinderAxisMax - dragStart.CylinderAxisMin) * 0.5f * factor);
+        CylinderAxisMin = center - half;
+        CylinderAxisMax = center + half;
+    }
+
+    /// <summary>After the cylinder extent changed, rescales the radius by the same factor.</summary>
+    public void ApplyCylinderAspectFromExtent(VolumeCutState dragStart)
+    {
+        if (!LockAspectRatio) return;
+        var startExtent = dragStart.CylinderAxisMax - dragStart.CylinderAxisMin;
+        if (startExtent <= 0) return;
+        var factor = (CylinderAxisMax - CylinderAxisMin) / startExtent;
+        CylinderRadius = MathF.Max(1f, dragStart.CylinderRadius * factor);
+    }
+
+    #endregion
 }

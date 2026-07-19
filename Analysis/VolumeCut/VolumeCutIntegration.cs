@@ -278,6 +278,8 @@ public static class VolumeCutIntegration
                             VolumeCutState.Component(snap.BoxMin, axis) + 1));
                         state.BoxMax = max;
                     }
+
+                    state.ApplyBoxAspect(snap, axis);
                 }
 
                 break;
@@ -333,6 +335,7 @@ public static class VolumeCutIntegration
                         else
                             state.CylinderAxisMax = MathF.Max(snap.CylinderAxisMax + deltaVox,
                                 snap.CylinderAxisMin + 1);
+                        state.ApplyCylinderAspectFromExtent(snap);
                         break;
                     }
                     case Handle3D.Radius:
@@ -344,6 +347,7 @@ public static class VolumeCutIntegration
                         var deltaVox = AxisDelta(dataset, anchor, crossAxis, deltaPx, viewProj, origin, size,
                             volumeScale);
                         state.CylinderRadius = MathF.Max(1f, snap.CylinderRadius + deltaVox);
+                        state.ApplyCylinderAspectFromRadius(snap);
                         break;
                     }
                 }
