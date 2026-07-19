@@ -120,15 +120,17 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
         {
             ImGui.Text("Ambient Occlusion Segmentation Help");
             ImGui.Separator();
-            ImGui.TextWrapped("This tool casts rays from each voxel to compute ambient occlusion values.");
-            ImGui.TextWrapped("• Pores/cavities have LOW AO (rays escape)");
-            ImGui.TextWrapped("• Solid material has HIGH AO (rays blocked)");
+            ImGui.TextWrapped("This tool casts rays from every void (non-material) voxel and measures " +
+                              "openness: the fraction of rays escaping without hitting material.");
+            ImGui.TextWrapped("• Enclosed pores/cavities have LOW openness (rays are blocked)");
+            ImGui.TextWrapped("• Open exterior space has HIGH openness (rays escape)");
+            ImGui.TextWrapped("• Material voxels are excluded (openness = 1)");
             ImGui.Spacing();
             ImGui.TextWrapped("Parameters:");
             ImGui.BulletText("Ray Count: More rays = better accuracy, slower (64-256)");
             ImGui.BulletText("Ray Length: Longer = capture larger features (voxels)");
             ImGui.BulletText("Material Threshold: Grayscale value above = material");
-            ImGui.BulletText("AO Threshold: Voxels below this are segmented as pores");
+            ImGui.BulletText("AO Threshold: Void voxels with openness below this become pores");
             ImGui.EndPopup();
         }
     }
@@ -284,7 +286,8 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
             }
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("AO threshold for segmentation. Voxels with AO below this are segmented as pores.");
+            ImGui.SetTooltip("Openness threshold. Void voxels whose openness (fraction of escaping rays)\n" +
+                             "is below this are segmented as enclosed pores/cavities.");
 
         // Target material selection
         ImGui.Text("Target Material:");
@@ -348,6 +351,16 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
                 _settings.CpuThreads = cpuThreads;
             }
         }
+
+        int workingSetMb = _settings.MaxWorkingSetMB;
+        if (ImGui.SliderInt("Max Working Set (MB)", ref workingSetMb, 64, 4096))
+        {
+            _settings.MaxWorkingSetMB = workingSetMb;
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Memory budget for the AO field. Datasets larger than the budget are\n" +
+                             "streamed out-of-core onto an adaptive coarser grid that still covers the\n" +
+                             "whole volume; results are upsampled when applied to the labels.");
     }
 
     private void DrawPreviewOptions()
@@ -494,7 +507,7 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
         if (result.SegmentationMask != null)
         {
             var mask = result.SegmentationMask;
-            long totalVoxels = mask.GetLength(0) * mask.GetLength(1) * mask.GetLength(2);
+            var totalVoxels = (long)mask.GetLength(0) * mask.GetLength(1) * mask.GetLength(2);
             long poreVoxels = 0;
 
             for (int z = 0; z < mask.GetLength(2); z++)
