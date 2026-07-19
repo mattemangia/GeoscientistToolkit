@@ -1770,9 +1770,6 @@ public class PNMViewer : IDatasetViewer
         Metric("k Darcy:", _dataset.DarcyPermeability, "F2", " mD");
         Metric("k N-S:", _dataset.NavierStokesPermeability, "F2", " mD");
         Metric("k LBM:", _dataset.LatticeBoltzmannPermeability, "F2", " mD");
-        if (_dataset.DarcyPermeability > 0 && _dataset.Tortuosity > 0)
-            Metric("  τ² corrected:",
-                $"{_dataset.DarcyPermeability / (_dataset.Tortuosity * _dataset.Tortuosity):F2} mD");
         Metric("D_eff:", _dataset.EffectiveDiffusivity, "E3", " m²/s");
         Metric("Form. factor:", _dataset.FormationFactor, "F2", "");
 

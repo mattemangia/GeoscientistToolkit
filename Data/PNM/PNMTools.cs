@@ -93,7 +93,6 @@ public class PNMTools : IDatasetTools
     private bool _calcNavierStokes = true;
     private string _calculationStatus = "";
     private float _confiningPressure = 5.0f; // MPa (typical reservoir pressure)
-    private bool _correctForTortuosity = true;
     private float _customBulkDiffusivity = 1.0e-9f; // m²/s
     private float _customViscosity = 1.0f; // cP
     private int _diffusivityFluidIndex;
@@ -836,12 +835,10 @@ public class PNMTools : IDatasetTools
 
         ImGui.Spacing();
 
-        // Tortuosity correction
-        ImGui.Checkbox("Apply Tortuosity Correction", ref _correctForTortuosity);
+        ImGui.TextDisabled("Tortuosity: resolved by network geometry");
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip($"Divides permeability by τ²\n" +
-                             $"Current tortuosity: {pnm.Tortuosity:F3}\n" +
-                             $"Correction factor: {1.0f / (pnm.Tortuosity * pnm.Tortuosity):F3}");
+            ImGui.SetTooltip("The pore-network flow solver already resolves path length and connectivity.\n" +
+                             "No additional tortuosity correction is applied to the primary permeability.");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -899,7 +896,6 @@ public class PNMTools : IDatasetTools
                     FluidViscosity = _fluidTypeIndex == _fluidTypes.Length - 1
                         ? _customViscosity
                         : _fluidViscosities[_fluidTypeIndex],
-                    CorrectForTortuosity = _correctForTortuosity,
                     UseGpu = _useGpu && OpenCLContext.IsAvailable,
                     CalculateDarcy = _calcDarcy,
                     CalculateNavierStokes = _calcNavierStokes,
@@ -1025,13 +1021,12 @@ public class PNMTools : IDatasetTools
         ImGui.Spacing();
 
         // Permeability results table
-        if (ImGui.BeginTable("PermTable", 4, ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg |
+        if (ImGui.BeginTable("PermTable", 3, ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg |
                                              ImGuiTableFlags.ScrollX | ImGuiTableFlags.PadOuterX))
         {
             ImGui.TableSetupColumn("Method", ImGuiTableColumnFlags.WidthFixed, 150);
-            ImGui.TableSetupColumn("Uncorrected (mD)", ImGuiTableColumnFlags.WidthFixed, 150);
-            ImGui.TableSetupColumn("τ²-Corrected (mD)", ImGuiTableColumnFlags.WidthFixed, 150);
-            ImGui.TableSetupColumn("Corrected (Darcy)", ImGuiTableColumnFlags.WidthFixed, 150);
+            ImGui.TableSetupColumn("Network k (mD)", ImGuiTableColumnFlags.WidthFixed, 150);
+            ImGui.TableSetupColumn("Network k (D)", ImGuiTableColumnFlags.WidthFixed, 150);
             ImGui.TableHeadersRow();
 
             // Darcy
@@ -1044,11 +1039,7 @@ public class PNMTools : IDatasetTools
                 var uncorrected = results?.DarcyUncorrected ?? pnm.DarcyPermeability;
                 ImGui.Text($"{uncorrected:F3}");
                 ImGui.TableSetColumnIndex(2);
-                var corrected = results?.DarcyCorrected ??
-                                (pnm.Tortuosity > 0 ? uncorrected / (pnm.Tortuosity * pnm.Tortuosity) : uncorrected);
-                ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), $"{corrected:F3}");
-                ImGui.TableSetColumnIndex(3);
-                ImGui.Text($"{corrected / 1000:F6}");
+                ImGui.Text($"{uncorrected / 1000:F6}");
             }
 
             // Navier-Stokes
@@ -1061,11 +1052,7 @@ public class PNMTools : IDatasetTools
                 var uncorrected = results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability;
                 ImGui.Text($"{uncorrected:F3}");
                 ImGui.TableSetColumnIndex(2);
-                var corrected = results?.NavierStokesCorrected ??
-                                (pnm.Tortuosity > 0 ? uncorrected / (pnm.Tortuosity * pnm.Tortuosity) : uncorrected);
-                ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), $"{corrected:F3}");
-                ImGui.TableSetColumnIndex(3);
-                ImGui.Text($"{corrected / 1000:F6}");
+                ImGui.Text($"{uncorrected / 1000:F6}");
             }
 
             // Lattice-Boltzmann
@@ -1078,11 +1065,7 @@ public class PNMTools : IDatasetTools
                 var uncorrected = results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability;
                 ImGui.Text($"{uncorrected:F3}");
                 ImGui.TableSetColumnIndex(2);
-                var corrected = results?.LatticeBoltzmannCorrected ??
-                                (pnm.Tortuosity > 0 ? uncorrected / (pnm.Tortuosity * pnm.Tortuosity) : uncorrected);
-                ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), $"{corrected:F3}");
-                ImGui.TableSetColumnIndex(3);
-                ImGui.Text($"{corrected / 1000:F6}");
+                ImGui.Text($"{uncorrected / 1000:F6}");
             }
 
             ImGui.EndTable();
@@ -1240,33 +1223,24 @@ public class PNMTools : IDatasetTools
 
                     writer.WriteLine();
                     writer.WriteLine("Permeability Results");
-                    writer.WriteLine("Method,Uncorrected (mD),τ²-Corrected (mD),Uncorrected (D),τ²-Corrected (D)");
+                    writer.WriteLine("Method,Network Permeability (mD),Network Permeability (D)");
 
                     if ((results?.DarcyUncorrected ?? pnm.DarcyPermeability) > 0)
                     {
                         var darcyUnc = results?.DarcyUncorrected ?? pnm.DarcyPermeability;
-                        var darcyCor = results?.DarcyCorrected ??
-                                       (pnm.Tortuosity > 0 ? darcyUnc / (pnm.Tortuosity * pnm.Tortuosity) : darcyUnc);
-                        writer.WriteLine($"Darcy,{darcyUnc:F6},{darcyCor:F6}," +
-                                         $"{darcyUnc / 1000:F9},{darcyCor / 1000:F9}");
+                        writer.WriteLine($"Darcy,{darcyUnc:F6},{darcyUnc / 1000:F9}");
                     }
 
                     if ((results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability) > 0)
                     {
                         var nsUnc = results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability;
-                        var nsCor = results?.NavierStokesCorrected ??
-                                    (pnm.Tortuosity > 0 ? nsUnc / (pnm.Tortuosity * pnm.Tortuosity) : nsUnc);
-                        writer.WriteLine($"Navier-Stokes,{nsUnc:F6},{nsCor:F6}," +
-                                         $"{nsUnc / 1000:F9},{nsCor / 1000:F9}");
+                        writer.WriteLine($"Navier-Stokes,{nsUnc:F6},{nsUnc / 1000:F9}");
                     }
 
                     if ((results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability) > 0)
                     {
                         var lbUnc = results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability;
-                        var lbCor = results?.LatticeBoltzmannCorrected ??
-                                    (pnm.Tortuosity > 0 ? lbUnc / (pnm.Tortuosity * pnm.Tortuosity) : lbUnc);
-                        writer.WriteLine($"Lattice-Boltzmann,{lbUnc:F6},{lbCor:F6}," +
-                                         $"{lbUnc / 1000:F9},{lbCor / 1000:F9}");
+                        writer.WriteLine($"Lattice-Boltzmann,{lbUnc:F6},{lbUnc / 1000:F9}");
                     }
 
                     writer.WriteLine();
@@ -1369,37 +1343,25 @@ public class PNMTools : IDatasetTools
                     writer.WriteLine("PERMEABILITY RESULTS");
                     writer.WriteLine("--------------------");
 
-                    var tortuosity = results?.Tortuosity ?? pnm.Tortuosity;
-                    var tau2Correction = tortuosity > 0 ? 1.0f / (tortuosity * tortuosity) : 1.0f;
-
                     if ((results?.DarcyUncorrected ?? pnm.DarcyPermeability) > 0)
                     {
                         var darcyUnc = results?.DarcyUncorrected ?? pnm.DarcyPermeability;
-                        var darcyCor = results?.DarcyCorrected ?? darcyUnc * tau2Correction;
-
                         writer.WriteLine("  Darcy Method:");
-                        writer.WriteLine($"    Uncorrected:        {darcyUnc:F6} mD ({darcyUnc / 1000:F9} D)");
-                        writer.WriteLine($"    τ²-Corrected:       {darcyCor:F6} mD ({darcyCor / 1000:F9} D)");
+                        writer.WriteLine($"    Network permeability: {darcyUnc:F6} mD ({darcyUnc / 1000:F9} D)");
                     }
 
                     if ((results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability) > 0)
                     {
                         var nsUnc = results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability;
-                        var nsCor = results?.NavierStokesCorrected ?? nsUnc * tau2Correction;
-
                         writer.WriteLine("  Navier-Stokes Method:");
-                        writer.WriteLine($"    Uncorrected:        {nsUnc:F6} mD ({nsUnc / 1000:F9} D)");
-                        writer.WriteLine($"    τ²-Corrected:       {nsCor:F6} mD ({nsCor / 1000:F9} D)");
+                        writer.WriteLine($"    Network permeability: {nsUnc:F6} mD ({nsUnc / 1000:F9} D)");
                     }
 
                     if ((results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability) > 0)
                     {
                         var lbUnc = results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability;
-                        var lbCor = results?.LatticeBoltzmannCorrected ?? lbUnc * tau2Correction;
-
                         writer.WriteLine("  Lattice-Boltzmann Method:");
-                        writer.WriteLine($"    Uncorrected:        {lbUnc:F6} mD ({lbUnc / 1000:F9} D)");
-                        writer.WriteLine($"    τ²-Corrected:       {lbCor:F6} mD ({lbCor / 1000:F9} D)");
+                        writer.WriteLine($"    Network permeability: {lbUnc:F6} mD ({lbUnc / 1000:F9} D)");
                     }
 
                     writer.WriteLine();
