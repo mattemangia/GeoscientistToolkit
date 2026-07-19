@@ -24,7 +24,7 @@ internal static class OpenTkGraphicsSelfTest
             pnm.Upload(Array.Empty<OpenTkPnmRenderer.PoreGpuData>(),
                 Array.Empty<OpenTkPnmRenderer.ThroatGpuData>());
             pnm.Render(System.Numerics.Matrix4x4.Identity, System.Numerics.Vector3.UnitZ,
-                0, 1, 1, true, true);
+                0, 1, 0, 1, 1, true, true);
         }
         using (var geothermal = new GeothermalVisualization3D())
         {

@@ -79,6 +79,7 @@ public sealed class PNMGeneratorOptions
     public int MaterialId { get; set; }
     public Neighborhood3D Neighborhood { get; set; } = Neighborhood3D.N26;
     public GenerationMode Mode { get; set; } = GenerationMode.Conservative;
+    [Obsolete("The scientific EDT/watershed path is currently CPU deterministic; this option is retained for source compatibility.")]
     public bool UseOpenCL { get; set; }
 
     /// <summary> Sub-volume to analyse. Null analyses the whole stack. </summary>
@@ -93,13 +94,23 @@ public sealed class PNMGeneratorOptions
     public bool AllowDownsampling { get; set; }
 
     // inlet↔outlet path options for absolute perm setups
+    public bool RequireInletOutletPercolation { get; set; }
+    [Obsolete("Use RequireInletOutletPercolation. Artificial connectivity is no longer created.")]
     public bool EnforceInletOutletConnectivity { get; set; }
     public FlowAxis Axis { get; set; } = FlowAxis.Z;
     public bool InletIsMinSide { get; set; } = true;
     public bool OutletIsMaxSide { get; set; } = true;
 
-    // Aggressiveness controls (number of erosions to split constrictions)
+    /// <summary>Gaussian smoothing sigma in voxels. A negative value selects the mode preset (0.4).</summary>
+    public float MarkerSmoothingSigmaVoxels { get; set; } = -1f;
+
+    /// <summary>Minimum separation/local-maximum radius in voxels. Zero selects 4 (conservative) or 2 (aggressive).</summary>
+    public int MarkerMinSpacingVoxels { get; set; }
+
+    // Retained so callers compiled against the previous erosion-based extractor keep building.
+    [Obsolete("Pore markers are now found from EDT maxima; erosion counts are ignored.")]
     public int ConservativeErosions { get; set; } = 1;
+    [Obsolete("Pore markers are now found from EDT maxima; erosion counts are ignored.")]
     public int AggressiveErosions { get; set; } = 3;
     public int MaxWorkingSetMB { get; set; } = 2048;
 
@@ -113,8 +124,8 @@ public sealed class PNMGeneratorOptions
     public bool OutOfCoreStreaming { get; set; }
 
     /// <summary>
-    ///     Context voxels read around each streamed block. Erosion and connectivity are exact as long
-    ///     as this exceeds the erosion count; pore radii near a block cut are exact for pores whose
+    ///     Context voxels read around each streamed block. Marker detection and smoothing are exact as long
+    ///     as this exceeds their support; pore radii near a block cut are exact for pores whose
     ///     inscribed radius fits inside the halo, and the generator logs a warning when it sees one
     ///     that does not.
     /// </summary>
@@ -309,55 +320,20 @@ public static partial class PNMGenerator
 
         token.ThrowIfCancellationRequested();
 
-        // Step 2: Split constrictions by erosion (work on a copy)
-        var erodedMask = (byte[])originalMask.Clone();
-        var erosions = opt.Mode == GenerationMode.Conservative ? opt.ConservativeErosions : opt.AggressiveErosions;
-
-        if (erosions > 0)
-        {
-            progressReporter.Report(0.10f, $"Applying {erosions} erosion(s) to identify pore centers...");
-            var tmp = new byte[erodedMask.Length];
-            for (var i = 0; i < erosions; i++)
-            {
-                progressReporter.Report(0.10f + 0.05f * i / erosions, $"Erosion pass {i + 1}/{erosions}...");
-
-                if (opt.UseOpenCL && TryBinaryErosionOpenCL(erodedMask, tmp, W, H, D, (int)opt.Neighborhood))
-                {
-                    var t = erodedMask;
-                    erodedMask = tmp;
-                    tmp = t;
-                }
-                else
-                {
-                    BinaryErosionCPU(erodedMask, tmp, W, H, D, opt.Neighborhood);
-                    var t = erodedMask;
-                    erodedMask = tmp;
-                    tmp = t;
-                }
-
-                token.ThrowIfCancellationRequested();
-            }
-        }
-
-        // Step 3: Connected-component labeling on ERODED mask → pore centers
-        progressReporter.Report(0.20f, "Identifying pore centers via connected components...");
-        var ccResult = ConnectedComponents3D(erodedMask, W, H, D, opt.Neighborhood);
-        var poreCount = ccResult.ComponentCount;
-        Logger.Log($"[PNMGenerator] Found {poreCount} pore centers after erosion");
-
+        // Pore bodies are the basins of the distance map, not connected remnants after erosion.
+        // A connected porous phase often survives erosion as one giant component; using its centroid
+        // as a pore creates the characteristic star/radial network in the viewer.
+        progressReporter.Report(0.12f, "Calculating Euclidean distance map...");
+        var edt = DistanceTransformExactCPU(originalMask, W, H, D);
         token.ThrowIfCancellationRequested();
 
-        // Step 4: Watershed expansion to recover full pore volumes in original mask
-        progressReporter.Report(0.30f, "Expanding pores back to original boundaries (watershed)...");
-        var fullPoreLabels = WatershedExpansion(ccResult.Labels, originalMask, W, H, D, opt.Neighborhood,
-            progressReporter, 0.30f, 0.45f);
+        progressReporter.Report(0.22f, "Finding distance-map pore markers...");
+        var watershed = BuildDistanceWatershed(originalMask, edt, W, H, D, opt, progressReporter, token);
+        var fullPoreLabels = watershed.Labels;
+        var poreCount = watershed.ComponentCount;
+        Logger.Log($"[PNMGenerator] Found {poreCount} EDT watershed pore regions");
 
-        // Step 4b: the expansion reaches only what the erosion left a seed for, so anything thinner
-        // than the structuring element would vanish from the network. Label it instead of dropping it.
-        poreCount = RecoverUnseededRegions(fullPoreLabels, originalMask, W, H, D, poreCount, opt.Neighborhood,
-            progressReporter);
-
-        // Checked only now: erosion wiping out every seed is recoverable, an empty material mask is not.
+        // An empty material mask is the only valid zero-marker result.
         if (poreCount == 0)
         {
             Logger.LogWarning("[PNMGenerator] No pores found: the selected material has no voxels in this volume.");
@@ -381,20 +357,8 @@ public static partial class PNMGenerator
         var pores = new Pore[poreCount + 1];
         ComputePoreStats(fullPoreLabels, originalMask, W, H, D, vx, vy, vz, pores);
 
-        // Step 6: Estimate pore radii via EDT on original mask
-        progressReporter.Report(0.55f, "Calculating distance transform for pore radii...");
-        float[] edt = null;
-        try
-        {
-            edt = opt.UseOpenCL && TryDistanceRelaxOpenCL(originalMask, W, H, D)
-                ? _lastDist
-                : DistanceTransformApproxCPU(originalMask, W, H, D);
-        }
-        catch
-        {
-            edt = DistanceTransformApproxCPU(originalMask, W, H, D);
-        }
-
+        // Step 6: pore radii come from the same EDT that defined the watershed markers.
+        progressReporter.Report(0.55f, "Assigning pore radii from distance map...");
         AssignPoreRadiiFromEDT(pores, fullPoreLabels, edt);
 
         token.ThrowIfCancellationRequested();
@@ -415,50 +379,12 @@ public static partial class PNMGenerator
 
         token.ThrowIfCancellationRequested();
 
-        if (opt.EnforceInletOutletConnectivity && poreCount > 0)
+        if ((opt.RequireInletOutletPercolation || opt.EnforceInletOutletConnectivity) && poreCount > 0)
         {
-            progressReporter.Report(0.82f, "Enforcing inlet-outlet connectivity...");
-            EnforceInOutConnectivity(
-                pores, adjacency, opt.Axis, opt.InletIsMinSide, opt.OutletIsMaxSide,
-                W, H, D, (float)vx, (float)vy, (float)vz,
-                throats,
-                fullPoreLabels, poreCount
-            );
-
-            // CRITICAL: Rebuild adjacency after adding bridging throats!
-            Logger.Log("[PNMGenerator] Rebuilding adjacency after connectivity enforcement...");
-            adjacency.Clear();
-            foreach (var throat in throats)
-            {
-                var p1 = pores.FirstOrDefault(p => p?.ID == throat.Pore1ID);
-                var p2 = pores.FirstOrDefault(p => p?.ID == throat.Pore2ID);
-                if (p1 == null || p2 == null) continue;
-
-                var dx = Math.Abs(p1.Position.X - p2.Position.X) * vx;
-                var dy = Math.Abs(p1.Position.Y - p2.Position.Y) * vy;
-                var dz = Math.Abs(p1.Position.Z - p2.Position.Z) * vz;
-                var dist = MathF.Sqrt((float)(dx * dx + dy * dy + dz * dz));
-
-                // Find pore indices (not IDs)
-                int p1Idx = -1, p2Idx = -1;
-                for (var i = 1; i < pores.Length; i++)
-                {
-                    if (pores[i]?.ID == throat.Pore1ID) p1Idx = i;
-                    if (pores[i]?.ID == throat.Pore2ID) p2Idx = i;
-                }
-
-                if (p1Idx > 0 && p2Idx > 0)
-                {
-                    if (!adjacency.TryGetValue(p1Idx, out var l1))
-                        adjacency[p1Idx] = l1 = new List<(int, float)>();
-                    if (!adjacency.TryGetValue(p2Idx, out var l2))
-                        adjacency[p2Idx] = l2 = new List<(int, float)>();
-
-                    // Avoid duplicates
-                    if (!l1.Any(x => x.Item1 == p2Idx)) l1.Add((p2Idx, dist));
-                    if (!l2.Any(x => x.Item1 == p1Idx)) l2.Add((p1Idx, dist));
-                }
-            }
+            progressReporter.Report(0.82f, "Selecting inlet-outlet percolating cluster...");
+            KeepLargestPercolatingCluster(pores, throats, fullPoreLabels, W, H, D, opt.Axis,
+                opt.InletIsMinSide, opt.OutletIsMaxSide);
+            adjacency = BuildAdjacency(pores, throats, (float)vx, (float)vy, (float)vz);
         }
 
 // Step 9: Calculate tortuosity (now with updated adjacency)
@@ -670,6 +596,240 @@ public static partial class PNMGenerator
         }
 
         return expanded;
+    }
+
+    private static LabelResult BuildDistanceWatershed(byte[] mask, float[] edt, int W, int H, int D,
+        PNMGeneratorOptions opt, DetailedProgressReporter progress, CancellationToken token)
+    {
+        var sigma = opt.MarkerSmoothingSigmaVoxels >= 0 ? opt.MarkerSmoothingSigmaVoxels : 0.4f;
+        var spacing = opt.MarkerMinSpacingVoxels > 0
+            ? opt.MarkerMinSpacingVoxels
+            : opt.Mode == GenerationMode.Conservative ? 4 : 2;
+        spacing = Math.Clamp(spacing, 1, 32);
+
+        var field = sigma > 0.01f ? GaussianSmooth3D(edt, W, H, D, sigma, token) : (float[])edt.Clone();
+        var localMaximum = MaximumFilter3D(field, W, H, D, spacing, token);
+        var peaks = new byte[mask.Length];
+
+        Parallel.For(0, peaks.Length, new ParallelOptions { CancellationToken = token }, i =>
+        {
+            if (mask[i] > 0 && field[i] >= localMaximum[i] - 1e-6f) peaks[i] = 1;
+        });
+
+        // A flat maximum is one marker, not one marker per voxel.
+        var peakRegions = ConnectedComponents3D(peaks, W, H, D, opt.Neighborhood);
+        var bestIndex = Enumerable.Repeat(-1, peakRegions.ComponentCount + 1).ToArray();
+        for (var i = 0; i < peakRegions.Labels.Length; i++)
+        {
+            var id = peakRegions.Labels[i];
+            if (id <= 0) continue;
+            var old = bestIndex[id];
+            if (old < 0 || field[i] > field[old] || (Math.Abs(field[i] - field[old]) < 1e-6f && i < old))
+                bestIndex[id] = i;
+        }
+
+        var labels = new int[mask.Length];
+        var queue = new PriorityQueue<(int idx, int label), (float height, int index)>();
+        var markerCount = 0;
+        for (var id = 1; id < bestIndex.Length; id++)
+        {
+            var idx = bestIndex[id];
+            if (idx < 0) continue;
+            markerCount++;
+            labels[idx] = markerCount;
+            queue.Enqueue((idx, markerCount), (-field[idx], idx));
+        }
+
+        while (queue.Count > 0)
+        {
+            token.ThrowIfCancellationRequested();
+            var (idx, label) = queue.Dequeue();
+            var z = idx / (W * H);
+            var y = idx % (W * H) / W;
+            var x = idx % W;
+            var neighborCount = (int)opt.Neighborhood;
+            for (var n = 0; n < neighborCount; n++)
+            {
+                var (dx, dy, dz) = NeighborOffsets[n];
+                var nx = x + dx;
+                var ny = y + dy;
+                var nz = z + dz;
+                if ((uint)nx >= W || (uint)ny >= H || (uint)nz >= D) continue;
+                var ni = (nz * H + ny) * W + nx;
+                if (mask[ni] == 0 || labels[ni] != 0) continue;
+                labels[ni] = label;
+                queue.Enqueue((ni, label), (-field[ni], ni));
+            }
+        }
+
+        progress?.Report(0.42f,
+            $"EDT watershed: {markerCount} markers (sigma={sigma:F2}, spacing={spacing} voxels)...");
+        return new LabelResult { Labels = labels, ComponentCount = markerCount };
+    }
+
+    private static float[] MaximumFilter3D(float[] source, int W, int H, int D, int radius,
+        CancellationToken token)
+    {
+        var a = new float[source.Length];
+        var b = new float[source.Length];
+        Parallel.For(0, D, new ParallelOptions { CancellationToken = token }, z =>
+        {
+            for (var y = 0; y < H; y++)
+            for (var x = 0; x < W; x++)
+            {
+                var max = float.MinValue;
+                for (var k = Math.Max(0, x - radius); k <= Math.Min(W - 1, x + radius); k++)
+                    max = Math.Max(max, source[(z * H + y) * W + k]);
+                a[(z * H + y) * W + x] = max;
+            }
+        });
+        Parallel.For(0, D, new ParallelOptions { CancellationToken = token }, z =>
+        {
+            for (var y = 0; y < H; y++)
+            for (var x = 0; x < W; x++)
+            {
+                var max = float.MinValue;
+                for (var k = Math.Max(0, y - radius); k <= Math.Min(H - 1, y + radius); k++)
+                    max = Math.Max(max, a[(z * H + k) * W + x]);
+                b[(z * H + y) * W + x] = max;
+            }
+        });
+        Parallel.For(0, D, new ParallelOptions { CancellationToken = token }, z =>
+        {
+            for (var y = 0; y < H; y++)
+            for (var x = 0; x < W; x++)
+            {
+                var max = float.MinValue;
+                for (var k = Math.Max(0, z - radius); k <= Math.Min(D - 1, z + radius); k++)
+                    max = Math.Max(max, b[(k * H + y) * W + x]);
+                a[(z * H + y) * W + x] = max;
+            }
+        });
+        return a;
+    }
+
+    private static float[] GaussianSmooth3D(float[] source, int W, int H, int D, float sigma,
+        CancellationToken token)
+    {
+        var radius = Math.Max(1, (int)Math.Ceiling(3 * sigma));
+        var kernel = new float[radius * 2 + 1];
+        var sum = 0f;
+        for (var i = -radius; i <= radius; i++)
+        {
+            var value = MathF.Exp(-(i * i) / (2 * sigma * sigma));
+            kernel[i + radius] = value;
+            sum += value;
+        }
+        for (var i = 0; i < kernel.Length; i++) kernel[i] /= sum;
+
+        var a = new float[source.Length];
+        var b = new float[source.Length];
+        Parallel.For(0, D, new ParallelOptions { CancellationToken = token }, z =>
+        {
+            for (var y = 0; y < H; y++)
+            for (var x = 0; x < W; x++)
+            {
+                var value = 0f;
+                for (var k = -radius; k <= radius; k++)
+                    value += source[(z * H + y) * W + Math.Clamp(x + k, 0, W - 1)] * kernel[k + radius];
+                a[(z * H + y) * W + x] = value;
+            }
+        });
+        Parallel.For(0, D, new ParallelOptions { CancellationToken = token }, z =>
+        {
+            for (var y = 0; y < H; y++)
+            for (var x = 0; x < W; x++)
+            {
+                var value = 0f;
+                for (var k = -radius; k <= radius; k++)
+                    value += a[(z * H + Math.Clamp(y + k, 0, H - 1)) * W + x] * kernel[k + radius];
+                b[(z * H + y) * W + x] = value;
+            }
+        });
+        Parallel.For(0, D, new ParallelOptions { CancellationToken = token }, z =>
+        {
+            for (var y = 0; y < H; y++)
+            for (var x = 0; x < W; x++)
+            {
+                var value = 0f;
+                for (var k = -radius; k <= radius; k++)
+                    value += b[(Math.Clamp(z + k, 0, D - 1) * H + y) * W + x] * kernel[k + radius];
+                a[(z * H + y) * W + x] = value;
+            }
+        });
+        return a;
+    }
+
+    private static Dictionary<int, List<(int nb, float w)>> BuildAdjacency(Pore[] pores, List<Throat> throats,
+        float vx, float vy, float vz)
+    {
+        var adjacency = new Dictionary<int, List<(int nb, float w)>>();
+        foreach (var t in throats)
+        {
+            if (t.Pore1ID <= 0 || t.Pore1ID >= pores.Length || pores[t.Pore1ID] == null) continue;
+            if (t.Pore2ID <= 0 || t.Pore2ID >= pores.Length || pores[t.Pore2ID] == null) continue;
+            var p1 = pores[t.Pore1ID].Position;
+            var p2 = pores[t.Pore2ID].Position;
+            var d = new Vector3((p1.X - p2.X) * vx, (p1.Y - p2.Y) * vy, (p1.Z - p2.Z) * vz).Length();
+            if (!adjacency.TryGetValue(t.Pore1ID, out var a)) adjacency[t.Pore1ID] = a = new();
+            if (!adjacency.TryGetValue(t.Pore2ID, out var b)) adjacency[t.Pore2ID] = b = new();
+            a.Add((t.Pore2ID, d));
+            b.Add((t.Pore1ID, d));
+        }
+        return adjacency;
+    }
+
+    private static void KeepLargestPercolatingCluster(Pore[] pores, List<Throat> throats, int[] labels,
+        int W, int H, int D, FlowAxis axis, bool inletIsMin, bool outletIsMax)
+    {
+        var contacts = ComputeFaceContacts(labels, W, H, D, pores.Length - 1);
+        bool Inlet(int id) => axis switch
+        {
+            FlowAxis.X => inletIsMin ? contacts.XMin[id] : contacts.XMax[id],
+            FlowAxis.Y => inletIsMin ? contacts.YMin[id] : contacts.YMax[id],
+            _ => inletIsMin ? contacts.ZMin[id] : contacts.ZMax[id]
+        };
+        bool Outlet(int id) => axis switch
+        {
+            FlowAxis.X => outletIsMax ? contacts.XMax[id] : contacts.XMin[id],
+            FlowAxis.Y => outletIsMax ? contacts.YMax[id] : contacts.YMin[id],
+            _ => outletIsMax ? contacts.ZMax[id] : contacts.ZMin[id]
+        };
+
+        var graph = BuildAdjacency(pores, throats, 1, 1, 1);
+        HashSet<int> best = null;
+        long bestVolume = -1;
+        var visited = new HashSet<int>();
+        for (var start = 1; start < pores.Length; start++)
+        {
+            if (pores[start] == null || !visited.Add(start)) continue;
+            var component = new HashSet<int> { start };
+            var queue = new Queue<int>();
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                var id = queue.Dequeue();
+                if (!graph.TryGetValue(id, out var neighbors)) continue;
+                foreach (var (next, _) in neighbors)
+                    if (visited.Add(next)) { component.Add(next); queue.Enqueue(next); }
+            }
+            if (!component.Any(Inlet) || !component.Any(Outlet)) continue;
+            var volume = component.Sum(id => (long)pores[id].VolumeVoxels);
+            if (volume > bestVolume) { bestVolume = volume; best = component; }
+        }
+        if (best == null)
+            throw new InvalidOperationException("No physical pore cluster connects the selected inlet and outlet faces. No artificial throats were added.");
+
+        for (var id = 1; id < pores.Length; id++)
+            if (pores[id] != null && !best.Contains(id)) pores[id] = null;
+        throats.RemoveAll(t => !best.Contains(t.Pore1ID) || !best.Contains(t.Pore2ID));
+        foreach (var pore in pores) if (pore != null) pore.Connections = 0;
+        foreach (var throat in throats)
+        {
+            pores[throat.Pore1ID].Connections++;
+            pores[throat.Pore2ID].Connections++;
+        }
+        Logger.Log($"[PNMGenerator] Kept physical percolating cluster: {best.Count} pores, {throats.Count} throats");
     }
 
     private static PoreFaceContacts ComputeFaceContacts(int[] labels, int W, int H, int D, int maxLabel)
@@ -1034,70 +1194,70 @@ public static partial class PNMGenerator
     //   IEEE Transactions on Pattern Analysis and Machine Intelligence, 25(2), 265-270.
     //   DOI: 10.1109/TPAMI.2003.1177156
     //
-    private static float[] DistanceTransformApproxCPU(byte[] mask, int W, int H, int D)
+    private static float[] DistanceTransformExactCPU(byte[] mask, int W, int H, int D)
     {
         var dist = new float[mask.Length];
-        for (var i = 0; i < dist.Length; i++) dist[i] = mask[i] == 0 ? 0f : 1e6f;
-
-        // forward pass
         for (var z = 0; z < D; z++)
         for (var y = 0; y < H; y++)
         for (var x = 0; x < W; x++)
         {
             var idx = (z * H + y) * W + x;
-            if (mask[idx] == 0)
-            {
-                dist[idx] = 0;
-                continue;
-            }
-
-            var best = dist[idx];
-            for (var dz = -1; dz <= 0; dz++)
-            for (var dy = -1; dy <= 0; dy++)
-            for (var dx = -1; dx <= 0; dx++)
-            {
-                if (dx == 0 && dy == 0 && dz == 0) continue;
-                int nx = x + dx, ny = y + dy, nz = z + dz;
-                if ((uint)nx >= W || (uint)ny >= H || (uint)nz >= D) continue;
-                var nidx = (nz * H + ny) * W + nx;
-                var w = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-                var nd = dist[nidx] + w;
-                if (nd < best) best = nd;
-            }
-
-            dist[idx] = best;
+            if (mask[idx] == 0) { dist[idx] = 0; continue; }
+            // The volume exterior is background too, so boundary-touching pores have finite radii.
+            var edge = Math.Min(Math.Min(x + 1, W - x), Math.Min(Math.Min(y + 1, H - y), Math.Min(z + 1, D - z)));
+            dist[idx] = edge * edge;
         }
 
-        // backward pass
-        for (var z = D - 1; z >= 0; z--)
-        for (var y = H - 1; y >= 0; y--)
-        for (var x = W - 1; x >= 0; x--)
+        void TransformLines(int lineCount, int length, Func<int, int, int> index)
         {
-            var idx = (z * H + y) * W + x;
-            if (mask[idx] == 0)
+            Parallel.For(0, lineCount, line =>
             {
-                dist[idx] = 0;
-                continue;
-            }
-
-            var best = dist[idx];
-            for (var dz = 0; dz <= 1; dz++)
-            for (var dy = 0; dy <= 1; dy++)
-            for (var dx = 0; dx <= 1; dx++)
-            {
-                if (dx == 0 && dy == 0 && dz == 0) continue;
-                int nx = x + dx, ny = y + dy, nz = z + dz;
-                if ((uint)nx >= W || (uint)ny >= H || (uint)nz >= D) continue;
-                var nidx = (nz * H + ny) * W + nx;
-                var w = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-                var nd = dist[nidx] + w;
-                if (nd < best) best = nd;
-            }
-
-            dist[idx] = best;
+                var f = new float[length];
+                var d = new float[length];
+                for (var q = 0; q < length; q++) f[q] = dist[index(line, q)];
+                ExactSquaredDistance1D(f, d);
+                for (var q = 0; q < length; q++) dist[index(line, q)] = d[q];
+            });
         }
 
+        TransformLines(H * D, W, (line, q) => (line / H * H + line % H) * W + q);
+        TransformLines(W * D, H, (line, q) => (line / W * H + q) * W + line % W);
+        TransformLines(W * H, D, (line, q) => (q * H + line / W) * W + line % W);
+        Parallel.For(0, dist.Length, i => dist[i] = MathF.Sqrt(Math.Max(0, dist[i])));
         return dist;
+    }
+
+    private static void ExactSquaredDistance1D(float[] f, float[] d)
+    {
+        var n = f.Length;
+        var v = new int[n];
+        var z = new float[n + 1];
+        var k = 0;
+        v[0] = 0;
+        z[0] = float.NegativeInfinity;
+        z[1] = float.PositiveInfinity;
+        for (var q = 1; q < n; q++)
+        {
+            float s;
+            do
+            {
+                var p = v[k];
+                s = (f[q] + q * q - f[p] - p * p) / (2f * (q - p));
+                if (s <= z[k]) k--;
+                else break;
+            } while (k >= 0);
+            k++;
+            v[k] = q;
+            z[k] = s;
+            z[k + 1] = float.PositiveInfinity;
+        }
+        k = 0;
+        for (var q = 0; q < n; q++)
+        {
+            while (z[k + 1] < q) k++;
+            var delta = q - v[k];
+            d[q] = delta * delta + f[v[k]];
+        }
     }
 
     private static void AssignPoreRadiiFromEDT(Pore[] pores, int[] ccl, float[] edt)
@@ -2219,7 +2379,9 @@ public sealed class PNMGenerationTool : IDatasetTools
     private int _modeIndex; // Conservative
     private int _neighIndex = 2; // default 26
     private bool _outMax = true;
-    private bool _useOpenCL;
+    private float _markerSigma = 0.4f;
+    private int _markerSpacing;
+    private bool _showMarkerAdvanced;
 
     // Region of interest, in source voxels. Defaults to the whole stack, re-seeded per dataset.
     private int _roiMinX, _roiMinY, _roiMinZ;
@@ -2264,18 +2426,31 @@ public sealed class PNMGenerationTool : IDatasetTools
         ImGui.Combo("Neighborhood", ref _neighIndex, neighs, neighs.Length);
 
         // Mode
-        string[] modes = { "Conservative (1 erosion)", "Aggressive (3 erosions)" };
+        string[] modes = { "Conservative (marker spacing 4)", "Aggressive (marker spacing 2)" };
         ImGui.SetNextItemWidth(-1);
         ImGui.Combo("Generation Mode", ref _modeIndex, modes, modes.Length);
 
-        ImGui.Checkbox("Use OpenCL (GPU acceleration)", ref _useOpenCL);
+        if (ImGui.Checkbox("Advanced pore markers", ref _showMarkerAdvanced))
+            if (_markerSpacing <= 0) _markerSpacing = _modeIndex == 0 ? 4 : 2;
+        if (_showMarkerAdvanced)
+        {
+            ImGui.SetNextItemWidth(140);
+            ImGui.DragFloat("Marker smoothing sigma (vox)", ref _markerSigma, 0.05f, 0f, 4f, "%.2f");
+            ImGui.SetNextItemWidth(140);
+            ImGui.DragInt("Minimum marker spacing (vox)", ref _markerSpacing, 1f, 1, 32);
+            _markerSigma = Math.Clamp(_markerSigma, 0f, 4f);
+            _markerSpacing = Math.Clamp(_markerSpacing, 1, 32);
+        }
 
         DrawRegionSection(ct);
 
         // Inlet/Outlet
         ImGui.Separator();
         ImGui.Text("Inlet—Outlet (for permeability)");
-        ImGui.Checkbox("Enforce inlet↔outlet connectivity", ref _enforce);
+        ImGui.Checkbox("Require inlet↔outlet percolating cluster", ref _enforce);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Keeps the largest physical cluster touching both selected faces.\n" +
+                             "Generation fails when no such cluster exists; artificial throats are never added.");
         string[] axes = { "X", "Y", "Z" };
         ImGui.Combo("Flow Axis", ref _axisIndex, axes, axes.Length);
         ImGui.Checkbox("Inlet = Min-face", ref _inMin);
@@ -2301,8 +2476,9 @@ public sealed class PNMGenerationTool : IDatasetTools
                     Neighborhood = _neighIndex == 0 ? Neighborhood3D.N6 :
                         _neighIndex == 1 ? Neighborhood3D.N18 : Neighborhood3D.N26,
                     Mode = _modeIndex == 0 ? GenerationMode.Conservative : GenerationMode.Aggressive,
-                    UseOpenCL = _useOpenCL,
-                    EnforceInletOutletConnectivity = _enforce,
+                    RequireInletOutletPercolation = _enforce,
+                    MarkerSmoothingSigmaVoxels = _showMarkerAdvanced ? _markerSigma : -1f,
+                    MarkerMinSpacingVoxels = _showMarkerAdvanced ? _markerSpacing : 0,
                     Axis = (FlowAxis)_axisIndex,
                     InletIsMinSide = _inMin,
                     OutletIsMaxSide = _outMax,

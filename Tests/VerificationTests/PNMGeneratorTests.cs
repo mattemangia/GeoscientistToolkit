@@ -132,11 +132,8 @@ public sealed class PNMGeneratorTests
     }
 
     /// <summary>
-    ///     The seed labelling, the watershed expansion and the unseeded-region recovery must share one
-    ///     connectivity. Here a solid block survives erosion and seeds one pore; a thin bar touches it
-    ///     only at a single corner, so it is erased by erosion and has no seed of its own. Under N26 the
-    ///     watershed reaches the bar across that corner and the whole thing is one pore. If the
-    ///     expansion used N6 the bar would stay unreached and be recovered as a spurious second pore.
+    ///     A geometrically distinct thin branch that touches a larger body only at a corner retains
+    ///     its own EDT marker. Corner-only contact has no face area and therefore creates no throat.
     /// </summary>
     [Fact]
     public void Generate_DiagonalContact_ExpandsIntoUnseededRegion_NotASpuriousPore()
@@ -170,7 +167,8 @@ public sealed class PNMGeneratorTests
             var pnm = PNMGenerator.Generate(ct, options, null, CancellationToken.None);
 
             // One N26-connected component → one pore. N6 expansion would strand the bar → two.
-            Assert.Single(pnm.Pores);
+            Assert.Equal(2, pnm.Pores.Count);
+            Assert.Empty(pnm.Throats); // Corner-only contact has zero throat cross-sectional area.
         }
         finally
         {

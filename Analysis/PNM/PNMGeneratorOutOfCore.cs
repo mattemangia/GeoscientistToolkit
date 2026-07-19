@@ -7,8 +7,8 @@
 //
 // The volume is partitioned into a regular grid of core blocks. Each block is read from the
 // (memory-mapped) label volume together with a halo of context voxels and run through the exact
-// same per-voxel pipeline as the in-RAM generator: material mask, binary erosion, seed labelling,
-// watershed expansion, unseeded-region recovery, distance transform and throat scan. Per-pore
+// same per-voxel pipeline as the in-RAM generator: material mask, exact distance transform,
+// marker detection, watershed partitioning and throat scan. Per-pore
 // statistics are accumulated over core voxels only, so every voxel of the volume is counted exactly
 // once. Pores that span a block cut appear in both blocks under different local labels; the two
 // labellings of the shared face plane are reconciled with a union-find:
@@ -42,8 +42,8 @@ namespace GAIA.Analysis.Pnm;
 public static partial class PNMGenerator
 {
     /// <summary>
-    ///     Peak bytes per extended-block voxel across mask, eroded mask, scratch, seed labels,
-    ///     expanded labels and EDT held at once while a block is processed.
+    ///     Peak bytes per extended-block voxel across mask, EDT, smoothing/max-filter fields,
+    ///     watershed labels and scratch arrays held while a block is processed.
     /// </summary>
     private const long OutOfCoreBytesPerVoxel = 26L;
 
@@ -72,8 +72,12 @@ public static partial class PNMGenerator
                 $"({Array.MaxLength:N0} elements). Reading a label slice requires one slice-sized buffer, " +
                 "so stacks this wide cannot be streamed; split the stack laterally first.");
 
-        var erosions = opt.Mode == GenerationMode.Conservative ? opt.ConservativeErosions : opt.AggressiveErosions;
-        var halo = Math.Max(Math.Max(1, opt.OutOfCoreHaloVoxels), erosions + 2);
+        var markerSpacing = opt.MarkerMinSpacingVoxels > 0
+            ? opt.MarkerMinSpacingVoxels
+            : opt.Mode == GenerationMode.Conservative ? 4 : 2;
+        var sigma = opt.MarkerSmoothingSigmaVoxels >= 0 ? opt.MarkerSmoothingSigmaVoxels : 0.4f;
+        var markerContext = markerSpacing + (int)Math.Ceiling(3 * sigma) + 2;
+        var halo = Math.Max(Math.Max(1, opt.OutOfCoreHaloVoxels), markerContext);
 
         var vx = Math.Max(1e-9, ct.PixelSize);
         var vy = Math.Max(1e-9, ct.PixelSize);
@@ -130,7 +134,7 @@ public static partial class PNMGenerator
                     progress.Report(blockProgress, $"Streaming block {blockId + 1}/{totalBlocks}...");
 
                     var blk = ComputeOutOfCoreBlock(ix, iy, iz, cx, cy, cz, W, H, D, halo);
-                    var faces = ProcessOutOfCoreBlock(ct, opt, roi, blk, blockId, erosions, halo,
+                    var faces = ProcessOutOfCoreBlock(ct, opt, roi, blk, blockId, halo,
                         ix + 1 < nbx, iy + 1 < nby, iz + 1 < nbz, ix > 0, iy > 0, iz > 0,
                         poreAgg, edgeAgg, ref haloExceeded, token);
 
@@ -296,24 +300,13 @@ public static partial class PNMGenerator
 
         token.ThrowIfCancellationRequested();
 
-        if (opt.EnforceInletOutletConnectivity)
+        if (opt.RequireInletOutletPercolation || opt.EnforceInletOutletConnectivity)
         {
-            progress.Report(0.90f, "Enforcing inlet-outlet connectivity...");
-            EnforceInOutConnectivityFromExtents(pores, throats,
+            progress.Report(0.90f, "Selecting inlet-outlet percolating cluster...");
+            KeepLargestPercolatingClusterFromExtents(pores, throats,
                 extMinX, extMaxX, extMinY, extMaxY, extMinZ, extMaxZ,
-                opt.Axis, opt.InletIsMinSide, opt.OutletIsMaxSide, (float)vx, (float)vy, (float)vz);
-
-            // Rebuild adjacency after any bridging throats (IDs equal array indices here).
-            adjacency.Clear();
-            foreach (var t in throats)
-            {
-                if (t.Pore1ID <= 0 || t.Pore1ID >= pores.Length || pores[t.Pore1ID] == null) continue;
-                if (t.Pore2ID <= 0 || t.Pore2ID >= pores.Length || pores[t.Pore2ID] == null) continue;
-                if (!adjacency.TryGetValue(t.Pore1ID, out var la)) adjacency[t.Pore1ID] = la = new List<(int, float)>();
-                if (!adjacency.TryGetValue(t.Pore2ID, out var lb)) adjacency[t.Pore2ID] = lb = new List<(int, float)>();
-                if (la.All(x => x.Item1 != t.Pore2ID)) la.Add((t.Pore2ID, 1));
-                if (lb.All(x => x.Item1 != t.Pore1ID)) lb.Add((t.Pore1ID, 1));
-            }
+                opt.Axis, opt.InletIsMinSide, opt.OutletIsMaxSide);
+            adjacency = BuildAdjacency(pores, throats, (float)vx, (float)vy, (float)vz);
         }
 
         progress.Report(0.93f, "Calculating tortuosity...");
@@ -416,7 +409,7 @@ public static partial class PNMGenerator
     }
 
     private static OocBlockFaces ProcessOutOfCoreBlock(CtImageStackDataset ct, PNMGeneratorOptions opt,
-        PnmRegion roi, OocBlockBounds blk, int blockId, int erosions, int halo,
+        PnmRegion roi, OocBlockBounds blk, int blockId, int halo,
         bool needHighX, bool needHighY, bool needHighZ, bool needLowX, bool needLowY, bool needLowZ,
         Dictionary<long, OocPoreAccumulator> poreAgg,
         Dictionary<(long a, long b), OocEdgeAccumulator> edgeAgg,
@@ -454,47 +447,10 @@ public static partial class PNMGenerator
 
         token.ThrowIfCancellationRequested();
 
-        // 2) Erosion to split constrictions. Exact for every voxel at least `erosions` from the
-        //    window edge; the halo exceeds that, so core voxels and face planes are exact.
-        var eroded = (byte[])mask.Clone();
-        if (erosions > 0)
-        {
-            var tmp = new byte[eroded.Length];
-            for (var i = 0; i < erosions; i++)
-            {
-                if (opt.UseOpenCL && TryBinaryErosionOpenCL(eroded, tmp, eW, eH, eD, (int)opt.Neighborhood))
-                {
-                    (eroded, tmp) = (tmp, eroded);
-                }
-                else
-                {
-                    BinaryErosionCPU(eroded, tmp, eW, eH, eD, opt.Neighborhood);
-                    (eroded, tmp) = (tmp, eroded);
-                }
-
-                token.ThrowIfCancellationRequested();
-            }
-        }
-
-        // 3) Seeds, watershed expansion, recovery — identical to the in-RAM pipeline.
-        var ccResult = ConnectedComponents3D(eroded, eW, eH, eD, opt.Neighborhood);
-        var expanded = WatershedExpansion(ccResult.Labels, mask, eW, eH, eD, opt.Neighborhood, null, 0f, 0f);
-        RecoverUnseededRegions(expanded, mask, eW, eH, eD, ccResult.ComponentCount, opt.Neighborhood, null);
-
-        token.ThrowIfCancellationRequested();
-
-        // 4) Distance transform for radii.
-        float[] edt;
-        try
-        {
-            edt = opt.UseOpenCL && TryDistanceRelaxOpenCL(mask, eW, eH, eD)
-                ? _lastDist
-                : DistanceTransformApproxCPU(mask, eW, eH, eD);
-        }
-        catch
-        {
-            edt = DistanceTransformApproxCPU(mask, eW, eH, eD);
-        }
+        // 2-4) The streamed path uses the same EDT-marker watershed as the in-memory path.
+        var edt = DistanceTransformExactCPU(mask, eW, eH, eD);
+        var watershed = BuildDistanceWatershed(mask, edt, eW, eH, eD, opt, null, token);
+        var expanded = watershed.Labels;
 
         token.ThrowIfCancellationRequested();
 
@@ -509,7 +465,7 @@ public static partial class PNMGenerator
         var blockHasCut = needLowX || needLowY || needLowZ || needHighX || needHighY || needHighZ;
         var localHaloExceeded = false;
 
-        // Labels whose seed reaches this block's core. They own their pore: face stitching never
+        // Labels whose distance maximum reaches this block's core. They own their pore: face stitching never
         // merges two native labels, only foreign views (spill-over basins, recovered regions) into
         // their native owner.
         var nativeSeeded = new HashSet<int>();
@@ -543,7 +499,6 @@ public static partial class PNMGenerator
                 if (z == eD - 1 || mask[idx + eW * eH] == 0) openFaces++;
 
                 acc.Add(gx, gy, gz, openFaces, edt[idx]);
-                if (eroded[idx] > 0) nativeSeeded.Add(lab);
                 if (edt[idx] > halo && blockHasCut) localHaloExceeded = true;
 
                 // Throats: each +axis voxel pair is owned by the block whose core contains the
@@ -554,16 +509,32 @@ public static partial class PNMGenerator
             }
         }
 
+        var bestByLabel = new Dictionary<int, (float value, int index)>();
+        for (var z = lz0; z < lz1; z++)
+        for (var y = ly0; y < ly1; y++)
+        for (var x = lx0; x < lx1; x++)
+        {
+            var idx = (z * eH + y) * eW + x;
+            var lab = expanded[idx];
+            if (lab <= 0) continue;
+            if (!bestByLabel.TryGetValue(lab, out var old) || edt[idx] > old.value)
+                bestByLabel[lab] = (edt[idx], idx);
+        }
+        foreach (var label in bestByLabel.Keys) nativeSeeded.Add(label);
+        var native = new byte[expanded.Length];
+        for (var i = 0; i < expanded.Length; i++)
+            if (expanded[i] > 0 && nativeSeeded.Contains(expanded[i])) native[i] = 1;
+
         if (localHaloExceeded) haloExceeded = true;
 
         // 6) Capture the face planes adjacent blocks will stitch against.
         var faces = new OocBlockFaces();
-        if (needLowX) faces.LowX = ExtractFacePlaneX(expanded, mask, eroded, edt, blk, lx0, blockId, nativeSeeded);
-        if (needHighX) faces.HighX = ExtractFacePlaneX(expanded, mask, eroded, edt, blk, lx1, blockId, nativeSeeded);
-        if (needLowY) faces.LowY = ExtractFacePlaneY(expanded, mask, eroded, edt, blk, ly0, blockId, nativeSeeded);
-        if (needHighY) faces.HighY = ExtractFacePlaneY(expanded, mask, eroded, edt, blk, ly1, blockId, nativeSeeded);
-        if (needLowZ) faces.LowZ = ExtractFacePlaneZ(expanded, mask, eroded, edt, blk, lz0, blockId, nativeSeeded);
-        if (needHighZ) faces.HighZ = ExtractFacePlaneZ(expanded, mask, eroded, edt, blk, lz1, blockId, nativeSeeded);
+        if (needLowX) faces.LowX = ExtractFacePlaneX(expanded, mask, native, edt, blk, lx0, blockId, nativeSeeded);
+        if (needHighX) faces.HighX = ExtractFacePlaneX(expanded, mask, native, edt, blk, lx1, blockId, nativeSeeded);
+        if (needLowY) faces.LowY = ExtractFacePlaneY(expanded, mask, native, edt, blk, ly0, blockId, nativeSeeded);
+        if (needHighY) faces.HighY = ExtractFacePlaneY(expanded, mask, native, edt, blk, ly1, blockId, nativeSeeded);
+        if (needLowZ) faces.LowZ = ExtractFacePlaneZ(expanded, mask, native, edt, blk, lz0, blockId, nativeSeeded);
+        if (needHighZ) faces.HighZ = ExtractFacePlaneZ(expanded, mask, native, edt, blk, lz1, blockId, nativeSeeded);
         return faces;
     }
 
@@ -897,6 +868,74 @@ public static partial class PNMGenerator
     ///     axis-aligned boundary band exactly when its voxel extent reaches the band, so the per-pore
     ///     extents accumulated during streaming reproduce the in-RAM selection without a label volume.
     /// </summary>
+    private static void KeepLargestPercolatingClusterFromExtents(Pore[] pores, List<Throat> throats,
+        int[] minX, int[] maxX, int[] minY, int[] maxY, int[] minZ, int[] maxZ,
+        FlowAxis axis, bool inletIsMin, bool outletIsMax)
+    {
+        var materialMin = axis switch
+        {
+            FlowAxis.X => minX.Where((_, i) => i > 0 && pores[i] != null).Min(),
+            FlowAxis.Y => minY.Where((_, i) => i > 0 && pores[i] != null).Min(),
+            _ => minZ.Where((_, i) => i > 0 && pores[i] != null).Min()
+        };
+        var materialMax = axis switch
+        {
+            FlowAxis.X => maxX.Where((_, i) => i > 0 && pores[i] != null).Max(),
+            FlowAxis.Y => maxY.Where((_, i) => i > 0 && pores[i] != null).Max(),
+            _ => maxZ.Where((_, i) => i > 0 && pores[i] != null).Max()
+        };
+        const int tolerance = 5;
+        bool AtMin(int id) => axis switch
+        {
+            FlowAxis.X => minX[id] <= materialMin + tolerance,
+            FlowAxis.Y => minY[id] <= materialMin + tolerance,
+            _ => minZ[id] <= materialMin + tolerance
+        };
+        bool AtMax(int id) => axis switch
+        {
+            FlowAxis.X => maxX[id] >= materialMax - tolerance,
+            FlowAxis.Y => maxY[id] >= materialMax - tolerance,
+            _ => maxZ[id] >= materialMax - tolerance
+        };
+        bool Inlet(int id) => inletIsMin ? AtMin(id) : AtMax(id);
+        bool Outlet(int id) => outletIsMax ? AtMax(id) : AtMin(id);
+
+        var graph = BuildAdjacency(pores, throats, 1, 1, 1);
+        var visited = new HashSet<int>();
+        HashSet<int> best = null;
+        long bestVolume = -1;
+        for (var start = 1; start < pores.Length; start++)
+        {
+            if (pores[start] == null || !visited.Add(start)) continue;
+            var component = new HashSet<int> { start };
+            var queue = new Queue<int>();
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                var id = queue.Dequeue();
+                if (!graph.TryGetValue(id, out var neighbors)) continue;
+                foreach (var (next, _) in neighbors)
+                    if (visited.Add(next)) { component.Add(next); queue.Enqueue(next); }
+            }
+            if (!component.Any(Inlet) || !component.Any(Outlet)) continue;
+            var volume = component.Sum(id => (long)pores[id].VolumeVoxels);
+            if (volume > bestVolume) { bestVolume = volume; best = component; }
+        }
+        if (best == null)
+            throw new InvalidOperationException("No physical pore cluster connects the selected inlet and outlet faces. No artificial throats were added.");
+
+        for (var id = 1; id < pores.Length; id++)
+            if (pores[id] != null && !best.Contains(id)) pores[id] = null;
+        throats.RemoveAll(t => !best.Contains(t.Pore1ID) || !best.Contains(t.Pore2ID));
+        foreach (var pore in pores) if (pore != null) pore.Connections = 0;
+        foreach (var throat in throats)
+        {
+            pores[throat.Pore1ID].Connections++;
+            pores[throat.Pore2ID].Connections++;
+        }
+    }
+
+    [Obsolete("Artificial connectivity has been replaced by physical percolation validation.")]
     private static void EnforceInOutConnectivityFromExtents(Pore[] pores, List<Throat> throats,
         int[] minX, int[] maxX, int[] minY, int[] maxY, int[] minZ, int[] maxZ,
         FlowAxis axis, bool inletMin, bool outletMax, float vx, float vy, float vz)

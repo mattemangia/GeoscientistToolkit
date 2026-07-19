@@ -13,6 +13,37 @@ using ImGuiNET;
 
 namespace GAIA.UI;
 
+internal enum ThroatColorMode { Radius, Length, PressureDrop, FlowRate }
+
+internal static class PnmThroatColorMapping
+{
+    public static float GetValue(ThroatColorMode mode, Throat throat, Pore first, Pore second, float voxelSize,
+        IReadOnlyDictionary<int, float> pressures, IReadOnlyDictionary<int, float> flowRates)
+    {
+        var scale = Math.Max(voxelSize, 1e-9f);
+        return mode switch
+        {
+            ThroatColorMode.Radius => throat.Radius * scale,
+            ThroatColorMode.Length => Vector3.Distance(first.Position, second.Position) * scale,
+            ThroatColorMode.PressureDrop => pressures.TryGetValue(first.ID, out var p1) &&
+                                            pressures.TryGetValue(second.ID, out var p2)
+                ? Math.Abs(p1 - p2) : 0f,
+            ThroatColorMode.FlowRate => Math.Abs(flowRates.TryGetValue(throat.ID, out var rate) ? rate : 0f),
+            _ => throat.Radius * scale
+        };
+    }
+
+    public static (float min, float max) GetRange(IEnumerable<float> values)
+    {
+        var finite = values.Where(float.IsFinite).ToArray();
+        if (finite.Length == 0) return (0f, 1f);
+        var min = finite.Min();
+        var max = finite.Max();
+        if (Math.Abs(max - min) < 0.001f) max = min + 1f;
+        return (min, max);
+    }
+}
+
 public class PNMViewer : IDatasetViewer
 {
     private readonly string[] _colorByOptions =
@@ -69,6 +100,7 @@ public class PNMViewer : IDatasetViewer
 
     // UI & Rendering State
     private int _colorByIndex;
+    private int _throatColorByIndex;
 
     // Flow direction info
     private string _flowAxis = "Z";
@@ -107,6 +139,8 @@ public class PNMViewer : IDatasetViewer
     private Matrix4x4 _viewMatrix, _projMatrix;
     private float _minColorValue;
     private float _maxColorValue = 1f;
+    private float _minThroatColorValue;
+    private float _maxThroatColorValue = 1f;
 
     // HUD overlays
     private bool _showStatsOverlay = true;
@@ -660,7 +694,7 @@ public class PNMViewer : IDatasetViewer
         ImGui.Separator();
         ImGui.SameLine();
 
-        ImGui.Text("Color by:");
+        ImGui.Text("Pore color:");
         ImGui.SameLine();
 
         var availableOptions = new List<string>();
@@ -712,6 +746,20 @@ public class PNMViewer : IDatasetViewer
             _colorByIndex = optionIndices[localIndex];
             RebuildGeometryFromDataset();
         }
+
+        ImGui.SameLine();
+        ImGui.Text("Throat color:");
+        ImGui.SameLine();
+        var throatOptions = new List<string> { "Radius", "Length" };
+        if (_hasFlowData)
+        {
+            throatOptions.Add("Pressure Drop");
+            throatOptions.Add("Flow Rate");
+        }
+        if (_throatColorByIndex >= throatOptions.Count) _throatColorByIndex = 0;
+        ImGui.SetNextItemWidth(145);
+        if (ImGui.Combo("##ThroatColorBy", ref _throatColorByIndex, throatOptions.ToArray(), throatOptions.Count))
+            RebuildGeometryFromDataset();
 
         // NEW: Show species/mineral selector if relevant mode is active
         if (_colorByIndex == 8 && _availableSpecies.Count > 0)
@@ -994,49 +1042,16 @@ public class PNMViewer : IDatasetViewer
 
     private float GetThroatColorValue(Throat t, Pore p1, Pore p2)
     {
-        switch (_colorByIndex)
-        {
-            case 4:
-                if (_porePressures.TryGetValue(t.Pore1ID, out var pr1) &&
-                    _porePressures.TryGetValue(t.Pore2ID, out var pr2))
-                    return Math.Abs(pr1 - pr2);
-                return 0;
-            case 5:
-                var tort1 = _localTortuosity.TryGetValue(p1.ID, out var t1) ? t1 : 1.0f;
-                var tort2 = _localTortuosity.TryGetValue(p2.ID, out var t2) ? t2 : 1.0f;
-                return (tort1 + tort2) / 2.0f;
-            case 6: // Diffusivity with LOG SCALE
-                var diff1 = _localDiffusivity.TryGetValue(p1.ID, out var d1) ? d1 : 0;
-                var diff2 = _localDiffusivity.TryGetValue(p2.ID, out var d2) ? d2 : 0;
-                var avgDiff = (diff1 + diff2) / 2.0f;
-                if (avgDiff > 0)
-                    return MathF.Log10(avgDiff);
-                return -20f;
-            case 7: // Temperature
-                if (_hasReactiveTransportData)
-                {
-                    var temp1 = _dataset.ReactiveTransportState.PoreTemperatures.GetValueOrDefault(p1.ID, 298.15f);
-                    var temp2 = _dataset.ReactiveTransportState.PoreTemperatures.GetValueOrDefault(p2.ID, 298.15f);
-                    return (temp1 + temp2) / 2.0f;
-                }
-                return 298.15f;
-            case 8: // Species concentration
-            case 9: // Mineral precipitation
-            case 10: // Reaction rate
-                // Average the pore values for throats
-                var val1 = GetPoreColorValue(p1);
-                var val2 = GetPoreColorValue(p2);
-                return (val1 + val2) / 2.0f;
-            default:
-                return t.Radius;
-        }
+        return PnmThroatColorMapping.GetValue((ThroatColorMode)_throatColorByIndex, t, p1, p2,
+            _dataset.VoxelSize, _porePressures, _throatFlowRates);
     }
 
     private void Render()
     {
         UpdateConstantBuffers();
         _openTkRenderer.Render(_viewMatrix * _projMatrix, _cameraPosition, _minColorValue,
-            _maxColorValue, _poreSizeMultiplier, _showPores, _showThroats);
+            _maxColorValue, _minThroatColorValue, _maxThroatColorValue,
+            _poreSizeMultiplier, _showPores, _showThroats);
     }
 
     private void UpdateConstantBuffers()
@@ -1133,6 +1148,20 @@ public class PNMViewer : IDatasetViewer
 
         _minColorValue = minVal;
         _maxColorValue = maxVal;
+
+        if (_dataset.Throats.Count == 0)
+        {
+            _minThroatColorValue = 0;
+            _maxThroatColorValue = 1;
+            return;
+        }
+        var poreById = _dataset.Pores.ToDictionary(p => p.ID);
+        var throatValues = _dataset.Throats
+            .Where(t => poreById.ContainsKey(t.Pore1ID) && poreById.ContainsKey(t.Pore2ID))
+            .Select(t => GetThroatColorValue(t, poreById[t.Pore1ID], poreById[t.Pore2ID]))
+            .Where(float.IsFinite)
+            .ToArray();
+        (_minThroatColorValue, _maxThroatColorValue) = PnmThroatColorMapping.GetRange(throatValues);
     }
 
     private void HandleMouseInput()
@@ -1335,7 +1364,17 @@ public class PNMViewer : IDatasetViewer
     private void DrawLegendContent()
     {
         var title = _colorByIndex < _colorByOptions.Length ? _colorByOptions[_colorByIndex] : "Unknown";
-        ImGui.Text(title);
+        ImGui.Text($"Pores: {title}");
+        var throatTitle = _throatColorByIndex switch
+        {
+            0 => "Radius (μm)",
+            1 => "Length (μm)",
+            2 => "Pressure drop (Pa)",
+            3 => "Flow rate",
+            _ => "Radius (μm)"
+        };
+        ImGui.Text($"Throats: {throatTitle}");
+        ImGui.TextDisabled($"{_minThroatColorValue:G4} — {_maxThroatColorValue:G4}");
         ImGui.Separator();
 
         float minVal = 0, maxVal = 1;

@@ -33,8 +33,8 @@ public sealed class OutOfCorePNMGeneratorTests
     }
 
     /// <summary>
-    ///     A lattice of solid pore bodies joined by 2-voxel bars (thin enough that erosion erases
-    ///     them, as sandstone throats are). The bodies and bars straddle the block cuts that a 1 MB
+    ///     A lattice of pore bodies joined by 2-voxel bars representative of narrow sandstone throats.
+    ///     The bodies and bars straddle the block cuts that a 1 MB
     ///     budget forces, so pore identity, volume and throat topology all depend on the face
     ///     stitching being exact.
     /// </summary>

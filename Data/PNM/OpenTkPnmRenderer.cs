@@ -92,10 +92,12 @@ internal sealed class OpenTkPnmRenderer : IDisposable
                 throats.ToArray(), BufferUsageHint.DynamicDraw);
     }
 
-    public void Render(Matrix4x4 viewProjection, Vector3 camera, float minValue, float maxValue,
+    public void Render(Matrix4x4 viewProjection, Vector3 camera, float poreMinValue, float poreMaxValue,
+        float throatMinValue, float throatMaxValue,
         float poreScale, bool showPores, bool showThroats)
     {
-        var invRange = 1f / Math.Max(1e-20f, maxValue - minValue);
+        var poreInvRange = 1f / Math.Max(1e-20f, poreMaxValue - poreMinValue);
+        var throatInvRange = 1f / Math.Max(1e-20f, throatMaxValue - throatMinValue);
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
         GL.Viewport(0, 0, Width, Height);
         GL.Enable(EnableCap.DepthTest);
@@ -106,7 +108,7 @@ internal sealed class OpenTkPnmRenderer : IDisposable
         {
             GL.UseProgram(_throatProgram);
             SetMatrix(_throatProgram, "uVp", viewProjection);
-            GL.Uniform3(GL.GetUniformLocation(_throatProgram, "uRange"), minValue, maxValue, invRange);
+            GL.Uniform3(GL.GetUniformLocation(_throatProgram, "uRange"), throatMinValue, throatMaxValue, throatInvRange);
             GL.BindVertexArray(_throatVao);
             GL.DrawArrays(PrimitiveType.Lines, 0, _throatVertexCount);
         }
@@ -115,7 +117,7 @@ internal sealed class OpenTkPnmRenderer : IDisposable
             GL.UseProgram(_poreProgram);
             SetMatrix(_poreProgram, "uVp", viewProjection);
             GL.Uniform3(GL.GetUniformLocation(_poreProgram, "uCamera"), camera.X, camera.Y, camera.Z);
-            GL.Uniform3(GL.GetUniformLocation(_poreProgram, "uRange"), minValue, maxValue, invRange);
+            GL.Uniform3(GL.GetUniformLocation(_poreProgram, "uRange"), poreMinValue, poreMaxValue, poreInvRange);
             GL.Uniform1(GL.GetUniformLocation(_poreProgram, "uScale"), poreScale * .1f);
             GL.BindVertexArray(_poreVao);
             GL.DrawElementsInstanced(PrimitiveType.Triangles, _sphereIndexCount,
