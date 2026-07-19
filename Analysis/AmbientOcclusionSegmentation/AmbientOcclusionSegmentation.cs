@@ -12,10 +12,12 @@
 // be distinguished from surrounding material by grayscale values alone.
 //
 // KEY CONCEPT:
-// - Ambient occlusion measures how exposed each voxel is to ambient lighting
-// - Pores/cavities have LOW AO values (rays escape)
-// - Solid material has HIGH AO values (rays are blocked)
-// - Generates smooth scalar fields suitable for segmentation
+// - For every VOID voxel (background / not the analyzed material) rays are cast in all
+//   directions and the "openness" is the fraction of rays that escape without hitting material.
+// - Enclosed pores/cavities have LOW openness (rays are blocked by the surrounding material).
+// - Open exterior space has HIGH openness (rays leave the volume unobstructed).
+// - Material voxels are excluded from segmentation (openness fixed at 1.0).
+// - Segmentation keeps void voxels whose openness falls below the threshold.
 // ================================================================================================
 
 using System.Diagnostics;
@@ -67,8 +69,8 @@ public class AmbientOcclusionSettings
     public byte SourceMaterialId { get; set; } = 1;
 
     /// <summary>
-    /// AO threshold for segmentation (0.0-1.0)
-    /// Voxels with AO below this are segmented as pores
+    /// Openness threshold for segmentation (0.0-1.0)
+    /// Void voxels whose openness is below this are segmented as pores/cavities
     /// Typical range: 0.5-0.95
     /// </summary>
     public float SegmentationThreshold { get; set; } = 0.7f;
@@ -114,7 +116,8 @@ public struct Region3D
 public class AmbientOcclusionResult
 {
     /// <summary>
-    /// Ambient occlusion values (0.0-1.0) for each voxel
+    /// Openness values (0.0-1.0) for each voxel: the fraction of rays escaping without
+    /// hitting material. Material voxels are fixed at 1.0 so they are never segmented.
     /// </summary>
     public float[,,] AoField { get; set; }
 
@@ -355,7 +358,7 @@ public class AmbientOcclusionSegmentation : IDisposable
 
         for (int i = 0; i < count; i++)
         {
-            float y = 1f - (i / (float)(count - 1)) * 2f; // y goes from 1 to -1
+            float y = 1f - (i / (float)Math.Max(1, count - 1)) * 2f; // y goes from 1 to -1
             float radius = MathF.Sqrt(1f - y * y);
 
             float theta = 2f * MathF.PI * i / phi;
@@ -410,16 +413,16 @@ __kernel void compute_ao(
         is_material = (voxel_value >= material_threshold) ? 1 : 0;
     }
 
-    // If voxel is not material, AO = 0
-    if (!is_material)
+    // Material voxels are never pores: fix openness at 1 so thresholding skips them.
+    if (is_material)
     {
-        ao_field[voxel_idx] = 0.0f;
+        ao_field[voxel_idx] = 1.0f;
         return;
     }
 
-    int occluded_count = 0;
+    int escaped_count = 0;
 
-    // Cast rays in all directions
+    // Cast rays in all directions from this void voxel
     for (int r = 0; r < ray_count; r++)
     {
         float3 dir;
@@ -430,7 +433,7 @@ __kernel void compute_ao(
         // March along ray
         float t = 0.0f;
         const float step_size = 1.0f;
-        bool hit = false;
+        bool blocked = false;
 
         while (t < ray_length)
         {
@@ -440,7 +443,7 @@ __kernel void compute_ao(
             int ry = y + (int)(dir.y * t + 0.5f);
             int rz = z + (int)(dir.z * t + 0.5f);
 
-            // Check bounds
+            // Leaving the volume counts as escaping
             if (rx < 0 || rx >= width || ry < 0 || ry >= height || rz < 0 || rz >= depth)
                 break;
 
@@ -459,15 +462,17 @@ __kernel void compute_ao(
 
             if (ray_hit_material)
             {
-                hit = true;
-                occluded_count++;
+                blocked = true;
                 break;
             }
         }
+
+        if (!blocked)
+            escaped_count++;
     }
 
-    // AO = fraction of rays that were occluded
-    ao_field[voxel_idx] = (float)occluded_count / (float)ray_count;
+    // Openness = fraction of rays that escaped. Enclosed cavities -> low openness.
+    ao_field[voxel_idx] = (float)escaped_count / (float)ray_count;
 }
 
 // Apply threshold to AO field to generate segmentation mask
@@ -741,21 +746,22 @@ __kernel void threshold_ao(
                     var isMaterial = labels != null ? labels[center] == settings.SourceMaterialId :
                         volume[center] >= settings.MaterialThreshold;
 
-                    if (!isMaterial)
+                    // Material voxels are never pores: openness fixed at 1 so thresholding skips them.
+                    if (isMaterial)
                     {
-                        aoField[x, y, z] = 0f;
+                        aoField[x, y, z] = 1f;
                         continue;
                     }
 
-                    int occludedCount = 0;
+                    int escapedCount = 0;
 
-                    // Cast rays using SIMD where possible
+                    // Cast rays from this void voxel
                     for (int r = 0; r < _rayDirections.Length; r++)
                     {
                         var dir = _rayDirections[r];
                         float t = 0f;
                         const float stepSize = 1f;
-                        bool hit = false;
+                        bool blocked = false;
 
                         while (t < sampledRayLength)
                         {
@@ -765,6 +771,7 @@ __kernel void threshold_ao(
                             int ry = y + (int)(dir.Y * t + 0.5f);
                             int rz = z + (int)(dir.Z * t + 0.5f);
 
+                            // Leaving the volume counts as escaping
                             if (rx < 0 || rx >= width || ry < 0 || ry >= height || rz < 0 || rz >= depth)
                                 break;
 
@@ -776,14 +783,17 @@ __kernel void threshold_ao(
 
                             if (rayHitMaterial)
                             {
-                                hit = true;
-                                occludedCount++;
+                                blocked = true;
                                 break;
                             }
                         }
+
+                        if (!blocked)
+                            escapedCount++;
                     }
 
-                    aoField[x, y, z] = (float)occludedCount / _rayDirections.Length;
+                    // Openness = fraction of rays that escaped. Enclosed cavities -> low openness.
+                    aoField[x, y, z] = (float)escapedCount / _rayDirections.Length;
                 }
             }
 
@@ -826,7 +836,8 @@ __kernel void threshold_ao(
             {
                 for (int x = 0; x < width; x++)
                 {
-                    // Pores have LOW AO values
+                    // Enclosed pores/cavities have LOW openness; material voxels are fixed
+                    // at 1.0 and open exterior space scores high, so neither is selected.
                     mask[x, y, z] = aoField[x, y, z] < threshold;
                 }
             }

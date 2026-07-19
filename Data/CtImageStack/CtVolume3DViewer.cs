@@ -132,8 +132,16 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         ImGui.SetCursorScreenPos(origin);
         ImGui.InvisibleButton("##CtVolume3DViewport", available,
             ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
-        HandleInput(ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem) || _dragging || _panning);
+        var viewportHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
+        var cutHandled = GAIA.Analysis.VolumeCut.VolumeCutIntegration.HandleViewportInput(_editableDataset,
+            ImGui.GetIO().MousePos, origin, available, _view * _projection, _view, VolumeScale,
+            viewportHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left),
+            ImGui.IsMouseDragging(ImGuiMouseButton.Left),
+            ImGui.IsMouseReleased(ImGuiMouseButton.Left));
+        HandleInput(viewportHovered || _dragging || _panning, cutHandled);
         DrawOverlayLabels(origin, available);
+        GAIA.Analysis.VolumeCut.VolumeCutIntegration.DrawViewport(_editableDataset, ImGui.GetWindowDrawList(),
+            _view * _projection, origin, available, VolumeScale);
         if (_labelBuildTask is { IsCompleted: false })
         {
             var savedCursor = ImGui.GetCursorScreenPos();
@@ -306,6 +314,8 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private void BuildOverlayLines(List<float> v)
     {
         if (ShowBoundingBox) AddBox(v, Vector3.Zero, VolumeScale, CtViewPalette.BoundingBox, 0.85f);
+        GAIA.Analysis.VolumeCut.VolumeCutIntegration.BuildOverlayLines(_editableDataset, VolumeScale,
+            (a, b, color, alpha) => AddLine(v, a, b, color, alpha));
         if (!ShowPlaneVisualizations) return;
 
         for (var axis = 0; axis < 3; axis++)
@@ -565,11 +575,12 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
 
     private Vector3 CameraPosition => _cameraTarget + new Vector3(MathF.Cos(_cameraYaw) * MathF.Cos(_cameraPitch), MathF.Sin(_cameraPitch), MathF.Sin(_cameraYaw) * MathF.Cos(_cameraPitch)) * _cameraDistance;
 
-    private void HandleInput(bool isHovered)
+    private void HandleInput(bool isHovered, bool suppressLeftDrag = false)
     {
         if (!isHovered) { _dragging = _panning = false; return; }
         var io = ImGui.GetIO(); var mouse = io.MousePos;
-        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) { _dragging = true; _lastMouse = mouse; }
+        if (suppressLeftDrag) _dragging = false;
+        else if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) { _dragging = true; _lastMouse = mouse; }
         if (ImGui.IsMouseReleased(ImGuiMouseButton.Left)) _dragging = false;
         if (ImGui.IsMouseClicked(ImGuiMouseButton.Middle)) { _panning = true; _lastMouse = mouse; }
         if (ImGui.IsMouseReleased(ImGuiMouseButton.Middle)) _panning = false;

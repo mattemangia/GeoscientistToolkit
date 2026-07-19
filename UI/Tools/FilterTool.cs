@@ -19,6 +19,9 @@ public class FilterTool : IDatasetTools, IDisposable
         _filterUI = new FilterUI();
     }
 
+    /// <summary>The underlying filter UI, used to wire the interactive sandbox overlay.</summary>
+    public FilterUI UI => _filterUI;
+
     /// <summary>
     ///     Draws the UI panel for the advanced filters.
     /// </summary>

@@ -251,8 +251,10 @@ public class RockCoreExtractorTool
 
     private void ClampAllParameters()
     {
-        _coreDiameter = Math.Clamp(_coreDiameter, 10f, SafeGetMaxDiameter());
-        _coreLength = Math.Clamp(_coreLength, 10f, SafeGetMaxLength());
+        // A dataset selected but not yet loaded reports 0-sized dimensions; a max below the
+        // min would make Math.Clamp throw, so keep the range valid until real sizes arrive.
+        _coreDiameter = Math.Clamp(_coreDiameter, 10f, Math.Max(10f, SafeGetMaxDiameter()));
+        _coreLength = Math.Clamp(_coreLength, 10f, Math.Max(10f, SafeGetMaxLength()));
         _coreCenter = new Vector2(Math.Clamp(_coreCenter.X, 0f, 1f), Math.Clamp(_coreCenter.Y, 0f, 1f));
 
         var maxLen = Math.Max(1f, SafeGetMaxLength());

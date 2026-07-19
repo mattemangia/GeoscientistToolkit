@@ -404,7 +404,7 @@ public sealed class CtLabelStorageTests
         var material = new Material("particles", System.Numerics.Vector4.One, 0, 255, 6);
         using var processor = new AcceleratedProcessor { SelectedAcceleration = AccelerationType.CPU };
 
-        var result = processor.SeparateParticles(dataset, material, true, false, 1, 0,
+        using var result = processor.SeparateParticles(dataset, material, true, false, 1, 0, null,
             CancellationToken.None);
 
         Assert.Null(result.LabelVolume);
