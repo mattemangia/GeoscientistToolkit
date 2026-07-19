@@ -38,6 +38,7 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
 
     // Tool instances (stable references)
     private readonly TransformTool _transformTool;
+    private readonly GAIA.Analysis.VolumeCut.VolumeCutTool _volumeCutTool;
     private bool _disposed;
 
     private CtImageStackDataset _lastDataset;
@@ -49,6 +50,7 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
         // Initialize stable tool instances
         _transformTool = new TransformTool();
         _rockCoreTool = new RockCoreExtractorTool();
+        _volumeCutTool = new GAIA.Analysis.VolumeCut.VolumeCutTool();
 
         // Category metadata
         _categoryNames = new Dictionary<ToolCategory, string>
@@ -104,6 +106,14 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
                         Name = "Rock Core",
                         Description = "Extract cylindrical core samples from datasets",
                         Tool = new RockCoreAdapter(_rockCoreTool),
+                        Category = ToolCategory.Preprocessing
+                    },
+                    new()
+                    {
+                        Name = "Volume Cut",
+                        Description =
+                            "Cut the volume with box/cylinder/sphere regions (keep interior or exterior)",
+                        Tool = _volumeCutTool,
                         Category = ToolCategory.Preprocessing
                     }
                 }
@@ -483,6 +493,19 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
                 RockCoreIntegration.RegisterTool(ds, rcAdapter.Tool);
                 _registered.Add(key);
             }
+            // Volume Cut overlay integration (2D slice handles + 3D viewport handles)
+            else if (entry.Tool is GAIA.Analysis.VolumeCut.VolumeCutTool vcTool)
+            {
+                vcTool.AttachDataset(ds);
+                GAIA.Analysis.VolumeCut.VolumeCutIntegration.RegisterTool(ds, vcTool);
+                _registered.Add(key);
+            }
+            // Filter sandbox ROI overlay
+            else if (entry.Tool is FilterTool fTool)
+            {
+                GAIA.Analysis.Filtering.FilterSandboxIntegration.Register(ds, fTool.UI);
+                _registered.Add(key);
+            }
             else
             {
                 _registered.Add(key);
@@ -496,6 +519,8 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
 
         TransformIntegration.UnregisterTool(ds);
         RockCoreIntegration.UnregisterTool(ds);
+        GAIA.Analysis.VolumeCut.VolumeCutIntegration.UnregisterTool(ds);
+        GAIA.Analysis.Filtering.FilterSandboxIntegration.Unregister(ds);
         _registered.RemoveWhere(tuple => ReferenceEquals(tuple.ds, ds));
     }
 }

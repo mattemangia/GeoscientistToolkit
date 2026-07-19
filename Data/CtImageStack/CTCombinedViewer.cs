@@ -1032,7 +1032,22 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 return;
             }
 
-            inputHandled = RockCoreIntegration.HandleMouseInput(_dataset, io.MousePos,
+            inputHandled = GAIA.Analysis.VolumeCut.VolumeCutIntegration.HandleMouseInput(_dataset, io.MousePos,
+                imagePos, imageSize, width, height, viewIndex,
+                ImGui.IsItemClicked(ImGuiMouseButton.Left),
+                ImGui.IsMouseDragging(ImGuiMouseButton.Left),
+                ImGui.IsMouseReleased(ImGuiMouseButton.Left),
+                _sliceX, _sliceY, _sliceZ);
+
+            if (!inputHandled)
+                inputHandled = GAIA.Analysis.Filtering.FilterSandboxIntegration.HandleMouseInput(_dataset,
+                    io.MousePos, imagePos, imageSize, width, height, viewIndex,
+                    ImGui.IsItemClicked(ImGuiMouseButton.Left),
+                    ImGui.IsMouseDragging(ImGuiMouseButton.Left),
+                    ImGui.IsMouseReleased(ImGuiMouseButton.Left));
+
+            if (!inputHandled)
+                inputHandled = RockCoreIntegration.HandleMouseInput(_dataset, io.MousePos,
                 imagePos, imageSize, width, height, viewIndex,
                 ImGui.IsItemClicked(ImGuiMouseButton.Left),
                 ImGui.IsMouseDragging(ImGuiMouseButton.Left),
@@ -1186,6 +1201,10 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 width, height, _sliceX, _sliceY, _sliceZ);
             AmbientOcclusionIntegration.DrawOverlay(_dataset, dl, viewIndex, imagePos, imageSize,
                 width, height, _sliceX, _sliceY, _sliceZ);
+            GAIA.Analysis.VolumeCut.VolumeCutIntegration.DrawOverlay(_dataset, dl, viewIndex, imagePos,
+                imageSize, width, height, _sliceX, _sliceY, _sliceZ);
+            GAIA.Analysis.Filtering.FilterSandboxIntegration.DrawOverlay(_dataset, dl, viewIndex, imagePos,
+                imageSize, width, height, _sliceX, _sliceY, _sliceZ);
         }
 
         if (isHovered && _interactiveSegmentation?.ActiveTool is BrushTool brushTool)

@@ -54,6 +54,31 @@ public class FilterUI : IDisposable
     private float _unsharpAmount = 0.5f;
     private bool _useGpu = true;
 
+    // Interactive sandbox (ROI preview on a slice view)
+    private const int SandboxMaxZHalo = 8;
+    private readonly object _sandboxLock = new();
+    private bool _sandboxEnabled;
+    private int _sandboxView;
+    private float _sandboxCenterU = -1, _sandboxCenterV = -1;
+    private int _sandboxHalf = 96;
+    private bool _sandboxSplit = true;
+    private int _sandboxVersion;
+    private int _sandboxComputedVersion = -1;
+    private int _sandboxUploadedVersion = -1;
+    private byte[] _sandboxRgba;
+    private int _sandboxRgbaW, _sandboxRgbaH;
+    private (int U0, int V0, int W, int H) _sandboxComputedRect;
+    private int _sandboxSliceIndex = -1;
+    private bool _sandboxComputing;
+    private double _sandboxComputeMs;
+    private TextureManager _sandboxTexture;
+    private SandboxDragMode _sandboxDrag = SandboxDragMode.None;
+    private Vector2 _sandboxDragStartMouse;
+    private float _sandboxDragStartU, _sandboxDragStartV;
+    private int _sandboxDragStartHalf;
+
+    private enum SandboxDragMode { None, Move, Resize }
+
     public FilterUI()
     {
         try
@@ -77,6 +102,8 @@ public class FilterUI : IDisposable
     public void Dispose()
     {
         ClearPreview();
+        _sandboxTexture?.Dispose();
+        _sandboxTexture = null;
         _gpuProcessor?.Dispose();
     }
 
@@ -93,6 +120,7 @@ public class FilterUI : IDisposable
                 {
                     _selectedFilter = type;
                     ClearPreview();
+                    InvalidateSandbox();
                 }
 
             ImGui.EndCombo();
@@ -140,6 +168,10 @@ public class FilterUI : IDisposable
                 _ = UpdatePreviewAsync(dataset);
         }
 
+        if (paramsChanged) InvalidateSandbox();
+
+        ImGui.Separator();
+        DrawSandboxControls(dataset);
         ImGui.Separator();
 
         if (_isProcessing) ImGui.BeginDisabled();
@@ -330,18 +362,336 @@ public class FilterUI : IDisposable
         _previewDataset = null;
     }
 
-    private void ApplyFilterCPUToSubVolume(byte[] source, byte[] result, int width, int height, int depth)
+    #region Interactive sandbox
+
+    private void InvalidateSandbox() => Interlocked.Increment(ref _sandboxVersion);
+
+    private void DrawSandboxControls(CtImageStackDataset dataset)
     {
+        ImGui.TextColored(new Vector4(0.7f, 1.0f, 0.7f, 1), "Interactive Sandbox");
+        if (ImGui.Checkbox("Enable sandbox ROI", ref _sandboxEnabled) && _sandboxEnabled)
+            InvalidateSandbox();
+        ImGui.SameLine();
+        ImGui.TextDisabled("(?)");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Shows a movable/resizable region on the slice view with the current\n" +
+                             "filter applied inside it. Only the region is computed, so parameters can\n" +
+                             "be compared interactively regardless of dataset size. Drag the center to\n" +
+                             "move it, the corner to resize it.");
+
+        if (!_sandboxEnabled) return;
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(90);
+        if (ImGui.Combo("View##sandbox", ref _sandboxView, "XY\0XZ\0YZ\0")) InvalidateSandbox();
+        var sizeVox = _sandboxHalf * 2;
+        ImGui.SetNextItemWidth(-140);
+        if (ImGui.SliderInt("ROI size (voxels)", ref sizeVox, 32, 768))
+        {
+            _sandboxHalf = sizeVox / 2;
+            InvalidateSandbox();
+        }
+
+        if (ImGui.Checkbox("Split A|B", ref _sandboxSplit)) InvalidateSandbox();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Left half of the region shows the original, right half the filtered result.");
+        ImGui.SameLine();
+        if (_sandboxComputing) ImGui.TextColored(new Vector4(1, 1, 0, 1), "computing...");
+        else if (_sandboxComputeMs > 0) ImGui.TextDisabled($"last update {_sandboxComputeMs:F0} ms");
+        if (_process3D && _sandboxView != 0)
+            ImGui.TextDisabled("3D filtering previews in-plane on XZ/YZ views.");
+    }
+
+    public void DrawSandboxOverlay(CtImageStackDataset dataset, ImDrawListPtr dl, int viewIndex,
+        Vector2 imagePos, Vector2 imageSize, int imageWidth, int imageHeight, int sliceX, int sliceY, int sliceZ)
+    {
+        if (!_sandboxEnabled || viewIndex != _sandboxView || dataset.VolumeData == null) return;
+        if (imageSize.X <= 0 || imageSize.Y <= 0 || imageWidth <= 0 || imageHeight <= 0) return;
+
+        var slice = viewIndex switch { 0 => sliceZ, 1 => sliceY, _ => sliceX };
+        if (slice != _sandboxSliceIndex)
+        {
+            _sandboxSliceIndex = slice;
+            InvalidateSandbox();
+        }
+
+        if (_sandboxCenterU < 0 || _sandboxCenterV < 0)
+        {
+            _sandboxCenterU = imageWidth * 0.5f;
+            _sandboxCenterV = imageHeight * 0.5f;
+        }
+
+        var (u0, v0, w, h) = SandboxRect(imageWidth, imageHeight);
+        Vector2 ToPx(float u, float v) => imagePos +
+            new Vector2(u / imageWidth * imageSize.X, v / imageHeight * imageSize.Y);
+        var tl = ToPx(u0, v0);
+        var br = ToPx(u0 + w, v0 + h);
+
+        // Latest computed patch (may lag one interaction behind while recomputing).
+        byte[] rgba = null;
+        (int U0, int V0, int W, int H) rect = default;
+        int rgbaW = 0, rgbaH = 0;
+        var uploadedIsStale = false;
+        lock (_sandboxLock)
+        {
+            if (_sandboxRgba != null)
+            {
+                rgba = _sandboxRgba;
+                rect = _sandboxComputedRect;
+                rgbaW = _sandboxRgbaW;
+                rgbaH = _sandboxRgbaH;
+                uploadedIsStale = _sandboxUploadedVersion != _sandboxComputedVersion;
+            }
+        }
+
+        if (rgba != null)
+        {
+            if (uploadedIsStale)
+            {
+                _sandboxTexture ??= TextureManager.CreateFromPixelData(rgba, (uint)rgbaW, (uint)rgbaH);
+                _sandboxTexture.UpdateFromPixelData(rgba, (uint)rgbaW, (uint)rgbaH);
+                lock (_sandboxLock) _sandboxUploadedVersion = _sandboxComputedVersion;
+            }
+
+            if (_sandboxTexture is { IsValid: true })
+            {
+                var patchTl = ToPx(rect.U0, rect.V0);
+                var patchBr = ToPx(rect.U0 + rect.W, rect.V0 + rect.H);
+                dl.AddImage(_sandboxTexture.GetImGuiTextureId(), patchTl, patchBr);
+                if (_sandboxSplit)
+                {
+                    var midX = (patchTl.X + patchBr.X) * 0.5f;
+                    dl.AddLine(new Vector2(midX, patchTl.Y), new Vector2(midX, patchBr.Y), 0xAAFFFFFF, 1f);
+                    dl.AddText(new Vector2(patchTl.X + 4, patchTl.Y + 2), 0xFFFFFFFF, "A");
+                    dl.AddText(new Vector2(midX + 4, patchTl.Y + 2), 0xFFFFFFFF, "B");
+                }
+            }
+        }
+
+        var borderColor = _sandboxComputing ? 0xFF00A5FF : 0xFF00FF7F;
+        dl.AddRect(tl, br, borderColor, 0, ImDrawFlags.None, 2f);
+        var center = (tl + br) * 0.5f;
+        dl.AddCircleFilled(center, 5f, borderColor);
+        dl.AddCircle(center, 5f, 0xFFFFFFFF, 12, 1.5f);
+        dl.AddCircleFilled(br, 5f, borderColor);
+        dl.AddCircle(br, 5f, 0xFFFFFFFF, 12, 1.5f);
+
+        KickSandboxCompute(dataset, viewIndex, slice, imageWidth, imageHeight);
+    }
+
+    public bool HandleSandboxMouse(Vector2 mousePos, Vector2 imagePos, Vector2 imageSize,
+        int imageWidth, int imageHeight, int viewIndex, bool clicked, bool dragging, bool released)
+    {
+        if (!_sandboxEnabled || viewIndex != _sandboxView) return false;
+        if (imageSize.X <= 0 || imageSize.Y <= 0 || imageWidth <= 0 || imageHeight <= 0) return false;
+        if (_sandboxCenterU < 0 || _sandboxCenterV < 0) return false;
+
+        var (u0, v0, w, h) = SandboxRect(imageWidth, imageHeight);
+        Vector2 ToPx(float u, float v) => imagePos +
+            new Vector2(u / imageWidth * imageSize.X, v / imageHeight * imageSize.Y);
+        var center = ToPx(u0 + w * 0.5f, v0 + h * 0.5f);
+        var corner = ToPx(u0 + w, v0 + h);
+
+        if (clicked)
+        {
+            if (Vector2.Distance(mousePos, corner) <= 8f) _sandboxDrag = SandboxDragMode.Resize;
+            else if (Vector2.Distance(mousePos, center) <= 8f) _sandboxDrag = SandboxDragMode.Move;
+            else return false;
+            _sandboxDragStartMouse = mousePos;
+            _sandboxDragStartU = _sandboxCenterU;
+            _sandboxDragStartV = _sandboxCenterV;
+            _sandboxDragStartHalf = _sandboxHalf;
+            return true;
+        }
+
+        if (dragging && _sandboxDrag != SandboxDragMode.None)
+        {
+            var delta = mousePos - _sandboxDragStartMouse;
+            var du = delta.X * (imageWidth / MathF.Max(1f, imageSize.X));
+            var dv = delta.Y * (imageHeight / MathF.Max(1f, imageSize.Y));
+            if (_sandboxDrag == SandboxDragMode.Move)
+            {
+                _sandboxCenterU = Math.Clamp(_sandboxDragStartU + du, 0, imageWidth - 1);
+                _sandboxCenterV = Math.Clamp(_sandboxDragStartV + dv, 0, imageHeight - 1);
+            }
+            else
+            {
+                _sandboxHalf = Math.Clamp(_sandboxDragStartHalf + (int)MathF.Max(du, dv) / 2, 16, 512);
+            }
+
+            InvalidateSandbox();
+            return true;
+        }
+
+        if (released && _sandboxDrag != SandboxDragMode.None)
+        {
+            _sandboxDrag = SandboxDragMode.None;
+            InvalidateSandbox();
+            return true;
+        }
+
+        if (_sandboxDrag == SandboxDragMode.None &&
+            (Vector2.Distance(mousePos, corner) <= 8f || Vector2.Distance(mousePos, center) <= 8f))
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+        return _sandboxDrag != SandboxDragMode.None;
+    }
+
+    private (int U0, int V0, int W, int H) SandboxRect(int imageWidth, int imageHeight)
+    {
+        var half = Math.Min(_sandboxHalf, Math.Min(imageWidth, imageHeight) / 2);
+        var u0 = Math.Clamp((int)(_sandboxCenterU - half), 0, Math.Max(0, imageWidth - 2 * half));
+        var v0 = Math.Clamp((int)(_sandboxCenterV - half), 0, Math.Max(0, imageHeight - 2 * half));
+        return (u0, v0, Math.Min(2 * half, imageWidth), Math.Min(2 * half, imageHeight));
+    }
+
+    private void KickSandboxCompute(CtImageStackDataset dataset, int view, int slice, int viewWidth, int viewHeight)
+    {
+        int version;
+        lock (_sandboxLock)
+        {
+            version = _sandboxVersion;
+            if (_sandboxComputing || _sandboxComputedVersion == version || _isProcessing) return;
+            _sandboxComputing = true;
+        }
+
+        var rect = SandboxRect(viewWidth, viewHeight);
+        _ = Task.Run(() =>
+        {
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                var rgba = ComputeSandboxPatch(dataset, view, slice, rect, viewWidth, viewHeight);
+                stopwatch.Stop();
+                lock (_sandboxLock)
+                {
+                    if (rgba != null)
+                    {
+                        _sandboxRgba = rgba;
+                        _sandboxRgbaW = rect.W;
+                        _sandboxRgbaH = rect.H;
+                        _sandboxComputedRect = rect;
+                        _sandboxComputedVersion = version;
+                        _sandboxUploadedVersion = -1;
+                        _sandboxComputeMs = stopwatch.Elapsed.TotalMilliseconds;
+                    }
+                    else
+                    {
+                        _sandboxComputedVersion = version; // avoid retry storms on failure
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[FilterTool] Sandbox preview failed: {ex.Message}");
+                lock (_sandboxLock) _sandboxComputedVersion = version;
+            }
+            finally
+            {
+                lock (_sandboxLock) _sandboxComputing = false;
+            }
+        });
+    }
+
+    /// <summary>In-plane halo needed so the filtered ROI has no border artifacts.</summary>
+    private int SandboxHalo() => _selectedFilter switch
+    {
+        FilterType.NonLocalMeans => (int)MathF.Ceiling(_nlmSearchRadius + _nlmPatchRadius),
+        FilterType.EdgeSobel => 1,
+        FilterType.EdgeCanny => Math.Max(2, _kernelSize / 2 + 1),
+        _ => Math.Max(1, _kernelSize / 2)
+    };
+
+    private byte[] ComputeSandboxPatch(CtImageStackDataset dataset, int view, int slice,
+        (int U0, int V0, int W, int H) rect, int viewWidth, int viewHeight)
+    {
+        var halo = SandboxHalo();
+        var e0 = Math.Max(0, rect.U0 - halo);
+        var e1 = Math.Min(viewWidth, rect.U0 + rect.W + halo);
+        var f0 = Math.Max(0, rect.V0 - halo);
+        var f1 = Math.Min(viewHeight, rect.V0 + rect.H + halo);
+        var pw = e1 - e0;
+        var ph = f1 - f0;
+        if (pw <= 0 || ph <= 0) return null;
+
+        // 3D neighborhoods are only meaningful on the XY view, where the third axis is Z.
+        var use3D = _process3D && view == 0;
+        var zHalo = use3D ? Math.Min(SandboxMaxZHalo, halo) : 0;
+        var z0 = Math.Max(0, slice - zHalo);
+        var z1 = Math.Min(view == 0 ? dataset.Depth : 1, slice + zHalo + 1);
+        var slabDepth = view == 0 ? z1 - z0 : 1;
+        if (view != 0) slabDepth = 1;
+
+        var source = new byte[checked(pw * ph * slabDepth)];
+        var planeBuffer = new byte[checked(viewWidth * viewHeight)];
+        if (view == 0)
+        {
+            for (var z = z0; z < z1; z++)
+            {
+                dataset.VolumeData.ReadSliceZ(z, planeBuffer);
+                CopyPatch(planeBuffer, viewWidth, source, (z - z0) * pw * ph, e0, f0, pw, ph);
+            }
+        }
+        else
+        {
+            if (view == 1) dataset.VolumeData.ReadSliceXZ(slice, planeBuffer);
+            else dataset.VolumeData.ReadSliceYZ(slice, planeBuffer);
+            CopyPatch(planeBuffer, viewWidth, source, 0, e0, f0, pw, ph);
+        }
+
+        byte[] filtered = null;
+        if (_useGpu && _gpuProcessor is { IsInitialized: true })
+            filtered = _gpuProcessor.RunFilter(source, pw, ph, slabDepth, _selectedFilter, _kernelSize, _sigma,
+                _sigmaColor, _nlmSearchRadius, _nlmPatchRadius, _unsharpAmount, _cannyLowThreshold,
+                _cannyHighThreshold, use3D && slabDepth > 1, _ => { }, _ => { });
+        if (filtered == null)
+        {
+            filtered = new byte[source.Length];
+            ApplyFilterCPUToSubVolume(source, filtered, pw, ph, slabDepth, use3D && slabDepth > 1);
+        }
+
+        // Extract the ROI (minus halo) from the middle slab slice and build the RGBA patch.
+        var midSlice = view == 0 ? Math.Clamp(slice - z0, 0, slabDepth - 1) : 0;
+        var rgba = new byte[rect.W * rect.H * 4];
+        var splitColumn = _sandboxSplit ? rect.W / 2 : 0;
+        for (var v = 0; v < rect.H; v++)
+        {
+            var sourceRow = midSlice * pw * ph + (rect.V0 - f0 + v) * pw + (rect.U0 - e0);
+            for (var u = 0; u < rect.W; u++)
+            {
+                var value = _sandboxSplit && u < splitColumn
+                    ? source[sourceRow + u]
+                    : filtered[sourceRow + u];
+                var o = (v * rect.W + u) * 4;
+                rgba[o] = rgba[o + 1] = rgba[o + 2] = value;
+                rgba[o + 3] = 255;
+            }
+        }
+
+        return rgba;
+    }
+
+    private static void CopyPatch(byte[] plane, int planeWidth, byte[] destination, int destinationOffset,
+        int u0, int v0, int pw, int ph)
+    {
+        for (var v = 0; v < ph; v++)
+            Buffer.BlockCopy(plane, (v0 + v) * planeWidth + u0, destination, destinationOffset + v * pw, pw);
+    }
+
+    #endregion
+
+    private void ApplyFilterCPUToSubVolume(byte[] source, byte[] result, int width, int height, int depth,
+        bool? is3DOverride = null)
+    {
+        var is3D = is3DOverride ?? _process3D;
         switch (_selectedFilter)
         {
-            case FilterType.Gaussian: ApplyGaussianCPU(source, result, width, height, depth); break;
-            case FilterType.Median: ApplyMedianCPU(source, result, width, height, depth); break;
-            case FilterType.Mean: ApplyMeanCPU(source, result, width, height, depth); break;
-            case FilterType.Bilateral: ApplyBilateralCPU(source, result, width, height, depth); break;
-            case FilterType.NonLocalMeans: ApplyNonLocalMeansCPU(source, result, width, height, depth); break;
-            case FilterType.EdgeSobel: ApplySobelCPU(source, result, width, height, depth); break;
-            case FilterType.EdgeCanny: ApplyCannyCPU(source, result, width, height, depth); break;
-            case FilterType.UnsharpMask: ApplyUnsharpMaskCPU(source, result, width, height, depth); break;
+            case FilterType.Gaussian: ApplyGaussianCPU(source, result, width, height, depth, is3D); break;
+            case FilterType.Median: ApplyMedianCPU(source, result, width, height, depth, is3D); break;
+            case FilterType.Mean: ApplyMeanCPU(source, result, width, height, depth, is3D); break;
+            case FilterType.Bilateral: ApplyBilateralCPU(source, result, width, height, depth, is3D); break;
+            case FilterType.NonLocalMeans: ApplyNonLocalMeansCPU(source, result, width, height, depth, is3D); break;
+            case FilterType.EdgeSobel: ApplySobelCPU(source, result, width, height, depth, is3D); break;
+            case FilterType.EdgeCanny: ApplyCannyCPU(source, result, width, height, depth, is3D); break;
+            case FilterType.UnsharpMask: ApplyUnsharpMaskCPU(source, result, width, height, depth, is3D); break;
         }
     }
 
@@ -363,6 +713,7 @@ public class FilterUI : IDisposable
 
             stopwatch.Stop();
             _statusMessage = $"Completed in {stopwatch.Elapsed.TotalSeconds:F2} seconds.";
+            InvalidateSandbox();
             ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
         }
         catch (Exception ex)
@@ -447,36 +798,22 @@ public class FilterUI : IDisposable
         }
     }
 
-    private void ApplyFilterCPU(byte[] source, byte[] result, int width, int height, int depth)
-    {
-        switch (_selectedFilter)
-        {
-            case FilterType.Gaussian: ApplyGaussianCPU(source, result, width, height, depth); break;
-            case FilterType.Median: ApplyMedianCPU(source, result, width, height, depth); break;
-            case FilterType.Mean: ApplyMeanCPU(source, result, width, height, depth); break;
-            case FilterType.Bilateral: ApplyBilateralCPU(source, result, width, height, depth); break;
-            case FilterType.NonLocalMeans: ApplyNonLocalMeansCPU(source, result, width, height, depth); break;
-            case FilterType.EdgeSobel: ApplySobelCPU(source, result, width, height, depth); break;
-            case FilterType.EdgeCanny: ApplyCannyCPU(source, result, width, height, depth); break;
-            case FilterType.UnsharpMask: ApplyUnsharpMaskCPU(source, result, width, height, depth); break;
-        }
-    }
-
-    private void ApplyGaussianCPU(byte[] source, byte[] result, int width, int height, int depth)
+    private void ApplyGaussianCPU(byte[] source, byte[] result, int width, int height, int depth, bool is3D)
     {
         var R = _kernelSize / 2;
-        var kernel = CreateGaussianKernel3D(_kernelSize, _sigma, _process3D);
+        var kernel = CreateGaussianKernel3D(_kernelSize, _sigma, is3D);
         Parallel.For(0, depth, z =>
         {
             for (var y = 0; y < height; y++)
             for (var x = 0; x < width; x++)
             {
                 float sum = 0, weightSum = 0;
-                var zStart = _process3D ? Math.Max(0, z - R) : z;
-                var zEnd = _process3D ? Math.Min(depth - 1, z + R) : z;
+                var zStart = is3D ? Math.Max(0, z - R) : z;
+                var zEnd = is3D ? Math.Min(depth - 1, z + R) : z;
                 for (var kz = zStart; kz <= zEnd; kz++)
                 {
-                    var dz = _process3D ? kz - z + R : R;
+                    // In 2D mode the kernel has a single Z plane at index 0.
+                    var dz = is3D ? kz - z + R : 0;
                     for (var ky = Math.Max(0, y - R); ky <= Math.Min(height - 1, y + R); ky++)
                     {
                         var dy = ky - y + R;
@@ -499,18 +836,18 @@ public class FilterUI : IDisposable
         });
     }
 
-    private void ApplyMedianCPU(byte[] source, byte[] result, int width, int height, int depth)
+    private void ApplyMedianCPU(byte[] source, byte[] result, int width, int height, int depth, bool is3D)
     {
         var R = _kernelSize / 2;
         Parallel.For(0, depth, z =>
         {
-            var neighbors = new List<byte>(_kernelSize * _kernelSize * (_process3D ? _kernelSize : 1));
+            var neighbors = new List<byte>(_kernelSize * _kernelSize * (is3D ? _kernelSize : 1));
             for (var y = 0; y < height; y++)
             for (var x = 0; x < width; x++)
             {
                 neighbors.Clear();
-                var zStart = _process3D ? Math.Max(0, z - R) : z;
-                var zEnd = _process3D ? Math.Min(depth - 1, z + R) : z;
+                var zStart = is3D ? Math.Max(0, z - R) : z;
+                var zEnd = is3D ? Math.Min(depth - 1, z + R) : z;
                 for (var kz = zStart; kz <= zEnd; kz++)
                 for (var ky = Math.Max(0, y - R); ky <= Math.Min(height - 1, y + R); ky++)
                 for (var kx = Math.Max(0, x - R); kx <= Math.Min(width - 1, x + R); kx++)
@@ -528,7 +865,7 @@ public class FilterUI : IDisposable
         });
     }
 
-    private void ApplyMeanCPU(byte[] source, byte[] result, int width, int height, int depth)
+    private void ApplyMeanCPU(byte[] source, byte[] result, int width, int height, int depth, bool is3D)
     {
         var R = _kernelSize / 2;
         Parallel.For(0, depth, z =>
@@ -538,8 +875,8 @@ public class FilterUI : IDisposable
             {
                 float sum = 0;
                 var count = 0;
-                var zStart = _process3D ? Math.Max(0, z - R) : z;
-                var zEnd = _process3D ? Math.Min(depth - 1, z + R) : z;
+                var zStart = is3D ? Math.Max(0, z - R) : z;
+                var zEnd = is3D ? Math.Min(depth - 1, z + R) : z;
                 for (var kz = zStart; kz <= zEnd; kz++)
                 for (var ky = Math.Max(0, y - R); ky <= Math.Min(height - 1, y + R); ky++)
                 for (var kx = Math.Max(0, x - R); kx <= Math.Min(width - 1, x + R); kx++)
@@ -557,7 +894,7 @@ public class FilterUI : IDisposable
         });
     }
 
-    private void ApplyBilateralCPU(byte[] source, byte[] result, int width, int height, int depth)
+    private void ApplyBilateralCPU(byte[] source, byte[] result, int width, int height, int depth, bool is3D)
     {
         var R = _kernelSize / 2;
         Parallel.For(0, depth, z =>
@@ -568,15 +905,15 @@ public class FilterUI : IDisposable
                 var centerIdx = (long)z * width * height + (long)y * width + x;
                 var centerVal = source[centerIdx];
                 float totalWeight = 0, weightedSum = 0;
-                var zStart = _process3D ? Math.Max(0, z - R) : z;
-                var zEnd = _process3D ? Math.Min(depth - 1, z + R) : z;
+                var zStart = is3D ? Math.Max(0, z - R) : z;
+                var zEnd = is3D ? Math.Min(depth - 1, z + R) : z;
                 for (var kz = zStart; kz <= zEnd; kz++)
                 for (var ky = Math.Max(0, y - R); ky <= Math.Min(height - 1, y + R); ky++)
                 for (var kx = Math.Max(0, x - R); kx <= Math.Min(width - 1, x + R); kx++)
                 {
                     var kernelIdx = (long)kz * width * height + (long)ky * width + kx;
                     var neighborVal = source[kernelIdx];
-                    float distSq = (kx - x) * (kx - x) + (ky - y) * (ky - y) + (_process3D ? (kz - z) * (kz - z) : 0);
+                    float distSq = (kx - x) * (kx - x) + (ky - y) * (ky - y) + (is3D ? (kz - z) * (kz - z) : 0);
                     float colorDist = Math.Abs(neighborVal - centerVal);
                     var spatialWeight = (float)Math.Exp(-distSq / (2 * _sigma * _sigma));
                     var colorWeight = (float)Math.Exp(-colorDist * colorDist / (2 * _sigmaColor * _sigmaColor));
@@ -592,7 +929,7 @@ public class FilterUI : IDisposable
         });
     }
 
-    private void ApplyNonLocalMeansCPU(byte[] source, byte[] result, int width, int height, int depth)
+    private void ApplyNonLocalMeansCPU(byte[] source, byte[] result, int width, int height, int depth, bool is3D)
     {
         int searchRadius = (int)_nlmSearchRadius, patchRadius = (int)_nlmPatchRadius;
         float h = _sigma, h2 = h * h;
@@ -603,16 +940,16 @@ public class FilterUI : IDisposable
             {
                 float totalWeight = 0, weightedSum = 0;
                 var centerIdx = (long)z * width * height + (long)y * width + x;
-                var szMin = _process3D ? Math.Max(0, z - searchRadius) : z;
-                var szMax = _process3D ? Math.Min(depth - 1, z + searchRadius) : z;
+                var szMin = is3D ? Math.Max(0, z - searchRadius) : z;
+                var szMax = is3D ? Math.Min(depth - 1, z + searchRadius) : z;
                 for (var sz = szMin; sz <= szMax; sz++)
                 for (var sy = Math.Max(0, y - searchRadius); sy <= Math.Min(height - 1, y + searchRadius); sy++)
                 for (var sx = Math.Max(0, x - searchRadius); sx <= Math.Min(width - 1, x + searchRadius); sx++)
                 {
                     float patchDist = 0;
                     var patchCount = 0;
-                    var pzMin = _process3D ? Math.Max(0, -patchRadius) : 0;
-                    var pzMax = _process3D ? Math.Min(depth - 1 - Math.Max(z, sz), patchRadius) : 0;
+                    var pzMin = is3D ? Math.Max(0, -patchRadius) : 0;
+                    var pzMax = is3D ? Math.Min(depth - 1 - Math.Max(z, sz), patchRadius) : 0;
                     for (var pz = pzMin; pz <= pzMax; pz++)
                     for (var py = Math.Max(-patchRadius, -Math.Min(y, sy));
                          py <= Math.Min(patchRadius, Math.Min(height - 1 - y, height - 1 - sy));
@@ -642,7 +979,7 @@ public class FilterUI : IDisposable
         });
     }
 
-    private void ApplySobelCPU(byte[] source, byte[] result, int width, int height, int depth)
+    private void ApplySobelCPU(byte[] source, byte[] result, int width, int height, int depth, bool is3D)
     {
         int[,] sobelX = { { -1, 0, 1 }, { -2, 0, 2 }, { -1, 0, 1 } };
         int[,] sobelY = { { -1, -2, -1 }, { 0, 0, 0 }, { 1, 2, 1 } };
@@ -661,7 +998,7 @@ public class FilterUI : IDisposable
                     gy += val * sobelY[ky + 1, kx + 1];
                 }
 
-                if (_process3D && z > 0 && z < depth - 1)
+                if (is3D && z > 0 && z < depth - 1)
                     for (var ky = -1; ky <= 1; ky++)
                     for (var kx = -1; kx <= 1; kx++)
                     {
@@ -678,10 +1015,10 @@ public class FilterUI : IDisposable
         });
     }
 
-    private void ApplyCannyCPU(byte[] source, byte[] result, int width, int height, int depth)
+    private void ApplyCannyCPU(byte[] source, byte[] result, int width, int height, int depth, bool is3D)
     {
         var blurred = new byte[source.Length];
-        ApplyGaussianCPU(source, blurred, width, height, depth);
+        ApplyGaussianCPU(source, blurred, width, height, depth, is3D);
         var gradients = new byte[source.Length];
         var gradX = new float[depth, height, width];
         var gradY = new float[depth, height, width];
@@ -776,10 +1113,10 @@ public class FilterUI : IDisposable
         });
     }
 
-    private void ApplyUnsharpMaskCPU(byte[] source, byte[] result, int width, int height, int depth)
+    private void ApplyUnsharpMaskCPU(byte[] source, byte[] result, int width, int height, int depth, bool is3D)
     {
         var blurred = new byte[source.Length];
-        ApplyGaussianCPU(source, blurred, width, height, depth);
+        ApplyGaussianCPU(source, blurred, width, height, depth, is3D);
         Parallel.For(0, (long)width * height * depth, i =>
         {
             float original = source[i];
