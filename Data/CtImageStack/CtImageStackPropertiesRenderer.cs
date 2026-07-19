@@ -1,6 +1,8 @@
 ﻿// GAIA/Data/CtImageStack/CtImageStackPropertiesRenderer.cs
 
+using System.Buffers;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using GAIA.UI;
 using GAIA.UI.Interfaces;
 using ImGuiNET;
@@ -9,6 +11,8 @@ namespace GAIA.Data.CtImageStack;
 
 public class CtImageStackPropertiesRenderer : IDatasetPropertiesRenderer
 {
+    private static readonly ConditionalWeakTable<CtImageStackDataset, HistogramState> s_histograms = new();
+
     // Persist UI state per dataset (survives renderer re-creation / frame refresh)
     private static readonly Dictionary<string, int> s_selectedByDataset = new();
     private static readonly Dictionary<string, string> s_renameBufByDataset = new();
@@ -49,6 +53,9 @@ public class CtImageStackPropertiesRenderer : IDatasetPropertiesRenderer
             ImGui.Unindent();
         }
 
+        if (ImGui.CollapsingHeader("Grayscale Histogram", ImGuiTreeNodeFlags.DefaultOpen))
+            DrawGrayscaleHistogram(ct);
+
         if (ImGui.CollapsingHeader("Materials", ImGuiTreeNodeFlags.DefaultOpen)) DrawMaterialEditor(ct);
 
         if (ImGui.CollapsingHeader("Acquisition Info"))
@@ -75,6 +82,110 @@ public class CtImageStackPropertiesRenderer : IDatasetPropertiesRenderer
             }
             ImGui.Unindent();
         }
+    }
+
+    private static void DrawGrayscaleHistogram(CtImageStackDataset ct)
+    {
+        ImGui.Indent();
+        var state = s_histograms.GetValue(ct, _ => new HistogramState());
+        if (state.Calculation == null && ct.VolumeData != null)
+            StartHistogramCalculation(ct, state);
+
+        if (state.Calculation == null)
+        {
+            ImGui.TextDisabled("Grayscale volume is not loaded.");
+            ImGui.Unindent();
+            return;
+        }
+
+        if (!state.Calculation.IsCompleted)
+        {
+            ImGui.TextDisabled("Calculating histogram in background...");
+            var phase = (float)(ImGui.GetTime() % 1.0);
+            ImGui.ProgressBar(phase, new Vector2(-1, 0), string.Empty);
+            ImGui.Unindent();
+            return;
+        }
+
+        if (state.Calculation.IsFaulted)
+        {
+            var message = state.Calculation.Exception?.GetBaseException().Message ?? "Unknown error";
+            ImGui.TextWrapped($"Histogram calculation failed: {message}");
+            if (ImGui.Button("Retry", new Vector2(-1, 0))) StartHistogramCalculation(ct, state);
+            ImGui.Unindent();
+            return;
+        }
+
+        var logarithmic = state.Logarithmic;
+        if (ImGui.Checkbox("Log scale", ref logarithmic)) state.Logarithmic = logarithmic;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Applies log10(1 + count) to the vertical axis.");
+
+        var histogram = state.Calculation.Result;
+        var values = new float[histogram.Length];
+        long total = 0;
+        var peakBin = 0;
+        for (var i = 0; i < histogram.Length; i++)
+        {
+            total += histogram[i];
+            if (histogram[i] > histogram[peakBin]) peakBin = i;
+            values[i] = state.Logarithmic
+                ? (float)Math.Log10(1d + histogram[i])
+                : histogram[i];
+        }
+
+        var max = values.Max();
+        ImGui.PlotHistogram("##CtGrayscaleHistogram", ref values[0], values.Length, 0,
+            state.Logarithmic ? "log10(1 + count)" : "voxel count", 0f, Math.Max(1f, max),
+            new Vector2(-1, 150));
+        ImGui.TextDisabled("0");
+        ImGui.SameLine();
+        var labelWidth = ImGui.CalcTextSize("255").X;
+        ImGui.SetCursorPosX(Math.Max(ImGui.GetCursorPosX(), ImGui.GetWindowContentRegionMax().X - labelWidth));
+        ImGui.TextDisabled("255");
+        PropertiesPanel.DrawProperty("Voxels", PropertiesPanel.FormatNumber(total));
+        PropertiesPanel.DrawProperty("Peak value", $"{peakBin} ({PropertiesPanel.FormatNumber(histogram[peakBin])})");
+
+        if (ImGui.Button("Recalculate", new Vector2(-1, 0))) StartHistogramCalculation(ct, state);
+        ImGui.Unindent();
+    }
+
+    private static void StartHistogramCalculation(CtImageStackDataset ct, HistogramState state)
+    {
+        var volume = ct.VolumeData;
+        var width = ct.Width;
+        var height = ct.Height;
+        var depth = ct.Depth;
+        state.Calculation = Task.Run(() => CalculateHistogram(volume, width, height, depth));
+    }
+
+    private static long[] CalculateHistogram(VolumeData.ChunkedVolume volume, int width, int height, int depth)
+    {
+        if (volume == null || width <= 0 || height <= 0 || depth <= 0)
+            throw new InvalidOperationException("Grayscale volume is not available.");
+
+        var histogram = new long[256];
+        var sliceLength = checked(width * height);
+        var slice = ArrayPool<byte>.Shared.Rent(sliceLength);
+        try
+        {
+            for (var z = 0; z < depth; z++)
+            {
+                volume.ReadSliceZ(z, slice);
+                for (var i = 0; i < sliceLength; i++) histogram[slice[i]]++;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(slice);
+        }
+
+        return histogram;
+    }
+
+    private sealed class HistogramState
+    {
+        public Task<long[]> Calculation { get; set; }
+        public bool Logarithmic { get; set; }
     }
 
     // ----------------- Persistent-state helpers -----------------
