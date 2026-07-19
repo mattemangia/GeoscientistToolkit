@@ -69,7 +69,7 @@ public static class MolecularDiffusivity
                 length = pnm.VoxelSize * 1e-6f;
             }
 
-            var throatRadius_m = throat.Radius * 1e-6f;
+            var throatRadius_m = throat.Radius * pnm.VoxelSize * 1e-6f;
             var minRadius_m = pnm.VoxelSize * 0.01f * 1e-6f;
             if (throatRadius_m < minRadius_m)
                 throatRadius_m = minRadius_m;
@@ -124,7 +124,7 @@ public static class MolecularDiffusivity
         for (var i = 0; i < poreList.Count; i++)
         {
             var pore = poreList[i];
-            var volume_m3 = pore.VolumePhysical * 1e-18f;
+            var volume_m3 = PoreVolumeM3(pore, pnm.VoxelSize);
             poreVolumes[i] = volume_m3;
             totalPoreVolume += volume_m3;
         }
@@ -188,7 +188,7 @@ public static class MolecularDiffusivity
                     return;
 
                 var currentPore = pores[walker.CurrentPoreId];
-                var poreVolume_m3 = currentPore.VolumePhysical * 1e-18f; // μm³ to m³
+                var poreVolume_m3 = PoreVolumeM3(currentPore, pnm.VoxelSize); // m³
 
                 // CRITICAL FIX: Hopping rate = (D₀ × Σg) / V_pore
                 // Units: [m²/s] × [m] / [m³] = [1/s] ✓
@@ -299,9 +299,24 @@ public static class MolecularDiffusivity
         };
     }
 
+    private static float PoreVolumeM3(Pore pore, float voxelSizeUm)
+    {
+        // VolumePhysical is derived and can be stale after correcting a dataset's voxel size.
+        return pore.VolumeVoxels > 0
+            ? pore.VolumeVoxels * voxelSizeUm * voxelSizeUm * voxelSizeUm * 1e-18f
+            : pore.VolumePhysical * 1e-18f;
+    }
+
     private static float CalculateMaterialBoundingBoxVolume(PNMDataset pnm)
     {
         if (pnm.Pores.Count == 0) return 0;
+
+        if (pnm.ImageWidth > 0 && pnm.ImageHeight > 0 && pnm.ImageDepth > 0)
+        {
+            var voxelSizeM = pnm.VoxelSize * 1e-6f;
+            return pnm.ImageWidth * pnm.ImageHeight * pnm.ImageDepth *
+                   voxelSizeM * voxelSizeM * voxelSizeM;
+        }
 
         // Calculate MATERIAL bounds from actual pore positions
         var minBounds = new Vector3(
@@ -480,19 +495,17 @@ public static class AbsolutePermeability
         _lastFlowData.PorePressures.Clear();
         _lastFlowData.ThroatFlowRates.Clear();
 
-        var tau2 = pnm.Tortuosity * pnm.Tortuosity;
-
         if (options.CalculateDarcy)
         {
             var darcyUncorrected = RunEngine(options, "Darcy", stressGeometry);
             pnm.DarcyPermeability = darcyUncorrected;
 
             _lastResults.DarcyUncorrected = darcyUncorrected;
-            _lastResults.DarcyCorrected = darcyUncorrected / tau2;
+            _lastResults.DarcyCorrected = darcyUncorrected;
 
             Logger.Log("[Permeability] Darcy permeability:");
             Logger.Log($"  Uncorrected: {darcyUncorrected:E3} mD ({darcyUncorrected / 1000:F3} D)");
-            Logger.Log($"  τ²-corrected: {_lastResults.DarcyCorrected:E3} mD");
+            Logger.Log($"  Network-corrected: {_lastResults.DarcyCorrected:E3} mD (tortuosity already resolved)");
         }
 
         if (options.CalculateNavierStokes)
@@ -501,11 +514,11 @@ public static class AbsolutePermeability
             pnm.NavierStokesPermeability = nsUncorrected;
 
             _lastResults.NavierStokesUncorrected = nsUncorrected;
-            _lastResults.NavierStokesCorrected = nsUncorrected / tau2;
+            _lastResults.NavierStokesCorrected = nsUncorrected;
 
             Logger.Log("[Permeability] Navier-Stokes permeability:");
             Logger.Log($"  Uncorrected: {nsUncorrected:E3} mD");
-            Logger.Log($"  τ²-corrected: {_lastResults.NavierStokesCorrected:E3} mD");
+            Logger.Log($"  Network-corrected: {_lastResults.NavierStokesCorrected:E3} mD (tortuosity already resolved)");
         }
 
         if (options.CalculateLatticeBoltzmann)
@@ -514,11 +527,11 @@ public static class AbsolutePermeability
             pnm.LatticeBoltzmannPermeability = lbmUncorrected;
 
             _lastResults.LatticeBoltzmannUncorrected = lbmUncorrected;
-            _lastResults.LatticeBoltzmannCorrected = lbmUncorrected / tau2;
+            _lastResults.LatticeBoltzmannCorrected = lbmUncorrected;
 
             Logger.Log("[Permeability] Lattice-Boltzmann permeability:");
             Logger.Log($"  Uncorrected: {lbmUncorrected:E3} mD");
-            Logger.Log($"  τ²-corrected: {_lastResults.LatticeBoltzmannCorrected:E3} mD");
+            Logger.Log($"  Network-corrected: {_lastResults.LatticeBoltzmannCorrected:E3} mD (tortuosity already resolved)");
         }
 
         ValidateAndWarnResults();
@@ -543,13 +556,13 @@ public static class AbsolutePermeability
 
         if (!options.UseConfiningPressure || options.ConfiningPressure <= 0)
         {
-            // No confining pressure - use original radii (IN MICROMETERS)
+            // Keep radii in their native voxel units until conductance assembly.
             for (var i = 0; i < pnm.Pores.Count; i++)
-                result.PoreRadii[i] = pnm.Pores[i].Radius; // Already in μm
+                result.PoreRadii[i] = pnm.Pores[i].Radius; // voxels
 
             for (var i = 0; i < pnm.Throats.Count; i++)
             {
-                result.ThroatRadii[i] = pnm.Throats[i].Radius; // Already in μm
+                result.ThroatRadii[i] = pnm.Throats[i].Radius; // voxels
                 result.ThroatOpen[i] = true;
             }
 
@@ -575,7 +588,7 @@ public static class AbsolutePermeability
         // Apply pressure effects to pores
         for (var i = 0; i < pnm.Pores.Count; i++)
         {
-            var r0 = pnm.Pores[i].Radius; // In μm
+            var r0 = pnm.Pores[i].Radius; // voxels
 
             var reduction = MathF.Exp(-αp * P);
             reduction = Math.Max(reduction, minRadiusFactor);
@@ -590,7 +603,7 @@ public static class AbsolutePermeability
         // Apply pressure effects to throats
         for (var i = 0; i < pnm.Throats.Count; i++)
         {
-            var r0 = pnm.Throats[i].Radius; // In μm
+            var r0 = pnm.Throats[i].Radius; // voxels
 
             var reduction = MathF.Exp(-αt * P);
             var sizeEffect = 1.0f + (1.0f - r0 / pnm.MaxThroatRadius) * 1.0f;
@@ -749,13 +762,12 @@ public static class AbsolutePermeability
                 !poreMap.TryGetValue(throat.Pore2ID, out var p2))
                 continue;
 
-            // CRITICAL FIX: Pore radii are ALREADY IN MICROMETERS, not voxels!
-            // Convert from μm to m directly (multiply by 1e-6, NOT by voxelSize_m)
+            // PNM radii are stored in voxels; convert them with the current voxel size.
             var poreIndex1 = pnm.Pores.IndexOf(p1);
             var poreIndex2 = pnm.Pores.IndexOf(p2);
-            var r_p1 = stressGeom.PoreRadii[poreIndex1] * 1e-6f; // μm to m
-            var r_p2 = stressGeom.PoreRadii[poreIndex2] * 1e-6f; // μm to m
-            var r_t = stressGeom.ThroatRadii[throatIdx] * 1e-6f; // μm to m
+            var r_p1 = stressGeom.PoreRadii[poreIndex1] * voxelSize_m;
+            var r_p2 = stressGeom.PoreRadii[poreIndex2] * voxelSize_m;
+            var r_t = stressGeom.ThroatRadii[throatIdx] * voxelSize_m;
 
             var conductance = CalculateConductanceWithStress(p1.Position, p2.Position,
                 r_p1, r_p2, r_t, engine, voxelSize_m, viscosity_PaS);
@@ -913,12 +925,20 @@ public static class AbsolutePermeability
             }
         }
 
-        // Add margin for pore radii
-        var margin = pnm.MaxPoreRadius;
-
-        // Calculate physical dimensions based on MATERIAL extent
-        var L = (maxPos - minPos + 2 * margin) * voxelSize_m;
-        var A = (maxCross1 - minCross1 + 2 * margin) * (maxCross2 - minCross2 + 2 * margin) * voxelSize_m * voxelSize_m;
+        // Darcy dimensions belong to the imaged specimen, not to the bounding box of pore
+        // centres (which varies with segmentation and boundary-pore detection).
+        var axisVoxels = axis switch
+        {
+            FlowAxis.X => pnm.ImageWidth,
+            FlowAxis.Y => pnm.ImageHeight,
+            _ => pnm.ImageDepth
+        };
+        var crossVoxels1 = axis == FlowAxis.X ? pnm.ImageHeight : pnm.ImageWidth;
+        var crossVoxels2 = axis == FlowAxis.Z ? pnm.ImageHeight : pnm.ImageDepth;
+        var L = (axisVoxels > 0 ? axisVoxels : maxPos - minPos + 1) * voxelSize_m;
+        var A = (crossVoxels1 > 0 ? crossVoxels1 : maxCross1 - minCross1 + 1) *
+                (crossVoxels2 > 0 ? crossVoxels2 : maxCross2 - minCross2 + 1) *
+                voxelSize_m * voxelSize_m;
 
         // Boundary detection tolerance
         var axisLength = maxPos - minPos;
@@ -1048,12 +1068,12 @@ public static class AbsolutePermeability
                 !poreMap.TryGetValue(throat.Pore2ID, out var p2))
                 continue;
 
-            // CRITICAL FIX: Radii are ALREADY IN MICROMETERS!
+            // PNM radii are stored in voxels; convert them with the current voxel size.
             var poreIndex1 = pnm.Pores.IndexOf(p1);
             var poreIndex2 = pnm.Pores.IndexOf(p2);
-            var r_p1 = stressGeom.PoreRadii[poreIndex1] * 1e-6f; // μm to m
-            var r_p2 = stressGeom.PoreRadii[poreIndex2] * 1e-6f; // μm to m
-            var r_t = stressGeom.ThroatRadii[throatIdx] * 1e-6f; // μm to m
+            var r_p1 = stressGeom.PoreRadii[poreIndex1] * voxelSize_m;
+            var r_p2 = stressGeom.PoreRadii[poreIndex2] * voxelSize_m;
+            var r_t = stressGeom.ThroatRadii[throatIdx] * voxelSize_m;
 
             var conductance = CalculateConductanceWithStress(p1.Position, p2.Position,
                 r_p1, r_p2, r_t, engine, voxelSize_m, viscosity_PaS);
@@ -1099,9 +1119,8 @@ public static class AbsolutePermeability
         // Check for closed throat
         if (r_t <= 0) return 0;
 
-        // CRITICAL: Shape factor should be between 0.5-0.7 for real rocks
-        // Too low gives unrealistic permeabilities
-        const float SHAPE_FACTOR = 0.6f; // Adjusted for more realistic values
+        // Radius is the circular-equivalent hydraulic radius used by this reduced model.
+        const float SHAPE_FACTOR = 1.0f; // circular-equivalent extracted radius
 
         // Hagen-Poiseuille conductance: g = (π*r^4) / (8*μ*L)
         switch (engine)

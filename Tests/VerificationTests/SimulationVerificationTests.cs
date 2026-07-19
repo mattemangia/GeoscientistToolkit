@@ -469,7 +469,43 @@ public class SimulationVerificationTests
         AbsolutePermeability.Calculate(options);
         var permeability = dataset.DarcyPermeability;
 
-        Assert.InRange(permeability, 10.0f, 40.0f);
+        // Cylindrical throat, with the Darcy specimen dimensions declared above:
+        // k = pi*r^4*Lspecimen/(8*Lthroat*A).
+        var expectedM2 = Math.PI * Math.Pow(0.5e-6, 4) * 2e-6 /
+                         (8 * 10e-6 * 2e-12);
+        const double squareMetresToMilliDarcy = 1.01325e15;
+        Assert.InRange(permeability,
+            (float)(expectedM2 * squareMetresToMilliDarcy * 0.99),
+            (float)(expectedM2 * squareMetresToMilliDarcy * 1.01));
+    }
+
+    [Fact]
+    public void PnmAbsolutePermeability_ScalesWithVoxelSizeSquared()
+    {
+        static float Calculate(float voxelSize)
+        {
+            var dataset = new PNMDataset("ScaledTube", string.Empty)
+            {
+                VoxelSize = voxelSize, ImageWidth = 2, ImageHeight = 1, ImageDepth = 2
+            };
+            dataset.Pores.AddRange(new[]
+            {
+                new Pore { ID = 1, Position = Vector3.Zero, Radius = 0.5f },
+                new Pore { ID = 2, Position = new Vector3(0, 0, 10), Radius = 0.5f }
+            });
+            dataset.Throats.Add(new Throat { ID = 1, Pore1ID = 1, Pore2ID = 2, Radius = 0.5f });
+            dataset.InitializeFromCurrentLists();
+            AbsolutePermeability.Calculate(new PermeabilityOptions
+            {
+                Dataset = dataset, InletPressure = 100, OutletPressure = 0,
+                FluidViscosity = 1, CalculateDarcy = true, Axis = FlowAxis.Z
+            });
+            return dataset.DarcyPermeability;
+        }
+
+        var atOneMicron = Calculate(1f);
+        var atTwoPointFiveMicron = Calculate(2.5f);
+        Assert.InRange(atTwoPointFiveMicron / atOneMicron, 6.24f, 6.26f);
     }
 
     [Fact]

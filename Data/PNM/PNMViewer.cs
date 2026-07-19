@@ -101,6 +101,10 @@ public class PNMViewer : IDatasetViewer
     // UI & Rendering State
     private int _colorByIndex;
     private int _throatColorByIndex;
+    private int _viewModeIndex;
+    private int _geometryColorByIndex;
+    private int _geometryThroatColorByIndex;
+    private bool _geometryShowFlowVisualization;
 
     // Flow direction info
     private string _flowAxis = "Z";
@@ -297,8 +301,15 @@ public class PNMViewer : IDatasetViewer
         {
             var results = AbsolutePermeability.GetLastResults();
             var flowData = AbsolutePermeability.GetLastFlowData();
+            var pressureFieldMatchesDataset = results != null &&
+                                              results.PoreCount == _dataset.Pores.Count &&
+                                              results.ThroatCount == _dataset.Throats.Count &&
+                                              _dataset.Pores.Count > 0 &&
+                                              _dataset.Pores.All(pore =>
+                                                  flowData?.PorePressures.TryGetValue(pore.ID, out var pressure) == true &&
+                                                  float.IsFinite(pressure));
 
-            if (flowData != null && flowData.PorePressures != null && flowData.PorePressures.Count > 0)
+            if (pressureFieldMatchesDataset)
             {
                 _porePressures.Clear();
                 foreach (var kvp in flowData.PorePressures)
@@ -369,7 +380,7 @@ public class PNMViewer : IDatasetViewer
             else
             {
                 _hasFlowData = false;
-                _showFlowVisualization = false;
+                RestoreGeometryView(false);
                 while (_inletPoreIds.TryTake(out _))
                 {
                 }
@@ -659,11 +670,26 @@ public class PNMViewer : IDatasetViewer
         ImGui.Checkbox("Stats", ref _showStatsOverlay);
         ImGui.SameLine();
 
+        ImGui.Text("View:");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(125);
+        if (!_hasFlowData) ImGui.BeginDisabled();
+        var requestedViewMode = _viewModeIndex;
+        if (ImGui.Combo("##PNMViewMode", ref requestedViewMode, new[] { "Geometry", "Pressure Field" }, 2))
+            SetViewMode(requestedViewMode);
+        if (!_hasFlowData) ImGui.EndDisabled();
+        if (!_hasFlowData && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip("Run a permeability calculation to enable the pressure field view.");
+        else if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Switch between the configured geometry colors and the calculated pressure field.");
+        ImGui.SameLine();
+
         if (_hasFlowData)
         {
             ImGui.Separator();
             ImGui.SameLine();
 
+            if (_viewModeIndex == 1) ImGui.BeginDisabled();
             if (ImGui.Checkbox("Flow Viz", ref _showFlowVisualization))
             {
                 if (_showFlowVisualization)
@@ -674,6 +700,7 @@ public class PNMViewer : IDatasetViewer
 
                 RebuildGeometryFromDataset();
             }
+            if (_viewModeIndex == 1) ImGui.EndDisabled();
 
             if (_showFlowVisualization)
             {
@@ -696,6 +723,8 @@ public class PNMViewer : IDatasetViewer
 
         ImGui.Text("Pore color:");
         ImGui.SameLine();
+
+        if (_viewModeIndex == 1) ImGui.BeginDisabled();
 
         var availableOptions = new List<string>();
         var optionIndices = new List<int>();
@@ -761,6 +790,8 @@ public class PNMViewer : IDatasetViewer
         if (ImGui.Combo("##ThroatColorBy", ref _throatColorByIndex, throatOptions.ToArray(), throatOptions.Count))
             RebuildGeometryFromDataset();
 
+        if (_viewModeIndex == 1) ImGui.EndDisabled();
+
         // NEW: Show species/mineral selector if relevant mode is active
         if (_colorByIndex == 8 && _availableSpecies.Count > 0)
         {
@@ -800,6 +831,41 @@ public class PNMViewer : IDatasetViewer
         if (ImGui.Button("Screenshot...")) _screenshotDialog.Open($"{_dataset.Name}_capture");
 
         if (_screenshotDialog.Submit()) TakeAndSaveScreenshot(_screenshotDialog.SelectedPath);
+    }
+
+    private void SetViewMode(int requestedMode)
+    {
+        if (requestedMode == 1 && _hasFlowData)
+        {
+            if (_viewModeIndex != 1)
+            {
+                _geometryColorByIndex = _colorByIndex;
+                _geometryThroatColorByIndex = _throatColorByIndex;
+                _geometryShowFlowVisualization = _showFlowVisualization;
+            }
+
+            _viewModeIndex = 1;
+            _showFlowVisualization = false;
+            _colorByIndex = 3;
+            _throatColorByIndex = (int)ThroatColorMode.PressureDrop;
+            RebuildGeometryFromDataset();
+            return;
+        }
+
+        RestoreGeometryView(true);
+    }
+
+    private void RestoreGeometryView(bool rebuildGeometry)
+    {
+        if (_viewModeIndex == 1)
+        {
+            _colorByIndex = _geometryColorByIndex;
+            _throatColorByIndex = _geometryThroatColorByIndex;
+            _showFlowVisualization = _geometryShowFlowVisualization && _hasFlowData;
+        }
+
+        _viewModeIndex = 0;
+        if (rebuildGeometry) RebuildGeometryFromDataset();
     }
 
     public void DrawContent(ref float zoom, ref Vector2 pan)
@@ -1877,14 +1943,15 @@ public class PNMViewer : IDatasetViewer
     private float EffectiveVoxelSize => _dataset.VoxelSize > 0 ? _dataset.VoxelSize : 1f;
 
     /// <summary>
-    ///     Physical pore volume, falling back to voxel counting when the generator left it unset.
+    ///     Physical pore volume derived from scale-independent voxel count. Older files can retain
+    ///     a stale VolumePhysical after their voxel size is corrected.
     ///     VoxelSize is the geometric mean of the three voxel edges, so VoxelSize³ equals vx·vy·vz
     ///     and this fallback agrees exactly with the VolumePhysical the generator computes.
     /// </summary>
     private double PhysicalVolume(Pore pore)
     {
-        if (pore.VolumePhysical > 0) return pore.VolumePhysical;
-        return pore.VolumeVoxels * Math.Pow(EffectiveVoxelSize, 3);
+        if (pore.VolumeVoxels > 0) return pore.VolumeVoxels * Math.Pow(EffectiveVoxelSize, 3);
+        return pore.VolumePhysical;
     }
 
     private void RecomputeStatistics()

@@ -105,6 +105,7 @@ public class PNMTools : IDatasetTools
 
     // Pressure parameters
     private float _inletPressure = 2.0f; // Pa (default 2 Pa)
+    private float _inletPressureDisplay = 2.0f;
 
     // --- Permeability Calculator State ---
     private bool _isCalculating;
@@ -117,6 +118,7 @@ public class PNMTools : IDatasetTools
     // Store last results for display
     private PermeabilityResults _lastResults;
     private float _outletPressure; // Pa (default 0 Pa)
+    private float _outletPressureDisplay;
     private float _poreCompressibility = 0.015f; // 1/MPa (typical sandstone)
     private int _pressureUnitIndex; // 0=Pa, 1=kPa, 2=bar, 3=psi
     private int _rockTypeIndex; // For preset compressibility values
@@ -461,9 +463,11 @@ public class PNMTools : IDatasetTools
 
                 // Add margin for pore radii
                 var margin = pnm.MaxPoreRadius;
-                var materialVolumeVoxels = (maxBounds.X - minBounds.X + 2 * margin) *
-                                           (maxBounds.Y - minBounds.Y + 2 * margin) *
-                                           (maxBounds.Z - minBounds.Z + 2 * margin);
+                var materialVolumeVoxels = pnm.ImageWidth > 0 && pnm.ImageHeight > 0 && pnm.ImageDepth > 0
+                    ? (double)pnm.ImageWidth * pnm.ImageHeight * pnm.ImageDepth
+                    : (maxBounds.X - minBounds.X + 2 * margin) *
+                      (maxBounds.Y - minBounds.Y + 2 * margin) *
+                      (maxBounds.Z - minBounds.Z + 2 * margin);
 
                 var poreVolume = pnm.Pores.Sum(p => p.VolumeVoxels);
                 var porosity = materialVolumeVoxels > 0 ? poreVolume / materialVolumeVoxels : 0;
@@ -707,19 +711,23 @@ public class PNMTools : IDatasetTools
 
         // Pressure unit selector
         ImGui.SetNextItemWidth(100);
-        ImGui.Combo("Pressure Unit", ref _pressureUnitIndex, _pressureUnits, _pressureUnits.Length);
+        if (ImGui.Combo("Pressure Unit", ref _pressureUnitIndex, _pressureUnits, _pressureUnits.Length))
+        {
+            _inletPressureDisplay = _inletPressure / _pressureConversions[_pressureUnitIndex];
+            _outletPressureDisplay = _outletPressure / _pressureConversions[_pressureUnitIndex];
+        }
 
         // Inlet pressure
         ImGui.SetNextItemWidth(150);
-        var inletDisplay = _inletPressure / _pressureConversions[_pressureUnitIndex];
-        if (ImGui.InputFloat($"Inlet Pressure ({_pressureUnits[_pressureUnitIndex]})", ref inletDisplay, 0.1f, 1.0f,
-                "%.3f")) _inletPressure = inletDisplay * _pressureConversions[_pressureUnitIndex];
+        if (ImGui.InputFloat($"Inlet Pressure ({_pressureUnits[_pressureUnitIndex]})", ref _inletPressureDisplay,
+                0.1f, 1.0f, "%.3f"))
+            _inletPressure = _inletPressureDisplay * _pressureConversions[_pressureUnitIndex];
 
         // Outlet pressure
         ImGui.SetNextItemWidth(150);
-        var outletDisplay = _outletPressure / _pressureConversions[_pressureUnitIndex];
-        if (ImGui.InputFloat($"Outlet Pressure ({_pressureUnits[_pressureUnitIndex]})", ref outletDisplay, 0.1f, 1.0f,
-                "%.3f")) _outletPressure = outletDisplay * _pressureConversions[_pressureUnitIndex];
+        if (ImGui.InputFloat($"Outlet Pressure ({_pressureUnits[_pressureUnitIndex]})", ref _outletPressureDisplay,
+                0.1f, 1.0f, "%.3f"))
+            _outletPressure = _outletPressureDisplay * _pressureConversions[_pressureUnitIndex];
 
         // Show pressure drop
         var pressureDrop = Math.Abs(_inletPressure - _outletPressure);
