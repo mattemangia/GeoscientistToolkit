@@ -380,6 +380,9 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
             ? categoryTools[_selectedToolIndex]
             : null;
 
+        GAIA.Analysis.VolumeCut.VolumeCutIntegration.SetToolPageOpen(ctDataset,
+            activeToolEntry?.Tool is GAIA.Analysis.VolumeCut.VolumeCutTool);
+
         // If the active tool is NOT the acoustic simulation, ensure the transducer placement state is stopped.
         // The acoustic tool's own Draw() method will re-enable it when it becomes active.
         if (activeToolEntry?.Tool is not AcousticSimulationTool) AcousticIntegration.StopPlacement();
@@ -428,6 +431,8 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
                     if (ImGui.BeginTabItem(entry.Name))
                     {
                         _selectedToolIndex = i;
+                        GAIA.Analysis.VolumeCut.VolumeCutIntegration.SetToolPageOpen(ctDataset,
+                            entry.Tool is GAIA.Analysis.VolumeCut.VolumeCutTool);
 
                         // Tool description
                         ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), entry.Description);

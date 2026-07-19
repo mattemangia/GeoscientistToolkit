@@ -13,6 +13,7 @@ namespace GAIA.Analysis.VolumeCut;
 public static class VolumeCutIntegration
 {
     private static readonly Dictionary<CtImageStackDataset, VolumeCutTool> _activeTools = new();
+    private static readonly HashSet<CtImageStackDataset> _openToolPages = new();
 
     // 3D drag state
     private static Handle3D _active3D = Handle3D.None;
@@ -29,10 +30,28 @@ public static class VolumeCutIntegration
     {
         if (dataset == null) return;
         _activeTools.Remove(dataset);
+        _openToolPages.Remove(dataset);
+    }
+
+    /// <summary>
+    ///     Enables viewer overlays and handle input only while the Volume Cut page is open.
+    ///     Registration alone must not make the cut controls visible when a CT dataset is opened.
+    /// </summary>
+    public static void SetToolPageOpen(CtImageStackDataset dataset, bool isOpen)
+    {
+        if (dataset == null) return;
+        if (isOpen)
+            _openToolPages.Add(dataset);
+        else if (_openToolPages.Remove(dataset))
+        {
+            _active3D = Handle3D.None;
+            _drag3DSnapshot = null;
+        }
     }
 
     public static VolumeCutTool GetActiveTool(CtImageStackDataset dataset) =>
-        dataset != null && _activeTools.TryGetValue(dataset, out var tool) ? tool : null;
+        dataset != null && _openToolPages.Contains(dataset) &&
+        _activeTools.TryGetValue(dataset, out var tool) ? tool : null;
 
     // ---------------- 2D slice views ----------------
 
