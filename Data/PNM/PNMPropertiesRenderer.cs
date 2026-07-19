@@ -18,15 +18,15 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
         if (ImGui.CollapsingHeader("Pore Network Properties", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.Indent();
-            PropertiesPanel.DrawProperty("Pore Count", $"{pnm.Pores.Count:N0}");
-            PropertiesPanel.DrawProperty("Throat Count", $"{pnm.Throats.Count:N0}");
-            PropertiesPanel.DrawProperty("Voxel Size", $"{pnm.VoxelSize:F3} μm");
+            DrawProperty("Pore Count", $"{pnm.Pores.Count:N0}");
+            DrawProperty("Throat Count", $"{pnm.Throats.Count:N0}");
+            DrawProperty("Voxel Size", $"{pnm.VoxelSize:F3} μm");
 
             // Calculate average connectivity
             if (pnm.Pores.Count > 0)
             {
                 var avgConnectivity = pnm.Throats.Count * 2.0f / pnm.Pores.Count;
-                PropertiesPanel.DrawProperty("Avg. Connectivity", $"{avgConnectivity:F2}");
+                DrawProperty("Avg. Connectivity", $"{avgConnectivity:F2}");
             }
 
             ImGui.Unindent();
@@ -37,12 +37,12 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
             ImGui.Indent();
 
             // Tortuosity
-            PropertiesPanel.DrawProperty("Tortuosity (τ)", $"{pnm.Tortuosity:F4}");
+            DrawProperty("Tortuosity (τ)", $"{pnm.Tortuosity:F4}");
             if (pnm.Tortuosity > 0)
             {
                 var tau2 = pnm.Tortuosity * pnm.Tortuosity;
-                PropertiesPanel.DrawProperty("τ²", $"{tau2:F4}");
-                PropertiesPanel.DrawProperty("Correction (1/τ²)", $"{1.0f / tau2:F4}");
+                DrawProperty("τ²", $"{tau2:F4}");
+                DrawProperty("Correction (1/τ²)", $"{1.0f / tau2:F4}");
             }
 
             ImGui.Spacing();
@@ -63,7 +63,7 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
                 ImGui.Indent();
 
                 var uncorrected = results?.DarcyUncorrected ?? pnm.DarcyPermeability;
-                PropertiesPanel.DrawProperty("  Uncorrected", $"{uncorrected:F3} mD");
+                DrawProperty("Uncorrected", $"{uncorrected:F3} mD");
 
                 if (pnm.Tortuosity > 0)
                 {
@@ -83,7 +83,7 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
                 ImGui.Indent();
 
                 var uncorrected = results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability;
-                PropertiesPanel.DrawProperty("  Uncorrected", $"{uncorrected:F3} mD");
+                DrawProperty("Uncorrected", $"{uncorrected:F3} mD");
 
                 if (pnm.Tortuosity > 0)
                 {
@@ -103,7 +103,7 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
                 ImGui.Indent();
 
                 var uncorrected = results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability;
-                PropertiesPanel.DrawProperty("  Uncorrected", $"{uncorrected:F3} mD");
+                DrawProperty("Uncorrected", $"{uncorrected:F3} mD");
 
                 if (pnm.Tortuosity > 0)
                 {
@@ -134,9 +134,9 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
 
             if (pnm.Pores.Count > 0)
             {
-                PropertiesPanel.DrawProperty("Min Pore Radius",
+                DrawProperty("Min Pore Radius",
                     $"{pnm.MinPoreRadius:F3} vox ({pnm.MinPoreRadius * pnm.VoxelSize:F2} μm)");
-                PropertiesPanel.DrawProperty("Max Pore Radius",
+                DrawProperty("Max Pore Radius",
                     $"{pnm.MaxPoreRadius:F3} vox ({pnm.MaxPoreRadius * pnm.VoxelSize:F2} μm)");
 
                 // Calculate mean and std dev
@@ -144,9 +144,9 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
                 var variance = pnm.Pores.Sum(p => (p.Radius - meanRadius) * (p.Radius - meanRadius)) / pnm.Pores.Count;
                 var stdDev = MathF.Sqrt(variance);
 
-                PropertiesPanel.DrawProperty("Mean Pore Radius",
+                DrawProperty("Mean Pore Radius",
                     $"{meanRadius:F3} vox ({meanRadius * pnm.VoxelSize:F2} μm)");
-                PropertiesPanel.DrawProperty("Std Dev",
+                DrawProperty("Std Dev",
                     $"{stdDev:F3} vox ({stdDev * pnm.VoxelSize:F2} μm)");
             }
             else
@@ -163,9 +163,9 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
 
             if (pnm.Throats.Count > 0)
             {
-                PropertiesPanel.DrawProperty("Min Throat Radius",
+                DrawProperty("Min Throat Radius",
                     $"{pnm.MinThroatRadius:F3} vox ({pnm.MinThroatRadius * pnm.VoxelSize:F2} μm)");
-                PropertiesPanel.DrawProperty("Max Throat Radius",
+                DrawProperty("Max Throat Radius",
                     $"{pnm.MaxThroatRadius:F3} vox ({pnm.MaxThroatRadius * pnm.VoxelSize:F2} μm)");
 
                 // Calculate mean and std dev
@@ -174,9 +174,9 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
                                pnm.Throats.Count;
                 var stdDev = MathF.Sqrt(variance);
 
-                PropertiesPanel.DrawProperty("Mean Throat Radius",
+                DrawProperty("Mean Throat Radius",
                     $"{meanRadius:F3} vox ({meanRadius * pnm.VoxelSize:F2} μm)");
-                PropertiesPanel.DrawProperty("Std Dev",
+                DrawProperty("Std Dev",
                     $"{stdDev:F3} vox ({stdDev * pnm.VoxelSize:F2} μm)");
             }
             else
@@ -198,5 +198,24 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
             ImGui.TextWrapped("The corrected value accounts for the tortuous flow path through the pore network.");
             ImGui.Unindent();
         }
+    }
+
+    private static void DrawProperty(string label, string value)
+    {
+        ImGui.PushID(label + value);
+        if (ImGui.BeginTable("##PNMPropertyRow", 2, ImGuiTableFlags.SizingStretchProp))
+        {
+            ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch, 0.48f);
+            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch, 0.52f);
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextWrapped($"{label}:");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.PushTextWrapPos(0);
+            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.8f, 1.0f), value);
+            ImGui.PopTextWrapPos();
+            ImGui.EndTable();
+        }
+        ImGui.PopID();
     }
 }

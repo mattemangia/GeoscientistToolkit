@@ -16,6 +16,32 @@ namespace GAIA.UI;
 
 public class PNMTools : IDatasetTools
 {
+    private enum ToolCategory
+    {
+        Overview,
+        FlowAnalysis,
+        ReactiveTransport,
+        Export
+    }
+
+    private ToolCategory _selectedCategory = ToolCategory.Overview;
+
+    private static readonly Dictionary<ToolCategory, string> CategoryNames = new()
+    {
+        [ToolCategory.Overview] = "Overview",
+        [ToolCategory.FlowAnalysis] = "Flow Analysis",
+        [ToolCategory.ReactiveTransport] = "Reactive Transport",
+        [ToolCategory.Export] = "Export"
+    };
+
+    private static readonly Dictionary<ToolCategory, string> CategoryDescriptions = new()
+    {
+        [ToolCategory.Overview] = "Network summary and connectivity statistics.",
+        [ToolCategory.FlowAnalysis] = "Permeability and molecular diffusivity calculators.",
+        [ToolCategory.ReactiveTransport] = "Reactive transport setup, execution, and results.",
+        [ToolCategory.Export] = "Export the PNM network and calculated results."
+    };
+
     private readonly float[] _bulkDiffusivities =
     {
         2.299e-9f, // Water self-diffusion in m²/s
@@ -172,33 +198,89 @@ public class PNMTools : IDatasetTools
         ImGui.Text("PNM Analysis Tools");
         ImGui.Separator();
 
-        // Network Statistics
-        if (ImGui.CollapsingHeader("Network Statistics", ImGuiTreeNodeFlags.DefaultOpen)) DrawNetworkStatistics(pnm);
-
+        DrawCategorySelector();
         ImGui.Spacing();
 
-        // Absolute Permeability Calculator
-        if (ImGui.CollapsingHeader("Absolute Permeability Calculator", ImGuiTreeNodeFlags.DefaultOpen))
-            DrawPermeabilityCalculator(pnm);
+        ImGui.BeginChild("##PNMToolCategoryContent", new Vector2(0, 0), ImGuiChildFlags.None,
+            ImGuiWindowFlags.HorizontalScrollbar);
 
-        ImGui.Spacing();
+        switch (_selectedCategory)
+        {
+            case ToolCategory.Overview:
+                DrawToolSection("Network Statistics", () => DrawNetworkStatistics(pnm));
+                break;
+            case ToolCategory.FlowAnalysis:
+                DrawFlowAnalysisTools(pnm);
+                break;
+            case ToolCategory.ReactiveTransport:
+                DrawToolSection("Reactive Transport", () => DrawReactiveTransport(pnm));
+                break;
+            case ToolCategory.Export:
+                DrawToolSection("Export", () => DrawExportSection(pnm));
+                break;
+        }
 
-        // --- NEW: Molecular Diffusivity Calculator ---
-        if (ImGui.CollapsingHeader("Molecular Diffusivity Calculator", ImGuiTreeNodeFlags.DefaultOpen))
-            DrawDiffusivityCalculator(pnm);
-
-        ImGui.Spacing();
-
-        if (ImGui.CollapsingHeader("Reactive Transport", ImGuiTreeNodeFlags.DefaultOpen))
-            DrawReactiveTransport(pnm);
-
-        ImGui.Spacing();
-
-        // Export Options
-        if (ImGui.CollapsingHeader("Export")) DrawExportSection(pnm);
+        ImGui.EndChild();
 
         // Handle dialogs
         HandleDialogs(pnm);
+    }
+
+    private void DrawCategorySelector()
+    {
+        ImGui.Text("Category:");
+        ImGui.SameLine();
+
+        var preview = CategoryNames[_selectedCategory];
+        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+        if (ImGui.BeginCombo("##PNMToolCategorySelector", preview))
+        {
+            foreach (var category in Enum.GetValues<ToolCategory>())
+            {
+                var isSelected = _selectedCategory == category;
+                if (ImGui.Selectable(CategoryNames[category], isSelected))
+                    _selectedCategory = category;
+
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(CategoryDescriptions[category]);
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), CategoryDescriptions[_selectedCategory]);
+        ImGui.Separator();
+    }
+
+    private static void DrawToolSection(string title, Action drawContent)
+    {
+        ImGui.TextColored(new Vector4(0.9f, 0.9f, 0.9f, 1), title);
+        ImGui.Separator();
+        ImGui.Spacing();
+        drawContent();
+    }
+
+    private void DrawFlowAnalysisTools(PNMDataset pnm)
+    {
+        if (ImGui.BeginTabBar("##PNMFlowAnalysisTabs", ImGuiTabBarFlags.None))
+        {
+            if (ImGui.BeginTabItem("Permeability"))
+            {
+                DrawToolSection("Absolute Permeability Calculator", () => DrawPermeabilityCalculator(pnm));
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Diffusivity"))
+            {
+                DrawToolSection("Molecular Diffusivity Calculator", () => DrawDiffusivityCalculator(pnm));
+                ImGui.EndTabItem();
+            }
+
+            ImGui.EndTabBar();
+        }
     }
 
     private void DrawDiffusivityCalculator(PNMDataset pnm)
