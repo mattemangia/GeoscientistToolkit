@@ -15,8 +15,10 @@ public static class UpscalingGpexExporter
     /// <summary>Origin tag written on intervals whose petrophysics come from PNM upscaling.</summary>
     public const string PnmUpscaledOrigin = "PnmUpscaled";
 
-    /// <summary>Explicit assignment of a pore network to a depth interval of a borehole.</summary>
-    public sealed record PnmWellAssignment(PNMDataset Pnm, float DepthFromMetres, float DepthToMetres, double Weight = 1.0);
+    /// <summary>Explicit assignment of a pore network to a depth interval of a borehole.
+    /// A null <paramref name="WellName"/> applies the assignment to every exported well.</summary>
+    public sealed record PnmWellAssignment(PNMDataset Pnm, float DepthFromMetres, float DepthToMetres,
+        double Weight = 1.0, string? WellName = null);
 
     /// <summary>Summarises a GAIA pore-network dataset into the exchange record (SI + native mD units).</summary>
     public static PnmNetworkSummary CreateSummary(PNMDataset pnm, string? id = null,
@@ -68,6 +70,7 @@ public static class UpscalingGpexExporter
         IEnumerable<PNMDataset>? availablePnms = null)
     {
         ArgumentNullException.ThrowIfNull(borehole);
+        var wellName = string.IsNullOrWhiteSpace(borehole.WellName) ? borehole.Name : borehole.WellName;
         var pnmByName = (availablePnms ?? []).ToDictionary(p => p.Name, StringComparer.Ordinal);
         var intervals = new List<WellIntervalRecord>();
         foreach (var unit in borehole.LithologyUnits.OrderBy(u => u.DepthFrom))
@@ -75,8 +78,11 @@ public static class UpscalingGpexExporter
             var unitAssignments = new List<PnmAssignment>();
             if (assignments is not null)
                 foreach (var assignment in assignments)
+                {
+                    if (assignment.WellName is not null && !string.Equals(assignment.WellName, wellName, StringComparison.Ordinal)) continue;
                     if (assignment.DepthFromMetres < unit.DepthTo && assignment.DepthToMetres > unit.DepthFrom)
                         unitAssignments.Add(new PnmAssignment { PnmId = MakeId(assignment.Pnm.Name), Weight = assignment.Weight });
+                }
             // Discover networks already linked through GAIA's parameter-source bookkeeping.
             foreach (var source in unit.ParameterSources.Values)
                 if (source.DatasetType == DatasetType.PNM && pnmByName.ContainsKey(source.DatasetName))
