@@ -184,7 +184,7 @@ namespace GAIA.Analysis.Geothermal
                     ImGui.Text($"  Geo Temp: {_temperatureRange[maxPowerIdx] - 273.15f:F1} °C");
                 }
                 ImGui.Text($"  Net Power: {_results[maxPowerIdx].NetPower / 1e6f:F2} MW");
-                ImGui.Text($"  Efficiency: {_results[maxPowerIdx].ThermalEfficiency * 100f:F2} %");
+                ImGui.TextUnformatted($"  Efficiency: {_results[maxPowerIdx].ThermalEfficiency * 100f:F2} %");
                 ImGui.Text($"  Mass Flow: {_results[maxPowerIdx].MassFlowRate:F2} kg/s");
             }
         }
@@ -340,10 +340,10 @@ namespace GAIA.Analysis.Geothermal
             // Financial metrics
             ImGui.TextColored(new Vector4(0.2f, 1f, 0.2f, 1), "Financial Metrics:");
             ImGui.Text($"NPV: ${_economics.NPV_MUSD:F2} M");
-            ImGui.Text($"IRR: {_economics.IRR:F2} %");
+            ImGui.TextUnformatted($"IRR: {_economics.IRR:F2} %");
             ImGui.Text($"Payback: {_economics.PaybackPeriodYears:F1} years");
             ImGui.Text($"LCOE: ${_economics.LCOE_USDperMWh:F2} /MWh");
-            ImGui.Text($"ROI: {_economics.ROI:F1} %");
+            ImGui.TextUnformatted($"ROI: {_economics.ROI:F1} %");
 
             ImGui.Columns(1);
             ImGui.Separator();

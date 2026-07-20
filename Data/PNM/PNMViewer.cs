@@ -1919,7 +1919,7 @@ public class PNMViewer : IDatasetViewer
             if (_dataset.BulkDiffusivity > 0)
             {
                 var restriction = 1.0f - diffusivity / _dataset.BulkDiffusivity;
-                ImGui.Text($"Restriction: {restriction:P1}");
+                ImGui.TextUnformatted($"Restriction: {restriction:P1}");
             }
         }
 

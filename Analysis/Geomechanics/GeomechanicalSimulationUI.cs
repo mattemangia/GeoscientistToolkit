@@ -1216,7 +1216,7 @@ public class GeomechanicalSimulationUI : IDisposable
             ImGui.Indent();
             ImGui.Text($"Total Voxels: {_lastResults.TotalVoxels:N0}");
             ImGui.Text($"Failed Voxels: {_lastResults.FailedVoxels:N0}");
-            ImGui.Text($"Failure Percentage: {_lastResults.FailedVoxelPercentage:F2}%");
+            ImGui.TextUnformatted($"Failure Percentage: {_lastResults.FailedVoxelPercentage:F2}%");
             ImGui.Unindent();
             if (_lastResults.YieldedVoxels > 0)
             {
@@ -1588,7 +1588,7 @@ public class GeomechanicalSimulationUI : IDisposable
             ImGui.Text($"Average Gradient: {_lastResults.AverageThermalGradient:F1} °C/km");
             ImGui.Text($"Energy Potential: {_lastResults.GeothermalEnergyPotential:F2} MWh");
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Recoverable thermal energy assuming 10% extraction efficiency");
+                ImGui.SetTooltip("Recoverable thermal energy assuming 10%% extraction efficiency");
             ImGui.Unindent();
         }
 

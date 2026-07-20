@@ -447,11 +447,11 @@ namespace GAIA.UI.Windows
             ImGui.TextColored(new Vector4(0.3f, 0.8f, 1, 1), $"Heat Rejection: {heatRejection:F1} kJ/kg");
             ImGui.Separator();
             ImGui.TextColored(new Vector4(1, 1, 1, 1), $"Net Work: {netWork:F1} kJ/kg");
-            ImGui.TextColored(new Vector4(1, 1, 0, 1), $"Thermal Efficiency: {efficiency:F1}%");
+            ImGui.TextColored(new Vector4(1, 1, 0, 1), $"Thermal Efficiency: {efficiency:F1}%%");
 
             // Back-work ratio
             float bwr = pumpWork / turbineWork * 100;
-            ImGui.Text($"Back-Work Ratio: {bwr:F1}%");
+            ImGui.TextUnformatted($"Back-Work Ratio: {bwr:F1}%");
 
             ImGui.EndChild();
         }

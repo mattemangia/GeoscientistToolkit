@@ -447,7 +447,7 @@ public class PNMTools : IDatasetTools
             ImGui.TableSetColumnIndex(0);
             ImGui.Text("Network Porosity (φ):");
             ImGui.TableSetColumnIndex(1);
-            if (hasPhi) ImGui.Text($"{phi:P2}");
+            if (hasPhi) ImGui.TextUnformatted($"{phi:P2}");
             else ImGui.Text("—");
 
             ImGui.TableNextRow();
@@ -581,7 +581,7 @@ public class PNMTools : IDatasetTools
                 ImGui.TableSetColumnIndex(0);
                 ImGui.Text("Est. Porosity:");
                 ImGui.TableSetColumnIndex(1);
-                ImGui.Text($"{porosity:P2}");
+                ImGui.TextUnformatted($"{porosity:P2}");
             }
 
             ImGui.EndTable();
@@ -928,7 +928,7 @@ public class PNMTools : IDatasetTools
             ImGui.SeparatorText("Reactive Transport Results");
             ImGui.Text($"Initial permeability: {pnm.ReactiveTransportResults.InitialPermeability:E3} mD");
             ImGui.Text($"Final permeability: {pnm.ReactiveTransportResults.FinalPermeability:E3} mD");
-            ImGui.Text($"Permeability change: {pnm.ReactiveTransportResults.PermeabilityChange:P2}");
+            ImGui.TextUnformatted($"Permeability change: {pnm.ReactiveTransportResults.PermeabilityChange:P2}");
             ImGui.Text($"Time steps stored: {pnm.ReactiveTransportResults.TimeSteps.Count}");
         }
 
@@ -1148,9 +1148,9 @@ public class PNMTools : IDatasetTools
 
                 ImGui.Spacing();
                 ImGui.TextColored(new Vector4(1, 1, 0, 1), "Expected Effects:");
-                ImGui.Text($"  Pore radius reduction: ~{poreReduction:P1}");
-                ImGui.Text($"  Throat radius reduction: ~{throatReduction:P1}");
-                ImGui.Text($"  Permeability reduction: ~{1 - permReduction:P1}");
+                ImGui.TextUnformatted($"  Pore radius reduction: ~{poreReduction:P1}");
+                ImGui.TextUnformatted($"  Throat radius reduction: ~{throatReduction:P1}");
+                ImGui.TextUnformatted($"  Permeability reduction: ~{1 - permReduction:P1}");
             }
 
             ImGui.Unindent();
@@ -1335,13 +1335,13 @@ public class PNMTools : IDatasetTools
                 ImGui.TableSetColumnIndex(0);
                 ImGui.Text("Pore Reduction:");
                 ImGui.TableSetColumnIndex(1);
-                ImGui.Text($"{results.EffectivePoreReduction:F1}%");
+                ImGui.TextUnformatted($"{results.EffectivePoreReduction:F1}%");
 
                 ImGui.TableNextRow();
                 ImGui.TableSetColumnIndex(0);
                 ImGui.Text("Throat Reduction:");
                 ImGui.TableSetColumnIndex(1);
-                ImGui.Text($"{results.EffectiveThroatReduction:F1}%");
+                ImGui.TextUnformatted($"{results.EffectiveThroatReduction:F1}%");
 
                 ImGui.TableNextRow();
                 ImGui.TableSetColumnIndex(0);

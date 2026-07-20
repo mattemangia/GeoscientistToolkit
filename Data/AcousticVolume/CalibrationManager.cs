@@ -279,7 +279,7 @@ public class CalibrationManagerUI
                     var color = error < 5 ? new Vector4(0, 1, 0, 1) :
                         error < 10 ? new Vector4(1, 1, 0, 1) :
                         new Vector4(1, 0, 0, 1);
-                    ImGui.TextColored(color, $"{error:F1}%");
+                    ImGui.TextColored(color, $"{error:F1}%%");
                 }
                 else
                 {
@@ -308,7 +308,7 @@ public class CalibrationManagerUI
                 var avgError = validPoints.Average(p =>
                     Math.Abs((float)(p.SimulatedVp - p.MeasuredVp) / (float)p.MeasuredVp) * 100);
 
-                ImGui.Text($"Average Error: {avgError:F2}%");
+                ImGui.TextUnformatted($"Average Error: {avgError:F2}%");
                 ImGui.Text($"Validated Points: {validPoints.Count}/{CalibrationData.Points.Count}");
             }
         }
@@ -404,10 +404,10 @@ public class CalibrationManagerUI
                 var vsErrors = validPoints.Select(p =>
                     Math.Abs((float)(p.SimulatedVs - p.MeasuredVs) / (float)p.MeasuredVs) * 100).ToList();
 
-                ImGui.Text($"Vp Error: {vpErrors.Average():F2}% ± {StandardDeviation(vpErrors):F2}%");
-                ImGui.Text($"Vs Error: {vsErrors.Average():F2}% ± {StandardDeviation(vsErrors):F2}%");
-                ImGui.Text($"Max Vp Error: {vpErrors.Max():F2}%");
-                ImGui.Text($"Max Vs Error: {vsErrors.Max():F2}%");
+                ImGui.TextUnformatted($"Vp Error: {vpErrors.Average():F2}% ± {StandardDeviation(vpErrors):F2}%");
+                ImGui.TextUnformatted($"Vs Error: {vsErrors.Average():F2}% ± {StandardDeviation(vsErrors):F2}%");
+                ImGui.TextUnformatted($"Max Vp Error: {vpErrors.Max():F2}%");
+                ImGui.TextUnformatted($"Max Vs Error: {vsErrors.Max():F2}%");
             }
         }
     }

@@ -564,7 +564,7 @@ public class ImageTools : IDatasetTools
                         ImGui.Text($"{kvp.Value.ToString()}");
                         ImGui.TableNextColumn();
                         var percentage = totalPoints > 0 ? kvp.Value * 100f / totalPoints : 0;
-                        ImGui.Text($"{percentage.ToString("F1")}%");
+                        ImGui.TextUnformatted($"{percentage.ToString("F1")}%");
                     }
 
                     ImGui.EndTable();
@@ -980,7 +980,7 @@ public class ImageTools : IDatasetTools
         private void DrawPoreStatistics(ImageDataset imageDataset)
         {
             ImGui.Text($"Total Pores Detected: {_detectedPores.Count.ToString()}");
-            ImGui.Text($"Total Porosity: {_totalPorosity.ToString("F2")}%");
+            ImGui.TextUnformatted($"Total Porosity: {_totalPorosity.ToString("F2")}%");
             ImGui.Separator();
 
             var totalArea = _detectedPores.Sum(p => p.Area);
@@ -1069,7 +1069,7 @@ public class ImageTools : IDatasetTools
                     ImGui.Text($"{kvp.Value.ToString()}");
                     ImGui.TableNextColumn();
                     var percentage = _detectedPores.Count > 0 ? kvp.Value * 100f / _detectedPores.Count : 0;
-                    ImGui.Text($"{percentage.ToString("F1")}%");
+                    ImGui.TextUnformatted($"{percentage.ToString("F1")}%");
                 }
 
                 ImGui.EndTable();

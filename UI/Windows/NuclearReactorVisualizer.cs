@@ -184,7 +184,7 @@ namespace GAIA.UI.Windows
             if (ImGui.CollapsingHeader("Power", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 float power = (float)(_state.RelativePower * 100);
-                ImGui.Text($"Power: {power:F1}%");
+                ImGui.TextUnformatted($"Power: {power:F1}%");
                 ImGui.ProgressBar(power / 100f, new Vector2(-1, 0), $"{power:F1}%");
 
                 ImGui.Text($"Thermal: {_state.ThermalPowerMW:F0} MW");

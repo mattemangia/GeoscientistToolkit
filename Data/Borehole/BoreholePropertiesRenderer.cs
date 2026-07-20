@@ -50,7 +50,7 @@ public class BoreholePropertiesRenderer : IDatasetPropertiesRenderer
                 var coveredDepth = borehole.LithologyUnits.Sum(u => u.DepthTo - u.DepthFrom);
                 var coverage = coveredDepth / borehole.TotalDepth * 100;
 
-                ImGui.Text($"Depth Coverage: {coverage:F1}%");
+                ImGui.TextUnformatted($"Depth Coverage: {coverage:F1}%");
                 ImGui.Text($"Covered Depth: {coveredDepth:F2} m");
 
                 // Count parameters
@@ -79,7 +79,7 @@ public class BoreholePropertiesRenderer : IDatasetPropertiesRenderer
 
                     ImGui.Text($"{group.Key}:");
                     ImGui.Indent();
-                    ImGui.Text($"  Thickness: {totalThickness:F2} m ({percentage:F1}%)");
+                    ImGui.TextUnformatted($"  Thickness: {totalThickness:F2} m ({percentage:F1}%)");
                     ImGui.Text($"  Units: {group.Count()}");
                     ImGui.Unindent();
                 }

@@ -148,7 +148,7 @@ namespace GAIA.UI.Windows
             }
             ImGui.SameLine();
 
-            ImGui.Text($"| Zoom: {_zoom:P0}");
+            ImGui.TextUnformatted($"| Zoom: {_zoom:P0}");
             ImGui.SameLine();
             if (ImGui.Button("-")) _zoom = Math.Max(0.25f, _zoom - 0.25f);
             ImGui.SameLine();

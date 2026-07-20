@@ -149,7 +149,7 @@ public class SubsurfaceGISTools : IDatasetTools
                 foreach (var group in lithologyGroups.Take(5))
                 {
                     float percentage = (float)group.Count() / dataset.VoxelGrid.Count * 100f;
-                    ImGui.BulletText($"{group.Key}: {group.Count():N0} voxels ({percentage:F1}%)");
+                    ImGui.BulletText($"{group.Key}: {group.Count():N0} voxels ({percentage:F1}%%)");
                 }
                 
                 if (lithologyGroups.Count > 5)
@@ -197,8 +197,8 @@ public class SubsurfaceGISTools : IDatasetTools
                 float maxConfidence = dataset.VoxelGrid.Max(v => v.Confidence);
                 
                 ImGui.Text("Confidence:");
-                ImGui.BulletText($"Average: {avgConfidence:P1}");
-                ImGui.BulletText($"Range: [{minConfidence:P1}, {maxConfidence:P1}]");
+                ImGui.BulletText($"Average: {avgConfidence:P1}".Replace("%", "%%"));
+                ImGui.BulletText($"Range: [{minConfidence:P1}, {maxConfidence:P1}]".Replace("%", "%%"));
             }
             
             ImGui.Unindent();

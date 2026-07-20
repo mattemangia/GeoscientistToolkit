@@ -206,11 +206,11 @@ public class WaveformViewer : IDisposable
                     var totalPower = lowPower + midPower + highPower;
                     if (totalPower > 0)
                     {
-                        ImGui.Text($"{100 * lowPower / totalPower:F1}%");
+                        ImGui.TextUnformatted($"{100 * lowPower / totalPower:F1}%");
                         ImGui.NextColumn();
-                        ImGui.Text($"{100 * midPower / totalPower:F1}%");
+                        ImGui.TextUnformatted($"{100 * midPower / totalPower:F1}%");
                         ImGui.NextColumn();
-                        ImGui.Text($"{100 * highPower / totalPower:F1}%");
+                        ImGui.TextUnformatted($"{100 * highPower / totalPower:F1}%");
                     }
 
                     ImGui.Columns(1);

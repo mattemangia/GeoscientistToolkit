@@ -323,7 +323,7 @@ public class MaterialStatisticsWindow : BasePanel, IDisposable
                 ImGui.TableNextColumn();
                 ImGui.Text($"{stat.Volume:F3}");
                 ImGui.TableNextColumn();
-                ImGui.Text($"{stat.Percentage:F2}%");
+                ImGui.TextUnformatted($"{stat.Percentage:F2}%");
                 ImGui.TableNextColumn();
                 ImGui.Text($"{stat.CenterOfMass.X:F1}, {stat.CenterOfMass.Y:F1}, {stat.CenterOfMass.Z:F1}");
                 ImGui.TableNextColumn();

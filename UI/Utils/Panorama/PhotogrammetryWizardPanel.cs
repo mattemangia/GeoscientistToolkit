@@ -1196,13 +1196,13 @@ public class PhotogrammetryWizardPanel : BasePanel
                 switch (_meshOptions.OptimizationQuality)
                 {
                     case OptimizationQuality.Fast:
-                        ImGui.TextWrapped("• 1 optimization pass\n• Basic smoothing\n• ~10-20% processing overhead\n• Good for previews");
+                        ImGui.TextWrapped("• 1 optimization pass\n• Basic smoothing\n• ~10-20%% processing overhead\n• Good for previews");
                         break;
                     case OptimizationQuality.Balanced:
-                        ImGui.TextWrapped("• 2 optimization passes\n• Enhanced smoothing & vertex optimization\n• ~30-40% processing overhead\n• Recommended for most cases");
+                        ImGui.TextWrapped("• 2 optimization passes\n• Enhanced smoothing & vertex optimization\n• ~30-40%% processing overhead\n• Recommended for most cases");
                         break;
                     case OptimizationQuality.High:
-                        ImGui.TextWrapped("• 3 optimization passes\n• Maximum quality algorithms\n• ~50-70% processing overhead\n• Best for final deliverables");
+                        ImGui.TextWrapped("• 3 optimization passes\n• Maximum quality algorithms\n• ~50-70%% processing overhead\n• Best for final deliverables");
                         break;
                 }
                 ImGui.PopStyleColor();
