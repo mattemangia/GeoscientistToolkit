@@ -99,6 +99,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private CancellationTokenSource _sliceTextureCancellation;
     private int _buildingSliceView = -1;
     private int _buildingSliceVersion;
+    private (int W, int H, int D) _lastRenderedDims;
 
     public CtCombinedViewer(CtImageStackDataset dataset)
     {
@@ -306,6 +307,16 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 DrawLoadingState();
                 return;
             }
+        }
+
+        // A Volume Cut with "Crop to region" resizes the dataset in place. Detect that here, in the
+        // render loop, so the viewer rebuilds itself for the new dimensions instead of showing a
+        // black canvas at the old size until it is closed and reopened.
+        var currentDims = (_dataset.Width, _dataset.Height, _dataset.Depth);
+        if (_lastRenderedDims != currentDims)
+        {
+            if (_lastRenderedDims != default) HandleDimensionsChanged();
+            _lastRenderedDims = currentDims;
         }
 
         FlushDisplayUpdates();
@@ -541,6 +552,40 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     ///     The dirty flag survives until <see cref="FlushDisplayUpdates" /> honours it, so the value
     ///     the drag settles on is always the one displayed.
     /// </summary>
+    /// <summary>
+    ///     Full rebuild after the dataset was resized in place (e.g. a cropping Volume Cut): recenter
+    ///     the slices, drop textures and caches, cancel any in-flight slice build, and force a fresh
+    ///     render for the new dimensions — the same clean state a freshly reopened viewer starts in.
+    /// </summary>
+    private void HandleDimensionsChanged()
+    {
+        _sliceX = _dataset.Width / 2;
+        _sliceY = _dataset.Height / 2;
+        _sliceZ = _dataset.Depth / 2;
+        _zoomXY = _zoomXZ = _zoomYZ = 1.0f;
+        _panXY = _panXZ = _panYZ = Vector2.Zero;
+
+        _grayscaleSliceCache.Clear();
+        _labelSliceCache.Clear();
+        _cachedKeyXY = _cachedKeyXZ = _cachedKeyYZ = (-1, -1);
+
+        // Discard any slice build in flight: it targeted the old dimensions, and superseding the
+        // request versions makes a late result be rejected by PumpSliceTexturePipeline.
+        _sliceTextureCancellation?.Cancel();
+        _pendingSliceViews.Clear();
+        _buildingSliceView = -1;
+        for (var i = 0; i < _sliceRequestVersions.Length; i++) _sliceRequestVersions[i]++;
+
+        _textureXY?.Dispose();
+        _textureXY = null;
+        _textureXZ?.Dispose();
+        _textureXZ = null;
+        _textureYZ?.Dispose();
+        _textureYZ = null;
+
+        _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+    }
+
     private void MarkDisplayDirty() => _displayDirty = true;
 
     private void FlushDisplayUpdates()
@@ -1350,7 +1395,9 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             {
                 var result = _sliceTextureTask.Result;
                 var currentSlice = result.View switch { 0 => _sliceZ, 1 => _sliceY, _ => _sliceX };
-                if (result.Slice == currentSlice && _buildingSliceVersion == _sliceRequestVersions[result.View])
+                var (curW, curH) = GetImageDimensionsForView(result.View);
+                if (result.Slice == currentSlice && _buildingSliceVersion == _sliceRequestVersions[result.View]
+                    && result.Width == curW && result.Height == curH)
                 {
                     var replacement = TextureManager.CreateFromPixelData(result.Rgba,
                         (uint)result.Width, (uint)result.Height);

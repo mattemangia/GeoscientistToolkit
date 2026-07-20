@@ -115,12 +115,16 @@ public sealed class VolumeCutState
                 break;
         }
 
-        var x0 = Math.Clamp((int)MathF.Floor(lo.X), 0, width - 1);
-        var y0 = Math.Clamp((int)MathF.Floor(lo.Y), 0, height - 1);
-        var z0 = Math.Clamp((int)MathF.Floor(lo.Z), 0, depth - 1);
-        var x1 = Math.Clamp((int)MathF.Ceiling(hi.X), x0, width - 1);
-        var y1 = Math.Clamp((int)MathF.Ceiling(hi.Y), y0, height - 1);
-        var z1 = Math.Clamp((int)MathF.Ceiling(hi.Z), z0, depth - 1);
+        // Round to the exact voxels the cut keeps — ceil(min)/floor(max), matching
+        // TryGetRowInsideSpan (start = ceil(min), end = floor(max) + 1). Using floor/ceil here
+        // instead would make the crop box one voxel wider than the kept region on each side,
+        // leaving a black frame around the result.
+        var x0 = Math.Clamp((int)MathF.Ceiling(lo.X), 0, width - 1);
+        var y0 = Math.Clamp((int)MathF.Ceiling(lo.Y), 0, height - 1);
+        var z0 = Math.Clamp((int)MathF.Ceiling(lo.Z), 0, depth - 1);
+        var x1 = Math.Clamp((int)MathF.Floor(hi.X), x0, width - 1);
+        var y1 = Math.Clamp((int)MathF.Floor(hi.Y), y0, height - 1);
+        var z1 = Math.Clamp((int)MathF.Floor(hi.Z), z0, depth - 1);
         return (x0, y0, z0, x1, y1, z1);
     }
 

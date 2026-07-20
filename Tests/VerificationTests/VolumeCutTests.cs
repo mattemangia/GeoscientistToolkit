@@ -237,6 +237,40 @@ public sealed class VolumeCutTests
     }
 
     [Fact]
+    public void BoxKeepInside_CropWithFractionalBounds_LeavesNoBlackBorder()
+    {
+        // Dragged box handles land on fractional voxel coordinates. The crop box must match the
+        // voxels the cut keeps (ceil(min)..floor(max)); otherwise it is one voxel wider per side,
+        // leaving a black frame around the result that makes segmentation impossible.
+        var dataset = CreateDataset(30, 26, 22, out var grayscale, out var labels);
+        using var _ = grayscale;
+        using var __ = labels;
+        var state = new VolumeCutState
+        {
+            Shape = VolumeCutShapeKind.Box,
+            KeepMode = VolumeCutKeepMode.KeepInside,
+            CropToRegion = true,
+            BoxMin = new Vector3(5.3f, 4.7f, 3.2f),
+            BoxMax = new Vector3(24.6f, 20.1f, 17.9f)
+        };
+
+        var result = VolumeCutProcessor.Apply(dataset, state, CancellationToken.None);
+        Assert.NotNull(result);
+        result.CommitTo(dataset);
+
+        // Kept X range is [ceil(5.3), floor(24.6)] = [6, 24] -> 19 voxels, likewise per axis.
+        Assert.Equal(19, dataset.Width);
+        Assert.Equal(16, dataset.Height);
+        Assert.Equal(14, dataset.Depth);
+
+        // No cleared voxel anywhere, including the outer shell: the whole crop is kept content.
+        for (var z = 0; z < dataset.Depth; z++)
+        for (var y = 0; y < dataset.Height; y++)
+        for (var x = 0; x < dataset.Width; x++)
+            Assert.Equal(200, dataset.VolumeData[x, y, z]);
+    }
+
+    [Fact]
     public void SphereKeepInside_CropResizesToBoundingBoxAndClearsCorners()
     {
         var dataset = CreateDataset(24, 24, 24, out var grayscale, out var labels);
