@@ -135,7 +135,8 @@ public unsafe class NMRSimulationOpenCL : IDisposable
     public void RunSimulationAsync(
         IProgress<(float progress, string message)> progress,
         Action<NMRResults> onSuccess,
-        Action<Exception> onError)
+        Action<Exception> onError,
+        CancellationToken cancellationToken = default)
     {
         Task.Run(() =>
         {
@@ -164,24 +165,27 @@ public unsafe class NMRSimulationOpenCL : IDisposable
                 UploadDataToGPU();
 
                 progress?.Report((0.1f, "Initializing walkers on GPU..."));
-                var validWalkerCount = InitializeWalkersGPU();
+                var validWalkerCount = InitializeWalkersGPU(out var porosity);
                 results.NumberOfWalkers = validWalkerCount;
+                results.TotalPorosity = porosity;
 
                 if (validWalkerCount == 0)
                     throw new InvalidOperationException("No valid walker positions found on GPU");
 
                 progress?.Report((0.15f, $"Running simulation with {validWalkerCount:N0} walkers..."));
-                SimulateRandomWalkGPU(results, progress);
+                SimulateRandomWalkGPU(results, progress, cancellationToken);
+
+                cancellationToken.ThrowIfCancellationRequested();
 
                 progress?.Report((0.85f, "Computing T2 distribution..."));
                 ComputeT2Distribution(results);
                 ComputePoreSizeDistribution(results);
                 ComputeStatistics(results);
 
-                // Optional T1-T2 map
+                // Optional T1-T2 map (estimated from the T2 spectrum, not simulated)
                 if (_config.ComputeT1T2Map)
                 {
-                    progress?.Report((0.95f, "Computing T1-T2 map..."));
+                    progress?.Report((0.95f, "Estimating T1-T2 map..."));
                     T1T2Computation.ComputeT1T2Map(results, _config);
                 }
 
@@ -434,9 +438,12 @@ public unsafe class NMRSimulationOpenCL : IDisposable
         CheckError(errorCode, "CreateBuffer validWalkerCount");
     }
 
-    private int InitializeWalkersGPU()
+    private int InitializeWalkersGPU(out double porosity)
     {
-        var (xMin, xMax, yMin, yMax, zMin, zMax) = CalculateMaterialBounds();
+        var (xMin, xMax, yMin, yMax, zMin, zMax, poreVoxels) = CalculateMaterialBounds();
+
+        var totalVoxels = (long)_width * _height * _depth;
+        porosity = totalVoxels > 0 ? poreVoxels / (double)totalVoxels : 0.0;
 
         if (xMin > xMax)
         {
@@ -444,14 +451,10 @@ public unsafe class NMRSimulationOpenCL : IDisposable
             return 0;
         }
 
-        var materialWidth = xMax - xMin + 1;
-        var materialHeight = yMax - yMin + 1;
-        var materialDepth = zMax - zMin + 1;
-        var materialVolume = materialWidth * materialHeight * materialDepth;
-
         Logger.Log($"[NMRSimulationOpenCL] Material extent: [{xMin},{xMax}] x [{yMin},{yMax}] x [{zMin},{zMax}]");
         Logger.Log(
-            $"[NMRSimulationOpenCL] Material occupies {materialVolume:N0} / {_width * _height * _depth:N0} voxels");
+            $"[NMRSimulationOpenCL] Pore material occupies {poreVoxels:N0} / {totalVoxels:N0} voxels " +
+            $"(porosity {porosity * 100:F2}%)");
 
         var argIndex = 0;
         var bufLabelVolume = _bufferLabelVolume;
@@ -517,19 +520,22 @@ public unsafe class NMRSimulationOpenCL : IDisposable
     }
 
     /// <summary>
-    ///     Calculate the bounding box of the selected material (same approach as PNM)
+    ///     Calculate the bounding box of the selected material (same approach as PNM),
+    ///     plus the pore voxel count used for porosity.
     /// </summary>
-    private (int xMin, int xMax, int yMin, int yMax, int zMin, int zMax) CalculateMaterialBounds()
+    private (int xMin, int xMax, int yMin, int yMax, int zMin, int zMax, long poreVoxels) CalculateMaterialBounds()
     {
         int xMin = _width, xMax = -1;
         int yMin = _height, yMax = -1;
         int zMin = _depth, zMax = -1;
+        long poreVoxels = 0;
 
         for (var z = 0; z < _depth; z++)
         for (var y = 0; y < _height; y++)
         for (var x = 0; x < _width; x++)
             if (_labelVolume[x, y, z] == _config.PoreMaterialID)
             {
+                poreVoxels++;
                 if (x < xMin) xMin = x;
                 if (x > xMax) xMax = x;
                 if (y < yMin) yMin = y;
@@ -538,15 +544,29 @@ public unsafe class NMRSimulationOpenCL : IDisposable
                 if (z > zMax) zMax = z;
             }
 
-        return (xMin, xMax, yMin, yMax, zMin, zMax);
+        return (xMin, xMax, yMin, yMax, zMin, zMax, poreVoxels);
     }
 
-    private void SimulateRandomWalkGPU(NMRResults results, IProgress<(float, string)> progress)
-    {
-        var stepSize = Math.Max(1,
-            (int)(Math.Sqrt(6.0 * _config.DiffusionCoefficient * _config.TimeStepMs * 1e-3) / _config.VoxelSize));
+    // Guard against pathological hop counts (very high D or very coarse time steps)
+    private const int MaxHopsPerStep = 500;
 
-        var timeStepSec = (float)(_config.TimeStepMs * 1e-3);
+    private void SimulateRandomWalkGPU(NMRResults results, IProgress<(float, string)> progress,
+        CancellationToken cancellationToken)
+    {
+        // Einstein relation: a hop of one voxel (length a) takes dt_hop = a²/(6D).
+        // Each recorded step of duration dt executes round(dt/dt_hop) hops (cumulative
+        // rounding), matching the CPU backend. Surface relaxation is applied per hop
+        // with the hop's physical duration.
+        var dtStepSec = _config.TimeStepMs * 1e-3;
+        var dtHopSec = _config.VoxelSize * _config.VoxelSize / (6.0 * _config.DiffusionCoefficient);
+        var hopsPerStep = dtStepSec / dtHopSec;
+
+        if (hopsPerStep > MaxHopsPerStep)
+            Logger.LogWarning(
+                $"[NMRSimulationOpenCL] Time step requires {hopsPerStep:F0} voxel hops per step (capped at {MaxHopsPerStep}). " +
+                "Diffusion will be underestimated; reduce the time step or use a finer voxel size.");
+
+        var hopTimeSec = (float)dtHopSec;
         var voxelSizeUm = (float)(_config.VoxelSize * 1e6);
         var seed = (uint)_config.RandomSeed;
 
@@ -564,10 +584,19 @@ public unsafe class NMRSimulationOpenCL : IDisposable
         var depth = _depth;
         var poreMaterialID = _config.PoreMaterialID;
 
-        Logger.Log($"[NMRSimulationOpenCL] Step size: {stepSize} voxels, voxel size: {voxelSizeUm:F2} µm");
+        Logger.Log(
+            $"[NMRSimulationOpenCL] Hop time: {dtHopSec:E3} s ({hopsPerStep:F2} hops per {_config.TimeStepMs} ms step), voxel size: {voxelSizeUm:F2} µm");
+
+        long hopsDone = 0;
 
         for (var step = 0; step < _config.NumberOfSteps; step++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var hopsTarget = (long)Math.Round((step + 1) * dtStepSec / dtHopSec);
+            var hopsThisStep = (int)Math.Min(MaxHopsPerStep, Math.Max(0, hopsTarget - hopsDone));
+            hopsDone += hopsThisStep;
+
             if (step % 100 == 0)
             {
                 var progressPercent = 0.15f + 0.7f * (step / (float)_config.NumberOfSteps);
@@ -590,8 +619,8 @@ public unsafe class NMRSimulationOpenCL : IDisposable
             _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &width);
             _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &height);
             _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &depth);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &stepSize);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(float), &timeStepSec);
+            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &hopsThisStep);
+            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(float), &hopTimeSec);
             _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(float), &voxelSizeUm);
             _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(byte), &poreMaterialID);
             _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(uint), &seed);
@@ -625,79 +654,12 @@ public unsafe class NMRSimulationOpenCL : IDisposable
 
     private void ComputeT2Distribution(NMRResults results)
     {
-        var logMin = Math.Log10(_config.T2MinMs);
-        var logMax = Math.Log10(_config.T2MaxMs);
-        var logStep = (logMax - logMin) / _config.T2BinCount;
+        var (bins, amplitudes) = T2Inversion.Invert(
+            results.TimePoints, results.Magnetization,
+            _config.T2MinMs, _config.T2MaxMs, _config.T2BinCount);
 
-        results.T2HistogramBins = new double[_config.T2BinCount];
-        results.T2Histogram = new double[_config.T2BinCount];
-
-        for (var i = 0; i < _config.T2BinCount; i++)
-            results.T2HistogramBins[i] = Math.Pow(10, logMin + i * logStep);
-
-        var kernel = BuildKernelMatrix(results.TimePoints, results.T2HistogramBins);
-        var amplitudes = SolveRegularizedLeastSquares(kernel, results.Magnetization, 0.01);
-
-        Array.Copy(amplitudes, results.T2Histogram, amplitudes.Length);
-
-        var sum = results.T2Histogram.Sum();
-        if (sum > 0)
-            for (var i = 0; i < results.T2Histogram.Length; i++)
-                results.T2Histogram[i] /= sum;
-    }
-
-    private double[,] BuildKernelMatrix(double[] timePoints, double[] t2Values)
-    {
-        var matrix = new double[timePoints.Length, t2Values.Length];
-
-        for (var i = 0; i < timePoints.Length; i++)
-        for (var j = 0; j < t2Values.Length; j++)
-            matrix[i, j] = Math.Exp(-timePoints[i] / t2Values[j]);
-
-        return matrix;
-    }
-
-    private double[] SolveRegularizedLeastSquares(double[,] kernel, double[] data, double lambda)
-    {
-        var m = kernel.GetLength(0);
-        var n = kernel.GetLength(1);
-
-        var ktk = new double[n, n];
-        var ktd = new double[n];
-
-        for (var i = 0; i < n; i++)
-        {
-            for (var j = 0; j < n; j++)
-            {
-                double sum = 0;
-                for (var k = 0; k < m; k++) sum += kernel[k, i] * kernel[k, j];
-                ktk[i, j] = sum;
-                if (i == j) ktk[i, j] *= 1.0 + lambda;
-            }
-
-            for (var k = 0; k < m; k++) ktd[i] += kernel[k, i] * data[k];
-        }
-
-        return SolveCholeskySystem(ktk, ktd);
-    }
-
-    private double[] SolveCholeskySystem(double[,] A, double[] b)
-    {
-        var n = b.Length;
-        var x = new double[n];
-
-        for (var iter = 0; iter < 100; iter++)
-        for (var i = 0; i < n; i++)
-        {
-            var sum = b[i];
-            for (var j = 0; j < n; j++)
-                if (j != i)
-                    sum -= A[i, j] * x[j];
-
-            x[i] = Math.Max(0, sum / Math.Max(A[i, i], 1e-10));
-        }
-
-        return x;
+        results.T2HistogramBins = bins;
+        results.T2Histogram = amplitudes;
     }
 
     /// <summary>
@@ -778,6 +740,17 @@ uint xorshift(uint state) {
     return state;
 }
 
+// Wang hash: decorrelates the linear (seed, walker, step) tuple before it feeds
+// the xorshift stream, so neighbouring walkers/steps don't produce correlated walks.
+uint wang_hash(uint s) {
+    s = (s ^ 61u) ^ (s >> 16);
+    s *= 9u;
+    s = s ^ (s >> 4);
+    s *= 0x27d4eb2du;
+    s = s ^ (s >> 15);
+    return s;
+}
+
 uchar getLabelValue(
     __global const uchar* labelVolume,
     int x, int y, int z,
@@ -824,68 +797,82 @@ __kernel void randomWalkStep(
     const int width,
     const int height,
     const int depth,
-    const int stepSize,
-    const float timeStepSec,
+    const int numHops,
+    const float hopTimeSec,
     const float voxelSizeUm,
     const uchar poreMaterialID,
     const uint randomSeed,
     const int currentStep)
 {
     int walkerId = get_global_id(0);
-    
+
     if (walkerId >= numWalkers || walkerActive[walkerId] == 0) {
         return;
     }
-    
-    uint rngState = randomSeed + walkerId * 7919 + currentStep * 104729;
-    
+
+    uint rngState = wang_hash(randomSeed ^ ((uint)walkerId * 2654435761u) ^ ((uint)currentStep * 40503u));
+    if (rngState == 0u) rngState = 1u;
+
     int x = (int)(walkerPositionsX[walkerId] + 0.5f);
     int y = (int)(walkerPositionsY[walkerId] + 0.5f);
     int z = (int)(walkerPositionsZ[walkerId] + 0.5f);
-    
-    rngState = xorshift(rngState);
-    int direction = rngState % 6;
-    
-    int newX = x;
-    int newY = y;
-    int newZ = z;
-    
-    switch(direction) {
-        case 0: newX += stepSize; break;
-        case 1: newX -= stepSize; break;
-        case 2: newY += stepSize; break;
-        case 3: newY -= stepSize; break;
-        case 4: newZ += stepSize; break;
-        case 5: newZ -= stepSize; break;
-    }
-    
-    newX = clamp(newX, 0, width - 1);
-    newY = clamp(newY, 0, height - 1);
-    newZ = clamp(newZ, 0, depth - 1);
-    
-    uchar materialID = getLabelValue(labelVolume, newX, newY, newZ, width, height, depth);
-    
-    if (materialID == poreMaterialID) {
-        walkerPositionsX[walkerId] = (float)newX;
-        walkerPositionsY[walkerId] = (float)newY;
-        walkerPositionsZ[walkerId] = (float)newZ;
-    } 
-    else {
-        float surfaceRelaxivity = materialRelaxivities[materialID];
-        float relaxationRate = surfaceRelaxivity * timeStepSec / voxelSizeUm;
-        float relaxationFactor = exp(-relaxationRate);
-        
-        float mag = walkerMagnetization[walkerId] * relaxationFactor;
-        walkerMagnetization[walkerId] = mag;
-        
-        if (mag < 0.001f) {
-            walkerActive[walkerId] = 0;
+
+    float mag = walkerMagnetization[walkerId];
+    bool active = true;
+
+    // One-voxel hops: each hop lasts hopTimeSec = a*a/(6D), which keeps the effective
+    // diffusion coefficient exact and prevents tunnelling through matrix walls.
+    for (int h = 0; h < numHops; h++) {
+        rngState = xorshift(rngState);
+        int direction = rngState % 6;
+
+        int newX = x;
+        int newY = y;
+        int newZ = z;
+
+        switch(direction) {
+            case 0: newX += 1; break;
+            case 1: newX -= 1; break;
+            case 2: newY += 1; break;
+            case 3: newY -= 1; break;
+            case 4: newZ += 1; break;
+            case 5: newZ -= 1; break;
+        }
+
+        newX = clamp(newX, 0, width - 1);
+        newY = clamp(newY, 0, height - 1);
+        newZ = clamp(newZ, 0, depth - 1);
+
+        uchar materialID = getLabelValue(labelVolume, newX, newY, newZ, width, height, depth);
+
+        if (materialID == poreMaterialID) {
+            x = newX;
+            y = newY;
+            z = newZ;
+        }
+        else {
+            // Surface relaxation for the physical duration of one hop
+            float surfaceRelaxivity = materialRelaxivities[materialID];
+            mag *= exp(-surfaceRelaxivity * hopTimeSec / voxelSizeUm);
+
+            if (mag < 0.001f) {
+                active = false;
+                break;
+            }
         }
     }
-    
-    if (walkerActive[walkerId] != 0) {
-        // FIXED: Use OpenCL 1.2 compatible atomic float addition
-        atomic_add_float(&stepMagnetization[0], walkerMagnetization[walkerId]);
+
+    walkerPositionsX[walkerId] = (float)x;
+    walkerPositionsY[walkerId] = (float)y;
+    walkerPositionsZ[walkerId] = (float)z;
+    walkerMagnetization[walkerId] = mag;
+
+    if (!active) {
+        walkerActive[walkerId] = 0;
+    }
+    else {
+        // OpenCL 1.2 compatible atomic float addition
+        atomic_add_float(&stepMagnetization[0], mag);
     }
 }
 
@@ -914,9 +901,10 @@ __kernel void initializeWalkers(
     const int zMax)
 {
     int walkerId = get_global_id(0);
-    
-    uint rngState = randomSeed + walkerId * 7919;
-    
+
+    uint rngState = wang_hash(randomSeed ^ ((uint)walkerId * 2654435761u));
+    if (rngState == 0u) rngState = 1u;
+
     int attempts = 0;
     bool found = false;
     

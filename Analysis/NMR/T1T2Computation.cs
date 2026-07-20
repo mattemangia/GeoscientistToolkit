@@ -221,9 +221,9 @@ public static class T1T2Computation
         }
 
         // Labels
-        DrawTextInBuffer(buffer, width, width / 2 - 100, 50, "T1-T2 Correlation Map", 255, 255, 255);
-        DrawTextInBuffer(buffer, width, width / 2 - 30, height - 80, "T2 (ms)", 255, 255, 255);
-        DrawTextInBuffer(buffer, width, 40, height / 2, "T1 (ms)", 255, 255, 255);
+        DrawTextInBuffer(buffer, width, width / 2 - 100, 50, "T1-T2 Correlation Map (estimated)", 255, 255, 255, 2);
+        DrawTextInBuffer(buffer, width, width / 2 - 30, height - 80, "T2 (ms)", 255, 255, 255, 2);
+        DrawTextInBuffer(buffer, width, 40, height / 2, "T1 (ms)", 255, 255, 255, 2);
     }
 
     private static (byte r, byte g, byte b) GetHotColor(double value)
@@ -303,7 +303,12 @@ public static class T1T2Computation
         buffer[index + 3] = 255;
     }
 
-    private static void DrawTextInBuffer(byte[] buffer, int width, int x, int y, string text, byte r, byte g, byte b)
+    /// <summary>
+    ///     Draws text into an RGBA buffer using the built-in 5x7 bitmap font.
+    ///     Shared with NMRAnalysisTool for PNG exports.
+    /// </summary>
+    public static void DrawTextInBuffer(byte[] buffer, int width, int x, int y, string text, byte r, byte g, byte b,
+        int scale = 1)
     {
         const int charWidth = 6;
         const int charHeight = 8;
@@ -311,7 +316,7 @@ public static class T1T2Computation
         for (var i = 0; i < text.Length; i++)
         {
             var ch = text[i];
-            var charX = x + i * charWidth;
+            var charX = x + i * charWidth * scale;
 
             // Get bitmap for character
             var bitmap = GetCharBitmap(ch);
@@ -321,8 +326,11 @@ public static class T1T2Computation
                 byte row = bitmap[dy];
                 for (var dx = 0; dx < charWidth - 1; dx++)
                 {
-                    if ((row & (0x80 >> dx)) != 0)
-                        SetPixel(buffer, width, charX + dx, y + dy, r, g, b);
+                    if ((row & (0x80 >> dx)) == 0) continue;
+
+                    for (var sy = 0; sy < scale; sy++)
+                    for (var sx = 0; sx < scale; sx++)
+                        SetPixel(buffer, width, charX + dx * scale + sx, y + dy * scale + sy, r, g, b);
                 }
             }
         }

@@ -1783,7 +1783,8 @@ public class PNMViewer : IDatasetViewer
     {
         ImGui.TextDisabled(label);
         ImGui.SameLine();
-        ImGui.Text(value);
+        // TextUnformatted: values may carry '%' (e.g. ":P" formats), which ImGui.Text parses as printf
+        ImGui.TextUnformatted(value);
     }
 
     /// <summary> Renders a quantity, or an em dash when the analysis producing it has not been run. </summary>
@@ -1792,7 +1793,7 @@ public class PNMViewer : IDatasetViewer
         ImGui.TextDisabled(label);
         ImGui.SameLine();
         if (value > 0)
-            ImGui.Text($"{value.ToString(format)}{unit}");
+            ImGui.TextUnformatted($"{value.ToString(format)}{unit}");
         else
             ImGui.TextDisabled("—");
     }

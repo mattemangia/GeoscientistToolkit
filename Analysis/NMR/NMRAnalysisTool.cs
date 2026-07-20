@@ -17,12 +17,26 @@ namespace GAIA.Analysis.NMR;
 
 public class NMRAnalysisTool : IDatasetTools
 {
+    private enum AdvancedExport
+    {
+        PeakFitting,
+        DiffusionResults,
+        CalibrationReport,
+        LabCsvTemplate
+    }
+
     private readonly NMRSimulationConfig _config = new();
     private readonly ImGuiExportFileDialog _exportDialog = new("NMRExportDialog", "Export NMR Data");
 
+    // Advanced analysis dialogs
+    private readonly ImGuiExportFileDialog _advancedExportDialog = new("NMRAdvExportDialog", "Export Analysis Data");
+    private readonly ImGuiFileDialog _labImportDialog = new("NMRLabImportDialog", FileDialogType.OpenFile,
+        "Import Lab NMR Data (CSV)");
+    private readonly DiffusionEditing.DiffusionSequenceConfig _diffusionConfig = new();
+
     // GPU support
     private readonly bool _gpuAvailable;
-    private readonly Dictionary<byte, bool> _materialExpanded = new();
+    private AdvancedExport _advancedExportKind;
     private LabDataCalibration.CalibrationResults _calibrationResults;
     private CancellationTokenSource _cancellationSource;
 
@@ -32,6 +46,7 @@ public class NMRAnalysisTool : IDatasetTools
     private DiffusionEditing.DiffusionResults _diffusionResults;
     private bool _isSimulating;
     private LabDataCalibration.LabNMRData _labData;
+    private string _labDataStatus = "";
 
     private MultiComponentFitting.FittingResults _peakFittingResults;
     private Material _selectedPoreMaterial;
@@ -50,6 +65,11 @@ public class NMRAnalysisTool : IDatasetTools
     {
         _exportDialog.SetExtensions(
             (".png", "PNG Image"),
+            (".csv", "CSV Data"),
+            (".txt", "Text Report")
+        );
+
+        _advancedExportDialog.SetExtensions(
             (".csv", "CSV Data"),
             (".txt", "Text Report")
         );
@@ -89,6 +109,9 @@ public class NMRAnalysisTool : IDatasetTools
         {
             _currentDataset = ctDataset;
             _selectedPoreMaterial = null;
+            _peakFittingResults = null;
+            _diffusionResults = null;
+            _calibrationResults = null;
             InitializeDefaultConfig(ctDataset);
         }
 
@@ -106,8 +129,10 @@ public class NMRAnalysisTool : IDatasetTools
             DrawResultsPanel();
         }
 
-        // Handle export dialog
+        // Handle dialogs
         if (_exportDialog.Submit()) HandleExport(_exportDialog.SelectedPath);
+        if (_advancedExportDialog.Submit()) HandleAdvancedExport(_advancedExportDialog.SelectedPath);
+        if (_labImportDialog.Submit()) ImportLabData(_labImportDialog.SelectedPath);
     }
 
     private void InitializeDefaultConfig(CtImageStackDataset dataset)
@@ -420,8 +445,15 @@ public class NMRAnalysisTool : IDatasetTools
         else
         {
             var estimatedTime = EstimateComputationTime();
-            var method = _config.UseOpenCL && _gpuAvailable ? "GPU (OpenCL)" : "CPU (SIMD)";
+            var method = _config.UseOpenCL && _gpuAvailable ? "GPU (OpenCL)" : "CPU (Parallel)";
             ImGui.TextDisabled($"Method: {method} | Estimated time: {estimatedTime:F1}s");
+
+            var simulatedMs = _config.NumberOfSteps * _config.TimeStepMs;
+            if (_config.T2MaxMs > simulatedMs)
+                ImGui.TextColored(new Vector4(1f, 0.75f, 0.2f, 1f),
+                    $"Warning: simulated decay spans {simulatedMs:F1} ms but T2 Max is {_config.T2MaxMs:F0} ms.\n" +
+                    "T2 components longer than the simulated time cannot be resolved.\n" +
+                    "Increase Time Steps / Time Step, or reduce T2 Max.");
 
             if (ImGui.Button("Run NMR Simulation", new Vector2(-1, 0))) _ = RunSimulationAsync();
         }
@@ -443,6 +475,8 @@ public class NMRAnalysisTool : IDatasetTools
             ImGui.Text($"Computation Time: {results.ComputationTime.TotalSeconds:F2}s");
             ImGui.Text($"Method: {results.ComputationMethod}");
             ImGui.Text($"Walkers: {results.NumberOfWalkers:N0}");
+            if (results.TotalPorosity > 0)
+                ImGui.TextUnformatted($"Total Porosity: {results.TotalPorosity * 100:F2}% (pore voxels / volume)");
             ImGui.Separator();
             ImGui.Text($"Mean T2: {results.MeanT2:F2} ms");
             ImGui.Text($"Geometric Mean T2: {results.GeometricMeanT2:F2} ms");
@@ -471,7 +505,7 @@ public class NMRAnalysisTool : IDatasetTools
         ImGui.SeparatorText("Visualization");
 
         var vizOptions = results.HasT1T2Data
-            ? new[] { "Decay Curve", "T2 Distribution", "Pore Size Distribution", "T1-T2 Map" }
+            ? new[] { "Decay Curve", "T2 Distribution", "Pore Size Distribution", "T1-T2 Map (estimated)" }
             : new[] { "Decay Curve", "T2 Distribution", "Pore Size Distribution" };
 
         ImGui.SetNextItemWidth(-1);
@@ -500,8 +534,237 @@ public class NMRAnalysisTool : IDatasetTools
 
         ImGui.Spacing();
 
+        // Advanced analysis (peak fitting, lab calibration, diffusion editing)
+        DrawAdvancedAnalysis();
+
+        ImGui.Spacing();
+
         // Export controls
         DrawExportControls();
+    }
+
+    private void DrawAdvancedAnalysis()
+    {
+        if (!ImGui.CollapsingHeader("Advanced Analysis")) return;
+
+        var results = _currentDataset.NmrResults;
+
+        // --- Multi-component peak fitting ---
+        ImGui.SeparatorText("T2 Peak Fitting");
+        ImGui.TextWrapped("Decomposes the T2 spectrum into Gaussian components (pore populations).");
+        if (ImGui.Button("Fit T2 Components", new Vector2(-1, 0)))
+            try
+            {
+                _peakFittingResults = MultiComponentFitting.FitMultipleComponents(
+                    results.T2HistogramBins, results.T2Histogram);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[NMRAnalysisTool] Peak fitting failed: {ex.Message}");
+            }
+
+        if (_peakFittingResults != null)
+        {
+            ImGui.TextUnformatted(
+                $"Components: {_peakFittingResults.Peaks.Count} | R2 = {_peakFittingResults.RSquared:F4} | RMSE = {_peakFittingResults.RMSE:F5}");
+
+            if (_peakFittingResults.Peaks.Count > 0 &&
+                ImGui.BeginTable("##PeakTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            {
+                ImGui.TableSetupColumn("Component");
+                ImGui.TableSetupColumn("T2 (ms)");
+                ImGui.TableSetupColumn("Amplitude");
+                ImGui.TableSetupColumn("Area fraction");
+                ImGui.TableHeadersRow();
+
+                foreach (var peak in _peakFittingResults.Peaks.OrderBy(p => p.Center))
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted(peak.Label ?? "-");
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted($"{peak.Center:F2}");
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted($"{peak.Amplitude:F4}");
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted($"{peak.Area * 100:F1}%");
+                }
+
+                ImGui.EndTable();
+            }
+
+            if (ImGui.Button("Export Peak Fitting (CSV)", new Vector2(-1, 0)))
+            {
+                _advancedExportKind = AdvancedExport.PeakFitting;
+                _advancedExportDialog.Open("nmr_peak_fitting.csv");
+            }
+        }
+
+        ImGui.Spacing();
+
+        // --- Lab data calibration ---
+        ImGui.SeparatorText("Lab Data Calibration");
+        ImGui.TextWrapped("Compares the simulation with a measured NMR decay/T2 spectrum (CSV).");
+
+        if (ImGui.Button("Import Lab Data (CSV)", new Vector2(-1, 0)))
+            _labImportDialog.Open(null, new[] { ".csv" });
+
+        if (ImGui.Button("Save CSV Import Template", new Vector2(-1, 0)))
+        {
+            _advancedExportKind = AdvancedExport.LabCsvTemplate;
+            _advancedExportDialog.Open("nmr_lab_template.csv");
+        }
+
+        if (!string.IsNullOrEmpty(_labDataStatus)) ImGui.TextDisabled(_labDataStatus);
+
+        if (_labData != null)
+        {
+            if (ImGui.Button("Calibrate Against Lab Data", new Vector2(-1, 0)))
+                try
+                {
+                    _calibrationResults = LabDataCalibration.CalibrateWithLabData(results, _labData);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[NMRAnalysisTool] Calibration failed: {ex.Message}");
+                }
+
+            if (_calibrationResults != null)
+            {
+                ImGui.TextUnformatted($"Overall agreement: {_calibrationResults.OverallAgreement * 100:F1}%");
+                ImGui.TextUnformatted($"Decay correlation: {_calibrationResults.DecayCurveCorrelation:F3}");
+                ImGui.TextUnformatted($"T2 spectrum correlation: {_calibrationResults.T2DistributionCorrelation:F3}");
+                ImGui.TextUnformatted($"Suggested relaxivity scale: x{_calibrationResults.RelaxivityScaleFactor:F2}");
+
+                if (_calibrationResults.Recommendations != null)
+                    foreach (var recommendation in _calibrationResults.Recommendations)
+                        ImGui.TextWrapped($"- {recommendation.Replace("%", "%%")}");
+
+                if (ImGui.Button("Apply Suggested Relaxivity Scale", new Vector2(-1, 0)))
+                {
+                    foreach (var kvp in _config.MaterialRelaxivities)
+                        if (kvp.Key != _config.PoreMaterialID)
+                            kvp.Value.SurfaceRelaxivity *= _calibrationResults.RelaxivityScaleFactor;
+                    Logger.Log(
+                        $"[NMRAnalysisTool] Applied relaxivity scale factor {_calibrationResults.RelaxivityScaleFactor:F2}. Re-run the simulation.");
+                }
+
+                if (ImGui.Button("Export Calibration Report (TXT)", new Vector2(-1, 0)))
+                {
+                    _advancedExportKind = AdvancedExport.CalibrationReport;
+                    _advancedExportDialog.Open("nmr_calibration_report.txt");
+                }
+            }
+        }
+
+        ImGui.Spacing();
+
+        // --- Diffusion editing ---
+        ImGui.SeparatorText("Diffusion Editing");
+        ImGui.TextWrapped(
+            "Runs the simulation over several b-values to separate bound from free fluid (adds processing time).");
+
+        if (_isSimulating)
+        {
+            ImGui.TextDisabled("Simulation in progress...");
+        }
+        else if (ImGui.Button("Run Diffusion Sequence", new Vector2(-1, 0)))
+        {
+            _ = RunDiffusionSequenceAsync();
+        }
+
+        if (_diffusionResults != null)
+        {
+            ImGui.TextUnformatted($"Mean ADC: {_diffusionResults.MeanADC:E2} m2/s");
+            ImGui.TextUnformatted($"Free fluid: {_diffusionResults.FastDiffusingFraction * 100:F1}%");
+            ImGui.TextUnformatted($"Bound fluid: {_diffusionResults.SlowDiffusingFraction * 100:F1}%");
+
+            if (ImGui.Button("Export Diffusion Results (CSV)", new Vector2(-1, 0)))
+            {
+                _advancedExportKind = AdvancedExport.DiffusionResults;
+                _advancedExportDialog.Open("nmr_diffusion_editing.csv");
+            }
+        }
+    }
+
+    private async Task RunDiffusionSequenceAsync()
+    {
+        _isSimulating = true;
+        _simulationStatus = "Running diffusion editing sequence...";
+        _simulationProgress = 0f;
+
+        try
+        {
+            var progress = new Progress<(float, string)>(update =>
+            {
+                _simulationProgress = update.Item1;
+                _simulationStatus = update.Item2;
+            });
+
+            _diffusionResults = await DiffusionEditing.RunDiffusionSequenceAsync(
+                _currentDataset, _config, _diffusionConfig, progress);
+
+            _simulationStatus = "Diffusion editing completed.";
+        }
+        catch (Exception ex)
+        {
+            _simulationStatus = $"Diffusion editing failed: {ex.Message}";
+            Logger.LogError($"[NMRAnalysisTool] Diffusion editing error: {ex}");
+        }
+        finally
+        {
+            _isSimulating = false;
+        }
+    }
+
+    private void ImportLabData(string filePath)
+    {
+        try
+        {
+            _labData = LabDataCalibration.ImportFromCSV(filePath);
+            _calibrationResults = null;
+            _labDataStatus = _labData != null
+                ? $"Loaded: {_labData.SampleName ?? Path.GetFileName(filePath)}"
+                : "Import returned no data. Check the CSV format (use the template).";
+        }
+        catch (Exception ex)
+        {
+            _labData = null;
+            _labDataStatus = $"Import failed: {ex.Message}";
+            Logger.LogError($"[NMRAnalysisTool] Lab data import failed: {ex.Message}");
+        }
+    }
+
+    private void HandleAdvancedExport(string filePath)
+    {
+        try
+        {
+            switch (_advancedExportKind)
+            {
+                case AdvancedExport.PeakFitting:
+                    if (_peakFittingResults != null && _currentDataset.NmrResults?.T2HistogramBins != null)
+                        MultiComponentFitting.ExportFittingResults(_peakFittingResults,
+                            _currentDataset.NmrResults.T2HistogramBins, filePath);
+                    break;
+                case AdvancedExport.DiffusionResults:
+                    if (_diffusionResults != null)
+                        DiffusionEditing.ExportDiffusionResults(_diffusionResults, filePath);
+                    break;
+                case AdvancedExport.CalibrationReport:
+                    if (_calibrationResults != null)
+                        LabDataCalibration.ExportCalibrationReport(_calibrationResults, filePath);
+                    break;
+                case AdvancedExport.LabCsvTemplate:
+                    LabDataCalibration.CreateImportTemplate(filePath);
+                    break;
+            }
+
+            Logger.Log($"[NMRAnalysisTool] Exported to: {filePath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[NMRAnalysisTool] Export failed: {ex.Message}");
+        }
     }
 
     private void DrawDecayCurve(Vector2 size)
@@ -600,6 +863,7 @@ public class NMRAnalysisTool : IDatasetTools
     private void DrawT1T2Map(Vector2 size)
     {
         var results = _currentDataset.NmrResults;
+        ImGui.TextDisabled($"Estimated from the T2 spectrum via T1 = {_config.T1T2Ratio:F1} x T2 (not simulated).");
         if (ImGui.BeginChild("##T1T2Plot", size, ImGuiChildFlags.Border))
         {
             var drawList = ImGui.GetWindowDrawList();
@@ -1005,6 +1269,8 @@ public class NMRAnalysisTool : IDatasetTools
 
         if (ImGui.Button("Export All Data (CSV)", new Vector2(-1, 0))) _exportDialog.Open("nmr_results.csv");
 
+        if (ImGui.Button("Export Report (TXT)", new Vector2(-1, 0))) _exportDialog.Open("nmr_report.txt");
+
         if (ImGui.Button("Import as Table Dataset", new Vector2(-1, 0))) ImportAsTableDataset();
     }
 
@@ -1047,14 +1313,14 @@ public class NMRAnalysisTool : IDatasetTools
                 Action<Exception> onError = ex => tcs.TrySetException(ex);
 
                 using var simulation = new NMRSimulationOpenCL(_currentDataset, _config);
-                simulation.RunSimulationAsync(progress, onSuccess, onError);
+                simulation.RunSimulationAsync(progress, onSuccess, onError, _cancellationSource.Token);
 
                 results = await tcs.Task;
             }
             else
             {
                 var simulation = new NMRSimulation(_currentDataset, _config);
-                results = await simulation.RunSimulationAsync(progress);
+                results = await simulation.RunSimulationAsync(progress, _cancellationSource.Token);
             }
 
             _currentDataset.NmrResults = results;
@@ -1184,9 +1450,9 @@ public class NMRAnalysisTool : IDatasetTools
             DrawLineInBuffer(buffer, width, x1, y1, x2, y2, 51, 204, 51);
         }
 
-        DrawTextInBuffer(buffer, width, width / 2 - 100, 50, "NMR Decay Curve", 255, 255, 255);
-        DrawTextInBuffer(buffer, width, width / 2 - 50, height - 80, "Time (ms)", 255, 255, 255);
-        DrawTextInBuffer(buffer, width, 40, height / 2, "Magnetization", 255, 255, 255);
+        DrawTextInBuffer(buffer, width, width / 2 - 100, 50, "NMR Decay Curve", 30, 30, 30);
+        DrawTextInBuffer(buffer, width, width / 2 - 50, height - 80, "Time (ms)", 30, 30, 30);
+        DrawTextInBuffer(buffer, width, 40, height / 2, "Magnetization", 30, 30, 30);
     }
 
     private void RenderT2DistributionToBuffer(byte[] buffer, int width, int height)
@@ -1217,9 +1483,9 @@ public class NMRAnalysisTool : IDatasetTools
                 230);
         }
 
-        DrawTextInBuffer(buffer, width, width / 2 - 100, 50, "T2 Distribution", 255, 255, 255);
-        DrawTextInBuffer(buffer, width, width / 2 - 50, height - 80, "T2 (ms)", 255, 255, 255);
-        DrawTextInBuffer(buffer, width, 40, height / 2, "Amplitude", 255, 255, 255);
+        DrawTextInBuffer(buffer, width, width / 2 - 100, 50, "T2 Distribution", 30, 30, 30);
+        DrawTextInBuffer(buffer, width, width / 2 - 50, height - 80, "T2 (ms)", 30, 30, 30);
+        DrawTextInBuffer(buffer, width, 40, height / 2, "Amplitude", 30, 30, 30);
     }
 
     private void RenderPoreSizeDistributionToBuffer(byte[] buffer, int width, int height)
@@ -1250,9 +1516,9 @@ public class NMRAnalysisTool : IDatasetTools
                 128, 51);
         }
 
-        DrawTextInBuffer(buffer, width, width / 2 - 150, 50, "Pore Size Distribution", 255, 255, 255);
-        DrawTextInBuffer(buffer, width, width / 2 - 80, height - 80, "Pore Radius (μm)", 255, 255, 255);
-        DrawTextInBuffer(buffer, width, 40, height / 2, "Frequency", 255, 255, 255);
+        DrawTextInBuffer(buffer, width, width / 2 - 150, 50, "Pore Size Distribution", 30, 30, 30);
+        DrawTextInBuffer(buffer, width, width / 2 - 80, height - 80, "Pore Radius (um)", 30, 30, 30);
+        DrawTextInBuffer(buffer, width, 40, height / 2, "Frequency", 30, 30, 30);
     }
 
     private void DrawLineInBuffer(byte[] buffer, int width, int x0, int y0, int x1, int y1, byte r, byte g, byte b)
@@ -1291,10 +1557,10 @@ public class NMRAnalysisTool : IDatasetTools
             SetPixel(buffer, width, x + dx, y + dy, r, g, b);
     }
 
-    private void DrawTextInBuffer(byte[] buffer, int width, int x, int y, string text, byte r, byte g, byte b)
+    private static void DrawTextInBuffer(byte[] buffer, int width, int x, int y, string text, byte r, byte g, byte b)
     {
-        var textWidth = text.Length * 10;
-        DrawFilledRectInBuffer(buffer, width, x, y, textWidth, 20, r, g, b);
+        // Shared 5x7 bitmap font (scale 2 for 1080p exports)
+        T1T2Computation.DrawTextInBuffer(buffer, width, x, y, text, r, g, b, 2);
     }
 
     private void SetPixel(byte[] buffer, int width, int x, int y, byte r, byte g, byte b)
@@ -1372,6 +1638,8 @@ public class NMRAnalysisTool : IDatasetTools
         sb.AppendLine();
         sb.AppendLine("RESULTS");
         sb.AppendLine("-------");
+        if (results.TotalPorosity > 0)
+            sb.AppendLine($"Total Porosity: {results.TotalPorosity * 100:F2}% (pore voxels / total volume)");
         sb.AppendLine($"Mean T2: {results.MeanT2:F2} ms");
         sb.AppendLine($"Geometric Mean T2: {results.GeometricMeanT2:F2} ms");
         sb.AppendLine($"Peak T2: {results.T2PeakValue:F2} ms");
@@ -1398,12 +1666,12 @@ public class NMRAnalysisTool : IDatasetTools
         if (results.HasT1T2Data)
         {
             sb.AppendLine();
-            sb.AppendLine("T1-T2 CORRELATION");
-            sb.AppendLine("-----------------");
+            sb.AppendLine("T1-T2 CORRELATION (ESTIMATED)");
+            sb.AppendLine("-----------------------------");
             sb.AppendLine($"T1/T2 Ratio: {_config.T1T2Ratio:F2}");
             sb.AppendLine($"T1 Range: {results.T1HistogramBins[0]:F2} - {results.T1HistogramBins[^1]:F2} ms");
             sb.AppendLine($"T2 Range: {results.T2HistogramBins[0]:F2} - {results.T2HistogramBins[^1]:F2} ms");
-            sb.AppendLine("2D T1-T2 map computed successfully");
+            sb.AppendLine("Map estimated from the T2 spectrum via T1 = ratio x T2 (not independently simulated)");
         }
 
         sb.AppendLine();
