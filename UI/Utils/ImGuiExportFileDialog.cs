@@ -101,14 +101,28 @@ public class ImGuiExportFileDialog
         var selectionMade = false;
         if (IsOpen)
         {
-            // Increased window size to prevent scrollbars
-            ImGui.SetNextWindowSize(new Vector2(950, 650), ImGuiCond.FirstUseEver);
-            var center = ImGui.GetMainViewport().GetCenter();
-            ImGui.SetNextWindowPos(center, ImGuiCond.FirstUseEver, new Vector2(0.5f, 0.5f));
+            // Keep the dialog inside its host window. It must fit inside small pop-out panels and
+            // must never be draggable off the OS window: a window dragged out of a pop-out gets
+            // clipped, Begin() then returns false, and skipping End() corrupts ImGui's window
+            // stack (the 139/SIGSEGV crash). So we clamp the size/position AND always call End().
+            var viewport = ImGui.GetMainViewport();
+            var workPos = viewport.WorkPos;
+            var workSize = viewport.WorkSize;
 
-            if (ImGui.Begin(_title + "###" + _id, ref IsOpen,
-                    ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking))
+            ImGui.SetNextWindowSize(Vector2.Min(new Vector2(950, 650), workSize), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSizeConstraints(Vector2.Min(new Vector2(360, 320), workSize), workSize);
+            ImGui.SetNextWindowPos(workPos + workSize * 0.5f, ImGuiCond.FirstUseEver, new Vector2(0.5f, 0.5f));
+
+            var visible = ImGui.Begin(_title + "###" + _id, ref IsOpen,
+                ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoSavedSettings);
+            if (visible)
             {
+                // Pull the window back inside the host viewport if it was dragged past the edge.
+                var windowPos = ImGui.GetWindowPos();
+                var maxPos = Vector2.Max(workPos, workPos + workSize - ImGui.GetWindowSize());
+                var clampedPos = Vector2.Clamp(windowPos, workPos, maxPos);
+                if (clampedPos != windowPos) ImGui.SetWindowPos(clampedPos);
+
                 DrawPathNavigation();
 
                 // More accurate calculation for bottom controls height
@@ -142,9 +156,10 @@ public class ImGuiExportFileDialog
                 // Add small spacing before bottom controls
                 ImGui.Dummy(new Vector2(0, ImGui.GetStyle().ItemSpacing.Y));
                 DrawBottomControls(ref selectionMade);
-
-                ImGui.End();
             }
+
+            // Begin() must always be paired with End(), even when the window is not visible.
+            ImGui.End();
 
             // Draw popups (these can be outside since they're modal)
             if (_showCreateFolderPopup)
@@ -583,8 +598,33 @@ public class ImGuiExportFileDialog
     {
         ImGui.Separator();
 
-        // Create a child region to ensure consistent layout
-        var controlsHeight = ImGui.GetFrameHeightWithSpacing() * 4.5f;
+        // Folder-selection mode: with no extensions registered the caller only wants a directory,
+        // so there is no file-name field here — the caller supplies the file name separately and
+        // asking for it twice was the reported redundancy.
+        if (_extensionOptions.Count == 0)
+        {
+            ImGui.AlignTextToFramePadding();
+            ImGui.Text("Selected folder:");
+            ImGui.SameLine();
+            ImGui.TextWrapped(CurrentDirectory);
+
+            var folderButtonWidth = 120f;
+            var folderButtonsWidth = folderButtonWidth * 2 + ImGui.GetStyle().ItemSpacing.X;
+            ImGui.Dummy(new Vector2(Math.Max(0, ImGui.GetContentRegionAvail().X - folderButtonsWidth), 0));
+            ImGui.SameLine();
+
+            if (ImGui.Button("Select Folder", new Vector2(folderButtonWidth, 0)) &&
+                Directory.Exists(CurrentDirectory))
+            {
+                SelectedPath = CurrentDirectory;
+                selectionMade = true;
+                IsOpen = false;
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel", new Vector2(folderButtonWidth, 0))) IsOpen = false;
+            return;
+        }
 
         // File name input row
         ImGui.AlignTextToFramePadding();

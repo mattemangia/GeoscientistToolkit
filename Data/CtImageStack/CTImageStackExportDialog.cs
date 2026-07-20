@@ -107,8 +107,11 @@ public class CtImageStackExportDialog
         {
             DrawExportSettings();
             DrawButtons();
-            ImGui.End();
         }
+
+        // Begin() must always be paired with End(), even when the window is not visible;
+        // skipping it when a clipped/dragged-out window returns false corrupts the window stack.
+        ImGui.End();
 
         // Handle folder selection dialog
         if (_folderDialog.Submit()) _selectedFolder = _folderDialog.CurrentDirectory;
