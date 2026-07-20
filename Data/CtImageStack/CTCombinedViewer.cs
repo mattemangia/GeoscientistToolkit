@@ -788,17 +788,22 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         var viewWidth = (availableSize.X - 2) / 2;
         var viewHeight = (availableSize.Y - 2) / 2;
 
-        ImGui.BeginChild("XY_View", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
+        // Slice panels size their image to fit; suppress the child scrollbar so a sub-pixel
+        // content overflow can't spawn a useless vertical bar, and keep the wheel for zoom.
+        const ImGuiWindowFlags sliceChildFlags =
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+
+        ImGui.BeginChild("XY_View", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border, sliceChildFlags);
         DrawSliceView(0, "XY (Axial)", ref _zoomXY, ref _panXY, ref _needsUpdateXY, ref _textureXY);
         ImGui.EndChild();
 
         ImGui.SameLine(0, 2);
 
-        ImGui.BeginChild("XZ_View", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
+        ImGui.BeginChild("XZ_View", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border, sliceChildFlags);
         DrawSliceView(1, "XZ (Coronal)", ref _zoomXZ, ref _panXZ, ref _needsUpdateXZ, ref _textureXZ);
         ImGui.EndChild();
 
-        ImGui.BeginChild("YZ_View", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
+        ImGui.BeginChild("YZ_View", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border, sliceChildFlags);
         DrawSliceView(2, "YZ (Sagittal)", ref _zoomYZ, ref _panYZ, ref _needsUpdateYZ, ref _textureYZ);
         ImGui.EndChild();
 
@@ -858,38 +863,41 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         var viewWidth = totalWidth / 3;
         var viewHeight = availableSize.Y;
 
+        const ImGuiWindowFlags sliceChildFlags =
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+
         if (viewWidth < 200)
         {
             viewWidth = availableSize.X;
             viewHeight = (availableSize.Y - spacing * 2) / 3;
 
-            ImGui.BeginChild("XY_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
+            ImGui.BeginChild("XY_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border, sliceChildFlags);
             DrawSliceView(0, "XY (Axial)", ref _zoomXY, ref _panXY, ref _needsUpdateXY, ref _textureXY);
             ImGui.EndChild();
 
             ImGui.Dummy(new Vector2(0, spacing));
 
-            ImGui.BeginChild("XZ_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
+            ImGui.BeginChild("XZ_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border, sliceChildFlags);
             DrawSliceView(1, "XZ (Coronal)", ref _zoomXZ, ref _panXZ, ref _needsUpdateXZ, ref _textureXZ);
             ImGui.EndChild();
 
             ImGui.Dummy(new Vector2(0, spacing));
 
-            ImGui.BeginChild("YZ_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
+            ImGui.BeginChild("YZ_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border, sliceChildFlags);
             DrawSliceView(2, "YZ (Sagittal)", ref _zoomYZ, ref _panYZ, ref _needsUpdateYZ, ref _textureYZ);
             ImGui.EndChild();
         }
         else
         {
-            ImGui.BeginChild("XY_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
+            ImGui.BeginChild("XY_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border, sliceChildFlags);
             DrawSliceView(0, "XY (Axial)", ref _zoomXY, ref _panXY, ref _needsUpdateXY, ref _textureXY);
             ImGui.EndChild();
             ImGui.SameLine(0, spacing);
-            ImGui.BeginChild("XZ_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
+            ImGui.BeginChild("XZ_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border, sliceChildFlags);
             DrawSliceView(1, "XZ (Coronal)", ref _zoomXZ, ref _panXZ, ref _needsUpdateXZ, ref _textureXZ);
             ImGui.EndChild();
             ImGui.SameLine(0, spacing);
-            ImGui.BeginChild("YZ_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
+            ImGui.BeginChild("YZ_SliceView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border, sliceChildFlags);
             DrawSliceView(2, "YZ (Sagittal)", ref _zoomYZ, ref _panYZ, ref _needsUpdateYZ, ref _textureYZ);
             ImGui.EndChild();
         }

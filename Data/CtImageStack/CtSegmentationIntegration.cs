@@ -307,44 +307,57 @@ public class CtSegmentationIntegration : IDisposable
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(tooltip);
     }
 
+    // A centred square icon area (~58% of the button) with a local fraction-to-pixel mapper, so
+    // every glyph is drawn on the same crisp, padded grid regardless of the button size.
+    private static (Func<float, float, Vector2> at, float extent) IconGrid(Vector2 p, Vector2 s)
+    {
+        var extent = MathF.Min(s.X, s.Y) * 0.58f;
+        var origin = p + (s - new Vector2(extent)) * 0.5f;
+        return ((fx, fy) => origin + new Vector2(fx * extent, fy * extent), extent);
+    }
+
+    private static void Sparkle(ImDrawListPtr dl, Vector2 center, float radius, uint c)
+    {
+        var thickness = MathF.Max(1.2f, radius * 0.32f);
+        dl.AddLine(center - new Vector2(radius, 0), center + new Vector2(radius, 0), c, thickness);
+        dl.AddLine(center - new Vector2(0, radius), center + new Vector2(0, radius), c, thickness);
+    }
+
     private void DrawBrushIcon(ImDrawListPtr dl, Vector2 p, Vector2 s, uint c, bool a)
     {
-        var h1 = p + new Vector2(s.X * 0.3f, s.Y * 0.7f);
-        var h2 = p + new Vector2(s.X * 0.7f, s.Y * 0.3f);
-        dl.AddLine(h1, h2, c, 3f);
-        var hc = p + new Vector2(s.X * 0.25f, s.Y * 0.25f);
-        dl.AddRectFilled(hc, hc + new Vector2(s.X * 0.2f, s.Y * 0.4f), c);
+        var (at, e) = IconGrid(p, s);
+        var handle = MathF.Max(2f, e * 0.12f);
+        // Wooden handle, then a slightly thicker ferrule, then a splayed bristle tip.
+        dl.AddLine(at(0.88f, 0.10f), at(0.46f, 0.52f), c, handle);
+        dl.AddLine(at(0.52f, 0.44f), at(0.36f, 0.60f), c, handle * 1.5f);
+        dl.AddTriangleFilled(at(0.46f, 0.50f), at(0.10f, 0.72f), at(0.34f, 0.94f), c);
     }
 
     private void DrawLassoIcon(ImDrawListPtr dl, Vector2 p, Vector2 s, uint c, bool a)
     {
-        var points = new Vector2[]
-        {
-            p + new Vector2(s.X * 0.2f, s.Y * 0.2f),
-            p + new Vector2(s.X * 0.8f, s.Y * 0.3f),
-            p + new Vector2(s.X * 0.7f, s.Y * 0.8f),
-            p + new Vector2(s.X * 0.3f, s.Y * 0.7f)
-        };
-        dl.AddPolyline(ref points[0], points.Length, c, ImDrawFlags.Closed, 2f);
+        var (at, e) = IconGrid(p, s);
+        var thickness = MathF.Max(1.8f, e * 0.09f);
+        // A rope loop with a dangling tail — reads as a lasso rather than a plain quad.
+        dl.AddCircle(at(0.5f, 0.40f), e * 0.30f, c, 28, thickness);
+        dl.AddBezierQuadratic(at(0.50f, 0.70f), at(0.40f, 0.92f), at(0.66f, 0.96f), c, thickness, 16);
     }
 
     private void DrawWandIcon(ImDrawListPtr dl, Vector2 p, Vector2 s, uint c, bool a)
     {
-        var p1 = p + new Vector2(s.X * 0.2f, s.Y * 0.8f);
-        var p2 = p + new Vector2(s.X * 0.8f, s.Y * 0.2f);
-        dl.AddLine(p1, p2, c, 3f);
-        for (var i = 0; i < 5; i++)
-        {
-            var ang = i * (MathF.PI * 2 / 5f) - MathF.PI / 2;
-            var o = new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * s.X * 0.15f;
-            dl.AddLine(p2, p2 + o, c, 1.5f);
-        }
+        var (at, e) = IconGrid(p, s);
+        // Wand shaft with a bright tip star and two smaller sparkles.
+        dl.AddLine(at(0.18f, 0.88f), at(0.60f, 0.44f), c, MathF.Max(2f, e * 0.11f));
+        Sparkle(dl, at(0.68f, 0.34f), e * 0.17f, c);
+        Sparkle(dl, at(0.90f, 0.60f), e * 0.09f, c);
+        Sparkle(dl, at(0.86f, 0.14f), e * 0.08f, c);
     }
 
     private void DrawOffIcon(ImDrawListPtr dl, Vector2 p, Vector2 s, uint c, bool a)
     {
-        dl.AddLine(p + s * 0.2f, p + s * 0.8f, c, 2.5f);
-        dl.AddLine(p + new Vector2(s.X * 0.2f, s.Y * 0.8f), p + new Vector2(s.X * 0.8f, s.Y * 0.2f), c, 2.5f);
+        var (at, e) = IconGrid(p, s);
+        // Default arrow pointer: no active tool.
+        dl.AddTriangleFilled(at(0.20f, 0.10f), at(0.20f, 0.74f), at(0.60f, 0.44f), c);
+        dl.AddLine(at(0.42f, 0.52f), at(0.58f, 0.86f), c, MathF.Max(2.5f, e * 0.13f));
     }
 
     #endregion
