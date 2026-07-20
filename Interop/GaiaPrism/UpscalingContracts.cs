@@ -164,13 +164,19 @@ public sealed record PnmNetworkSummary
     public double? FormationFactor { get; init; }
     public double? BulkDiffusivitySquareMetresPerSecond { get; init; }
     public double? EffectiveDiffusivitySquareMetresPerSecond { get; init; }
+    /// <summary>Dual-scale (macro+micro) effective permeability for a Dual PNM, in millidarcy.
+    /// When present it takes precedence over the single-scale solves so upscaling cannot silently
+    /// drop the microporosity contribution. Null for ordinary single-scale networks.</summary>
+    public double? CombinedPermeabilityMilliDarcy { get; init; }
     public QualificationStatus Qualification { get; init; } = QualificationStatus.Raw;
     /// <summary>Optional artifact id of the full pore/throat network (GAIA PNM JSON) in the same package.</summary>
     public string? NetworkArtifactId { get; init; }
 
-    /// <summary>Highest-fidelity available permeability: lattice-Boltzmann, then Navier-Stokes, then Darcy network solve.</summary>
+    /// <summary>Highest-fidelity available permeability: dual-scale combined (if present), then
+    /// lattice-Boltzmann, then Navier-Stokes, then Darcy network solve.</summary>
     public double? PreferredPermeabilityMilliDarcy =>
-        LatticeBoltzmannPermeabilityMilliDarcy ?? NavierStokesPermeabilityMilliDarcy ?? DarcyPermeabilityMilliDarcy;
+        CombinedPermeabilityMilliDarcy ?? LatticeBoltzmannPermeabilityMilliDarcy
+            ?? NavierStokesPermeabilityMilliDarcy ?? DarcyPermeabilityMilliDarcy;
 }
 
 /// <summary>Serialization helpers for the upscaling payload artifacts.</summary>

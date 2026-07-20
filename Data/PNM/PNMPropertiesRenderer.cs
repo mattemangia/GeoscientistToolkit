@@ -15,6 +15,9 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
     {
         if (dataset is not PNMDataset pnm) return;
 
+        if (dataset is DualPNMDataset dual)
+            DrawDualPorosityProperties(dual);
+
         if (ImGui.CollapsingHeader("Pore Network Properties", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.Indent();
@@ -196,6 +199,52 @@ public class PNMPropertiesRenderer : IDatasetPropertiesRenderer
             ImGui.BulletText("τ²-Corrected: Divided by tortuosity squared");
             ImGui.Spacing();
             ImGui.TextWrapped("The corrected value accounts for the tortuous flow path through the pore network.");
+            ImGui.Unindent();
+        }
+    }
+
+    private static void DrawDualPorosityProperties(DualPNMDataset dual)
+    {
+        if (ImGui.CollapsingHeader("Dual Porosity (Macro + Micro)", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.Indent();
+
+            var coupling = dual.Coupling;
+            DrawProperty("Coupling Mode", coupling.CouplingMode.ToString());
+            DrawProperty("Micro-networks", $"{dual.MicroNetworks.Count:N0}");
+            DrawProperty("Micro-pores (total)", $"{dual.TotalMicroPoreCount:N0}");
+            DrawProperty("Micro-throats (total)", $"{dual.TotalMicroThroatCount:N0}");
+            DrawProperty("Macro-pores w/ micro-porosity", $"{dual.MacroPoresWithMicroporosity:N0}");
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // TotalMicroPorosity is a bulk fraction of the whole sample (micro-porous phase
+            // volume / total volume), as produced by CalculateCombinedProperties().
+            DrawProperty("Bulk micro-porosity fraction", $"{coupling.TotalMicroPorosity:F4}");
+            DrawProperty("Effective macro k", $"{coupling.EffectiveMacroPermeability:F3} mD");
+            DrawProperty("Effective micro k", $"{coupling.EffectiveMicroPermeability:F3} mD");
+            ImGui.PushID("CombinedK");
+            if (ImGui.BeginTable("##PNMPropertyRow", 2, ImGuiTableFlags.SizingStretchProp))
+            {
+                ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch, 0.48f);
+                ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch, 0.52f);
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.TextWrapped("Combined permeability:");
+                ImGui.TableSetColumnIndex(1);
+                ImGui.TextColored(new Vector4(0.5f, 1f, 0.5f, 1f), $"{coupling.CombinedPermeability:F3} mD");
+                ImGui.EndTable();
+            }
+            ImGui.PopID();
+
+            if (coupling.CombinedPermeability <= 0)
+            {
+                ImGui.TextDisabled("Combined properties not calculated yet.");
+                ImGui.TextDisabled("Use PNM Tools → Dual Porosity to compute.");
+            }
+
             ImGui.Unindent();
         }
     }

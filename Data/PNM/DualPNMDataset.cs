@@ -65,7 +65,12 @@ public enum DualPorosityCouplingMode
     Series,
 
     /// <summary>
-    /// Advanced coupling with explicit mass transfer between scales
+    /// Weighted-arithmetic approximation of dual-porosity behaviour. Despite the name, this mode
+    /// does not model explicit inter-porosity (matrix↔fracture) mass transfer: it returns the same
+    /// volume-fraction weighted arithmetic average as the corrected parallel bound. A full transfer
+    /// model would add a Warren-Root shape-factor transmissibility term (Warren &amp; Root 1963,
+    /// DOI 10.2118/426-pa); that term is intentionally not included in this approximation. The enum
+    /// value name is persisted as a string in project/DTO files and must not be renamed.
     /// </summary>
     MassTransfer
 }
@@ -142,7 +147,62 @@ public class DualPNMDataset : PNMDataset
     }
 
     /// <summary>
-    /// Calculate effective properties considering both scales
+    /// Bulk sample volume of the macro network (µm³): image dimensions × voxel size³.
+    /// Falls back to the summed macro pore volume when image dimensions are unavailable.
+    /// </summary>
+    public double MacroBulkVolume
+    {
+        get
+        {
+            double bulk = (double)ImageWidth * ImageHeight * ImageDepth * Math.Pow(VoxelSize, 3);
+            return bulk > 0 ? bulk : Pores.Sum(p => (double)p.VolumePhysical);
+        }
+    }
+
+    /// <summary>
+    /// Bulk volume of a micro-porous matrix phase (µm³). The SEM-derived MicroVolume is the micro
+    /// PORE volume; the phase (rock) it occupies is that pore volume divided by the local micro-
+    /// porosity. When the local porosity is unknown (≤0) we conservatively fall back to the pore
+    /// volume itself (i.e. treat the phase as fully porous).
+    /// </summary>
+    private static double MicroPhaseVolume(MicroPoreNetwork mn) =>
+        mn.MicroPorosity > 0f ? (double)mn.MicroVolume / mn.MicroPorosity : mn.MicroVolume;
+
+    /// <summary>
+    /// Volume-weighted geometric mean of micro-permeability across networks (mD), weighted by each
+    /// network's micro-phase bulk volume — the conventional estimator for spatially random media.
+    /// Networks with non-positive permeability or weight are skipped.
+    /// </summary>
+    private float VolumeWeightedGeometricMicroPermeability()
+    {
+        double sumW = 0, sumWlnK = 0;
+        foreach (var mn in MicroNetworks)
+        {
+            double w = MicroPhaseVolume(mn);
+            if (w <= 0 || mn.MicroPermeability <= 0f) continue;
+            sumW += w;
+            sumWlnK += w * Math.Log(mn.MicroPermeability);
+        }
+        if (sumW <= 0) return 0f;
+        return (float)Math.Exp(sumWlnK / sumW);
+    }
+
+    /// <summary>
+    /// Calculate effective properties considering both scales.
+    ///
+    /// Physics (see audit C2/C4/C5):
+    /// - f = micro-porous PHASE bulk fraction = Σ MicroPhaseVolume / MacroBulkVolume (NOT the
+    ///   pore-volume fraction). Effective-medium (Wiener) bounds weight by the bulk volume fraction
+    ///   of each conducting phase (Mavko, Mukerji &amp; Dvorkin, Rock Physics Handbook).
+    /// - Parallel (arithmetic / upper bound): k = (1-f)·k_macro + f·k_micro.
+    /// - Series (harmonic / lower bound):      1/k = (1-f)/k_macro + f/k_micro.
+    /// - MassTransfer: weighted-arithmetic approximation (see enum doc; no explicit transfer term).
+    /// - k_micro is the volume-weighted geometric mean across networks.
+    ///
+    /// Caveat: micro-networks exist only for macro-pores that received an SEM image, so f and the
+    /// bulk micro-porosity are estimated from that SAMPLE and may not be representative of the whole
+    /// specimen. Downstream consumers should treat them as screening priors until an REV analysis
+    /// confirms representativeness.
     /// </summary>
     public void CalculateCombinedProperties()
     {
@@ -150,57 +210,72 @@ public class DualPNMDataset : PNMDataset
         {
             Logger.LogWarning("No micro-networks defined. Combined properties will match macro-scale only.");
             Coupling.CombinedPermeability = DarcyPermeability;
+            Coupling.EffectiveMacroPermeability = DarcyPermeability;
+            Coupling.TotalMicroPorosity = 0f;
             return;
         }
 
-        // Calculate total micro-porosity
-        float totalMicroVolume = MicroNetworks.Sum(mn => mn.MicroVolume);
-        float totalMacroVolume = Pores.Sum(p => p.VolumePhysical);
-        Coupling.TotalMicroPorosity = totalMicroVolume / (totalMacroVolume + totalMicroVolume);
+        double bulkVolume = MacroBulkVolume;
 
-        // Calculate effective permeabilities based on coupling mode
+        // BULK micro-porosity fraction = micro pore volume / bulk volume, so that
+        // total porosity downstream is simply φ_macro + TotalMicroPorosity.
+        double totalMicroPoreVolume = MicroNetworks.Sum(mn => (double)mn.MicroVolume);
+        Coupling.TotalMicroPorosity = bulkVolume > 0
+            ? (float)Math.Clamp(totalMicroPoreVolume / bulkVolume, 0.0, 1.0)
+            : 0f;
+
+        // f = micro-porous PHASE bulk fraction (weight for the effective-medium bounds).
+        double totalMicroPhaseVolume = MicroNetworks.Sum(MicroPhaseVolume);
+        float f = bulkVolume > 0
+            ? (float)Math.Clamp(totalMicroPhaseVolume / bulkVolume, 0.0, 1.0)
+            : 0f;
+
+        Coupling.EffectiveMacroPermeability = DarcyPermeability;
+        Coupling.EffectiveMicroPermeability = VolumeWeightedGeometricMicroPermeability();
+        float kMacro = Coupling.EffectiveMacroPermeability;
+        float kMicro = Coupling.EffectiveMicroPermeability;
+
+        // Reference bounds for consistency check (independent of the selected mode).
+        float kParallel = (1f - f) * kMacro + f * kMicro;
+        float kSeries = kMicro > 0f
+            ? 1f / ((1f - f) / kMacro + f / kMicro)
+            : kMacro;
+
         switch (Coupling.CouplingMode)
         {
             case DualPorosityCouplingMode.Parallel:
-                // Parallel conductance: k_eff = k_macro + k_micro
-                Coupling.EffectiveMacroPermeability = DarcyPermeability;
-                Coupling.EffectiveMicroPermeability = MicroNetworks.Average(mn => mn.MicroPermeability);
-                Coupling.CombinedPermeability = Coupling.EffectiveMacroPermeability +
-                                               Coupling.EffectiveMicroPermeability * Coupling.TotalMicroPorosity;
+                // Parallel (arithmetic / Wiener upper bound): k = (1-f)·k_macro + f·k_micro.
+                Coupling.CombinedPermeability = kParallel;
                 break;
 
             case DualPorosityCouplingMode.Series:
-                // Series conductance: 1/k_eff = 1/k_macro + 1/k_micro
-                Coupling.EffectiveMacroPermeability = DarcyPermeability;
-                Coupling.EffectiveMicroPermeability = MicroNetworks.Average(mn => mn.MicroPermeability);
-
-                if (Coupling.EffectiveMicroPermeability > 0)
-                {
-                    Coupling.CombinedPermeability = 1.0f / (
-                        (1.0f - Coupling.TotalMicroPorosity) / Coupling.EffectiveMacroPermeability +
-                        Coupling.TotalMicroPorosity / Coupling.EffectiveMicroPermeability
-                    );
-                }
-                else
-                {
-                    Coupling.CombinedPermeability = Coupling.EffectiveMacroPermeability;
-                }
+                // Series (harmonic / Wiener lower bound): 1/k = (1-f)/k_macro + f/k_micro.
+                Coupling.CombinedPermeability = kSeries;
                 break;
 
             case DualPorosityCouplingMode.MassTransfer:
-                // For mass transfer mode, use weighted average
-                Coupling.EffectiveMacroPermeability = DarcyPermeability;
-                Coupling.EffectiveMicroPermeability = MicroNetworks.Average(mn => mn.MicroPermeability);
-                float alpha = Coupling.TotalMicroPorosity;
-                Coupling.CombinedPermeability = (1 - alpha) * Coupling.EffectiveMacroPermeability +
-                                               alpha * Coupling.EffectiveMicroPermeability;
+                // Weighted-arithmetic approximation (same form as corrected parallel). No explicit
+                // Warren-Root inter-porosity transfer term — see DualPorosityCouplingMode.MassTransfer.
+                Coupling.CombinedPermeability = kParallel;
                 break;
+        }
+
+        // Bound-consistency assertion: k_series <= k_combined <= k_parallel (within tolerance).
+        float lo = Math.Min(kSeries, kParallel);
+        float hi = Math.Max(kSeries, kParallel);
+        float tol = 1e-4f * Math.Max(1f, hi);
+        if (Coupling.CombinedPermeability < lo - tol || Coupling.CombinedPermeability > hi + tol)
+        {
+            Logger.LogWarning($"Dual PNM bound-consistency violated: combined k={Coupling.CombinedPermeability:F4} mD " +
+                              $"outside [{lo:F4}, {hi:F4}] mD (series/parallel bounds).");
         }
 
         Logger.Log($"Dual PNM Properties Calculated:");
         Logger.Log($"  Macro-permeability: {Coupling.EffectiveMacroPermeability:F3} mD");
-        Logger.Log($"  Micro-permeability: {Coupling.EffectiveMicroPermeability:F3} mD");
-        Logger.Log($"  Micro-porosity fraction: {Coupling.TotalMicroPorosity:F4}");
+        Logger.Log($"  Micro-permeability (vol-weighted geometric): {Coupling.EffectiveMicroPermeability:F3} mD");
+        Logger.Log($"  Micro-phase bulk fraction f: {f:F4}");
+        Logger.Log($"  Bulk micro-porosity fraction: {Coupling.TotalMicroPorosity:F4}");
+        Logger.Log($"  Bounds: k_series={kSeries:F3} mD <= k_combined <= k_parallel={kParallel:F3} mD");
         Logger.Log($"  Combined permeability ({Coupling.CouplingMode}): {Coupling.CombinedPermeability:F3} mD");
     }
 
@@ -208,7 +283,7 @@ public class DualPNMDataset : PNMDataset
     /// Creates a data transfer object (DTO) for serialization.
     /// Overrides base PNMDataset serialization to include dual PNM data.
     /// </summary>
-    public new object ToSerializableObject()
+    public override object ToSerializableObject()
     {
         return new DualPNMDatasetDTO
         {
@@ -505,9 +580,9 @@ public class DualPNMDataset : PNMDataset
 
         sb.AppendLine("DUAL POROSITY COUPLING:");
         sb.AppendLine($"  Coupling mode: {Coupling.CouplingMode}");
-        sb.AppendLine($"  Micro-porosity fraction: {Coupling.TotalMicroPorosity:F4}");
+        sb.AppendLine($"  Bulk micro-porosity fraction (Σ MicroVolume / bulk): {Coupling.TotalMicroPorosity:F4}");
         sb.AppendLine($"  Macro-permeability: {Coupling.EffectiveMacroPermeability:F3} mD");
-        sb.AppendLine($"  Micro-permeability: {Coupling.EffectiveMicroPermeability:F3} mD");
+        sb.AppendLine($"  Micro-permeability (vol-weighted geometric): {Coupling.EffectiveMicroPermeability:F3} mD");
         sb.AppendLine($"  Combined permeability: {Coupling.CombinedPermeability:F3} mD");
         sb.AppendLine();
 

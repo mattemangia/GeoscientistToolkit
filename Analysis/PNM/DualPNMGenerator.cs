@@ -828,10 +828,11 @@ public class DualPNMGeneratorTool
         ImGui.Spacing();
         ImGui.Separator();
 
-        ImGui.TextWrapped("Coupling mode determines how macro and micro permeabilities are combined:");
-        ImGui.BulletText("Parallel: k_eff = k_macro + α * k_micro (fastest flow)");
-        ImGui.BulletText("Series: 1/k_eff = (1-α)/k_macro + α/k_micro (slowest flow)");
-        ImGui.BulletText("Mass Transfer: Weighted average with mass exchange");
+        ImGui.TextWrapped("Coupling mode determines how macro and micro permeabilities are combined " +
+                          "(f = bulk micro-porosity fraction, the micro-porous phase volume over the total volume):");
+        ImGui.BulletText("Parallel: k_eff = (1-f)*k_macro + f*k_micro (fastest flow)");
+        ImGui.BulletText("Series: 1/k_eff = (1-f)/k_macro + f/k_micro (slowest flow)");
+        ImGui.BulletText("Mass Transfer: weighted blend with inter-scale mass exchange");
 
         ImGui.Spacing();
 
@@ -852,7 +853,7 @@ public class DualPNMGeneratorTool
             ImGui.Text("Results:");
             ImGui.Text($"Macro-permeability: {_dualPNM.Coupling.EffectiveMacroPermeability:F3} mD");
             ImGui.Text($"Micro-permeability: {_dualPNM.Coupling.EffectiveMicroPermeability:F3} mD");
-            ImGui.Text($"Micro-porosity fraction: {_dualPNM.Coupling.TotalMicroPorosity:F4}");
+            ImGui.Text($"Bulk micro-porosity fraction (f): {_dualPNM.Coupling.TotalMicroPorosity:F4}");
             ImGui.TextColored(new Vector4(0.2f, 0.8f, 0.2f, 1.0f),
                 $"Combined permeability: {_dualPNM.Coupling.CombinedPermeability:F3} mD");
 

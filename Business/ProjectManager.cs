@@ -763,6 +763,25 @@ public class ProjectManager
                 dataset = imgDataset;
                 break;
 
+            // DualPNMDatasetDTO derives from PNMDatasetDTO, so it must be matched first to avoid
+            // collapsing a dual network onto a plain macro-only PNM (silent micro-data loss).
+            case DualPNMDatasetDTO dualDto:
+            {
+                var dualDataset = new DualPNMDataset(dualDto.Name, dualDto.FilePath)
+                {
+                    IsMissing = !File.Exists(dualDto.FilePath)
+                };
+
+                dualDataset.ImportFromDTO(dualDto);
+
+                if (dualDataset.IsMissing)
+                    Logger.LogWarning(
+                        $"Source file not found for Dual PNM dataset: {dualDto.Name} at {dualDto.FilePath}. Data was restored from project file.");
+
+                dataset = dualDataset;
+                break;
+            }
+
             case PNMDatasetDTO pnmDto:
             {
                 var pnmDataset = new PNMDataset(pnmDto.Name, pnmDto.FilePath)

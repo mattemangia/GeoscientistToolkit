@@ -71,12 +71,11 @@ public static class DualPNMSimulations
                 // Full flow simulation on micro-network structure
                 microNet.MicroPermeability = EstimateMicroPermeability(microNet);
             }
-
-            dataset.Coupling.EffectiveMicroPermeability =
-                dataset.MicroNetworks.Average(mn => mn.MicroPermeability);
+            // Effective micro-permeability is computed as a volume-weighted geometric mean inside
+            // CalculateCombinedProperties() (see audit C5); no unweighted arithmetic average here.
         }
 
-        // Recalculate combined properties
+        // Recalculate combined properties (also sets Coupling.EffectiveMicroPermeability)
         dataset.CalculateCombinedProperties();
 
         Logger.Log($"Dual PNM permeability calculated:");

@@ -2,14 +2,132 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using GAIA.Analysis.Pnm;
+using GAIA.Data;
 using GAIA.Data.Pnm;
 using GAIA.Data.Loaders;
+using GAIA.Interop.GaiaPrism;
 using Xunit;
 
 namespace VerificationTests;
 
 public class DualPNMVerificationTests
 {
+    /// <summary>
+    /// Builds a deterministic dual network with a 10×10×10 voxel, 1 µm/voxel bulk (1000 µm³) and
+    /// two micro-networks whose micro-phase volumes are known, so the corrected effective-medium
+    /// physics (audit C2/C4/C5) can be checked against hand-computed values.
+    /// </summary>
+    private static DualPNMDataset MakeDeterministicDual(DualPorosityCouplingMode mode)
+    {
+        var d = new DualPNMDataset("DetDual", "")
+        {
+            ImageWidth = 10, ImageHeight = 10, ImageDepth = 10, VoxelSize = 1.0f,
+            DarcyPermeability = 10f // macro k
+        };
+        // Micro pore vols: 50 + 30 = 80 → bulk micro-porosity = 80/1000 = 0.08.
+        // Phase vols: 50/0.5 + 30/0.3 = 100 + 100 = 200 → f = 200/1000 = 0.2.
+        // k_micro (equal-weight geometric of 4 and 1) = 2 mD.
+        d.AddMicroNetwork(1, new MicroPoreNetwork { MacroPoreID = 1, MicroVolume = 50f, MicroPorosity = 0.5f, MicroPermeability = 4f });
+        d.AddMicroNetwork(2, new MicroPoreNetwork { MacroPoreID = 2, MicroVolume = 30f, MicroPorosity = 0.3f, MicroPermeability = 1f });
+        d.Coupling.CouplingMode = mode;
+        d.CalculateCombinedProperties();
+        return d;
+    }
+
+    [Fact]
+    public void DualPNM_CombinedProperties_UseBulkFractionAndVolumeWeightedGeometricMicroK()
+    {
+        var d = MakeDeterministicDual(DualPorosityCouplingMode.Parallel);
+
+        // C4: TotalMicroPorosity is now the BULK micro-porosity fraction (Σ MicroVolume / bulk).
+        Assert.Equal(0.08, d.Coupling.TotalMicroPorosity, 4);
+        // C5: volume-weighted geometric micro-permeability = sqrt(4*1) = 2 mD.
+        Assert.Equal(2.0, d.Coupling.EffectiveMicroPermeability, 4);
+        // C2: parallel = (1-f)*k_macro + f*k_micro with phase fraction f = 0.2:
+        // 0.8*10 + 0.2*2 = 8.4 mD.
+        Assert.Equal(8.4, d.Coupling.CombinedPermeability, 4);
+    }
+
+    [Fact]
+    public void DualPNM_SeriesIsHarmonic_AndBoundsBracketCombined()
+    {
+        var parallel = MakeDeterministicDual(DualPorosityCouplingMode.Parallel).Coupling.CombinedPermeability;
+        var series = MakeDeterministicDual(DualPorosityCouplingMode.Series).Coupling.CombinedPermeability;
+
+        // Series harmonic: 1 / (0.8/10 + 0.2/2) = 1/0.18 = 5.5556 mD.
+        Assert.Equal(5.55556, series, 4);
+        // Wiener bound ordering: harmonic (series) <= arithmetic (parallel).
+        Assert.True(series <= parallel + 1e-4f, $"series {series} should be <= parallel {parallel}");
+
+        // MassTransfer keeps its serialized name but is the weighted-arithmetic approximation,
+        // so it must fall within the bounds too (equals the parallel value here).
+        var massTransfer = MakeDeterministicDual(DualPorosityCouplingMode.MassTransfer).Coupling.CombinedPermeability;
+        Assert.True(massTransfer >= series - 1e-4f && massTransfer <= parallel + 1e-4f);
+    }
+
+    [Fact]
+    public void DualPNM_CreateSummary_CarriesCombinedPermeabilityAndTotalPorosityToPrism()
+    {
+        // 100^3 voxels at 2 µm → bulk = 8e6 µm³. One macro pore φ_macro = 0.2.
+        var d = new DualPNMDataset("DualUpscale", "dual.pnm")
+        {
+            ImageWidth = 100, ImageHeight = 100, ImageDepth = 100, VoxelSize = 2.0f,
+            DarcyPermeability = 50f
+        };
+        double bulk = 100.0 * 100 * 100 * System.Math.Pow(2.0, 3);
+        d.Pores.Add(new Pore { ID = 1, Position = new Vector3(1, 1, 1), Radius = 5, VolumePhysical = (float)(bulk * 0.2) });
+        // Micro pore vol 0.05*bulk, local porosity 0.4 → phase vol 0.125*bulk → f = 0.125.
+        d.AddMicroNetwork(1, new MicroPoreNetwork
+        {
+            MacroPoreID = 1, MicroVolume = (float)(bulk * 0.05), MicroPorosity = 0.4f, MicroPermeability = 5f
+        });
+
+        var summary = UpscalingGpexExporter.CreateSummary(d);
+
+        // C1: the dual-scale effective permeability reaches the summary and wins the Preferred selector.
+        Assert.NotNull(summary.CombinedPermeabilityMilliDarcy);
+        // parallel: (1-0.125)*50 + 0.125*5 = 44.375 mD.
+        Assert.Equal(44.375, summary.CombinedPermeabilityMilliDarcy!.Value, 3);
+        Assert.Equal(44.375, summary.PreferredPermeabilityMilliDarcy!.Value, 3);
+        Assert.Equal(50.0, summary.DarcyPermeabilityMilliDarcy!.Value, 3);
+        // Total porosity = φ_macro (0.2) + bulk micro-porosity (0.05) = 0.25.
+        Assert.Equal(0.25, summary.PorosityFraction!.Value, 4);
+    }
+
+    [Fact]
+    public void DualPNM_SaveLoadRoundTrip_PreservesMicroNetworksAndCoupling()
+    {
+        var d = new DualPNMDataset("RoundTrip", "rt.pnm")
+        {
+            ImageWidth = 10, ImageHeight = 10, ImageDepth = 10, VoxelSize = 1.0f, DarcyPermeability = 7f
+        };
+        d.Pores.Add(new Pore { ID = 1, Position = new Vector3(2, 3, 4), Radius = 2, VolumePhysical = 100f });
+        d.AddMicroNetwork(5, new MicroPoreNetwork
+        {
+            MacroPoreID = 5, MicroVolume = 40f, MicroPorosity = 0.4f, MicroPermeability = 3f,
+            MicroPores = { new Pore { ID = 11, Position = new Vector3(1, 1, 0), Radius = 0.5f, VolumePhysical = 2f } }
+        });
+        d.Coupling.CouplingMode = DualPorosityCouplingMode.Series;
+        d.CalculateCombinedProperties();
+        var expectedCombined = d.Coupling.CombinedPermeability;
+
+        // G5: the polymorphic ISerializableDataset call must dispatch to the DUAL override.
+        var dto = Assert.IsType<DualPNMDatasetDTO>(((ISerializableDataset)d).ToSerializableObject());
+        Assert.Equal(nameof(DualPNMDataset), dto.TypeName);
+        Assert.Single(dto.MicroNetworks);
+
+        var reloaded = new DualPNMDataset(dto.Name, dto.FilePath);
+        reloaded.ImportFromDTO(dto);
+
+        Assert.Single(reloaded.MicroNetworks);
+        Assert.Equal(5, reloaded.MicroNetworks[0].MacroPoreID);
+        Assert.Equal(40f, reloaded.MicroNetworks[0].MicroVolume);
+        Assert.Single(reloaded.MicroNetworks[0].MicroPores);
+        Assert.Equal(DualPorosityCouplingMode.Series, reloaded.Coupling.CouplingMode);
+        Assert.Equal(expectedCombined, reloaded.Coupling.CombinedPermeability);
+        Assert.NotNull(reloaded.GetMicroNetwork(5));
+    }
+
     [Fact]
     public void PNM_AtomicDiskPersistence_ReloadsCompleteNetworkAndDimensions()
     {

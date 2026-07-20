@@ -48,6 +48,7 @@ public class MainWindow : IDisposable
     private readonly Volume3DDebugWindow _volume3DDebugWindow = new();
     private readonly StratigraphyCorrelationViewer _stratigraphyViewer = new();
     private readonly GaiaPrismUpscalingWindow _gaiaPrismUpscalingWindow = new();
+    private readonly Analysis.Pnm.DualPNMGeneratorTool _dualPnmGenerator = new();
     private readonly MaterialLibraryWindow _materialLibraryWindow = new();
 
     // ADDED: Instance of the compound library editor window
@@ -330,6 +331,7 @@ public class MainWindow : IDisposable
         _geoScriptEditorWindow.Draw();
         _stratigraphyViewer.Draw();
         _gaiaPrismUpscalingWindow.Draw();
+        _dualPnmGenerator.Show(ProjectManager.Instance);
         _realtimePhotogrammetryWindow.Draw();
         _triaxialSimulationTool?.Draw();
         _slopeStabilityMeshWizard.Draw();
@@ -747,6 +749,7 @@ public class MainWindow : IDisposable
         {
             if (IconMenuItem(GaiaIcon.ScriptTerminal, "GeoScript Terminal")) _geoScriptTerminalWindow.Show();
             if (IconMenuItem(GaiaIcon.Stratigraphy, "Stratigraphy Correlation Viewer")) _stratigraphyViewer.Show();
+            if (IconMenuItem(GaiaIcon.PoreNetwork, "Dual PNM Generator (CT + SEM)...")) _dualPnmGenerator.IsOpen = true;
             if (IconMenuItem(GaiaIcon.PoreNetwork, "GAIA ↔ PRISM Upscaling...")) _gaiaPrismUpscalingWindow.Show();
             ImGui.Separator();
             if (IconMenuItem(GaiaIcon.Triaxial, "Triaxial Simulation")) _triaxialSimulationTool.Show();

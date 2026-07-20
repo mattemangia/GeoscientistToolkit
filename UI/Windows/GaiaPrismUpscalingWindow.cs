@@ -120,16 +120,28 @@ public class GaiaPrismUpscalingWindow
         if (pnms.Count == 0) ImGui.TextDisabled("No PNM datasets in the project.");
         foreach (var pnm in pnms)
         {
+            var isDual = pnm is DualPNMDataset;
             var selected = _selectedPnms.Contains(pnm.Name);
-            if (ImGui.Checkbox($"{pnm.Name}##pnm", ref selected))
+            var label = isDual ? $"{pnm.Name}  [DPNM]##pnm" : $"{pnm.Name}##pnm";
+            if (ImGui.Checkbox(label, ref selected))
             {
                 if (selected) _selectedPnms.Add(pnm.Name);
                 else _selectedPnms.Remove(pnm.Name);
             }
 
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip($"{pnm.Pores.Count} pores, k(Darcy) {pnm.DarcyPermeability:0.###} mD, " +
-                                 $"voxel {pnm.VoxelSize:0.##} µm");
+            {
+                if (pnm is DualPNMDataset dual)
+                    ImGui.SetTooltip(
+                        $"Dual PNM: {dual.Pores.Count} macro-pores, {dual.TotalMicroPoreCount} micro-pores\n" +
+                        $"k(macro Darcy) {dual.DarcyPermeability:0.###} mD, " +
+                        $"k(combined) {dual.Coupling.CombinedPermeability:0.###} mD\n" +
+                        $"bulk micro-porosity fraction {dual.Coupling.TotalMicroPorosity:0.####}, voxel {dual.VoxelSize:0.##} µm\n" +
+                        "The upscaling package exports the combined permeability and total porosity.");
+                else
+                    ImGui.SetTooltip($"{pnm.Pores.Count} pores, k(Darcy) {pnm.DarcyPermeability:0.###} mD, " +
+                                     $"voxel {pnm.VoxelSize:0.##} µm");
+            }
         }
 
         ImGui.EndChild();
@@ -139,7 +151,17 @@ public class GaiaPrismUpscalingWindow
 
         ImGui.SeparatorText("PNM → well interval assignments");
         ImGui.TextDisabled("Networks already linked to lithology units via 'Import Parameters from Dataset' are attached automatically.");
-        if (ImGui.Button("+ Add assignment") && selectedPnms.Count > 0) _assignments.Add(new AssignmentRow());
+        if (ImGui.Button("+ Add assignment") && selectedPnms.Count > 0)
+            _assignments.Add(NewAssignmentRow(selectedBoreholes));
+        ImGui.SameLine();
+        var canAuto = selectedPnms.Count > 0 && selectedBoreholes.Any(b => b.LithologyUnits.Count > 0);
+        if (!canAuto) ImGui.BeginDisabled();
+        if (ImGui.Button("Auto-assign by lithology"))
+            AutoAssignByLithology(selectedPnms, selectedBoreholes);
+        if (!canAuto) ImGui.EndDisabled();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Create one assignment per lithology unit of each selected well,\n" +
+                             "using the unit's depth interval and cycling through the selected pore networks.");
         if (selectedPnms.Count == 0)
         {
             ImGui.SameLine();
@@ -209,6 +231,66 @@ public class GaiaPrismUpscalingWindow
 
     private static string WellDisplayName(BoreholeDataset borehole) =>
         string.IsNullOrWhiteSpace(borehole.WellName) ? borehole.Name : borehole.WellName;
+
+    /// <summary>
+    ///     Builds a new assignment row with its depth interval pre-filled from the first selected
+    ///     well's lithology (its first unit, or its full depth range) instead of a fixed 0-10 m guess.
+    /// </summary>
+    private static AssignmentRow NewAssignmentRow(IReadOnlyList<BoreholeDataset> selectedBoreholes)
+    {
+        var row = new AssignmentRow();
+        var well = selectedBoreholes.FirstOrDefault();
+        if (well != null)
+        {
+            var units = well.LithologyUnits;
+            if (units.Count > 0)
+            {
+                var first = units.OrderBy(u => u.DepthFrom).First();
+                row.DepthFrom = first.DepthFrom;
+                row.DepthTo = first.DepthTo;
+            }
+            else
+            {
+                row.DepthFrom = 0f;
+                row.DepthTo = well.TotalDepth > 0 ? well.TotalDepth : 10f;
+            }
+
+            row.WellIndex = 1; // target the first selected well rather than "all wells"
+        }
+
+        return row;
+    }
+
+    /// <summary>
+    ///     Replaces the assignment table with one row per lithology unit of each selected well,
+    ///     cycling through the selected pore networks so every interval is covered.
+    /// </summary>
+    private void AutoAssignByLithology(IReadOnlyList<PNMDataset> selectedPnms,
+        IReadOnlyList<BoreholeDataset> selectedBoreholes)
+    {
+        if (selectedPnms.Count == 0) return;
+
+        _assignments.Clear();
+        var pnmCursor = 0;
+        for (var wellIndex = 0; wellIndex < selectedBoreholes.Count; wellIndex++)
+        {
+            var well = selectedBoreholes[wellIndex];
+            foreach (var unit in well.LithologyUnits.OrderBy(u => u.DepthFrom))
+            {
+                _assignments.Add(new AssignmentRow
+                {
+                    PnmIndex = pnmCursor % selectedPnms.Count,
+                    WellIndex = wellIndex + 1, // 0 = all wells; +1 selects this specific well
+                    DepthFrom = unit.DepthFrom,
+                    DepthTo = unit.DepthTo,
+                    Weight = 1f
+                });
+                pnmCursor++;
+            }
+        }
+
+        Log($"Auto-assigned {_assignments.Count} interval(s) from {selectedBoreholes.Count} well(s).");
+    }
 
     private void RunExport(string path)
     {

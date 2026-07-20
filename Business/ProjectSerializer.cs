@@ -206,6 +206,7 @@ public class DatasetDTOConverter : JsonConverter<DatasetDTO>
                     nameof(TableDataset) => JsonSerializer.Deserialize<TableDatasetDTO>(rawText, options),
                     nameof(AcousticVolumeDataset) => JsonSerializer.Deserialize<AcousticVolumeDatasetDTO>(rawText,
                         options),
+                    nameof(DualPNMDataset) => JsonSerializer.Deserialize<DualPNMDatasetDTO>(rawText, options),
                     nameof(PNMDataset) => JsonSerializer.Deserialize<PNMDatasetDTO>(rawText, options),
                     nameof(BoreholeDataset) => JsonSerializer.Deserialize<Data.Borehole.BoreholeDatasetDTO>(rawText, options),
                     "BoreholeLogCorrelation" => JsonSerializer.Deserialize<Data.Borehole.BoreholeLogCorrelationDTO>(rawText, options),

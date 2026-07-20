@@ -112,7 +112,7 @@ public class PNMDataset : Dataset, ISerializableDataset
     /// <summary>
     ///     Creates a data transfer object (DTO) for serialization.
     /// </summary>
-    public object ToSerializableObject()
+    public virtual object ToSerializableObject()
     {
         return new PNMDatasetDTO
         {

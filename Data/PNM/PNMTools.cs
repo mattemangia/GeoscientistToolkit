@@ -21,6 +21,7 @@ public class PNMTools : IDatasetTools
         Overview,
         FlowAnalysis,
         ReactiveTransport,
+        DualPorosity,
         Export
     }
 
@@ -31,6 +32,7 @@ public class PNMTools : IDatasetTools
         [ToolCategory.Overview] = "Overview",
         [ToolCategory.FlowAnalysis] = "Flow Analysis",
         [ToolCategory.ReactiveTransport] = "Reactive Transport",
+        [ToolCategory.DualPorosity] = "Dual Porosity",
         [ToolCategory.Export] = "Export"
     };
 
@@ -39,6 +41,7 @@ public class PNMTools : IDatasetTools
         [ToolCategory.Overview] = "Network summary and connectivity statistics.",
         [ToolCategory.FlowAnalysis] = "Permeability and molecular diffusivity calculators.",
         [ToolCategory.ReactiveTransport] = "Reactive transport setup, execution, and results.",
+        [ToolCategory.DualPorosity] = "Macro + micro coupling, combined permeability, and dual-scale simulations.",
         [ToolCategory.Export] = "Export the PNM network and calculated results."
     };
 
@@ -179,6 +182,12 @@ public class PNMTools : IDatasetTools
     private bool _useConfiningPressure;
     private bool _useGpu;
 
+    // --- Dual PNM (macro + micro) State ---
+    private int _dualCouplingModeIndex;
+    private int _dualPermMethodIndex; // 0 = Darcy, 1 = Navier-Stokes
+    private bool _isDualSimRunning;
+    private string _dualSimStatus = "";
+
     public PNMTools()
     {
         _exportDialog = new ImGuiExportFileDialog("ExportPNMDialog", "Export PNM");
@@ -195,10 +204,17 @@ public class PNMTools : IDatasetTools
     {
         if (dataset is not PNMDataset pnm) return;
 
+        var dual = dataset as DualPNMDataset;
+
+        // The Dual Porosity category is only meaningful for a DualPNMDataset; fall back to
+        // Overview if a plain PNM is shown while that category happened to be selected.
+        if (dual == null && _selectedCategory == ToolCategory.DualPorosity)
+            _selectedCategory = ToolCategory.Overview;
+
         ImGui.Text("PNM Analysis Tools");
         ImGui.Separator();
 
-        DrawCategorySelector();
+        DrawCategorySelector(dual != null);
         ImGui.Spacing();
 
         ImGui.BeginChild("##PNMToolCategoryContent", new Vector2(0, 0), ImGuiChildFlags.None,
@@ -215,6 +231,10 @@ public class PNMTools : IDatasetTools
             case ToolCategory.ReactiveTransport:
                 DrawToolSection("Reactive Transport", () => DrawReactiveTransport(pnm));
                 break;
+            case ToolCategory.DualPorosity:
+                if (dual != null)
+                    DrawToolSection("Dual Porosity (Macro + Micro)", () => DrawDualPorosityTools(dual));
+                break;
             case ToolCategory.Export:
                 DrawToolSection("Export", () => DrawExportSection(pnm));
                 break;
@@ -226,7 +246,7 @@ public class PNMTools : IDatasetTools
         HandleDialogs(pnm);
     }
 
-    private void DrawCategorySelector()
+    private void DrawCategorySelector(bool includeDualPorosity)
     {
         ImGui.Text("Category:");
         ImGui.SameLine();
@@ -237,6 +257,9 @@ public class PNMTools : IDatasetTools
         {
             foreach (var category in Enum.GetValues<ToolCategory>())
             {
+                if (category == ToolCategory.DualPorosity && !includeDualPorosity)
+                    continue;
+
                 var isSelected = _selectedCategory == category;
                 if (ImGui.Selectable(CategoryNames[category], isSelected))
                     _selectedCategory = category;
@@ -565,6 +588,240 @@ public class PNMTools : IDatasetTools
         }
 
         ImGui.Unindent();
+    }
+
+    private void DrawDualPorosityTools(DualPNMDataset dual)
+    {
+        ImGui.Indent();
+
+        var coupling = dual.Coupling;
+
+        // ---- Current dual-scale summary ----
+        if (ImGui.BeginTable("DualSummaryTable", 2, ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg))
+        {
+            ImGui.TableSetupColumn("Property", ImGuiTableColumnFlags.WidthFixed, 230);
+            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+
+            DualStatRow("Macro-pores", $"{dual.Pores.Count:N0}");
+            DualStatRow("Micro-networks", $"{dual.MicroNetworks.Count:N0}");
+            DualStatRow("Micro-pores (total)", $"{dual.TotalMicroPoreCount:N0}");
+            DualStatRow("Micro-throats (total)", $"{dual.TotalMicroThroatCount:N0}");
+            DualStatRow("Bulk micro-porosity fraction", $"{coupling.TotalMicroPorosity:F4}");
+            DualStatRow("Effective macro k", $"{coupling.EffectiveMacroPermeability:F3} mD");
+            DualStatRow("Effective micro k", $"{coupling.EffectiveMicroPermeability:F3} mD");
+            DualStatRow("Combined k", $"{coupling.CombinedPermeability:F3} mD");
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // ---- Coupling mode ----
+        ImGui.Text("Coupling Mode:");
+        _dualCouplingModeIndex = (int)coupling.CouplingMode;
+        ImGui.SetNextItemWidth(260);
+        if (ImGui.Combo("##DualCouplingMode", ref _dualCouplingModeIndex,
+                new[] { "Parallel", "Series", "Mass Transfer" }, 3))
+            coupling.CouplingMode = (DualPorosityCouplingMode)_dualCouplingModeIndex;
+
+        ImGui.SameLine();
+        ImGui.TextDisabled("(?)");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(
+                "Determines how macro and micro permeabilities are combined,\n" +
+                "with f = bulk micro-porosity fraction:\n" +
+                "  Parallel:      k_eff = (1-f)*k_macro + f*k_micro\n" +
+                "  Series:        1/k_eff = (1-f)/k_macro + f/k_micro\n" +
+                "  Mass Transfer: weighted blend with inter-scale exchange");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // ---- Simulations ----
+        ImGui.Text("Dual-Scale Simulations:");
+
+        ImGui.Text("Permeability Method:");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(200);
+        ImGui.Combo("##DualPermMethod", ref _dualPermMethodIndex, new[] { "Darcy", "Navier-Stokes" }, 2);
+
+        ImGui.Spacing();
+
+        if (_isDualSimRunning)
+        {
+            ImGui.BeginDisabled();
+            ImGui.Button("Running...", new Vector2(-1, 30));
+            ImGui.EndDisabled();
+            ImGui.TextColored(new Vector4(1, 1, 0, 1), _dualSimStatus);
+        }
+        else
+        {
+            var canRun = dual.Pores.Count > 0 && dual.MicroNetworks.Count > 0;
+            if (!canRun) ImGui.BeginDisabled();
+
+            if (ImGui.Button("Compute Combined Permeability", new Vector2(-1, 28)))
+                RunDualPermeability(dual);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Simulate macro and micro networks and combine them into a single\n" +
+                                 "effective permeability using the selected coupling mode.");
+
+            if (ImGui.Button("Run Dual Reactive Transport", new Vector2(-1, 28)))
+                RunDualReactiveTransport(dual);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Reactive transport on the macro network with micro-porosity\n" +
+                                 "treated as storage/exchange (Series and Mass Transfer modes).");
+
+            if (ImGui.Button("Compute Dual Diffusivity", new Vector2(-1, 28)))
+                RunDualDiffusivity(dual);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Effective molecular diffusivity corrected for micro-porosity storage.");
+
+            if (!canRun)
+            {
+                ImGui.EndDisabled();
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1),
+                    "Dual simulations require macro-pores and at least one micro-network.");
+            }
+        }
+
+        ImGui.Unindent();
+    }
+
+    private static void DualStatRow(string label, string value)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.Text(label + ":");
+        ImGui.TableSetColumnIndex(1);
+        ImGui.Text(value);
+    }
+
+    private void RunDualPermeability(DualPNMDataset dual)
+    {
+        _isDualSimRunning = true;
+        _dualSimStatus = "Computing dual-scale permeability...";
+        var method = _dualPermMethodIndex == 1
+            ? PNMPermeabilityMethod.NavierStokes
+            : PNMPermeabilityMethod.Darcy;
+
+        Task.Run(() =>
+        {
+            try
+            {
+                DualPNMSimulations.CalculateDualPermeability(dual, method);
+                _dualSimStatus = $"Combined permeability: {dual.Coupling.CombinedPermeability:F3} mD";
+                ProjectManager.Instance.NotifyDatasetDataChanged(dual);
+            }
+            catch (Exception ex)
+            {
+                _dualSimStatus = $"Error: {ex.Message}";
+                Logger.LogError($"[DualPNM] Combined permeability failed: {ex}");
+            }
+            finally
+            {
+                Thread.Sleep(1000);
+                _isDualSimRunning = false;
+            }
+        });
+    }
+
+    private void RunDualReactiveTransport(DualPNMDataset dual)
+    {
+        _isDualSimRunning = true;
+        _dualSimStatus = "Initializing dual reactive transport...";
+
+        var options = new PNMReactiveTransportOptions
+        {
+            TotalTime = _rtTotalTime,
+            TimeStep = _rtTimeStep,
+            OutputInterval = _rtOutputInterval,
+            FlowAxis = (FlowAxis)_rtFlowAxisIndex,
+            InletPressure = _rtInletPressure,
+            OutletPressure = _rtOutletPressure,
+            FluidViscosity = _rtFluidViscosity,
+            FluidDensity = _rtFluidDensity,
+            InletTemperature = _rtInletTemperature,
+            OutletTemperature = _rtOutletTemperature,
+            ThermalConductivity = _rtThermalConductivity,
+            SpecificHeat = _rtSpecificHeat,
+            MolecularDiffusivity = _rtMolecularDiffusivity,
+            Dispersivity = _rtDispersivity,
+            EnableReactions = _rtEnableReactions,
+            UpdateGeometry = _rtUpdateGeometry,
+            MinPoreRadius = _rtMinPoreRadius,
+            MinThroatRadius = _rtMinThroatRadius,
+            InitialConcentrations = ParseKeyValuePairs(_rtInitialConcentrations),
+            InletConcentrations = ParseKeyValuePairs(_rtInletConcentrations),
+            InitialMinerals = ParseKeyValuePairs(_rtInitialMinerals),
+            ReactionMinerals = ParseList(_rtReactionMinerals)
+        };
+
+        Task.Run(() =>
+        {
+            try
+            {
+                var progress = new Progress<(float progress, string message)>(p =>
+                {
+                    _dualSimStatus = $"{p.message} ({p.progress:P0})";
+                });
+
+                DualPNMSimulations.RunDualReactiveTransport(dual, options, progress);
+                _dualSimStatus = "Dual reactive transport complete.";
+                ProjectManager.Instance.NotifyDatasetDataChanged(dual);
+            }
+            catch (Exception ex)
+            {
+                _dualSimStatus = $"Error: {ex.Message}";
+                Logger.LogError($"[DualPNM] Reactive transport failed: {ex}");
+            }
+            finally
+            {
+                Thread.Sleep(1000);
+                _isDualSimRunning = false;
+            }
+        });
+    }
+
+    private void RunDualDiffusivity(DualPNMDataset dual)
+    {
+        _isDualSimRunning = true;
+        _dualSimStatus = "Computing dual-scale diffusivity...";
+
+        var options = new DiffusivityOptions
+        {
+            Dataset = dual,
+            BulkDiffusivity = _diffusivityFluidIndex == _diffusivityFluidTypes.Length - 1
+                ? _customBulkDiffusivity
+                : _bulkDiffusivities[_diffusivityFluidIndex],
+            NumberOfWalkers = _diffusivityWalkers,
+            NumberOfSteps = _diffusivitySteps
+        };
+
+        Task.Run(() =>
+        {
+            try
+            {
+                var results = DualPNMSimulations.CalculateDualDiffusivity(dual, options,
+                    progress => _dualSimStatus = progress);
+                _dualSimStatus = results != null
+                    ? $"Dual effective diffusivity: {results.EffectiveDiffusivity:E3} m²/s"
+                    : "Dual diffusivity calculation returned no result.";
+                ProjectManager.Instance.NotifyDatasetDataChanged(dual);
+            }
+            catch (Exception ex)
+            {
+                _dualSimStatus = $"Error: {ex.Message}";
+                Logger.LogError($"[DualPNM] Diffusivity failed: {ex}");
+            }
+            finally
+            {
+                Thread.Sleep(1000);
+                _isDualSimRunning = false;
+            }
+        });
     }
 
     private void DrawReactiveTransport(PNMDataset pnm)

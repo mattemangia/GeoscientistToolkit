@@ -26,6 +26,27 @@ public static class UpscalingGpexExporter
     {
         ArgumentNullException.ThrowIfNull(pnm);
         double? Positive(float value) => value > 0 ? value : null;
+
+        // Dual PNM: carry the macro+micro effective permeability and total porosity so the
+        // microporosity contribution is not silently dropped on the way to PRISM (audit C1).
+        double? combinedPermeability = null;
+        if (pnm is DualPNMDataset dual)
+        {
+            if (dual.Coupling.CombinedPermeability <= 0)
+                dual.CalculateCombinedProperties();
+            combinedPermeability = Positive(dual.Coupling.CombinedPermeability);
+
+            // Macro-only porosity for the QC line (PorosityFraction now returns the dual total).
+            var bulk = (double)pnm.ImageWidth * pnm.ImageHeight * pnm.ImageDepth * Math.Pow(pnm.VoxelSize, 3);
+            var phiMacro = bulk > 0 && pnm.Pores is { Count: > 0 }
+                ? pnm.Pores.Sum(p => (double)p.VolumePhysical) / bulk : 0.0;
+            var phiTotal = phiMacro + dual.Coupling.TotalMicroPorosity; // bulk micro fraction added
+            // QC log (audit item 12): show macro vs dual-scale effective values at export.
+            GAIA.Util.Logger.Log($"[Upscaling] Dual PNM '{pnm.Name}' ({dual.Coupling.CouplingMode}): " +
+                       $"phi_macro={phiMacro:F4}, phi_total={phiTotal:F4}, " +
+                       $"k_macro={pnm.DarcyPermeability:F3} mD, k_combined={dual.Coupling.CombinedPermeability:F3} mD");
+        }
+
         return new PnmNetworkSummary
         {
             Id = id ?? MakeId(pnm.Name),
@@ -39,6 +60,7 @@ public static class UpscalingGpexExporter
             DarcyPermeabilityMilliDarcy = Positive(pnm.DarcyPermeability),
             NavierStokesPermeabilityMilliDarcy = Positive(pnm.NavierStokesPermeability),
             LatticeBoltzmannPermeabilityMilliDarcy = Positive(pnm.LatticeBoltzmannPermeability),
+            CombinedPermeabilityMilliDarcy = combinedPermeability,
             Tortuosity = Positive(pnm.Tortuosity),
             TransportTortuosity = Positive(pnm.TransportTortuosity),
             FormationFactor = Positive(pnm.FormationFactor),
@@ -48,13 +70,24 @@ public static class UpscalingGpexExporter
         };
     }
 
-    /// <summary>Total pore volume over bulk image volume, as a fraction (both in µm³).</summary>
+    /// <summary>
+    /// Total porosity as a fraction of bulk image volume (µm³). For a Dual PNM this is the
+    /// dual-scale total porosity φ_macro + bulk-micro-porosity; for a single-scale network it is
+    /// the macro pore volume over bulk. Returns null when there is no pore volume or bulk.
+    /// </summary>
     public static double? PorosityFraction(PNMDataset pnm)
     {
         if (pnm.Pores == null || pnm.Pores.Count == 0) return null;
         var bulk = (double)pnm.ImageWidth * pnm.ImageHeight * pnm.ImageDepth * Math.Pow(pnm.VoxelSize, 3);
         if (bulk <= 0) return null;
-        return pnm.Pores.Sum(p => (double)p.VolumePhysical) / bulk;
+        var macroPorosity = pnm.Pores.Sum(p => (double)p.VolumePhysical) / bulk;
+        if (pnm is DualPNMDataset dual)
+        {
+            if (dual.Coupling.CombinedPermeability <= 0) dual.CalculateCombinedProperties();
+            // TotalMicroPorosity is the BULK micro-porosity fraction, so φ_total = φ_macro + it.
+            return macroPorosity + dual.Coupling.TotalMicroPorosity;
+        }
+        return macroPorosity;
     }
 
     /// <summary>

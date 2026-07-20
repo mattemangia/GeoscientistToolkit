@@ -318,6 +318,14 @@ public class DatasetPanel : BasePanel
             ImGui.TextUnformatted($"Pores: {pnm.Pores.Count:N0}");
             ImGui.TextUnformatted($"Throats: {pnm.Throats.Count:N0}");
             ImGui.TextUnformatted($"Darcy Permeability: {pnm.DarcyPermeability:F3} mD");
+
+            if (dataset is DualPNMDataset dual)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"Micro-pores: {dual.TotalMicroPoreCount:N0} ({dual.MicroNetworks.Count:N0} networks)");
+                ImGui.TextUnformatted($"Bulk micro-porosity fraction: {dual.Coupling.TotalMicroPorosity:F4}");
+                ImGui.TextUnformatted($"Combined Permeability: {dual.Coupling.CombinedPermeability:F3} mD ({dual.Coupling.CouplingMode})");
+            }
         }
         else if (dataset is DatasetGroup group)
         {
@@ -616,6 +624,7 @@ public class DatasetPanel : BasePanel
             DatasetType.GIS => "[GIS]",
             DatasetType.AcousticVolume => "[ACOUSTIC]",
             DatasetType.PNM => "[PNM]",
+            DatasetType.DualPNM => "[DPNM]",
             DatasetType.Borehole => "[WELL]",
             DatasetType.TwoDGeology => "[2DGEOL]",
             DatasetType.SubsurfaceGIS => "[SUBSGIS]",

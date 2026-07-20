@@ -656,6 +656,20 @@ public class PNMViewer : IDatasetViewer
 
     public void DrawToolbarControls()
     {
+        if (_dataset is DualPNMDataset dualBadge)
+        {
+            ImGui.TextColored(new Vector4(0.55f, 0.85f, 1.0f, 1.0f), "[DPNM]");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(
+                    $"Dual Pore Network Model\n" +
+                    $"Macro-pores: {dualBadge.Pores.Count:N0}   Micro-networks: {dualBadge.MicroNetworks.Count:N0}\n" +
+                    $"Combined permeability: {dualBadge.Coupling.CombinedPermeability:F3} mD\n" +
+                    "Dual-porosity coupling and simulations are available in the PNM Tools panel.");
+            ImGui.SameLine();
+            ImGui.Separator();
+            ImGui.SameLine();
+        }
+
         if (ImGui.Button("Reset Camera")) ResetCamera();
         ImGui.SameLine();
         ImGui.Separator();
