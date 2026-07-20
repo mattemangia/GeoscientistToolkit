@@ -1,3 +1,4 @@
+using GAIA.Data.CtImageStack;
 using GAIA.Data.VolumeData;
 using GAIA.Util;
 using StbImageWriteSharp;
@@ -159,6 +160,56 @@ public sealed class CtStackExportImportRoundTripTests
             for (var y = 0; y < h; y++)
             {
                 reimported.ReadSliceXZ(y, xz);
+                for (var z = 0; z < d; z++)
+                for (var x = 0; x < w; x++)
+                    Assert.Equal((byte)((z * 7 + y * 3 + x) % 251), xz[z * w + x]);
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(folder, true); } catch { /* best effort cleanup */ }
+        }
+    }
+
+    [Fact]
+    public async Task RealLoaderPipeline_ExportPngThenReimport_NoStripes()
+    {
+        // Full production reimport path used by "Optimized for 3D": export PNG slices exactly like
+        // the export tool, then run the real CTStackLoader (which sorts, builds the volume and
+        // writes the .Volume.bin) and reload that .bin memory-mapped exactly as the editable 2D
+        // partner does. Then read the XZ cross-section, where the stripes were reported.
+        const int w = 300, h = 200, d = 137;
+        const string dsName = "sample"; // export tool names files "{dsName}_{n:D4}.png"
+        var folder = Path.Combine(Path.GetTempPath(), $"ctstack-real-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        try
+        {
+            for (var z = 0; z < d; z++)
+            {
+                var gray = new byte[w * h];
+                for (var y = 0; y < h; y++)
+                for (var x = 0; x < w; x++)
+                    gray[y * w + x] = (byte)((z * 7 + y * 3 + x) % 251);
+                SaveGrayscale(Path.Combine(folder, $"{dsName}_{z + 1:D4}.png"), gray, w, h, "png");
+            }
+
+            var built = await CTStackLoader.LoadCTStackAsync(folder, 1e-6, 1,
+                useMemoryMapping: false, progress: null, datasetName: dsName);
+            built.Dispose();
+
+            // The editable partner reloads {folder}/{dsName}.Volume.bin, memory-mapped for big stacks.
+            var volumePath = Path.Combine(folder, $"{dsName}.Volume.bin");
+            Assert.True(File.Exists(volumePath), "Loader did not persist the editable .Volume.bin");
+            using var reloaded = await ChunkedVolume.LoadFromBinAsync(volumePath, useMemoryMapping: true);
+
+            Assert.Equal(w, reloaded.Width);
+            Assert.Equal(h, reloaded.Height);
+            Assert.Equal(d, reloaded.Depth);
+
+            var xz = new byte[w * d];
+            for (var y = 0; y < h; y++)
+            {
+                reloaded.ReadSliceXZ(y, xz);
                 for (var z = 0; z < d; z++)
                 for (var x = 0; x < w; x++)
                     Assert.Equal((byte)((z * 7 + y * 3 + x) % 251), xz[z * w + x]);
