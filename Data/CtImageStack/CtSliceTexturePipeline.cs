@@ -60,7 +60,7 @@ internal static class CtSliceTexturePipeline
                 var sourceIndex = sourceY * request.SourceWidth + sourceX;
                 var density = grayscale[sourceIndex];
                 var normalized = Math.Clamp((density - minWindow) / windowRange, 0f, 1f);
-                var color = ColorMap(normalized, request.ColorMap);
+                var color = CtColorMap.Apply(normalized, request.ColorMap);
 
                 if (labels != null && request.Materials.TryGetValue(labels[sourceIndex], out var material))
                     color = Vector4.Lerp(color, material.Color, material.Opacity);
@@ -132,14 +132,6 @@ internal static class CtSliceTexturePipeline
         return (Math.Max(1, (int)Math.Round(width * scale)), Math.Max(1, (int)Math.Round(height * scale)));
     }
 
-    private static Vector4 ColorMap(float value, int colorMap) => colorMap switch
-    {
-        1 => new Vector4(Math.Clamp(3 * value, 0, 1), Math.Clamp(3 * value - 1, 0, 1),
-            Math.Clamp(3 * value - 2, 0, 1), 1),
-        2 => new Vector4(value, 1 - value, 1, 1),
-        _ => new Vector4(value, value, value, 1)
-    };
-
     private static bool IsExternalPreviewSet(CtImageStackDataset dataset, CtSliceTextureRequest request,
         int sourceX, int sourceY)
     {
@@ -151,5 +143,28 @@ internal static class CtSliceTexturePipeline
             default: x = request.Slice; y = sourceX; z = sourceY; break;
         }
         return request.ExternalPreview.GetVoxel(x, y, z) > 0;
+    }
+}
+
+/// <summary>CPU counterpart of the volume shader's cmap function.</summary>
+internal static class CtColorMap
+{
+    internal static Vector4 Apply(float value, int colorMap)
+    {
+        var x = Math.Clamp(value, 0f, 1f);
+        return colorMap switch
+        {
+            1 => new Vector4(Math.Clamp(3 * x, 0, 1), Math.Clamp(3 * x - 1, 0, 1),
+                Math.Clamp(3 * x - 2, 0, 1), 1),
+            2 => new Vector4(x, 1 - x, 1, 1),
+            3 => new Vector4(Rainbow(x, 0), Rainbow(x, 4), Rainbow(x, 2), 1),
+            _ => new Vector4(x, x, x, 1)
+        };
+    }
+
+    private static float Rainbow(float value, float offset)
+    {
+        var wrapped = (value * 6f + offset) % 6f;
+        return Math.Clamp(MathF.Abs(wrapped - 3f) - 1f, 0f, 1f);
     }
 }

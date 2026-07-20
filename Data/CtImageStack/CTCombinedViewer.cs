@@ -45,8 +45,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         YZOnly
     }
 
-    // ADDED: Colormap data for 2D slices
-    private static Vector3[,] _colormapData;
     private readonly List<(Vector2, Vector2)> _cachedIsocontoursXY = new();
     private readonly List<(Vector2, Vector2)> _cachedIsocontoursXZ = new();
     private readonly List<(Vector2, Vector2)> _cachedIsocontoursYZ = new();
@@ -104,8 +102,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     public CtCombinedViewer(CtImageStackDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
-
-        InitializeColormaps();
 
         _renderingPanel = new CtRenderingPanel(this, _dataset);
         _renderingPanelOpen = true;
@@ -451,98 +447,10 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         VolumeViewer?.Dispose();
     }
 
-    private static void InitializeColormaps()
-    {
-        if (_colormapData != null) return;
-
-        const int size = 256;
-        const int numMaps = 4;
-        _colormapData = new Vector3[numMaps, size];
-
-        // Grayscale (map 0)
-        for (var i = 0; i < size; i++)
-        {
-            var v = i / (float)(size - 1);
-            _colormapData[0, i] = new Vector3(v, v, v);
-        }
-
-        // Hot (map 1)
-        for (var i = 0; i < size; i++)
-        {
-            var t = i / (float)(size - 1);
-            var r = Math.Min(1.0f, 3.0f * t);
-            var g = Math.Clamp(3.0f * t - 1.0f, 0.0f, 1.0f);
-            var b = Math.Clamp(3.0f * t - 2.0f, 0.0f, 1.0f);
-            _colormapData[1, i] = new Vector3(r, g, b);
-        }
-
-        // Cool (map 2)
-        for (var i = 0; i < size; i++)
-        {
-            var t = i / (float)(size - 1);
-            _colormapData[2, i] = new Vector3(t, 1 - t, 1);
-        }
-
-        // Rainbow (map 3)
-        for (var i = 0; i < size; i++)
-        {
-            var h = i / (float)(size - 1) * 0.7f;
-            _colormapData[3, i] = HsvToRgb(h, 1.0f, 1.0f);
-        }
-    }
-
     private Vector3 ApplyColorMap(float normalizedIntensity, int colorMapIndex)
     {
-        var mapIdx = Math.Clamp(colorMapIndex, 0, 3);
-        var texelIdx = (int)(normalizedIntensity * 255);
-        texelIdx = Math.Clamp(texelIdx, 0, 255);
-        return _colormapData[mapIdx, texelIdx];
-    }
-
-    private static Vector3 HsvToRgb(float h, float s, float v)
-    {
-        float r, g, b;
-        var i = (int)(h * 6);
-        var f = h * 6 - i;
-        var p = v * (1 - s);
-        var q = v * (1 - f * s);
-        var t = v * (1 - (1 - f) * s);
-
-        switch (i % 6)
-        {
-            case 0:
-                r = v;
-                g = t;
-                b = p;
-                break;
-            case 1:
-                r = q;
-                g = v;
-                b = p;
-                break;
-            case 2:
-                r = p;
-                g = v;
-                b = t;
-                break;
-            case 3:
-                r = p;
-                g = q;
-                b = v;
-                break;
-            case 4:
-                r = t;
-                g = p;
-                b = v;
-                break;
-            default:
-                r = v;
-                g = p;
-                b = q;
-                break;
-        }
-
-        return new Vector3(r, g, b);
+        var color = CtColorMap.Apply(normalizedIntensity, colorMapIndex);
+        return new Vector3(color.X, color.Y, color.Z);
     }
 
     /// <summary>

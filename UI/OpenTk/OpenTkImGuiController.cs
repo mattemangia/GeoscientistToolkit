@@ -11,6 +11,11 @@ namespace GAIA.UI.OpenTk;
 
 public sealed class ImGuiController : IDisposable
 {
+    // GLFW reports high-resolution wheels and touchpads as fractional offsets. On the devices
+    // used with GAIA those offsets are roughly one third of the logical notch expected by ImGui,
+    // which made both ordinary panel scrolling and viewer zoom feel unresponsive.
+    internal const float MouseWheelSensitivity = 3f;
+
     private static readonly Keys[] AllKeys = (Keys[])Enum.GetValues(typeof(Keys));
 
     // Fonts belong to the atlas of the context that built them, and each pop-out window runs
@@ -228,8 +233,10 @@ public sealed class ImGuiController : IDisposable
         io.MouseDown[1] = mouse.IsButtonDown(MouseButton.Right);
         io.MouseDown[2] = mouse.IsButtonDown(MouseButton.Middle);
         io.MousePos = new NumVector2(mouse.X, mouse.Y);
-        io.MouseWheel = mouse.ScrollDelta.Y;
-        io.MouseWheelH = mouse.ScrollDelta.X;
+        var wheelX = NormalizeMouseWheelDelta(mouse.ScrollDelta.X);
+        var wheelY = NormalizeMouseWheelDelta(mouse.ScrollDelta.Y);
+        if (wheelX != 0f || wheelY != 0f)
+            io.AddMouseWheelEvent(wheelX, wheelY);
 
         io.KeyCtrl = keyboard.IsKeyDown(Keys.LeftControl) || keyboard.IsKeyDown(Keys.RightControl);
         io.KeyAlt = keyboard.IsKeyDown(Keys.LeftAlt) || keyboard.IsKeyDown(Keys.RightAlt);
@@ -250,6 +257,8 @@ public sealed class ImGuiController : IDisposable
             }
         }
     }
+
+    internal static float NormalizeMouseWheelDelta(float delta) => delta * MouseWheelSensitivity;
 
     private static ImGuiKey TranslateKey(Keys key)
     {
