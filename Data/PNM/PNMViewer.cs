@@ -1409,7 +1409,7 @@ public class PNMViewer : IDatasetViewer
 
         if (_showStatsOverlay && viewSize.X >= 460 && viewSize.Y >= 260)
         {
-            var statsWidth = Math.Min(560f, viewSize.X - margin * 2);
+            var statsWidth = Math.Min(700f, viewSize.X - margin * 2);
             const float statsHeight = 208f;
             var position = viewPos + new Vector2(margin, viewSize.Y - statsHeight - margin);
             if (BeginOverlay(_statsWindowId, position, new Vector2(statsWidth, statsHeight), false))
@@ -1815,6 +1815,9 @@ public class PNMViewer : IDatasetViewer
 
         ImGui.Separator();
         ImGui.Columns(3, "##PNMStatsColumns", false);
+        var columnsWidth = ImGui.GetContentRegionAvail().X;
+        ImGui.SetColumnWidth(0, columnsWidth * 0.24f);
+        ImGui.SetColumnWidth(1, columnsWidth * 0.47f);
 
         // --- Topology ---
         ImGui.TextColored(new Vector4(0.45f, 0.75f, 1f, 1f), "Topology");
