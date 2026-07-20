@@ -644,15 +644,12 @@ public class ChunkedVolume : IGrayscaleVolumeData
             .ToList();
     }
 
-    private static List<string> SortImagesNumerically(List<string> files)
-    {
-        return files.OrderBy(f =>
-        {
-            var name = Path.GetFileNameWithoutExtension(f);
-            var numbers = new string(name.Where(char.IsDigit).ToArray());
-            return int.TryParse(numbers, out var n) ? n : 0;
-        }).ToList();
-    }
+    // Natural, overflow-safe, deterministic ordering. The old digit-concatenation + int.TryParse
+    // overflowed for names with long embedded numbers (dates/IDs), collapsing every key to 0 and
+    // falling back to the volatile Directory.GetFiles order — which scrambled slices differently
+    // on every reimport and showed up as stripes in the XZ/YZ views.
+    private static List<string> SortImagesNumerically(List<string> files) =>
+        NaturalFileSort.Sort(files);
 
     // --- FIXED METHOD ---
     private static async Task<(int width, int height)> GetImageDimensionsAsync(string imagePath)

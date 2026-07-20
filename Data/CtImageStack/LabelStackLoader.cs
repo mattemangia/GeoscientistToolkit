@@ -357,15 +357,10 @@ public static class LabelStackLoader
     /// <summary>
     ///     Sorts image files numerically based on numbers in filename
     /// </summary>
-    private static List<string> SortImagesNumerically(List<string> files)
-    {
-        return files.OrderBy(f =>
-        {
-            var name = Path.GetFileNameWithoutExtension(f);
-            var numbers = new string(name.Where(char.IsDigit).ToArray());
-            return int.TryParse(numbers, out var n) ? n : 0;
-        }).ToList();
-    }
+    // Overflow-safe, deterministic natural ordering (see NaturalFileSort): the old digit
+    // concatenation + int.TryParse scrambled stacks whose file names embed long numbers.
+    private static List<string> SortImagesNumerically(List<string> files) =>
+        NaturalFileSort.Sort(files);
 
     /// <summary>
     ///     Gets dimensions of an image

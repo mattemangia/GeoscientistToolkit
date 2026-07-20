@@ -584,17 +584,7 @@ public static class LabeledVolumeLoader
     /// <summary>
     ///     Sort files numerically based on numbers in filename.
     /// </summary>
-    private static List<string> SortFilesNumerically(List<string> files)
-    {
-        return files.OrderBy(f =>
-        {
-            var filename = Path.GetFileNameWithoutExtension(f);
-            var numbers = new string(filename.Where(char.IsDigit).ToArray());
-
-            if (int.TryParse(numbers, out var number))
-                return number;
-
-            return 0;
-        }).ToList();
-    }
+    // Overflow-safe, deterministic natural ordering (see NaturalFileSort).
+    private static List<string> SortFilesNumerically(List<string> files) =>
+        NaturalFileSort.Sort(files);
 }

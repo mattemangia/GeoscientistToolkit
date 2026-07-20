@@ -734,17 +734,9 @@ public static class CTStackLoader
     /// <summary>
     ///     Sort files numerically based on numbers in filename
     /// </summary>
-    private static List<string> SortFilesNumerically(List<string> files)
-    {
-        return files.OrderBy(f =>
-        {
-            var filename = Path.GetFileNameWithoutExtension(f);
-            var numbers = new string(filename.Where(char.IsDigit).ToArray());
-
-            if (int.TryParse(numbers, out var number))
-                return number;
-
-            return 0;
-        }).ToList();
-    }
+    // Overflow-safe, deterministic natural ordering (see NaturalFileSort): the old digit
+    // concatenation + int.TryParse overflowed for names with long embedded numbers and fell back
+    // to the volatile Directory.GetFiles order, scrambling slices differently on every reimport.
+    private static List<string> SortFilesNumerically(List<string> files) =>
+        NaturalFileSort.Sort(files);
 }
