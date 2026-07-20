@@ -284,9 +284,12 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         }
     }
 
+    // The CT viewer keeps its controls inside its own panels, so it contributes no toolbar strip;
+    // the host then skips the empty band that used to sit between the header and the four views.
+    public bool HasToolbarControls => false;
+
     public void DrawToolbarControls()
     {
-        ImGui.Dummy(new Vector2(0, 0));
     }
 
     public void DrawContent(ref float zoom, ref Vector2 pan)
@@ -785,8 +788,11 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private void DrawCombinedView()
     {
         var availableSize = ImGui.GetContentRegionAvail();
-        var viewWidth = (availableSize.X - 2) / 2;
-        var viewHeight = (availableSize.Y - 2) / 2;
+        // The two rows are separated by an implicit new-line (ItemSpacing.Y) and the columns by the
+        // explicit 2px SameLine below. Subtract both and floor, otherwise the 2x2 grid is a couple
+        // of pixels taller than the region and the host scrolls the four panels by a few pixels.
+        var viewWidth = MathF.Floor((availableSize.X - 2) / 2);
+        var viewHeight = MathF.Floor((availableSize.Y - ImGui.GetStyle().ItemSpacing.Y) / 2);
 
         // Slice panels size their image to fit; suppress the child scrollbar so a sub-pixel
         // content overflow can't spawn a useless vertical bar, and keep the wheel for zoom.

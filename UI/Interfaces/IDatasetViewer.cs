@@ -10,6 +10,13 @@ namespace GAIA.UI.Interfaces;
 public interface IDatasetViewer : IDisposable
 {
     /// <summary>
+    ///     Whether this viewer contributes any toolbar controls. When false the host skips the
+    ///     toolbar strip and its separator entirely instead of reserving an empty band above the
+    ///     content.
+    /// </summary>
+    bool HasToolbarControls => true;
+
+    /// <summary>
     ///     Draws viewer-specific controls in the toolbar.
     /// </summary>
     void DrawToolbarControls();

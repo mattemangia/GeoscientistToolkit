@@ -50,8 +50,13 @@ public class DatasetViewPanel : BasePanel
         // This allows child panels to manage their own state.
         // --- FIX END ---
 
-        DrawScrollableToolbar();
-        ImGui.Separator();
+        // Viewers with no controls of their own (e.g. the CT viewer) skip the toolbar strip and
+        // its separator so there is no empty band between the header and the content.
+        if (_viewer.HasToolbarControls)
+        {
+            DrawScrollableToolbar();
+            ImGui.Separator();
+        }
 
         var contentSize = ImGui.GetContentRegionAvail();
         // BeginChild contributes ItemSpacing after its own size. Using the full remaining
