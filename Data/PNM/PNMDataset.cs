@@ -357,6 +357,17 @@ public class PNMDataset : Dataset, ISerializableDataset
 
     // -------------------- TABLE BUILDERS & CSV EXPORT --------------------
 
+    /// <summary>
+    ///     Volume-equivalent sphere radius in voxels. Unlike <see cref="Pore.Radius" /> (max inscribed
+    ///     sphere from the EDT, which quantizes to sqrt-of-integer voxel values and collapses to a few
+    ///     shared values when pore bodies are only a few voxels thick), this is continuous and reflects
+    ///     the actual pore volume.
+    /// </summary>
+    public static double EquivalentRadiusVox(Pore p)
+    {
+        return Math.Pow(3.0 * p.VolumeVoxels / (4.0 * Math.PI), 1.0 / 3.0);
+    }
+
     public TableDataset BuildPoresTableDataset(string datasetName = null, bool includePhysicalUnits = true)
     {
         var table = new DataTable(datasetName ?? $"{Name}_Pores");
@@ -365,6 +376,7 @@ public class PNMDataset : Dataset, ISerializableDataset
         table.Columns.Add("Y", typeof(float));
         table.Columns.Add("Z", typeof(float));
         table.Columns.Add("Radius_vox", typeof(float));
+        table.Columns.Add("EqRadius_vox", typeof(double));
         table.Columns.Add("Area_vox2", typeof(float));
         table.Columns.Add("Volume_vox3", typeof(float));
         table.Columns.Add("Connections", typeof(int));
@@ -372,18 +384,22 @@ public class PNMDataset : Dataset, ISerializableDataset
         if (includePhysicalUnits)
         {
             table.Columns.Add("Radius_um", typeof(double));
+            table.Columns.Add("EqRadius_um", typeof(double));
             table.Columns.Add("Area_um2", typeof(double));
             table.Columns.Add("Volume_um3", typeof(double));
         }
 
         foreach (var p in Pores)
         {
+            var eqRadiusVox = EquivalentRadiusVox(p);
+
             var row = table.NewRow();
             row["PoreID"] = p.ID;
             row["X"] = p.Position.X;
             row["Y"] = p.Position.Y;
             row["Z"] = p.Position.Z;
             row["Radius_vox"] = p.Radius;
+            row["EqRadius_vox"] = eqRadiusVox;
             row["Area_vox2"] = p.Area;
             row["Volume_vox3"] = p.VolumeVoxels;
             row["Connections"] = p.Connections;
@@ -396,6 +412,7 @@ public class PNMDataset : Dataset, ISerializableDataset
                 if (v_um3 == 0) v_um3 = p.VolumeVoxels * Math.Pow(VoxelSize, 3);
 
                 row["Radius_um"] = r_um;
+                row["EqRadius_um"] = eqRadiusVox * VoxelSize;
                 row["Area_um2"] = a_um2;
                 row["Volume_um3"] = v_um3;
             }
@@ -436,13 +453,15 @@ public class PNMDataset : Dataset, ISerializableDataset
     {
         using var w = new StreamWriter(path, false, Encoding.UTF8);
         var headers = new List<string>
-            { "PoreID", "X", "Y", "Z", "Radius_vox", "Area_vox2", "Volume_vox3", "Connections" };
-        if (includePhysicalUnits) headers.AddRange(new[] { "Radius_um", "Area_um2", "Volume_um3" });
+            { "PoreID", "X", "Y", "Z", "Radius_vox", "EqRadius_vox", "Area_vox2", "Volume_vox3", "Connections" };
+        if (includePhysicalUnits) headers.AddRange(new[] { "Radius_um", "EqRadius_um", "Area_um2", "Volume_um3" });
 
         if (includeHeaders) w.WriteLine(string.Join(",", headers));
 
         foreach (var p in Pores)
         {
+            var eqRadiusVox = EquivalentRadiusVox(p);
+
             var vals = new List<string>
             {
                 p.ID.ToString(),
@@ -450,6 +469,7 @@ public class PNMDataset : Dataset, ISerializableDataset
                 p.Position.Y.ToString("G9"),
                 p.Position.Z.ToString("G9"),
                 p.Radius.ToString("G9"),
+                eqRadiusVox.ToString("G9"),
                 p.Area.ToString("G9"),
                 p.VolumeVoxels.ToString("G9"),
                 p.Connections.ToString()
@@ -463,6 +483,7 @@ public class PNMDataset : Dataset, ISerializableDataset
                 if (v_um3 == 0) v_um3 = p.VolumeVoxels * Math.Pow(VoxelSize, 3);
 
                 vals.Add(r_um.ToString("G9"));
+                vals.Add((eqRadiusVox * VoxelSize).ToString("G9"));
                 vals.Add(a_um2.ToString("G9"));
                 vals.Add(v_um3.ToString("G9"));
             }

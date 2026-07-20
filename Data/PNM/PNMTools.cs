@@ -68,6 +68,8 @@ public class PNMTools : IDatasetTools
 
     private readonly ImGuiExportFileDialog _exportDialog;
     private readonly ImGuiExportFileDialog _exportResultsDialog;
+    private readonly ImGuiExportFileDialog _exportPoresCsvDialog;
+    private readonly ImGuiExportFileDialog _exportThroatsCsvDialog;
 
     private readonly string[] _fluidTypes =
     {
@@ -198,6 +200,12 @@ public class PNMTools : IDatasetTools
             (".csv", "CSV (Comma-separated values)"),
             (".txt", "Text Report")
         );
+
+        _exportPoresCsvDialog = new ImGuiExportFileDialog("ExportPoresCSV", "Export Pores");
+        _exportPoresCsvDialog.SetExtensions((".csv", "CSV File"));
+
+        _exportThroatsCsvDialog = new ImGuiExportFileDialog("ExportThroatsCSV", "Export Throats");
+        _exportThroatsCsvDialog.SetExtensions((".csv", "CSV File"));
     }
 
     public void Draw(Dataset dataset)
@@ -1453,20 +1461,10 @@ public class PNMTools : IDatasetTools
 
         // CSV export
         if (ImGui.Button("Export Pores CSV...", new Vector2(-1, 0)))
-        {
-            var dialog = new ImGuiExportFileDialog("ExportPoresCSV", "Export Pores");
-            dialog.SetExtensions((".csv", "CSV File"));
-            dialog.Open($"{pnm.Name}_pores");
-            // Handle in next frame...
-        }
+            _exportPoresCsvDialog.Open($"{pnm.Name}_pores");
 
         if (ImGui.Button("Export Throats CSV...", new Vector2(-1, 0)))
-        {
-            var dialog = new ImGuiExportFileDialog("ExportThroatsCSV", "Export Throats");
-            dialog.SetExtensions((".csv", "CSV File"));
-            dialog.Open($"{pnm.Name}_throats");
-            // Handle in next frame...
-        }
+            _exportThroatsCsvDialog.Open($"{pnm.Name}_throats");
 
         ImGui.Unindent();
     }
@@ -1493,6 +1491,28 @@ public class PNMTools : IDatasetTools
             catch (Exception ex)
             {
                 Logger.LogError($"[PNMTools] Results export failed: {ex.Message}");
+            }
+
+        if (_exportPoresCsvDialog.Submit())
+            try
+            {
+                pnm.ExportPoresCsv(_exportPoresCsvDialog.SelectedPath);
+                Logger.Log($"[PNMTools] Exported pores CSV to '{_exportPoresCsvDialog.SelectedPath}'");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[PNMTools] Pores CSV export failed: {ex.Message}");
+            }
+
+        if (_exportThroatsCsvDialog.Submit())
+            try
+            {
+                pnm.ExportThroatsCsv(_exportThroatsCsvDialog.SelectedPath);
+                Logger.Log($"[PNMTools] Exported throats CSV to '{_exportThroatsCsvDialog.SelectedPath}'");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[PNMTools] Throats CSV export failed: {ex.Message}");
             }
     }
 
