@@ -1359,9 +1359,11 @@ public class PNMTools : IDatasetTools
         ImGui.Text("Permeability Values:");
         ImGui.Spacing();
 
-        // Permeability results table
+        // Permeability results table. No ScrollX: a scrolling table with an unset outer height
+        // collapses to a single visible row, which hid all but one method. The enclosing child
+        // already provides a horizontal scrollbar for narrow panels.
         if (ImGui.BeginTable("PermTable", 3, ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg |
-                                             ImGuiTableFlags.ScrollX | ImGuiTableFlags.PadOuterX))
+                                             ImGuiTableFlags.PadOuterX))
         {
             ImGui.TableSetupColumn("Method", ImGuiTableColumnFlags.WidthFixed, 150);
             ImGui.TableSetupColumn("Network k (mD)", ImGuiTableColumnFlags.WidthFixed, 150);

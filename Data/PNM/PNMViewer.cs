@@ -684,18 +684,27 @@ public class PNMViewer : IDatasetViewer
         ImGui.Checkbox("Stats", ref _showStatsOverlay);
         ImGui.SameLine();
 
+        var viewPresets = BuildViewModePresets();
+        // A stale index (e.g. a simulation result was cleared) would leave a preset colouring
+        // active with no matching combo entry; snap back to geometry so the two stay in sync.
+        if (_viewModeIndex >= viewPresets.Count)
+            SetViewMode(0, viewPresets);
+        var hasPresetViews = viewPresets.Count > 1;
+
         ImGui.Text("View:");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(125);
-        if (!_hasFlowData) ImGui.BeginDisabled();
+        ImGui.SetNextItemWidth(150);
+        if (!hasPresetViews) ImGui.BeginDisabled();
         var requestedViewMode = _viewModeIndex;
-        if (ImGui.Combo("##PNMViewMode", ref requestedViewMode, new[] { "Geometry", "Pressure Field" }, 2))
-            SetViewMode(requestedViewMode);
-        if (!_hasFlowData) ImGui.EndDisabled();
-        if (!_hasFlowData && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip("Run a permeability calculation to enable the pressure field view.");
+        var viewNames = viewPresets.Select(p => p.Name).ToArray();
+        if (ImGui.Combo("##PNMViewMode", ref requestedViewMode, viewNames, viewNames.Length))
+            SetViewMode(requestedViewMode, viewPresets);
+        if (!hasPresetViews) ImGui.EndDisabled();
+        if (!hasPresetViews && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip("Run a permeability, diffusivity or reactive-transport calculation to enable preset views.");
         else if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Switch between the configured geometry colors and the calculated pressure field.");
+            ImGui.SetTooltip("Switch between the configured geometry colours and a calculated result field\n" +
+                             "(pressure, diffusivity or reactive transport).");
         ImGui.SameLine();
 
         if (_hasFlowData)
@@ -703,7 +712,7 @@ public class PNMViewer : IDatasetViewer
             ImGui.Separator();
             ImGui.SameLine();
 
-            if (_viewModeIndex == 1) ImGui.BeginDisabled();
+            if (_viewModeIndex != 0) ImGui.BeginDisabled();
             if (ImGui.Checkbox("Flow Viz", ref _showFlowVisualization))
             {
                 if (_showFlowVisualization)
@@ -714,7 +723,7 @@ public class PNMViewer : IDatasetViewer
 
                 RebuildGeometryFromDataset();
             }
-            if (_viewModeIndex == 1) ImGui.EndDisabled();
+            if (_viewModeIndex != 0) ImGui.EndDisabled();
 
             if (_showFlowVisualization)
             {
@@ -738,7 +747,7 @@ public class PNMViewer : IDatasetViewer
         ImGui.Text("Pore color:");
         ImGui.SameLine();
 
-        if (_viewModeIndex == 1) ImGui.BeginDisabled();
+        if (_viewModeIndex != 0) ImGui.BeginDisabled();
 
         var availableOptions = new List<string>();
         var optionIndices = new List<int>();
@@ -804,7 +813,7 @@ public class PNMViewer : IDatasetViewer
         if (ImGui.Combo("##ThroatColorBy", ref _throatColorByIndex, throatOptions.ToArray(), throatOptions.Count))
             RebuildGeometryFromDataset();
 
-        if (_viewModeIndex == 1) ImGui.EndDisabled();
+        if (_viewModeIndex != 0) ImGui.EndDisabled();
 
         // NEW: Show species/mineral selector if relevant mode is active
         if (_colorByIndex == 8 && _availableSpecies.Count > 0)
@@ -847,31 +856,65 @@ public class PNMViewer : IDatasetViewer
         if (_screenshotDialog.Submit()) TakeAndSaveScreenshot(_screenshotDialog.SelectedPath);
     }
 
-    private void SetViewMode(int requestedMode)
-    {
-        if (requestedMode == 1 && _hasFlowData)
-        {
-            if (_viewModeIndex != 1)
-            {
-                _geometryColorByIndex = _colorByIndex;
-                _geometryThroatColorByIndex = _throatColorByIndex;
-                _geometryShowFlowVisualization = _showFlowVisualization;
-            }
+    /// <summary>A one-click colouring preset shown in the "View" combo. Index 0 is always the
+    /// user-configured geometry view; the rest map onto calculated result fields.</summary>
+    private readonly record struct ViewModePreset(string Name, int ColorBy, int ThroatColorBy);
 
-            _viewModeIndex = 1;
-            _showFlowVisualization = false;
-            _colorByIndex = 3;
-            _throatColorByIndex = (int)ThroatColorMode.PressureDrop;
-            RebuildGeometryFromDataset();
+    /// <summary>Builds the View combo entries for whatever result data the dataset currently has.
+    /// Geometry is always present; pressure, diffusivity and reactive transport appear once their
+    /// respective calculations have run.</summary>
+    private List<ViewModePreset> BuildViewModePresets()
+    {
+        var presets = new List<ViewModePreset> { new("Geometry", -1, -1) };
+
+        if (_hasFlowData)
+            presets.Add(new ViewModePreset("Pressure Field", 3, (int)ThroatColorMode.PressureDrop));
+
+        if (_hasDiffusivityData)
+            presets.Add(new ViewModePreset("Diffusivity", 6, (int)ThroatColorMode.Radius));
+
+        if (_hasReactiveTransportData)
+        {
+            // Prefer species concentration when species exist, otherwise temperature, which is
+            // always populated once reactive transport has run.
+            var colorBy = _availableSpecies.Count > 0 ? 8 : 7;
+            var throatColor = _hasFlowData ? (int)ThroatColorMode.FlowRate : (int)ThroatColorMode.Radius;
+            presets.Add(new ViewModePreset("Reactive Transport", colorBy, throatColor));
+        }
+
+        return presets;
+    }
+
+    private void SetViewMode(int requestedMode, List<ViewModePreset> presets)
+    {
+        requestedMode = Math.Clamp(requestedMode, 0, presets.Count - 1);
+
+        if (requestedMode == 0)
+        {
+            RestoreGeometryView(true);
             return;
         }
 
-        RestoreGeometryView(true);
+        // Preserve the user's geometry colouring the first time we leave it, so returning to the
+        // Geometry preset restores exactly what they had configured.
+        if (_viewModeIndex == 0)
+        {
+            _geometryColorByIndex = _colorByIndex;
+            _geometryThroatColorByIndex = _throatColorByIndex;
+            _geometryShowFlowVisualization = _showFlowVisualization;
+        }
+
+        var preset = presets[requestedMode];
+        _viewModeIndex = requestedMode;
+        _showFlowVisualization = false;
+        _colorByIndex = preset.ColorBy;
+        _throatColorByIndex = preset.ThroatColorBy;
+        RebuildGeometryFromDataset();
     }
 
     private void RestoreGeometryView(bool rebuildGeometry)
     {
-        if (_viewModeIndex == 1)
+        if (_viewModeIndex != 0)
         {
             _colorByIndex = _geometryColorByIndex;
             _throatColorByIndex = _geometryThroatColorByIndex;
@@ -1020,12 +1063,25 @@ public class PNMViewer : IDatasetViewer
             var colorValue = GetPoreColorValue(p);
             var radiusMultiplier = 1.0f;
 
-            if (_showFlowVisualization && _hasFlowData && (isInlet || isOutlet))
+            if (_showFlowVisualization && _hasFlowData)
             {
-                radiusMultiplier = 1.5f;
+                // Colour normalisation is forced to 0..1 in this mode, so the raw pore metric
+                // (radius, pressure, ...) would clip every interior pore to the inlet colour.
+                // Paint a clear three-way scheme instead: inlet high, outlet low, interior mid.
                 if (isInlet)
+                {
                     colorValue = 1.0f;
-                else if (isOutlet) colorValue = 0.0f;
+                    radiusMultiplier = 1.5f;
+                }
+                else if (isOutlet)
+                {
+                    colorValue = 0.0f;
+                    radiusMultiplier = 1.5f;
+                }
+                else
+                {
+                    colorValue = 0.5f;
+                }
             }
 
             poreInstances.Add(new OpenTkPnmRenderer.PoreGpuData(p.Position, colorValue,
@@ -1036,6 +1092,12 @@ public class PNMViewer : IDatasetViewer
 
         var poreById = _dataset.Pores.ToDictionary(p => p.ID, p => p);
         var throatVertices = new List<OpenTkPnmRenderer.ThroatGpuData>();
+
+        // Computed once here rather than per throat; recomputing the max inside the loop made
+        // flow visualisation O(N^2) and janky on large networks.
+        var maxThroatFlow = _showFlowVisualization && _showFlowPath && _hasFlowData && !_throatFlowRates.IsEmpty
+            ? _throatFlowRates.Values.Max()
+            : 0f;
 
         foreach (var t in _dataset.Throats)
             if (poreById.TryGetValue(t.Pore1ID, out var p1) && poreById.TryGetValue(t.Pore2ID, out var p2))
@@ -1050,11 +1112,9 @@ public class PNMViewer : IDatasetViewer
 
                     if ((p1Inlet || p2Inlet) && (p1Outlet || p2Outlet)) isFlowPath = true;
 
-                    if (_throatFlowRates.TryGetValue(t.ID, out var flowRate) && flowRate > 0)
-                    {
-                        var maxFlow = _throatFlowRates.Values.Max();
-                        if (flowRate > maxFlow * 0.5f) isFlowPath = true;
-                    }
+                    if (maxThroatFlow > 0 && _throatFlowRates.TryGetValue(t.ID, out var flowRate) &&
+                        flowRate > maxThroatFlow * 0.5f)
+                        isFlowPath = true;
                 }
 
                 var colorValue = GetThroatColorValue(t, p1, p2);

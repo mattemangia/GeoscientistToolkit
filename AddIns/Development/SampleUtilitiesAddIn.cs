@@ -15,7 +15,7 @@ namespace GAIA.CustomAddIns;
 public class DatasetInfoTool : AddInTool
 {
     public override string Name => "Show Dataset Info";
-    public override string Icon => "ℹ️";
+    public override string Icon => "ℹ";
     public override string Tooltip => "Shows detailed information about the current dataset.";
 
     // The tool is enabled as long as a dataset is selected.

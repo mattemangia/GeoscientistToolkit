@@ -28,6 +28,8 @@ public sealed class ImGuiController : IDisposable
         0x1E00, 0x1EFF, // Latin Extended Additional.
         0x2000, 0x206F, // General punctuation: en/em dash, quotes, bullets, ellipsis.
         0x2070, 0x209F, // Superscripts and subscripts, including chemical-formula digits.
+        0x20A0, 0x20CF, // Currency symbols (euro, etc.).
+        0x2100, 0x214F, // Letterlike symbols: info (i), trademark, numero, script small l.
         0x2190, 0x21FF, // Arrows.
         0x2200, 0x22FF, // Mathematical operators.
         0x2300, 0x23FF, // Misc technical symbols.
@@ -38,6 +40,8 @@ public sealed class ImGuiController : IDisposable
         0x27C0, 0x27EF, // Misc mathematical symbols-A.
         0x27F0, 0x27FF, // Supplemental arrows-A.
         0x2900, 0x297F, // Supplemental arrows-B.
+        0xA720, 0xA7FF, // Latin Extended-D: geological era symbols such as the Cambrian stroked C.
+        0xFE00, 0xFE0F, // Variation selectors, so emoji-style selectors do not fall back to '?'.
         0
     ];
     private static readonly GCHandle UiGlyphRangesHandle = GCHandle.Alloc(UiGlyphRanges, GCHandleType.Pinned);

@@ -207,7 +207,7 @@ public class SubsurfaceGISTools : IDatasetTools
 
     private void DrawModelInfoSection(SubsurfaceGISDataset dataset)
     {
-        if (ImGui.CollapsingHeader("ℹ️ Model Information", ImGuiTreeNodeFlags.None))
+        if (ImGui.CollapsingHeader("ℹ Model Information", ImGuiTreeNodeFlags.None))
         {
             ImGui.Indent();
             
