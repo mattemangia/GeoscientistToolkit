@@ -17,6 +17,7 @@
 // this class also publishes the preview there for backwards-compatibility.
 
 using System.Numerics;
+using GAIA.Business;
 using GAIA.Data;
 using GAIA.Data.CtImageStack;
 using GAIA.UI.Interfaces;
@@ -27,8 +28,8 @@ namespace GAIA.UI.Tools;
 
 public class DensityCalibrationTool : IDatasetTools, IDisposable
 {
-    // curve points: X=gray, Y=density
-    private readonly List<Vector2> _curve = new();
+    // grayscale -> density calibration built from the regions below
+    private GrayscaleDensityCalibration _calibration;
 
     // stats cache by material id
     private readonly Dictionary<byte, (float mean, float std, int count)> _matStats = new();
@@ -72,7 +73,7 @@ public class DensityCalibrationTool : IDatasetTools, IDisposable
             _regions.Clear();
             _samples.Clear();
             _matStats.Clear();
-            _curve.Clear();
+            _calibration = null;
             _previewSliceZ = 0;
             _previewDirty = true;
         }
@@ -146,7 +147,7 @@ public class DensityCalibrationTool : IDatasetTools, IDisposable
         {
             _regions.Clear();
             _samples.Clear();
-            _curve.Clear();
+            _calibration = null;
             _matStats.Clear();
             _previewDirty = true;
             CalibrationIntegration.ClearPreview(_ds);
@@ -184,13 +185,20 @@ public class DensityCalibrationTool : IDatasetTools, IDisposable
             return;
         }
 
-        if (ImGui.BeginTable("Regions", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        // Library materials that carry a density; index 0 in the combo means "manual entry".
+        var libMats = MaterialLibrary.Instance.Materials.Where(m => m.Density_kg_m3.HasValue).ToList();
+        var libNames = new[] { "(manual)" }
+            .Concat(libMats.Select(m => $"{m.Name}  ({m.Density_kg_m3:F0} kg/m3)"))
+            .ToArray();
+
+        if (ImGui.BeginTable("Regions", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
         {
-            ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 140);
-            ImGui.TableSetupColumn("Slice", ImGuiTableColumnFlags.WidthFixed, 60);
-            ImGui.TableSetupColumn("Density", ImGuiTableColumnFlags.WidthFixed, 90);
-            ImGui.TableSetupColumn("Color", ImGuiTableColumnFlags.WidthFixed, 90);
-            ImGui.TableSetupColumn("Rect (x0,y0)-(x1,y1)", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 130);
+            ImGui.TableSetupColumn("Slice", ImGuiTableColumnFlags.WidthFixed, 55);
+            ImGui.TableSetupColumn("Material (library)", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Density kg/m3", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Color", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableSetupColumn("Rect (x0,y0)-(x1,y1)", ImGuiTableColumnFlags.WidthFixed, 130);
             ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 120);
             ImGui.TableHeadersRow();
 
@@ -213,10 +221,33 @@ public class DensityCalibrationTool : IDatasetTools, IDisposable
                     _previewDirty = true;
                 }
 
-                // Density
+                // Material from library: picking one fills the known density.
                 ImGui.TableNextColumn();
                 ImGui.SetNextItemWidth(-1);
-                ImGui.InputFloat($"##dens{i}", ref r.Density, 0, 0, "%.1f");
+                var libIdx = r.LibraryName == null
+                    ? 0
+                    : Math.Max(0, libMats.FindIndex(m =>
+                          string.Equals(m.Name, r.LibraryName, StringComparison.OrdinalIgnoreCase)) + 1);
+                if (ImGui.Combo($"##lib{i}", ref libIdx, libNames, libNames.Length))
+                {
+                    if (libIdx <= 0)
+                    {
+                        r.LibraryName = null;
+                    }
+                    else
+                    {
+                        var lm = libMats[libIdx - 1];
+                        r.LibraryName = lm.Name;
+                        r.Density = (float)(lm.Density_kg_m3 ?? r.Density);
+                        r.Name = lm.Name;
+                    }
+                }
+
+                // Density (kg/m3)
+                ImGui.TableNextColumn();
+                ImGui.SetNextItemWidth(-1);
+                if (ImGui.InputFloat($"##dens{i}", ref r.Density, 0, 0, "%.1f"))
+                    r.LibraryName = null; // manual override detaches from the library material
 
                 // Color
                 ImGui.TableNextColumn();
@@ -402,59 +433,82 @@ public class DensityCalibrationTool : IDatasetTools, IDisposable
     // ---------- Calibration curve & apply ----------
     private void DrawCalibrationSection()
     {
-        ImGui.Text("Calibration Curve");
-        if (ImGui.SmallButton("Build Curve From Regions"))
-        {
-            _curve.Clear();
-            foreach (var r in _regions)
-            {
-                var (mean, _, count) = ComputeGrayStatsForRect(r.SliceZ, r.X0, r.Y0, r.X1, r.Y1);
-                if (count > 0)
-                    _curve.Add(new Vector2(mean, r.Density));
-            }
+        ImGui.Text("Calibration Curve (grayscale -> density, kg/m3)");
+        if (ImGui.SmallButton("Build Curve From Regions")) BuildCalibration();
+        ImGui.SameLine();
+        ImGui.TextDisabled("2 points = linear, 3+ = quadratic");
 
-            Logger.Log($"[DensityCalibration] Built calibration curve with {_curve.Count} points.");
+        if (_calibration is not { IsValid: true })
+        {
+            ImGui.TextDisabled("Assign a known density to at least 2 regions, then build the curve.");
+            return;
         }
 
-        if (_curve.Count >= 2)
+        ImGui.Text(_calibration.EquationText());
+        ImGui.Text(
+            $"Fit: {_calibration.Kind}, R2 = {_calibration.RSquared:F4}, points = {_calibration.Points.Count}");
+
+        ImGui.SetNextItemWidth(90);
+        ImGui.InputInt("Test Gray", ref _testGray);
+        _testGray = Math.Clamp(_testGray, 0, 255);
+        ImGui.SameLine();
+        ImGui.Text($"-> {_calibration.EvaluateKgM3(_testGray):F1} kg/m3");
+    }
+
+    private void BuildCalibration()
+    {
+        var cal = new GrayscaleDensityCalibration();
+        foreach (var r in _regions)
         {
-            var (m, q) = LinearFit(_curve);
-            ImGui.Text($"Linear Fit: ρ = {m:F6} · Gray + {q:F3}");
-            ImGui.SetNextItemWidth(90);
-            ImGui.InputInt("Test Gray", ref _testGray);
-            _testGray = Math.Clamp(_testGray, 0, 255);
-            var pred = m * _testGray + q;
-            ImGui.SameLine();
-            ImGui.Text($"→ {pred:F3}");
+            var (mean, _, count) = ComputeGrayStatsForRect(r.SliceZ, r.X0, r.Y0, r.X1, r.Y1);
+            if (count > 0)
+                cal.Points.Add(new GrayscaleDensityCalibration.CalibrationPoint
+                {
+                    Gray = mean,
+                    Density_kg_m3 = r.Density,
+                    MaterialName = r.LibraryName
+                });
         }
+
+        cal.Fit();
+        _calibration = cal.IsValid ? cal : null;
+
+        if (_calibration != null)
+            Logger.Log(
+                $"[DensityCalibration] Built {_calibration.Kind} curve from {_calibration.Points.Count} points (R2={_calibration.RSquared:F3}).");
         else
-        {
-            ImGui.TextDisabled("Need at least 2 regions to fit a line.");
-        }
+            Logger.LogWarning("[DensityCalibration] Not enough valid regions to build a calibration (need >= 2).");
     }
 
     private void ApplyCalibration()
     {
-        if (_curve.Count < 2)
+        if (_calibration is not { IsValid: true }) BuildCalibration();
+        if (_calibration is not { IsValid: true })
         {
-            Logger.LogWarning("[DensityCalibration] No calibration curve. Nothing to apply.");
+            Logger.LogWarning("[DensityCalibration] No calibration to apply. Add regions and build the curve.");
             return;
         }
 
-        var (m, q) = LinearFit(_curve);
-
-        // Use material label statistics to set density
+        // (a) Per-material densities. Material.Density is g/cm3, so convert from the calibrated kg/m3.
         foreach (var mat in _ds.Materials.Where(mm => mm.ID != 0))
         {
             var (mean, _, count) = GetMatStats(mat.ID);
             if (count == 0) continue;
-            var d = Math.Max(0.001f, m * mean + q);
+            var rhoKgM3 = _calibration.EvaluateKgM3(mean);
             var old = (float)mat.Density;
-            mat.Density = d;
-            Logger.Log($"[DensityCalibration] {mat.Name}: gray={mean:F1} (n={count}) → ρ={d:F3} (was {old:F3})");
+            mat.Density = rhoKgM3 / 1000.0; // kg/m3 -> g/cm3
+            Logger.Log(
+                $"[DensityCalibration] {mat.Name}: gray={mean:F1} (n={count}) -> {rhoKgM3:F1} kg/m3 " +
+                $"({mat.Density:F3} g/cm3, was {old:F3}).");
         }
 
+        // (b) Per-voxel field: attach the calibration so every grayscale maps to a density.
+        _ds.DensityCalibration = _calibration;
+
         _ds.SaveMaterials();
+        _ds.SaveDensityCalibration();
+        Logger.Log(
+            "[DensityCalibration] Applied per-material densities and attached the per-voxel grayscale->density calibration.");
     }
 
     // ---------- Computation helpers ----------
@@ -534,25 +588,6 @@ public class DensityCalibrationTool : IDatasetTools, IDisposable
         return (mean, (float)Math.Sqrt(var), vals.Count);
     }
 
-    private static (float m, float q) LinearFit(List<Vector2> pts)
-    {
-        float n = pts.Count;
-        float sx = 0, sy = 0, sxx = 0, sxy = 0;
-        foreach (var p in pts)
-        {
-            sx += p.X;
-            sy += p.Y;
-            sxx += p.X * p.X;
-            sxy += p.X * p.Y;
-        }
-
-        var denom = n * sxx - sx * sx;
-        if (Math.Abs(denom) < 1e-6f) return (0, sy / n);
-        var m = (n * sxy - sx * sy) / denom;
-        var q = (sy - m * sx) / n;
-        return (m, q);
-    }
-
     private static void ApplyWindowLevel(byte[] data, float wl, float ww)
     {
         var min = wl - ww / 2f;
@@ -627,7 +662,8 @@ public class DensityCalibrationTool : IDatasetTools, IDisposable
     private sealed class ManualRegion
     {
         public Vector4 Color = new(0.0f, 0.8f, 1.0f, 1.0f);
-        public float Density = 2700f; // kg/m^3 or g/m^3 depending on your convention; shown as-is
+        public float Density = 2700f; // kg/m^3
+        public string LibraryName; // library material this density came from, or null if manual
         public string Name = "New Region";
         public int SliceZ; // slice where ROI lives
         public int X0, Y0, X1, Y1; // inclusive rectangle in pixel coords (dataset space)

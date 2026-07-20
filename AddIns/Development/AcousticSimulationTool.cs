@@ -902,6 +902,21 @@ internal class AcousticSimulationTool : AddInTool, IDisposable
                 return density;
             }
 
+            // Prefer the dataset's grayscale->density calibration when present: every voxel gets the
+            // density its grayscale maps to (Air/Quartz style 2-3 point calibration).
+            if (dataset.DensityCalibration is { IsValid: true } calibration)
+            {
+                Parallel.For(0, dataset.Depth, z =>
+                {
+                    var graySlice = new byte[dataset.Width * dataset.Height];
+                    dataset.VolumeData.ReadSliceZ(z, graySlice);
+                    for (var i = 0; i < graySlice.Length; i++)
+                        density[i % dataset.Width, i / dataset.Width, z] =
+                            calibration.EvaluateKgM3(graySlice[i]);
+                });
+                return density;
+            }
+
             // Fallback: build ρ from GREYSCALE → RockMaterial → ρ for EVERY voxel
             if (_useChunkedProcessing)
             {

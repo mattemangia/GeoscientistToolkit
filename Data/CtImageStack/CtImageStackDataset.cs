@@ -50,6 +50,10 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
     public List<VirtualThresholdLabelRule> VirtualThresholdRules { get; private set; } = new();
     public int VirtualLabelRevision { get; private set; }
 
+    // Grayscale -> density mapping produced by the Density Calibration tool. When set, every voxel
+    // has a density (kg/m^3) derived from its grayscale, which the physical simulations consume.
+    public GrayscaleDensityCalibration DensityCalibration { get; set; }
+
     // --- NEW PROPERTIES FOR STORING ANALYSIS RESULTS ---
     public NMRResults NmrResults { get; set; }
     public ThermalResults ThermalResults { get; set; }
@@ -240,6 +244,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
             }
         }
         LoadVirtualThresholdRules();
+        LoadDensityCalibration();
         LabelData?.SetVirtualThresholdRules(VolumeData, VirtualThresholdRules);
         StartMemoryPressureMonitor();
     }
@@ -340,6 +345,49 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
             new JsonSerializerOptions { WriteIndented = true }));
     }
 
+    private string GetDensityCalibrationPath() => GetLabelPath() + ".density-calibration.json";
+
+    public void SaveDensityCalibration()
+    {
+        var path = GetDensityCalibrationPath();
+        try
+        {
+            if (DensityCalibration == null || !DensityCalibration.IsValid)
+            {
+                if (File.Exists(path)) File.Delete(path);
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+            File.WriteAllText(path, JsonSerializer.Serialize(DensityCalibration,
+                new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"[CT] Cannot save density calibration: {ex.Message}");
+        }
+    }
+
+    private void LoadDensityCalibration()
+    {
+        var path = GetDensityCalibrationPath();
+        if (!File.Exists(path))
+        {
+            DensityCalibration = null;
+            return;
+        }
+
+        try
+        {
+            DensityCalibration = JsonSerializer.Deserialize<GrayscaleDensityCalibration>(File.ReadAllText(path));
+        }
+        catch (Exception ex)
+        {
+            DensityCalibration = null;
+            Logger.LogWarning($"[CT] Cannot load density calibration: {ex.Message}");
+        }
+    }
+
     public override void Unload()
     {
         _memoryPressureMonitor?.Dispose();
@@ -403,6 +451,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
         {
             SaveVirtualThresholdRules();
             SaveMaterials();
+            SaveDensityCalibration();
             InvalidateLabelRenderCache();
         }, cancellationToken).ConfigureAwait(false);
         progress?.Report(1f);

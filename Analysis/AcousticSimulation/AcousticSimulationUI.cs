@@ -1697,6 +1697,32 @@ public class AcousticSimulationUI : IDisposable
     {
         return await Task.Run(() =>
         {
+            // If the user calibrated grayscale -> density, honour it directly: every voxel (labelled or
+            // not) gets the density its grayscale maps to. This is the "the volume has all densities" path.
+            if (dataset.DensityCalibration is { IsValid: true } calibration)
+            {
+                Logger.Log("[AcousticSimulation] Building density volume from grayscale->density calibration.");
+                var calibrated = new float[extent.Width, extent.Height, extent.Depth];
+                Parallel.For(0, extent.Depth, z_local =>
+                {
+                    var z_global = extent.Min.Z + z_local;
+                    var graySlice = new byte[dataset.Width * dataset.Height];
+                    grayscaleVolume.ReadSliceZ(z_global, graySlice);
+
+                    for (var y_local = 0; y_local < extent.Height; y_local++)
+                    {
+                        var y_global = extent.Min.Y + y_local;
+                        for (var x_local = 0; x_local < extent.Width; x_local++)
+                        {
+                            var x_global = extent.Min.X + x_local;
+                            calibrated[x_local, y_local, z_local] =
+                                calibration.EvaluateKgM3(graySlice[y_global * dataset.Width + x_global]);
+                        }
+                    }
+                });
+                return calibrated;
+            }
+
             Logger.Log("[AcousticSimulation] Generating heterogeneous density volume from grayscale data...");
 
             // --- Step 1: Pre-calculate the average grayscale value for each material ID ---
