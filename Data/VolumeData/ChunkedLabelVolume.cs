@@ -522,7 +522,20 @@ public class ChunkedLabelVolume : ILabelVolumeData
             progress?.Report(1f);
             return;
         }
-        if (string.IsNullOrWhiteSpace(path) || _dirtyChunks.IsEmpty) return;
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        // A resize (e.g. a Volume Cut crop) leaves an old-dimension file on disk. Flushing only the
+        // dirty chunks into it would keep the stale header and chunk layout, so the volume would
+        // reload with the wrong dimensions and desync from the grayscale volume — which is fully
+        // rewritten on save — producing a buffer-size mismatch when a slice is rendered. When the
+        // on-disk header no longer matches this volume, rewrite the whole file instead.
+        if (File.Exists(path) && !OnDiskHeaderMatches(path))
+        {
+            SaveAsBin(path);
+            return;
+        }
+
+        if (_dirtyChunks.IsEmpty) return;
 
         var chunkSize = checked(ChunkDim * ChunkDim * ChunkDim);
         var totalChunks = ChunkCountX * ChunkCountY * ChunkCountZ;
@@ -577,6 +590,31 @@ public class ChunkedLabelVolume : ILabelVolumeData
         finally { ArrayPool<byte>.Shared.Return(batchBuffer); }
         stream.Flush(false);
         Logger.Log($"[ChunkedLabelVolume] Flushed modified chunks to {path}");
+    }
+
+    /// <summary>Reads the 28-byte header of an existing label file and reports whether its stored
+    /// dimensions match this volume. A false result means the file predates a resize and must be
+    /// rewritten in full rather than incrementally patched.</summary>
+    private bool OnDiskHeaderMatches(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (stream.Length < HEADER_SIZE) return false;
+            using var reader = new BinaryReader(stream);
+            var width = reader.ReadInt32();
+            var height = reader.ReadInt32();
+            var depth = reader.ReadInt32();
+            var chunkDim = reader.ReadInt32();
+            return width == Width && height == Height && depth == Depth && chunkDim == ChunkDim;
+        }
+        catch (Exception ex)
+        {
+            // If the header cannot be read the file is unusable for an incremental flush; force a
+            // full rewrite rather than risk writing chunks against an unknown layout.
+            Logger.LogWarning($"[ChunkedLabelVolume] Could not read header of '{path}': {ex.Message}. Rewriting in full.");
+            return false;
+        }
     }
 
     public void Clear()

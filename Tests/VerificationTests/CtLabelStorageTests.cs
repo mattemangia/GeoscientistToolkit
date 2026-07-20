@@ -702,6 +702,87 @@ public sealed class CtLabelStorageTests
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
+    [Fact]
+    public void FlushDirtyChunks_RewritesFileWhenDimensionsShrankAfterCrop()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"gaia-labels-recrop-{Guid.NewGuid():N}.bin");
+        try
+        {
+            // The pre-crop label file, saved at the original (larger) dimensions.
+            using (var original = new ChunkedLabelVolume(40, 32, 16, 8, false))
+            {
+                original[39, 31, 15] = 5;
+                original.SaveAsBin(path);
+            }
+
+            // A Volume Cut crop swaps in a smaller label volume that is flushed to the same path.
+            // The stale larger file must be rewritten in full, not incrementally patched, or the
+            // header keeps the old dimensions and the reload desyncs from the grayscale.
+            using (var cropped = new ChunkedLabelVolume(20, 16, 8, 8, false))
+            {
+                cropped[19, 15, 7] = 9;
+                cropped.FlushDirtyChunks(path);
+            }
+
+            using var reloaded = ChunkedLabelVolume.LoadFromBin(path, false);
+            Assert.Equal(20, reloaded.Width);
+            Assert.Equal(16, reloaded.Height);
+            Assert.Equal(8, reloaded.Depth);
+            Assert.Equal(9, reloaded[19, 15, 7]);
+            // 28-byte header + 6 chunks (3x2x1) of 8^3: proves the old 40x32x16 layout is gone.
+            Assert.Equal(28 + 6L * 512, new FileInfo(path).Length);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void Load_ReconcilesStaleLabelDimensionsAndRendersSliceWithMaterials()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"gaia-recrop-load-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var storageName = Path.GetFileName(directory);
+        var volumePath = Path.Combine(directory, storageName + ".Volume.bin");
+        var labelPath = Path.Combine(directory, storageName + ".Labels.bin");
+        try
+        {
+            // On-disk state a dataset saved before the flush fix leaves behind: a cropped
+            // (smaller) grayscale volume next to a label file still at the old, larger size.
+            using (var gray = new ChunkedVolume(16, 12, 6, 4))
+            {
+                gray.Fill(100);
+                gray.SaveAsBinAsync(volumePath).GetAwaiter().GetResult();
+            }
+            using (var staleLabels = new ChunkedLabelVolume(32, 24, 10, 4, false))
+            {
+                staleLabels[31, 23, 9] = 5;
+                staleLabels.SaveAsBin(labelPath);
+            }
+
+            var dataset = new CtImageStackDataset("recrop", directory);
+            dataset.Load();
+
+            // The mismatched label is discarded and replaced by one matching the volume.
+            Assert.Equal(dataset.VolumeData.Width, dataset.LabelData.Width);
+            Assert.Equal(dataset.VolumeData.Height, dataset.LabelData.Height);
+            Assert.Equal(dataset.VolumeData.Depth, dataset.LabelData.Depth);
+
+            // Rendering a slice with a material forces the label read that previously threw the
+            // "buffer size must match slice dimensions" mismatch.
+            var materials = new Dictionary<byte, (System.Numerics.Vector4, float)>
+            {
+                [5] = (System.Numerics.Vector4.One, 0.5f)
+            };
+            var render = CtSliceTexturePipeline.Build(dataset,
+                new CtSliceTextureRequest(0, 3, 16, 12, 128, 255, 0, materials,
+                    (false, 0, 0, System.Numerics.Vector4.Zero), null, null,
+                    System.Numerics.Vector4.One, false, null, System.Numerics.Vector4.Zero),
+                CancellationToken.None);
+            Assert.Equal(16 * 12 * 4, render.Rgba.Length);
+            dataset.Unload();
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
     {
         public void Report(T value) => report(value);

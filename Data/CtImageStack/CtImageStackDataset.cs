@@ -215,13 +215,26 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
                         (loadedLabels.Width != VolumeData.Width ||
                          loadedLabels.Height != VolumeData.Height ||
                          loadedLabels.Depth != VolumeData.Depth))
-                        // Log a warning about the mismatch but still load the data.
+                    {
+                        // A label file whose dimensions no longer match the volume comes from a
+                        // dataset saved before the Volume Cut flush fix: its chunk layout is stale
+                        // and every slice render would throw a buffer-size mismatch. The content is
+                        // unrecoverable, so discard it and start from a fresh empty label sized to
+                        // the volume; the corrupt file is overwritten on the next save.
                         Logger.LogWarning(
-                            $"[CtImageStackDataset] Mismatched dimensions for '{Name}'. Label data may not align with volume data. " +
-                            $"Labels: {loadedLabels.Width}x{loadedLabels.Height}x{loadedLabels.Depth}, " +
-                            $"Volume: {VolumeData.Width}x{VolumeData.Height}x{VolumeData.Depth}");
-                    LabelData = loadedLabels;
-                    Logger.Log($"[CtImageStackDataset] Loaded label data for '{Name}' from {labelPath}");
+                            $"[CtImageStackDataset] Label dimensions for '{Name}' do not match the volume " +
+                            $"({loadedLabels.Width}x{loadedLabels.Height}x{loadedLabels.Depth} vs " +
+                            $"{VolumeData.Width}x{VolumeData.Height}x{VolumeData.Depth}). " +
+                            "Discarding the stale label volume and creating an empty one.");
+                        loadedLabels.Dispose();
+                        LabelData = new ChunkedLabelVolume(VolumeData.Width, VolumeData.Height, VolumeData.Depth,
+                            VolumeData.ChunkDim, useMemoryMapping, labelPath);
+                    }
+                    else
+                    {
+                        LabelData = loadedLabels;
+                        Logger.Log($"[CtImageStackDataset] Loaded label data for '{Name}' from {labelPath}");
+                    }
                 }
                 catch (Exception ex)
                 {
