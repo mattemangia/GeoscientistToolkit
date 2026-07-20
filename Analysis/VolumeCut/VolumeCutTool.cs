@@ -232,6 +232,13 @@ public class VolumeCutTool : IDatasetTools, IDisposable
             ImGui.SetTooltip("Tints the voxels that the cut will clear. The preview is procedural\n" +
                              "(no mask volume is allocated), so it is instant on any dataset size.");
 
+        var crop = State.CropToRegion;
+        if (ImGui.Checkbox("Crop to region (resize volume)", ref crop)) State.CropToRegion = crop;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Also shrinks the dataset to the bounding box of the kept region so no\n" +
+                             "empty black border is left around it. Keep-inside crops to the shape's\n" +
+                             "box; keep-outside keeps the whole exterior, so it is not resized.");
+
         ImGui.Spacing();
         var busy = _applyOperation?.IsActive == true;
         var canApply = !busy && (State.ApplyToGrayscale && dataset.VolumeData != null ||
@@ -265,8 +272,15 @@ public class VolumeCutTool : IDatasetTools, IDisposable
         State.ClampTo(dataset.Width, dataset.Height, dataset.Depth);
         _applyOperation = CtOperationCoordinator.For(dataset).Enqueue("Cutting volume", async (token, progress) =>
         {
-            VolumeCutProcessor.Apply(dataset, State, token, progress);
-            OpenTkManager.ExecuteOnMainThread(() => ProjectManager.Instance.NotifyDatasetDataChanged(dataset));
+            // Crop-to-region builds resized volumes off-thread and returns them; the swap and the
+            // dimension change are committed on the UI thread so the viewers never read a
+            // half-applied dataset.
+            var result = VolumeCutProcessor.Apply(dataset, State, token, progress);
+            OpenTkManager.ExecuteOnMainThread(() =>
+            {
+                result?.CommitTo(dataset);
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+            });
         });
     }
 

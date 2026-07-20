@@ -201,6 +201,95 @@ public sealed class VolumeCutTests
     }
 
     [Fact]
+    public void BoxKeepInside_CropResizesDatasetToTheBoxAndKeepsContent()
+    {
+        var dataset = CreateDataset(20, 16, 12, out var grayscale, out var labels);
+        using var _ = grayscale;
+        using var __ = labels;
+        var state = new VolumeCutState
+        {
+            Shape = VolumeCutShapeKind.Box,
+            KeepMode = VolumeCutKeepMode.KeepInside,
+            CropToRegion = true,
+            BoxMin = new Vector3(5, 4, 3),
+            BoxMax = new Vector3(14, 11, 8)
+        };
+
+        var result = VolumeCutProcessor.Apply(dataset, state, CancellationToken.None);
+        Assert.NotNull(result);
+        result.CommitTo(dataset);
+
+        // Dataset shrank to the box (inclusive bounds -> 10x8x6).
+        Assert.Equal(10, dataset.Width);
+        Assert.Equal(8, dataset.Height);
+        Assert.Equal(6, dataset.Depth);
+        Assert.Equal(10, dataset.VolumeData.Width);
+        Assert.Equal(6, dataset.LabelData.Depth);
+
+        // Every kept voxel survived the crop; there is no empty border left.
+        for (var z = 0; z < dataset.Depth; z++)
+        for (var y = 0; y < dataset.Height; y++)
+        for (var x = 0; x < dataset.Width; x++)
+        {
+            Assert.Equal(200, dataset.VolumeData[x, y, z]);
+            Assert.Equal(200, dataset.LabelData[x, y, z]);
+        }
+    }
+
+    [Fact]
+    public void SphereKeepInside_CropResizesToBoundingBoxAndClearsCorners()
+    {
+        var dataset = CreateDataset(24, 24, 24, out var grayscale, out var labels);
+        using var _ = grayscale;
+        using var __ = labels;
+        var state = new VolumeCutState
+        {
+            Shape = VolumeCutShapeKind.Sphere,
+            KeepMode = VolumeCutKeepMode.KeepInside,
+            CropToRegion = true,
+            SphereCenter = new Vector3(12, 12, 12),
+            SphereRadius = 6
+        };
+
+        var result = VolumeCutProcessor.Apply(dataset, state, CancellationToken.None);
+        Assert.NotNull(result);
+        result.CommitTo(dataset);
+
+        // Bounding box of a radius-6 sphere centred at 12 -> [6, 18], 13 voxels per axis.
+        Assert.Equal(13, dataset.Width);
+        Assert.Equal(13, dataset.Height);
+        Assert.Equal(13, dataset.Depth);
+
+        // Centre of the cropped volume is inside the sphere; the corners of the box are not.
+        Assert.Equal(200, dataset.VolumeData[6, 6, 6]);
+        Assert.Equal(0, dataset.VolumeData[0, 0, 0]);
+        Assert.Equal(0, dataset.VolumeData[12, 12, 12]);
+    }
+
+    [Fact]
+    public void KeepOutside_CropLeavesDimensionsUnchanged()
+    {
+        var dataset = CreateDataset(20, 16, 12, out var grayscale, out var labels);
+        using var _ = grayscale;
+        using var __ = labels;
+        var state = new VolumeCutState
+        {
+            Shape = VolumeCutShapeKind.Box,
+            KeepMode = VolumeCutKeepMode.KeepOutside,
+            CropToRegion = true,
+            BoxMin = new Vector3(5, 4, 3),
+            BoxMax = new Vector3(14, 11, 8)
+        };
+
+        // Keep-outside keeps the whole exterior, so there is nothing to trim: applied in place.
+        var result = VolumeCutProcessor.Apply(dataset, state, CancellationToken.None);
+        Assert.Null(result);
+        Assert.Equal(20, dataset.Width);
+        Assert.Equal(0, grayscale[10, 8, 5]);
+        Assert.Equal(200, grayscale[0, 0, 0]);
+    }
+
+    [Fact]
     public void TargetSelection_LabelsOnlyLeavesGrayscaleUntouched()
     {
         var dataset = CreateDataset(16, 16, 8, out var grayscale, out var labels);

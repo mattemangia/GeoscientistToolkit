@@ -21,6 +21,10 @@ public sealed class VolumeCutState
     public bool ApplyToLabels = true;
     public bool ShowOverlay = true;
 
+    /// <summary>When set, the cut also resizes the dataset to the bounding box of the kept region,
+    /// so no empty (black) border is left around it. See <see cref="GetCropBounds" />.</summary>
+    public bool CropToRegion;
+
     /// <summary>When set, resize handles scale the whole shape proportionally: a box drag
     /// rescales the other two axes about their centers, and cylinder radius/extent stay linked.
     /// Moves are unaffected; a sphere is inherently uniform.</summary>
@@ -78,6 +82,46 @@ public sealed class VolumeCutState
         CylinderAxisMax = Math.Clamp(CylinderAxisMax, CylinderAxisMin, axisLength);
         SphereCenter = Vector3.Clamp(SphereCenter, Vector3.Zero, max);
         SphereRadius = Math.Clamp(SphereRadius, 1, largest);
+    }
+
+    /// <summary>
+    ///     Inclusive voxel bounds of the region kept by the cut, for the optional crop-to-region.
+    ///     Keep-inside crops to the shape's bounding box (a sphere/cylinder crops to the box that
+    ///     contains it); keep-outside keeps the whole exterior, so the bounds span the full volume
+    ///     and no crop reduction happens. All values are clamped inside the volume.
+    /// </summary>
+    public (int X0, int Y0, int Z0, int X1, int Y1, int Z1) GetCropBounds(int width, int height, int depth)
+    {
+        if (KeepMode == VolumeCutKeepMode.KeepOutside)
+            return (0, 0, 0, width - 1, height - 1, depth - 1);
+
+        Vector3 lo, hi;
+        switch (Shape)
+        {
+            case VolumeCutShapeKind.Box:
+                lo = BoxMin;
+                hi = BoxMax;
+                break;
+            case VolumeCutShapeKind.Sphere:
+                lo = SphereCenter - new Vector3(SphereRadius);
+                hi = SphereCenter + new Vector3(SphereRadius);
+                break;
+            default:
+                // Cylinder: full radius on the two cross axes, [AxisMin, AxisMax] along the axis.
+                lo = CylinderCenter - new Vector3(CylinderRadius);
+                hi = CylinderCenter + new Vector3(CylinderRadius);
+                SetComponent(ref lo, CylinderAxis, CylinderAxisMin);
+                SetComponent(ref hi, CylinderAxis, CylinderAxisMax);
+                break;
+        }
+
+        var x0 = Math.Clamp((int)MathF.Floor(lo.X), 0, width - 1);
+        var y0 = Math.Clamp((int)MathF.Floor(lo.Y), 0, height - 1);
+        var z0 = Math.Clamp((int)MathF.Floor(lo.Z), 0, depth - 1);
+        var x1 = Math.Clamp((int)MathF.Ceiling(hi.X), x0, width - 1);
+        var y1 = Math.Clamp((int)MathF.Ceiling(hi.Y), y0, height - 1);
+        var z1 = Math.Clamp((int)MathF.Ceiling(hi.Z), z0, depth - 1);
+        return (x0, y0, z0, x1, y1, z1);
     }
 
     /// <summary>Whether a voxel lies inside the cut shape (independent of keep mode).</summary>

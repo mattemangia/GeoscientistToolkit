@@ -570,6 +570,11 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         {
             _grayscaleSliceCache.Clear();
             _labelSliceCache.Clear();
+            // A crop can shrink the volume below the current slice indices; keep them in range so
+            // the next slice read does not run past the resized bounds.
+            _sliceX = Math.Clamp(_sliceX, 0, Math.Max(0, _dataset.Width - 1));
+            _sliceY = Math.Clamp(_sliceY, 0, Math.Max(0, _dataset.Height - 1));
+            _sliceZ = Math.Clamp(_sliceZ, 0, Math.Max(0, _dataset.Depth - 1));
             _needsUpdateXY = true;
             _needsUpdateXZ = true;
             _needsUpdateYZ = true;
