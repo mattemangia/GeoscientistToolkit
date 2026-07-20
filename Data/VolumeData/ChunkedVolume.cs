@@ -393,7 +393,8 @@ public class ChunkedVolume : IGrayscaleVolumeData
             return;
         }
 
-        using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write))
+        using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write,
+                   FileShare.None, 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan))
         using (var bw = new BinaryWriter(fs))
         {
             WriteHeader(bw);

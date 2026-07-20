@@ -29,7 +29,8 @@ public static class CtStackConverter
 
             Logger.Log($"[CtStackConverter] Converting volume {width}×{height}×{depth}");
 
-            using (var fileStream = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write))
+            using (var fileStream = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write,
+                       FileShare.None, 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan))
             using (var writer = new BinaryWriter(fileStream))
             {
                 writer.Write(width);
@@ -72,13 +73,18 @@ public static class CtStackConverter
                     Logger.Log($"[CtStackConverter] LOD {i} has {bricksX}×{bricksY}×{bricksZ} = {totalBricks} bricks");
 
                     // Process one brick layer (BrickSize Z-slices) at a time: read the slices
-                    // with bulk slice reads once, then assemble every brick of the layer from
-                    // the slab with Array.Copy instead of per-voxel indexer access.
+                    // with bulk slice reads once, then assemble a whole row of bricks in parallel
+                    // into a contiguous buffer and flush it with a single async write. This keeps
+                    // the on-disk brick order (bz→by→bx) while collapsing thousands of tiny awaited
+                    // writes into one write per brick row and parallelising the Array.Copy work.
+                    var brickVolume = BrickSize * BrickSize * BrickSize;
                     var sliceLength = lodInfo.Width * lodInfo.Height;
                     var slab = new byte[BrickSize][];
                     for (var s = 0; s < BrickSize; s++) slab[s] = new byte[sliceLength];
-                    var brick = new byte[BrickSize * BrickSize * BrickSize];
+                    var rowBuffer = new byte[bricksX * brickVolume];
                     var lodVolume = currentLodVolume;
+                    var lodWidth = lodInfo.Width;
+                    var lodHeight = lodInfo.Height;
 
                     for (var bz = 0; bz < bricksZ; bz++)
                     {
@@ -93,10 +99,12 @@ public static class CtStackConverter
                             s => lodVolume.ReadSliceZ(startZ + s, slab[s])));
 
                         for (var by = 0; by < bricksY; by++)
-                        for (var bx = 0; bx < bricksX; bx++)
                         {
-                            AssembleBrick(slab, slabDepth, lodInfo.Width, lodInfo.Height, bx, by, brick);
-                            await fileStream.WriteAsync(brick, 0, brick.Length);
+                            var brickRow = by;
+                            await Task.Run(() => Parallel.For(0, bricksX, bx =>
+                                AssembleBrick(slab, slabDepth, lodWidth, lodHeight, bx, brickRow,
+                                    rowBuffer, bx * brickVolume)));
+                            await fileStream.WriteAsync(rowBuffer, 0, rowBuffer.Length);
                         }
                     }
 
@@ -136,9 +144,9 @@ public static class CtStackConverter
     ///     Regions outside the volume stay zero, matching the previous per-voxel behavior.
     /// </summary>
     private static void AssembleBrick(byte[][] slab, int slabDepth, int width, int height,
-        int brickX, int brickY, byte[] brick)
+        int brickX, int brickY, byte[] dest, int destOffset)
     {
-        Array.Clear(brick);
+        Array.Clear(dest, destOffset, BrickSize * BrickSize * BrickSize);
 
         var startX = brickX * BrickSize;
         var startY = brickY * BrickSize;
@@ -148,9 +156,9 @@ public static class CtStackConverter
         for (var z = 0; z < slabDepth; z++)
         {
             var slice = slab[z];
-            var zBase = z * BrickSize * BrickSize;
+            var zBase = destOffset + z * BrickSize * BrickSize;
             for (var y = 0; y < copyHeight; y++)
-                Array.Copy(slice, (startY + y) * width + startX, brick, zBase + y * BrickSize, copyWidth);
+                Array.Copy(slice, (startY + y) * width + startX, dest, zBase + y * BrickSize, copyWidth);
         }
     }
 

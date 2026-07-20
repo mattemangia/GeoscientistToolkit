@@ -164,6 +164,8 @@ public static class CTStackLoader
 
         // Decode page ranges in parallel: each worker opens its own TIFF handle, seeks once
         // to the start of its range and then walks pages sequentially (no per-page reopen).
+        // Reserve the last 15% of the bar for the volume-cache write below.
+        var decodeProgress = SubRange(progress, 0f, 0.85f);
         await Task.Run(() =>
         {
             var processed = 0;
@@ -193,7 +195,7 @@ public static class CTStackLoader
                             newVolume.WriteSliceZ(z, pageData);
 
                             var done = Interlocked.Increment(ref processed);
-                            progress?.Report((float)done / pageCount);
+                            decodeProgress?.Report((float)done / pageCount);
                         })));
             }
 
@@ -201,7 +203,10 @@ public static class CTStackLoader
         });
 
         // Save for future use (only if not memory mapped - it's already saved)
-        if (!useMemoryMapping) await newVolume.SaveAsBinAsync(volumePath);
+        if (!useMemoryMapping)
+            await newVolume.SaveAsBinAsync(volumePath, default, SubRange(progress, 0.85f, 1f));
+        else
+            progress?.Report(1f);
 
         // Create empty labels file
         await CreateEmptyLabelsFileAsync(outputDir, newVolume, datasetName);
@@ -276,11 +281,15 @@ public static class CTStackLoader
                 };
             }
 
-            // Process TIFF pages with 3D binning
-            await ProcessMultiPageTiff3DBinningAsync(binnedVolume, tiffPath, binningFactor, pageCount, progress);
+            // Process TIFF pages with 3D binning (reserve the last 15% of the bar for the cache write)
+            await ProcessMultiPageTiff3DBinningAsync(binnedVolume, tiffPath, binningFactor, pageCount,
+                SubRange(progress, 0f, 0.85f));
 
             // Save the binned volume (if not memory mapped)
-            if (!useMemoryMapping) await binnedVolume.SaveAsBinAsync(volumePath);
+            if (!useMemoryMapping)
+                await binnedVolume.SaveAsBinAsync(volumePath, default, SubRange(progress, 0.85f, 1f));
+            else
+                progress?.Report(1f);
 
             // Create marker file
             await File.WriteAllTextAsync(binnedMarker,
@@ -428,13 +437,18 @@ public static class CTStackLoader
             }
         }
 
-        // Load from images
+        // Load from images. Reserve the last 15% of the bar for the volume-cache write below so
+        // the progress keeps advancing during the (previously silent) multi-GB SaveAsBin step.
+        var loadProgress = SubRange(progress, 0f, 0.85f);
         var newVolume = await ChunkedVolume.FromFolderAsync(folderPath,
-            ChunkedVolume.DEFAULT_CHUNK_DIM, useMemoryMapping, progress, datasetName);
+            ChunkedVolume.DEFAULT_CHUNK_DIM, useMemoryMapping, loadProgress, datasetName);
         newVolume.PixelSize = pixelSize;
 
         // Save for future use (only if not memory mapped - it's already saved)
-        if (!useMemoryMapping) await newVolume.SaveAsBinAsync(volumePath);
+        if (!useMemoryMapping)
+            await newVolume.SaveAsBinAsync(volumePath, default, SubRange(progress, 0.85f, 1f));
+        else
+            progress?.Report(1f);
 
         // Create empty labels file
         await CreateEmptyLabelsFileAsync(folderPath, newVolume, datasetName);
@@ -507,11 +521,14 @@ public static class CTStackLoader
             };
         }
 
-        // Process images with 3D binning
-        await Process3DBinningAsync(binnedVolume, imageFiles, binningFactor, progress);
+        // Process images with 3D binning (reserve the last 15% of the bar for the cache write)
+        await Process3DBinningAsync(binnedVolume, imageFiles, binningFactor, SubRange(progress, 0f, 0.85f));
 
         // Save the binned volume (if not memory mapped)
-        if (!useMemoryMapping) await binnedVolume.SaveAsBinAsync(volumePath);
+        if (!useMemoryMapping)
+            await binnedVolume.SaveAsBinAsync(volumePath, default, SubRange(progress, 0.85f, 1f));
+        else
+            progress?.Report(1f);
 
         // Create marker file
         await File.WriteAllTextAsync(binnedMarker,
@@ -674,6 +691,34 @@ public static class CTStackLoader
             var info = ImageLoader.LoadImageInfo(imagePath);
             return (info.Width, info.Height);
         });
+    }
+
+    /// <summary>
+    ///     Wraps a progress sink so a sub-step reporting 0..1 is remapped into the [start, end]
+    ///     slice of the overall bar. Forwards synchronously to keep reports monotonic per phase.
+    /// </summary>
+    private static IProgress<float> SubRange(IProgress<float> outer, float start, float end)
+    {
+        return outer == null ? null : new ScaledProgress(outer, start, end);
+    }
+
+    private sealed class ScaledProgress : IProgress<float>
+    {
+        private readonly IProgress<float> _inner;
+        private readonly float _span;
+        private readonly float _start;
+
+        public ScaledProgress(IProgress<float> inner, float start, float end)
+        {
+            _inner = inner;
+            _start = start;
+            _span = end - start;
+        }
+
+        public void Report(float value)
+        {
+            _inner.Report(_start + Math.Clamp(value, 0f, 1f) * _span);
+        }
     }
 
     /// <summary>
