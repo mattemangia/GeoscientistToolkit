@@ -766,7 +766,7 @@ public class RealtimePhotogrammetryWindow : IDisposable
         double thresholdMB = thresholdBytes / (1024.0 * 1024.0);
         double usagePercent = (currentBytes / (double)thresholdBytes) * 100.0;
 
-        ImGui.Text($"Current: {currentMB:F0} MB / {thresholdMB:F0} MB ({usagePercent:F0}%)");
+        ImGui.TextUnformatted($"Current: {currentMB:F0} MB / {thresholdMB:F0} MB ({usagePercent:F0}%)");
         ImGui.ProgressBar((float)(usagePercent / 100.0), new Vector2(-1, 0));
 
         ImGui.Text($"Keyframes with images: {keyframeCount} / {maxKeyframes}");

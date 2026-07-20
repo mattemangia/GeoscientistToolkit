@@ -247,10 +247,10 @@ public class NodeManagerWindow
                 ImGui.PopStyleColor();
 
                 ImGui.TableNextColumn();
-                ImGui.Text($"{node.CpuUsage:F1}%");
+                ImGui.TextUnformatted($"{node.CpuUsage:F1}%");
 
                 ImGui.TableNextColumn();
-                ImGui.Text($"{node.MemoryUsage:F1}%");
+                ImGui.TextUnformatted($"{node.MemoryUsage:F1}%");
 
                 ImGui.TableNextColumn();
                 ImGui.Text(node.ActiveJobs.ToString());
@@ -363,8 +363,8 @@ public class NodeManagerWindow
         ImGui.Text("Resources");
         ImGui.Separator();
 
-        ImGui.Text($"Max Memory Usage: {settings.MaxMemoryUsagePercent}%");
-        ImGui.Text($"Max CPU Usage: {settings.MaxCpuUsagePercent}%");
+        ImGui.TextUnformatted($"Max Memory Usage: {settings.MaxMemoryUsagePercent}%");
+        ImGui.TextUnformatted($"Max CPU Usage: {settings.MaxCpuUsagePercent}%");
 
         ImGui.Spacing();
         ImGui.Separator();

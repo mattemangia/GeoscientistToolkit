@@ -754,7 +754,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                         ImGui.TableNextColumn();
                         var error = Math.Abs(results.EffectiveConductivity - value) / results.EffectiveConductivity *
                                     100.0;
-                        ImGui.Text($"{error:F2}%");
+                        ImGui.TextUnformatted($"{error:F2}%");
                     }
 
                     ImGui.EndTable();

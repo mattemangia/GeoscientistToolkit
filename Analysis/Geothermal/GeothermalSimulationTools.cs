@@ -590,7 +590,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 // Porosity
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
-                ImGui.Text("Porosity (fraction or %)");
+                ImGui.TextUnformatted("Porosity (fraction or %)");
                 ImGui.TableNextColumn();
                 var porIdx = Array.IndexOf(columnsArray, _mappedPorosityColumn);
                 if (porIdx < 0) porIdx = 0;
@@ -2009,7 +2009,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
                     ImGui.TableNextColumn();
                     var flux = _results.LayerHeatFluxContributions[layer];
-                    ImGui.Text($"{flux:F1}%");
+                    ImGui.TextUnformatted($"{flux:F1}%");
 
                     ImGui.TableNextColumn();
                     var tempChange = _results.LayerTemperatureChanges.GetValueOrDefault(layer, 0);
@@ -2103,7 +2103,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                            reduction > 20 ? new Vector4(1.0f, 0.7f, 0.2f, 1.0f) :
                            new Vector4(0.3f, 1.0f, 0.3f, 1.0f);
 
-                ImGui.TextColored(color, $"Permeability Reduction: {reduction:F1}%");
+                ImGui.TextColored(color, $"Permeability Reduction: {reduction:F1}%%");
             }
         }
 
@@ -2332,7 +2332,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Optimal Operating Point:");
             ImGui.BulletText($"Geo Fluid Temp: {optimalResult.GeothermalFluidInletTemp - 273.15f:F1} °C");
             ImGui.BulletText($"Net Power Output: {optimalResult.NetPower / 1e6f:F2} MW");
-            ImGui.BulletText($"Thermal Efficiency: {optimalResult.ThermalEfficiency * 100f:F2} %");
+            ImGui.BulletText($"Thermal Efficiency: {optimalResult.ThermalEfficiency * 100f:F2} %%");
             ImGui.BulletText($"ORC Mass Flow: {optimalResult.MassFlowRate:F2} kg/s");
             ImGui.BulletText($"Turbine Work: {optimalResult.TurbineWork / 1e6f:F2} MW");
             ImGui.BulletText($"Pump Work: {optimalResult.PumpWork / 1e6f:F2} MW");
@@ -2346,7 +2346,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 ImGui.TextColored(new Vector4(0.2f, 1.0f, 1.0f, 1.0f), "Economic Summary:");
                 ImGui.BulletText($"Total CAPEX: ${_economicResults.TotalCapitalCostMUSD:F2} M");
                 ImGui.BulletText($"NPV (30 years): ${_economicResults.NPV_MUSD:F2} M");
-                ImGui.BulletText($"IRR: {_economicResults.IRR:F2} %");
+                ImGui.BulletText($"IRR: {_economicResults.IRR:F2} %%");
                 ImGui.BulletText($"Payback Period: {_economicResults.PaybackPeriodYears:F1} years");
                 ImGui.BulletText($"LCOE: ${_economicResults.LCOE_USDperMWh:F2} /MWh");
                 ImGui.BulletText($"Annual Energy: {_economicResults.AnnualEnergyProductionMWh:F0} MWh");

@@ -420,7 +420,7 @@ public class TwoDGeologyViewer : IDisposable
             }
 
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("0% = Original deformed state\n100% = Fully restored (flat layers)");
+                ImGui.SetTooltip("0%% = Original deformed state\n100%% = Fully restored (flat layers)");
 
             ImGui.SameLine();
 
@@ -1397,7 +1397,7 @@ public class TwoDGeologyViewer : IDisposable
         {
             ImGui.Separator();
             ImGui.TextColored(new Vector4(0.5f, 1f, 0.5f, 1f), "Restoration:");
-            ImGui.Text($"Progress: {_restorationPercentage:F0}%");
+            ImGui.TextUnformatted($"Progress: {_restorationPercentage:F0}%");
 
             // Progress bar
             ImGui.ProgressBar(_restorationPercentage / 100f, new Vector2(-1, 0), "");

@@ -159,7 +159,7 @@ public class SeismicViewer : IDatasetViewer
         ImGui.SameLine();
         if (ImGui.Button("1:1"))
             _resetZoom = true;
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Reset to 100%");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Reset to 100%%");
 
         ImGui.SameLine();
         ImGui.TextDisabled("|");

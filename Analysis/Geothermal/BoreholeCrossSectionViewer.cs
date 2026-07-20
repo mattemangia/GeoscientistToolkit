@@ -120,7 +120,7 @@ public class BoreholeCrossSectionViewer
                 _depthPosition = depthMeters / _options.BoreholeDataset.TotalDepth;
             }
 
-            ImGui.Text($"At depth: {_selectedDepthMeters:F1} m ({_depthPosition * 100:F0}%)");
+            ImGui.TextUnformatted($"At depth: {_selectedDepthMeters:F1} m ({_depthPosition * 100:F0}%)");
         }
 
         // Lateral view controls

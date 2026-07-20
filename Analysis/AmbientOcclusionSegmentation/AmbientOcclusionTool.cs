@@ -523,7 +523,7 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
             }
 
             float porosity = (float)poreVoxels / totalVoxels * 100f;
-            ImGui.Text($"Porosity: {porosity:F2}%");
+            ImGui.TextUnformatted($"Porosity: {porosity:F2}%");
             ImGui.Text($"Pore Voxels: {poreVoxels:N0} / {totalVoxels:N0}");
         }
     }

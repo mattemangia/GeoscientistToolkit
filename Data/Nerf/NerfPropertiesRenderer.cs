@@ -199,7 +199,7 @@ public class NerfPropertiesRenderer : IDatasetPropertiesRenderer
 
                     ImGui.Spacing();
                     ImGui.Text("Improvement:");
-                    ImGui.Text($"  Loss: {lossImprovement:F1}% reduction");
+                    ImGui.TextUnformatted($"  Loss: {lossImprovement:F1}% reduction");
                     ImGui.Text($"  PSNR: +{psnrImprovement:F2} dB");
                 }
             }
