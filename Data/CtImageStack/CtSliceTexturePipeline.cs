@@ -20,7 +20,11 @@ internal sealed record CtSliceTextureRequest(
     CtPreviewVolume ExternalPreview,
     Vector4 ExternalPreviewColor);
 
-internal sealed record CtSliceTextureResult(int View, int Slice, int Width, int Height, byte[] Rgba);
+// SourceWidth/SourceHeight are the full slice dimensions the request was built for; Width/Height
+// are the (possibly downsampled) texture dimensions. The consumer must match staleness against the
+// source dimensions, not the texture ones, or a downsampled slice is discarded as a size mismatch.
+internal sealed record CtSliceTextureResult(
+    int View, int Slice, int SourceWidth, int SourceHeight, int Width, int Height, byte[] Rgba);
 
 /// <summary>CPU-only, cancellable slice renderer. It never touches ImGui/OpenGL.</summary>
 internal static class CtSliceTexturePipeline
@@ -84,7 +88,8 @@ internal static class CtSliceTexturePipeline
                 rgba[output + 3] = 255;
             }
         });
-        return new CtSliceTextureResult(request.View, request.Slice, targetWidth, targetHeight, rgba);
+        return new CtSliceTextureResult(request.View, request.Slice, request.SourceWidth, request.SourceHeight,
+            targetWidth, targetHeight, rgba);
     }
 
     private static void ReadGrayscale(CtImageStackDataset dataset, int view, int slice, byte[] destination)

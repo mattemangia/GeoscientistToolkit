@@ -75,10 +75,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     public bool CutXForward = true, CutYForward = true, CutZForward = true;
     public float CutXPosition = 0.5f, CutYPosition = 0.5f, CutZPosition = 0.5f;
     public float MinThreshold = 0.05f, MaxThreshold = 1f, StepSize = 0.5f, VolumeOpacity = 1f;
-    // The 3D crosshair slice planes render as opaque cuts through the volume; on by default they
-    // slice the body into a dome-on-a-plane, so it reads as a bell rather than the full shape.
-    // Start with the unobstructed volume and let the user enable the crosshair planes on demand.
-    public bool ShowGrayscale = true, ShowSlices = false;
+    public bool ShowGrayscale = true, ShowSlices = true;
     public Vector3 SlicePositions = new(0.5f);
     public bool ShowCutXPlaneVisual { get; set; } = true;
     public bool ShowCutYPlaneVisual { get; set; } = true;

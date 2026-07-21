@@ -1300,8 +1300,11 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 var result = _sliceTextureTask.Result;
                 var currentSlice = result.View switch { 0 => _sliceZ, 1 => _sliceY, _ => _sliceX };
                 var (curW, curH) = GetImageDimensionsForView(result.View);
+                // Match staleness against the source dimensions: the texture itself may be
+                // downsampled (large slices like a tall XZ/YZ plane), so comparing the texture
+                // dimensions here would discard every downsampled slice and leave the view blank.
                 if (result.Slice == currentSlice && _buildingSliceVersion == _sliceRequestVersions[result.View]
-                    && result.Width == curW && result.Height == curH)
+                    && result.SourceWidth == curW && result.SourceHeight == curH)
                 {
                     var replacement = TextureManager.CreateFromPixelData(result.Rgba,
                         (uint)result.Width, (uint)result.Height);

@@ -25,8 +25,7 @@ public sealed class SparseCtVolume : IDisposable
     public const int Apron = 1;              // one-voxel border for correct trilinear across bricks
     public const int BrickTile = BrickCore + 2 * Apron; // 66
     private const int MaxLevels = 16;        // shader uniform-array bound
-    private const int UploadsPerFrame = 12;  // bricks committed to the atlas each frame
-    private const int StreamBatch = 24;      // bricks read per background task
+    private const int StreamBatch = 32;      // bricks read per background task
 
     private readonly StreamingCtVolumeDataset _dataset;
     private readonly int _levelCount;         // total LODs in the file
@@ -258,6 +257,9 @@ public sealed class SparseCtVolume : IDisposable
 
         foreach (var key in desired)
             if (_resident.TryGetValue(key, out var slot)) _slotUsed[slot] = _frame;
+            // Keep the coarser ancestor the shader falls back to alive while the fine brick streams,
+            // otherwise it can be evicted and the region drops all the way to the base LOD.
+            else TouchResidentAncestor(key.level, key.brick);
 
         RebuildPageData(thByte);
         UploadPageTable();
@@ -377,17 +379,19 @@ public sealed class SparseCtVolume : IDisposable
             return;
         }
 
+        // The whole batch is no longer in flight. Clearing it wholesale — rather than only the
+        // bricks we manage to commit — is what lets a brick that could not get a slot this frame be
+        // requested again next frame, instead of staying wedged in the requested set and leaving
+        // that region permanently coarse (the symptom seen while orbiting a large volume).
+        _requested.Clear();
+
         GL.BindTexture(TextureTarget.Texture3D, _atlasTex);
         GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
-        var committed = 0;
         foreach (var (level, brick, data, max) in task.Result)
         {
-            _requested.Remove((level, brick));
             if (_resident.ContainsKey((level, brick))) continue;
-            if (committed >= UploadsPerFrame) break;
-
             var slot = AcquireSlot();
-            if (slot < 0) break;
+            if (slot < 0) continue; // atlas momentarily full; re-requested next frame if still wanted
             var sx = slot % _atlasSlotsX;
             var sy = slot / _atlasSlotsX % _atlasSlotsY;
             var sz = slot / (_atlasSlotsX * _atlasSlotsY);
@@ -397,7 +401,21 @@ public sealed class SparseCtVolume : IDisposable
             _slotUsed[slot] = _frame;
             _resident[(level, brick)] = slot;
             _brickMax[level][brick] = max; // tighten with the exact value
-            committed++;
+        }
+    }
+
+    /// <summary>Touch the finest resident ancestor of a not-yet-resident brick so the fallback the
+    /// shader will actually sample stays in the atlas instead of being evicted to the base LOD.</summary>
+    private void TouchResidentAncestor(int level, int brick)
+    {
+        var bx = brick % _bgX[level];
+        var by = brick / _bgX[level] % _bgY[level];
+        var bz = brick / (_bgX[level] * _bgY[level]);
+        for (var l = level + 1; l <= _maxAtlasLevel; l++)
+        {
+            bx >>= 1; by >>= 1; bz >>= 1;
+            var bi = (bz * _bgY[l] + by) * _bgX[l] + bx;
+            if (_resident.TryGetValue((l, bi), out var slot)) { _slotUsed[slot] = _frame; return; }
         }
     }
 
