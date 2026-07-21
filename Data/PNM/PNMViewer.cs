@@ -1389,14 +1389,38 @@ public class PNMViewer : IDatasetViewer
     {
         const float margin = 10f;
 
+        // Resolve the selected pore before any passive overlay: its panel owns the top-left
+        // corner, and the read-outs must make room for it instead of drawing underneath.
+        var selectedPanelWidth = 0f;
+        var selectedPanelHeight = 0f;
+        if (_selectedPoreId >= 0)
+        {
+            _selectedPore = FindPoreById(_selectedPoreId);
+            if (_selectedPore == null)
+            {
+                _selectedPoreId = -1;
+            }
+            else
+            {
+                selectedPanelWidth = Math.Min(340f, viewSize.X - margin * 2);
+                selectedPanelHeight = Math.Min(330f, viewSize.Y - margin * 2);
+            }
+        }
+
         if (_showLegendOverlay && viewSize.X >= 220 && viewSize.Y >= 140)
         {
             var legendWidth = Math.Clamp(viewSize.X - margin * 2, 120f, 190f);
             var legendHeight = Math.Clamp(viewSize.Y - margin * 2, 100f, 300f);
-            var position = viewPos + new Vector2(viewSize.X - legendWidth - margin, margin);
-            if (BeginOverlay(_legendWindowId, position, new Vector2(legendWidth, legendHeight), false))
-                DrawLegendContent();
-            EndOverlay();
+            // The legend hugs the top-right corner; skip it while the selected-pore panel is wide
+            // enough to reach it, otherwise the two draw on top of each other.
+            var legendLeft = viewSize.X - legendWidth - margin;
+            if (selectedPanelWidth <= 0 || legendLeft >= margin + selectedPanelWidth + margin)
+            {
+                var position = viewPos + new Vector2(legendLeft, margin);
+                if (BeginOverlay(_legendWindowId, position, new Vector2(legendWidth, legendHeight), false))
+                    DrawLegendContent();
+                EndOverlay();
+            }
         }
 
         if (_showFlowVisualization && _hasFlowData && viewSize.X >= 230 && viewSize.Y >= 310)
@@ -1407,30 +1431,82 @@ public class PNMViewer : IDatasetViewer
             EndOverlay();
         }
 
-        if (_showStatsOverlay && viewSize.X >= 460 && viewSize.Y >= 260)
+        if (_showStatsOverlay && _dataset != null && viewSize.X >= 280 && viewSize.Y >= 240)
         {
-            var statsWidth = Math.Min(700f, viewSize.X - margin * 2);
-            const float statsHeight = 208f;
-            var position = viewPos + new Vector2(margin, viewSize.Y - statsHeight - margin);
-            if (BeginOverlay(_statsWindowId, position, new Vector2(statsWidth, statsHeight), false))
-                DrawStatisticsContent();
-            EndOverlay();
-        }
+            // Size the panel from the rendered strings instead of fixed pixels: value lengths vary
+            // with the dataset and the font scale, and a hard-coded 3-column split let long values
+            // overlap the neighbouring column.
+            var sections = BuildStatisticsSections();
+            var style = ImGui.GetStyle();
+            var lineHeight = ImGui.GetTextLineHeightWithSpacing();
+            var labelGap = style.ItemSpacing.X;
+            var sectionGap = style.ItemSpacing.X * 3f;
+            const float overlayPadding = 8f; // keep in sync with BeginOverlay's WindowPadding
+            var chromeX = overlayPadding * 2f + 2f;
+            var chromeY = overlayPadding * 2f + 2f;
+            var separatorHeight = style.ItemSpacing.Y * 2f + 1f;
 
-        if (_selectedPoreId >= 0)
-        {
-            _selectedPore = FindPoreById(_selectedPoreId);
-            if (_selectedPore == null)
+            var columnWidths = new float[sections.Length];
+            var rowWidth = sectionGap * (sections.Length - 1);
+            var maxRows = 0;
+            for (var i = 0; i < sections.Length; i++)
             {
-                _selectedPoreId = -1;
-                return;
+                var width = ImGui.CalcTextSize(sections[i].Title).X;
+                foreach (var (label, value) in sections[i].Rows)
+                    width = MathF.Max(width,
+                        ImGui.CalcTextSize(label).X + labelGap + ImGui.CalcTextSize(value).X);
+                columnWidths[i] = width;
+                rowWidth += width;
+                maxRows = Math.Max(maxRows, sections[i].Rows.Length);
             }
 
-            var width = Math.Min(340f, viewSize.X - margin * 2);
-            var height = Math.Min(330f, viewSize.Y - margin * 2);
+            var headerWidth = ImGui.CalcTextSize("Network Statistics").X + labelGap +
+                              ImGui.CalcTextSize($"— {_dataset.Name}").X;
+            if (_dataset.ActiveFilter != null)
+                headerWidth += labelGap + ImGui.CalcTextSize("[filtered]").X;
+
+            var maxPanelWidth = viewSize.X - margin * 2f;
+            var horizontal = rowWidth + chromeX <= maxPanelWidth;
+
+            float statsWidth, statsHeight;
+            if (horizontal)
+            {
+                statsWidth = MathF.Min(maxPanelWidth, MathF.Max(rowWidth, headerWidth) + chromeX);
+                statsHeight = chromeY + lineHeight + separatorHeight + (maxRows + 1) * lineHeight;
+            }
+            else
+            {
+                var contentWidth = headerWidth;
+                foreach (var width in columnWidths)
+                    contentWidth = MathF.Max(contentWidth, width);
+                statsWidth = MathF.Min(maxPanelWidth, contentWidth + chromeX);
+                statsHeight = chromeY + lineHeight + separatorHeight;
+                foreach (var section in sections)
+                    statsHeight += (section.Rows.Length + 1) * lineHeight + style.ItemSpacing.Y;
+            }
+
+            // Both panels sit on the left edge, so cap the stats height at the space left under
+            // the selected-pore panel; when what remains is too short to read, yield to it.
+            var maxStatsHeight = viewSize.Y - margin * 2f;
+            if (selectedPanelHeight > 0)
+                maxStatsHeight -= selectedPanelHeight + margin;
+            statsHeight = MathF.Min(statsHeight, maxStatsHeight);
+
+            var minReadableHeight = chromeY + separatorHeight + lineHeight * 4f;
+            if (statsHeight >= minReadableHeight)
+            {
+                var position = viewPos + new Vector2(margin, viewSize.Y - statsHeight - margin);
+                if (BeginOverlay(_statsWindowId, position, new Vector2(statsWidth, statsHeight), false))
+                    DrawStatisticsContent(sections, columnWidths, horizontal);
+                EndOverlay();
+            }
+        }
+
+        if (_selectedPore != null && _selectedPoreId >= 0)
+        {
             // The only interactive overlay: it carries the Deselect button.
             if (BeginOverlay(_selectedWindowId, viewPos + new Vector2(margin, margin),
-                    new Vector2(width, height), true))
+                    new Vector2(selectedPanelWidth, selectedPanelHeight), true))
                 DrawSelectedPoreContent();
             EndOverlay();
         }
@@ -1783,26 +1859,68 @@ public class PNMViewer : IDatasetViewer
     {
         ImGui.TextDisabled(label);
         ImGui.SameLine();
+        if (value == "—")
+        {
+            // An em dash means the analysis producing the quantity has not been run.
+            ImGui.TextDisabled(value);
+            return;
+        }
+
         // TextUnformatted: values may carry '%' (e.g. ":P" formats), which ImGui.Text parses as printf
         ImGui.TextUnformatted(value);
     }
 
-    /// <summary> Renders a quantity, or an em dash when the analysis producing it has not been run. </summary>
-    private static void Metric(string label, float value, string format, string unit)
+    /// <summary>
+    ///     The statistics read-out as data, so the overlay can be measured before it is drawn and
+    ///     sized to its actual strings.
+    /// </summary>
+    private (string Title, (string Label, string Value)[] Rows)[] BuildStatisticsSections()
     {
-        ImGui.TextDisabled(label);
-        ImGui.SameLine();
-        if (value > 0)
-            ImGui.TextUnformatted($"{value.ToString(format)}{unit}");
-        else
-            ImGui.TextDisabled("—");
+        var stats = _statistics;
+        var isolatedFraction = stats.PoreCount > 0 ? stats.IsolatedPoreCount / (float)stats.PoreCount : 0f;
+
+        static string Optional(float value, string format, string unit)
+        {
+            return value > 0 ? $"{value.ToString(format)}{unit}" : "—";
+        }
+
+        return new[]
+        {
+            ("Topology", new[]
+            {
+                ("Pores:", $"{stats.PoreCount:N0}"),
+                ("Throats:", $"{stats.ThroatCount:N0}"),
+                ("Isolated:", $"{stats.IsolatedPoreCount:N0} ({isolatedFraction:P1})"),
+                ("Coord. number:", $"{stats.MeanCoordination:F2}"),
+                ("  range:", $"{stats.MinCoordination:F0} – {stats.MaxCoordination:F0}")
+            }),
+            ("Geometry", new[]
+            {
+                ("Voxel size:", $"{_dataset.VoxelSize:F3} μm"),
+                ("Volume:", $"{_dataset.ImageWidth}×{_dataset.ImageHeight}×{_dataset.ImageDepth} vox"),
+                ("Centre extent:", $"{stats.ExtentUm.X:F0}×{stats.ExtentUm.Y:F0}×{stats.ExtentUm.Z:F0} μm"),
+                ("Porosity:", stats.BulkVolumeUm3 > 0 ? $"{stats.Porosity:P2}" : "—"),
+                ("Pore r:",
+                    $"{stats.MinPoreRadiusUm:F2} / {stats.MeanPoreRadiusUm:F2} / {stats.MaxPoreRadiusUm:F2} μm"),
+                ("Throat r:",
+                    $"{stats.MinThroatRadiusUm:F2} / {stats.MeanThroatRadiusUm:F2} / {stats.MaxThroatRadiusUm:F2} μm")
+            }),
+            ("Transport", new[]
+            {
+                ("Tortuosity:", Optional(_dataset.Tortuosity, "F3", "")),
+                ("k Darcy:", Optional(_dataset.DarcyPermeability, "F2", " mD")),
+                ("k N-S:", Optional(_dataset.NavierStokesPermeability, "F2", " mD")),
+                ("k LBM:", Optional(_dataset.LatticeBoltzmannPermeability, "F2", " mD")),
+                ("D_eff:", Optional(_dataset.EffectiveDiffusivity, "E3", " m²/s")),
+                ("Form. factor:", Optional(_dataset.FormationFactor, "F2", ""))
+            })
+        };
     }
 
-    private void DrawStatisticsContent()
+    private void DrawStatisticsContent((string Title, (string Label, string Value)[] Rows)[] sections,
+        float[] columnWidths, bool horizontal)
     {
         if (_dataset == null) return;
-
-        var stats = _statistics;
 
         ImGui.Text("Network Statistics");
         ImGui.SameLine();
@@ -1814,44 +1932,39 @@ public class PNMViewer : IDatasetViewer
         }
 
         ImGui.Separator();
-        ImGui.Columns(3, "##PNMStatsColumns", false);
-        var columnsWidth = ImGui.GetContentRegionAvail().X;
-        ImGui.SetColumnWidth(0, columnsWidth * 0.24f);
-        ImGui.SetColumnWidth(1, columnsWidth * 0.47f);
 
-        // --- Topology ---
-        ImGui.TextColored(new Vector4(0.45f, 0.75f, 1f, 1f), "Topology");
-        Metric("Pores:", $"{stats.PoreCount:N0}");
-        Metric("Throats:", $"{stats.ThroatCount:N0}");
-        var isolatedFraction = stats.PoreCount > 0 ? stats.IsolatedPoreCount / (float)stats.PoreCount : 0f;
-        Metric("Isolated:", $"{stats.IsolatedPoreCount:N0} ({isolatedFraction:P1})");
-        Metric("Coord. number:", $"{stats.MeanCoordination:F2}");
-        Metric("  range:", $"{stats.MinCoordination:F0} – {stats.MaxCoordination:F0}");
+        var sectionColor = new Vector4(0.45f, 0.75f, 1f, 1f);
+        if (horizontal)
+        {
+            // Fixed-width columns sized to their widest string, so no value bleeds into a neighbour.
+            if (ImGui.BeginTable("##PNMStatsColumns", sections.Length, ImGuiTableFlags.SizingFixedFit))
+            {
+                for (var i = 0; i < sections.Length; i++)
+                    ImGui.TableSetupColumn(sections[i].Title, ImGuiTableColumnFlags.WidthFixed, columnWidths[i]);
 
-        ImGui.NextColumn();
+                ImGui.TableNextRow();
+                for (var i = 0; i < sections.Length; i++)
+                {
+                    ImGui.TableSetColumnIndex(i);
+                    ImGui.TextColored(sectionColor, sections[i].Title);
+                    foreach (var (label, value) in sections[i].Rows)
+                        Metric(label, value);
+                }
 
-        // --- Geometry ---
-        ImGui.TextColored(new Vector4(0.45f, 0.75f, 1f, 1f), "Geometry");
-        Metric("Voxel size:", $"{_dataset.VoxelSize:F3} μm");
-        Metric("Volume:", $"{_dataset.ImageWidth}×{_dataset.ImageHeight}×{_dataset.ImageDepth} vox");
-        Metric("Centre extent:", $"{stats.ExtentUm.X:F0}×{stats.ExtentUm.Y:F0}×{stats.ExtentUm.Z:F0} μm");
-        Metric("Porosity:", stats.BulkVolumeUm3 > 0 ? $"{stats.Porosity:P2}" : "—");
-        Metric("Pore r:", $"{stats.MinPoreRadiusUm:F2} / {stats.MeanPoreRadiusUm:F2} / {stats.MaxPoreRadiusUm:F2} μm");
-        Metric("Throat r:",
-            $"{stats.MinThroatRadiusUm:F2} / {stats.MeanThroatRadiusUm:F2} / {stats.MaxThroatRadiusUm:F2} μm");
-
-        ImGui.NextColumn();
-
-        // --- Transport ---
-        ImGui.TextColored(new Vector4(0.45f, 0.75f, 1f, 1f), "Transport");
-        Metric("Tortuosity:", _dataset.Tortuosity, "F3", "");
-        Metric("k Darcy:", _dataset.DarcyPermeability, "F2", " mD");
-        Metric("k N-S:", _dataset.NavierStokesPermeability, "F2", " mD");
-        Metric("k LBM:", _dataset.LatticeBoltzmannPermeability, "F2", " mD");
-        Metric("D_eff:", _dataset.EffectiveDiffusivity, "E3", " m²/s");
-        Metric("Form. factor:", _dataset.FormationFactor, "F2", "");
-
-        ImGui.Columns(1);
+                ImGui.EndTable();
+            }
+        }
+        else
+        {
+            // The viewer is too narrow for three columns: stack the sections instead.
+            for (var i = 0; i < sections.Length; i++)
+            {
+                if (i > 0) ImGui.Spacing();
+                ImGui.TextColored(sectionColor, sections[i].Title);
+                foreach (var (label, value) in sections[i].Rows)
+                    Metric(label, value);
+            }
+        }
     }
 
     private void DrawSelectedPoreContent()
