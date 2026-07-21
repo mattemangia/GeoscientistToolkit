@@ -551,16 +551,9 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             _dataset.Load();
             _loadingProgress = 0.45f;
             _loadingStatus = "Loading the multiresolution volume...";
-            if (_streamingDataset != null)
-            {
-                var memoryLimitMb = GAIA.Settings.SettingsManager.Instance.Settings.Hardware.TextureMemoryLimit;
-                // Give density half of the configured texture pool; labels and previews use
-                // separate, smaller adaptive textures. The previous 512 MiB ceiling silently
-                // dropped any volume above ~800³ to a coarser LOD regardless of available VRAM.
-                var densityBudget = Math.Clamp(memoryLimitMb * 1024L * 1024L / 2,
-                    96L * 1024 * 1024, 4096L * 1024 * 1024);
-                _streamingDataset.LoadBestRenderLod(densityBudget, 2048);
-            }
+            // The 3D viewer now streams bricks out-of-core, so no whole LOD is pulled into RAM
+            // here; only the small header/LOD table is needed to size the sparse renderer.
+            _streamingDataset?.LoadMetadata();
             _loadingProgress = 0.7f;
             _loadingStatus = "Volume data ready; initializing the viewer...";
         }
@@ -607,7 +600,9 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                     })
                     {
                         ShowGrayscale = ShowVolumeData,
-                        StepSize = 2.0f
+                        // ~2 samples per voxel at the level each region is sampled at; the sparse
+                        // renderer scales the physical step up for coarse/distant bricks itself.
+                        StepSize = 0.5f
                     };
                     if (_linkThresholds) PullWindowLevelFrom3D();
                     UpdateVolumeViewerSlices();

@@ -127,51 +127,19 @@ public class CtVolume3DControlPanel : BasePanel
         if (viewer.RenderLodCount <= 1) return;
 
         ImGui.Spacing();
-        ImGui.Text("Volume Detail");
-        var current = viewer.CurrentRenderLodIndex;
-        var loading = viewer.IsRenderLodLoading;
-
-        ImGui.BeginDisabled(loading);
-        if (ImGui.BeginCombo("##VolumeDetail", DescribeLod(viewer, current)))
+        if (viewer.SparseActive)
         {
-            for (var i = 0; i < viewer.RenderLodCount; i++)
-            {
-                var selectable = viewer.IsRenderLodSelectable(i);
-                ImGui.BeginDisabled(!selectable);
-                if (ImGui.Selectable(DescribeLod(viewer, i), i == current) && selectable)
-                    viewer.RequestRenderLod(i);
-                ImGui.EndDisabled();
-                if (!selectable && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                    ImGui.SetTooltip("Too large to keep resident on this system. This level is still\n" +
-                                     "shown at native detail: it streams in around the camera focus\n" +
-                                     "automatically as you zoom.");
-            }
-
-            ImGui.EndCombo();
+            ImGui.TextColored(new Vector4(0.4f, 0.85f, 0.4f, 1f), "Adaptive brick streaming");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Detail is chosen per region from its size on screen: near parts render at\n" +
+                                 "native resolution, far parts coarser. Only the visible bricks are kept in\n" +
+                                 "video memory, so datasets far larger than the GPU open without loading the\n" +
+                                 "whole volume. Zoom in and detail streams in around the view automatically.");
         }
-
-        ImGui.EndDisabled();
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Resolution of the whole-volume texture. Zooming in additionally streams\n" +
-                             "finer levels around the camera focus, so small features appear at native\n" +
-                             "resolution without loading the full level into memory.");
-        if (loading)
+        else
         {
-            ImGui.SameLine();
-            ImGui.TextDisabled("Loading...");
+            ImGui.TextDisabled("Single-resolution fallback");
         }
-
-        if (viewer.IsDetailWindowActive)
-            ImGui.TextColored(new Vector4(0.4f, 0.85f, 0.4f, 1f), "Native detail streaming around the camera focus");
-    }
-
-    private static string DescribeLod(CtVolume3DViewer viewer, int index)
-    {
-        if (index < 0) return "Default";
-        var (w, h, d) = viewer.GetRenderLodDimensions(index);
-        var mib = viewer.GetRenderLodTextureBytes(index) / 1048576.0;
-        var label = index == 0 ? "Full" : $"1/{1 << index}";
-        return $"{label}  {w}×{h}×{d}  ({mib:0.#} MiB)";
     }
 
     private void DrawMaterialsTab()
