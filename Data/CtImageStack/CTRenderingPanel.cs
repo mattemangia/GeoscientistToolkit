@@ -242,6 +242,15 @@ public class CtRenderingPanel : BasePanel
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Lower values = higher quality but slower performance");
 
+        var volumeOpacity = _viewer.VolumeViewer.VolumeOpacity;
+        if (ImGui.SliderFloat("Opacity", ref volumeOpacity, 0.1f, 8.0f, "%.2fx", ImGuiSliderFlags.Logarithmic))
+            _viewer.VolumeViewer.VolumeOpacity = volumeOpacity;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Scales how quickly the volume accumulates opacity along each ray.\n" +
+                             "Raise it to make the sample read as a solid body, lower it to see through it.");
+
+        CtVolume3DControlPanel.DrawDetailLevelSelector(_viewer.VolumeViewer);
+
         var minThreshold = _viewer.MinThreshold;
         var maxThreshold = _viewer.MaxThreshold;
 

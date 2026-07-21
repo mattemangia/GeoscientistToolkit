@@ -133,8 +133,11 @@ public abstract class BasePanel : IDisposable
 
             // Reclaim the top of the stack when the panel is behind another window, but only while
             // the user is not mid-interaction, so a drag-rotate on the viewer or an edit elsewhere
-            // is never stolen.
-            if (AlwaysOnTop && !_isFocused && !ImGui.IsAnyMouseDown() && !ImGui.IsAnyItemActive())
+            // is never stolen. Focusing a window also closes every popup stacked above it, so stand
+            // down while any popup is open: stealing focus there instantly dismissed the main menus
+            // and the close-confirmation dialog, which made the app's X button appear dead.
+            if (AlwaysOnTop && !_isFocused && !ImGui.IsAnyMouseDown() && !ImGui.IsAnyItemActive() &&
+                !ImGui.IsPopupOpen("", ImGuiPopupFlags.AnyPopupId | ImGuiPopupFlags.AnyPopupLevel))
                 ImGui.SetNextWindowFocus();
 
             // Pass our authoritative _isOpen flag to ImGui. It will be set to false if the user closes the window.

@@ -83,7 +83,7 @@ public class CtVolume3DControlPanel : BasePanel
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Lower values = higher quality but slower rendering.");
 
-        DrawDetailLevelSelector();
+        DrawDetailLevelSelector(_viewer);
 
         ImGui.Spacing();
 
@@ -121,24 +121,25 @@ public class CtVolume3DControlPanel : BasePanel
         ImGui.Combo("##ColorMap", ref _viewer.ColorMapIndex, colorMaps, colorMaps.Length);
     }
 
-    private void DrawDetailLevelSelector()
+    /// <summary>Shared by this panel and the combined viewer's rendering panel.</summary>
+    internal static void DrawDetailLevelSelector(CtVolume3DViewer viewer)
     {
-        if (_viewer.RenderLodCount <= 1) return;
+        if (viewer.RenderLodCount <= 1) return;
 
         ImGui.Spacing();
         ImGui.Text("Volume Detail");
-        var current = _viewer.CurrentRenderLodIndex;
-        var loading = _viewer.IsRenderLodLoading;
+        var current = viewer.CurrentRenderLodIndex;
+        var loading = viewer.IsRenderLodLoading;
 
         ImGui.BeginDisabled(loading);
-        if (ImGui.BeginCombo("##VolumeDetail", DescribeLod(current)))
+        if (ImGui.BeginCombo("##VolumeDetail", DescribeLod(viewer, current)))
         {
-            for (var i = 0; i < _viewer.RenderLodCount; i++)
+            for (var i = 0; i < viewer.RenderLodCount; i++)
             {
-                var selectable = _viewer.IsRenderLodSelectable(i);
+                var selectable = viewer.IsRenderLodSelectable(i);
                 ImGui.BeginDisabled(!selectable);
-                if (ImGui.Selectable(DescribeLod(i), i == current) && selectable)
-                    _viewer.RequestRenderLod(i);
+                if (ImGui.Selectable(DescribeLod(viewer, i), i == current) && selectable)
+                    viewer.RequestRenderLod(i);
                 ImGui.EndDisabled();
                 if (!selectable && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                     ImGui.SetTooltip("Exceeds this GPU's maximum 3D texture size.");
@@ -158,11 +159,11 @@ public class CtVolume3DControlPanel : BasePanel
         }
     }
 
-    private string DescribeLod(int index)
+    private static string DescribeLod(CtVolume3DViewer viewer, int index)
     {
         if (index < 0) return "Default";
-        var (w, h, d) = _viewer.GetRenderLodDimensions(index);
-        var mib = _viewer.GetRenderLodTextureBytes(index) / 1048576.0;
+        var (w, h, d) = viewer.GetRenderLodDimensions(index);
+        var mib = viewer.GetRenderLodTextureBytes(index) / 1048576.0;
         var label = index == 0 ? "Full" : $"1/{1 << index}";
         return $"{label}  {w}×{h}×{d}  ({mib:0.#} MiB)";
     }
