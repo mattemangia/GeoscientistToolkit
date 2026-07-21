@@ -142,7 +142,9 @@ public class CtVolume3DControlPanel : BasePanel
                     viewer.RequestRenderLod(i);
                 ImGui.EndDisabled();
                 if (!selectable && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                    ImGui.SetTooltip("Exceeds this GPU's maximum 3D texture size.");
+                    ImGui.SetTooltip("Too large to keep resident on this system. This level is still\n" +
+                                     "shown at native detail: it streams in around the camera focus\n" +
+                                     "automatically as you zoom.");
             }
 
             ImGui.EndCombo();
@@ -150,13 +152,17 @@ public class CtVolume3DControlPanel : BasePanel
 
         ImGui.EndDisabled();
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Resolution of the volume sampled by the 3D render. Finer levels reveal\n" +
-                             "small features but use more video memory and render slower.");
+            ImGui.SetTooltip("Resolution of the whole-volume texture. Zooming in additionally streams\n" +
+                             "finer levels around the camera focus, so small features appear at native\n" +
+                             "resolution without loading the full level into memory.");
         if (loading)
         {
             ImGui.SameLine();
             ImGui.TextDisabled("Loading...");
         }
+
+        if (viewer.IsDetailWindowActive)
+            ImGui.TextColored(new Vector4(0.4f, 0.85f, 0.4f, 1f), "Native detail streaming around the camera focus");
     }
 
     private static string DescribeLod(CtVolume3DViewer viewer, int index)

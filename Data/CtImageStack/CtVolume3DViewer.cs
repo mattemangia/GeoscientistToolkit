@@ -45,6 +45,12 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private Task<(int lodIndex, byte[] bricks, byte[] density)> _lodSwapTask;
     private int _pendingLodIndex = -1;
     private int _maxTexture3DSize = 2048;
+    private Task<(int lodIndex, Vector3 roiMin, Vector3 roiMax, Vector3 texScale, int w, int h, int d, byte[] data)> _roiBuildTask;
+    private int _roiTexture, _roiLodIndex = -1;
+    private int _roiSize = 384;
+    private bool _roiReady, _roiDisabled;
+    private Vector3 _roiMin, _roiMax, _roiTexScale, _roiBuiltCenter;
+    private long _lastRoiKickMs;
     private Task<List<(int z, byte[] data)>> _labelPatchTask;
     private byte[] _labelCacheData;
     private readonly ConcurrentDictionary<int, byte> _dirtyLabelSlices = new();
@@ -224,6 +230,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private void Render()
     {
         ProcessPendingLodSwap();
+        UpdateRoiStreaming();
         ProcessPendingLabelRefresh();
         ProcessPreviewRefresh();
         if (_materialsDirty) { UploadMaterials(); _materialsDirty = false; }
@@ -277,6 +284,16 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
             var rule = virtualRules[ruleIndex];
             Set4($"uVirtualRules[{ruleIndex}]", new Vector4(rule.Min / 255f, rule.Max / 255f,
                 rule.MaterialId / 255f, rule.Add ? 1f : 0f));
+        }
+        Set1("uRoiOn", _roiReady ? 1 : 0);
+        if (_roiReady)
+        {
+            Set3("uRoiMin", _roiMin); Set3("uRoiMax", _roiMax); Set3("uRoiTexScale", _roiTexScale);
+            var roiLod = _streamingDataset.LodInfos[_roiLodIndex];
+            var roiVoxel = Math.Min(VolumeScale.X / roiLod.Width,
+                Math.Min(VolumeScale.Y / roiLod.Height, VolumeScale.Z / roiLod.Depth));
+            Set1("uRoiDs", roiVoxel * StepSize);
+            GL.ActiveTexture(TextureUnit.Texture7); GL.BindTexture(TextureTarget.Texture3D, _roiTexture); Set1("uRoi", 7);
         }
         Bind3D(0, _volumeTexture, "uVolume"); Bind3D(1, _labelTexture, "uLabels"); Bind3D(2, _previewTexture, "uPreview");
         GL.ActiveTexture(TextureUnit.Texture3); GL.BindTexture(TextureTarget.Texture2D, _materialTexture); Set1("uMaterials", 3);
@@ -634,11 +651,14 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         var lod = _streamingDataset.LodInfos[index];
         return (long)lod.Width * lod.Height * lod.Depth;
     }
-    /// <summary>False when a LOD axis exceeds the driver's 3D texture limit and can never upload.</summary>
+    /// <summary>False when the LOD can never be resident as one texture — an axis beyond the
+    /// driver's 3D texture limit, or more voxels than a flat array can address. Such levels are
+    /// still shown at native detail through the streamed camera window.</summary>
     public bool IsRenderLodSelectable(int index)
     {
         var lod = _streamingDataset.LodInfos[index];
-        return Math.Max(lod.Width, Math.Max(lod.Height, lod.Depth)) <= _maxTexture3DSize;
+        return Math.Max(lod.Width, Math.Max(lod.Height, lod.Depth)) <= _maxTexture3DSize
+               && (long)lod.Width * lod.Height * lod.Depth <= StreamingCtVolumeDataset.MaxMonolithicVoxels;
     }
 
     /// <summary>Loads and reconstructs the requested LOD off-thread; the texture swap happens on
@@ -689,6 +709,119 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         Logger.Log($"[CtVolume3DViewer] Switched render LOD to {index}: {lod.Width}×{lod.Height}×{lod.Depth}");
     }
 
+    /// <summary>Whether the viewer is currently overlaying streamed native-resolution detail.</summary>
+    public bool IsDetailWindowActive => _roiReady;
+
+    /// <summary>
+    ///     Out-of-core detail streaming. The whole volume stays resident at a LOD that fits the
+    ///     texture budget; on top of that, a fixed-size window around the camera target streams
+    ///     from disk at whatever finer LOD the current zoom can actually resolve. The shader
+    ///     samples the window where it applies and falls back to the resident LOD elsewhere, so
+    ///     detail follows the camera instead of requiring the full level in memory.
+    /// </summary>
+    private void UpdateRoiStreaming()
+    {
+        if (_roiBuildTask is { IsCompleted: true })
+        {
+            var task = _roiBuildTask;
+            _roiBuildTask = null;
+            if (!task.IsCompletedSuccessfully)
+            {
+                Logger.LogError($"[CtVolume3DViewer] Detail window load failed: {task.Exception?.GetBaseException().Message}");
+            }
+            else if (EnsureRoiTexture())
+            {
+                var r = task.Result;
+                GL.BindTexture(TextureTarget.Texture3D, _roiTexture);
+                GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+                GL.TexSubImage3D(TextureTarget.Texture3D, 0, 0, 0, 0, r.w, r.h, r.d,
+                    PixelFormat.Red, PixelType.UnsignedByte, r.data);
+                _roiMin = r.roiMin; _roiMax = r.roiMax; _roiTexScale = r.texScale;
+                _roiLodIndex = r.lodIndex; _roiBuiltCenter = (r.roiMin + r.roiMax) * 0.5f;
+                _roiReady = true;
+            }
+        }
+
+        if (_roiDisabled || _streamingDataset.RenderLodIndex <= 0) { _roiReady = false; return; }
+
+        var desired = ComputeDesiredRoiLod();
+        if (desired < 0)
+        {
+            // Zoomed out far enough that the resident LOD already matches the screen resolution.
+            _roiReady = false;
+            return;
+        }
+
+        var lod = _streamingDataset.LodInfos[desired];
+        var centerN = Vector3.Clamp(_cameraTarget / VolumeScale, Vector3.Zero, Vector3.One);
+        var extentN = _roiSize / (float)Math.Max(lod.Width, Math.Max(lod.Height, lod.Depth));
+        var needsRebuild = desired != _roiLodIndex ||
+                           (centerN - _roiBuiltCenter).Length() > extentN * 0.2f;
+        if (!needsRebuild || _roiBuildTask != null) return;
+        var now = Environment.TickCount64;
+        if (now - _lastRoiKickMs < 300) return;
+        _lastRoiKickMs = now;
+
+        var w = Math.Min(_roiSize, lod.Width);
+        var h = Math.Min(_roiSize, lod.Height);
+        var d = Math.Min(_roiSize, lod.Depth);
+        var x0 = Math.Clamp((int)(centerN.X * lod.Width) - w / 2, 0, lod.Width - w);
+        var y0 = Math.Clamp((int)(centerN.Y * lod.Height) - h / 2, 0, lod.Height - h);
+        var z0 = Math.Clamp((int)(centerN.Z * lod.Depth) - d / 2, 0, lod.Depth - d);
+        var roiMin = new Vector3(x0 / (float)lod.Width, y0 / (float)lod.Height, z0 / (float)lod.Depth);
+        var roiMax = new Vector3((x0 + w) / (float)lod.Width, (y0 + h) / (float)lod.Height, (z0 + d) / (float)lod.Depth);
+        var texScale = new Vector3(w, h, d) / _roiSize;
+        _roiBuildTask = Task.Run(() =>
+        {
+            var data = new byte[(long)w * h * d];
+            _streamingDataset.ReadLodRegion(desired, x0, y0, z0, w, h, d, data);
+            return (desired, roiMin, roiMax, texScale, w, h, d, data);
+        });
+    }
+
+    /// <summary>Finest LOD whose streamed window still covers the visible extent at the current
+    /// zoom, or -1 when the resident LOD is already adequate.</summary>
+    private int ComputeDesiredRoiLod()
+    {
+        // Visible world extent for the 45-degree vertical FOV: 2*tan(22.5)*distance.
+        var visible = _cameraDistance * 0.83f;
+        var maxScale = Math.Max(VolumeScale.X, Math.Max(VolumeScale.Y, VolumeScale.Z));
+        for (var i = 0; i < _streamingDataset.RenderLodIndex; i++)
+        {
+            var lod = _streamingDataset.LodInfos[i];
+            var maxDim = Math.Max(lod.Width, Math.Max(lod.Height, lod.Depth));
+            var coverage = _roiSize / (float)maxDim * maxScale;
+            if (coverage >= visible) return i;
+        }
+        return -1;
+    }
+
+    private bool EnsureRoiTexture()
+    {
+        if (_roiTexture != 0) return true;
+        if (_roiDisabled) return false;
+        while (GL.GetError() != ErrorCode.NoError) { }
+        var t = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture3D, t);
+        GL.TexImage3D(TextureTarget.Texture3D, 0, PixelInternalFormat.R8, _roiSize, _roiSize, _roiSize, 0,
+            PixelFormat.Red, PixelType.UnsignedByte, IntPtr.Zero);
+        GL.TexParameter(TextureTarget.Texture3D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture3D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture3D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture3D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture3D, TextureParameterName.TextureWrapR, (int)TextureWrapMode.ClampToEdge);
+        if (GL.GetError() != ErrorCode.NoError)
+        {
+            GL.DeleteTexture(t);
+            _roiDisabled = true;
+            Logger.LogWarning($"[CtVolume3DViewer] Could not allocate the {_roiSize}³ detail window texture; " +
+                              "streamed detail is disabled for this session.");
+            return false;
+        }
+        _roiTexture = t;
+        return true;
+    }
+
     public void SaveScreenshot(string path)
     {
         var pixels = new byte[_renderWidth * _renderHeight * 4];
@@ -732,7 +865,9 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
         GL.BindTexture(TextureTarget.Texture2D, _materialTexture);
         GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, 256, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data);
     }
-    private static byte[] ReconstructVolume(GvtLodInfo l, byte[] b, int bs, Action<float> progress = null) { var r=new byte[l.Width*l.Height*l.Depth]; var bx=(l.Width+bs-1)/bs; var by=(l.Height+bs-1)/bs; for(int z=0;z<l.Depth;z++){for(int y=0;y<l.Height;y++)for(int x=0;x<l.Width;x++){var bi=((z/bs)*by*bx+(y/bs)*bx+x/bs)*bs*bs*bs+(z%bs)*bs*bs+(y%bs)*bs+x%bs; if(bi<b.Length)r[(z*l.Height+y)*l.Width+x]=b[bi];} if ((z & 7) == 0 || z == l.Depth - 1) progress?.Invoke((z + 1f) / l.Depth);} return r; }
+    // All index math is 64-bit: LODs near the array-length ceiling overflowed the previous
+    // int arithmetic and surfaced as an arithmetic-overflow failure while loading.
+    private static byte[] ReconstructVolume(GvtLodInfo l, byte[] b, int bs, Action<float> progress = null) { var r=new byte[(long)l.Width*l.Height*l.Depth]; var bx=(l.Width+bs-1)/bs; var by=(l.Height+bs-1)/bs; long brickVoxels=(long)bs*bs*bs; for(int z=0;z<l.Depth;z++){for(int y=0;y<l.Height;y++)for(int x=0;x<l.Width;x++){var bi=((long)(z/bs)*by*bx+(y/bs)*bx+x/bs)*brickVoxels+(z%bs)*bs*bs+(y%bs)*bs+x%bs; if(bi<b.LongLength)r[((long)z*l.Height+y)*l.Width+x]=b[bi];} if ((z & 7) == 0 || z == l.Depth - 1) progress?.Invoke((z + 1f) / l.Depth);} return r; }
     private static (int w, int h, int d) CalculateLabelTextureDimensions(int w, int h, int d, long budget)
     {
         var voxelCount = (long)w * h * d;
@@ -960,7 +1095,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
 
     public static Vector3 CalculateNormalizedPhysicalScale(int w,int h,int d,float px,float st){var xy=px>0&&float.IsFinite(px)?px:1;var z=st>0&&float.IsFinite(st)?st:xy;var p=new Vector3(Math.Max(1,w)*xy,Math.Max(1,h)*xy,Math.Max(1,d)*z);return p/Math.Max(p.X,Math.Max(p.Y,p.Z));}
     public static byte CalculateOtsuThreshold(byte[] data){if(data==null||data.Length==0)return 0;var h=new long[256];foreach(var v in data)h[v]++;double sum=0,sb=0,best=-1;long wb=0;for(int i=0;i<256;i++)sum+=i*h[i];byte t=0;for(int i=0;i<255;i++){wb+=h[i];if(wb==0)continue;var wf=data.LongLength-wb;if(wf==0)break;sb+=i*h[i];var mb=sb/wb;var mf=(sum-sb)/wf;var v=wb*(double)wf*(mb-mf)*(mb-mf);if(v>best){best=v;t=(byte)i;}}return t;}
-    public void Dispose(){if(_disposed)return;_disposed=true;ProjectManager.Instance.DatasetDataChanged-=OnDatasetDataChanged;CtImageStackTools.Preview3DChanged-=OnPreviewChanged;if(_observedLabelVolume!=null)_observedLabelVolume.SliceChanged-=OnLabelSliceChanged;_controlPanel?.Dispose();foreach(var t in new[]{_volumeTexture,_labelTexture,_previewTexture,_materialTexture,_colorTexture,_sliceTextures[0],_sliceTextures[1],_sliceTextures[2]})if(t!=0)GL.DeleteTexture(t);if(_depthBuffer!=0)GL.DeleteRenderbuffer(_depthBuffer);if(_fbo!=0)GL.DeleteFramebuffer(_fbo);if(_vbo!=0)GL.DeleteBuffer(_vbo);if(_ebo!=0)GL.DeleteBuffer(_ebo);if(_vao!=0)GL.DeleteVertexArray(_vao);if(_lineVbo!=0)GL.DeleteBuffer(_lineVbo);if(_lineVao!=0)GL.DeleteVertexArray(_lineVao);if(_program!=0)GL.DeleteProgram(_program);if(_lineProgram!=0)GL.DeleteProgram(_lineProgram);}
+    public void Dispose(){if(_disposed)return;_disposed=true;ProjectManager.Instance.DatasetDataChanged-=OnDatasetDataChanged;CtImageStackTools.Preview3DChanged-=OnPreviewChanged;if(_observedLabelVolume!=null)_observedLabelVolume.SliceChanged-=OnLabelSliceChanged;_controlPanel?.Dispose();foreach(var t in new[]{_volumeTexture,_labelTexture,_previewTexture,_materialTexture,_colorTexture,_roiTexture,_sliceTextures[0],_sliceTextures[1],_sliceTextures[2]})if(t!=0)GL.DeleteTexture(t);if(_depthBuffer!=0)GL.DeleteRenderbuffer(_depthBuffer);if(_fbo!=0)GL.DeleteFramebuffer(_fbo);if(_vbo!=0)GL.DeleteBuffer(_vbo);if(_ebo!=0)GL.DeleteBuffer(_ebo);if(_vao!=0)GL.DeleteVertexArray(_vao);if(_lineVbo!=0)GL.DeleteBuffer(_lineVbo);if(_lineVao!=0)GL.DeleteVertexArray(_lineVao);if(_program!=0)GL.DeleteProgram(_program);if(_lineProgram!=0)GL.DeleteProgram(_lineProgram);}
 
     private const string VertexShader=@"#version 330 core
 layout(location=0) in vec3 p; uniform mat4 uView,uProjection; uniform vec3 uScale; out vec3 world; void main(){world=p*uScale;gl_Position=uProjection*uView*vec4(world,1);}";
@@ -977,10 +1112,14 @@ in vec3 world;
 out vec4 outColor;
 
 uniform sampler3D uVolume,uLabels,uPreview;
+uniform sampler3D uRoi;        // native-resolution window streamed around the camera focus
 uniform sampler2D uMaterials;
 uniform sampler2D uSliceX,uSliceY,uSliceZ;   // full-resolution slice at each plane
 uniform vec3 uScale,uCamera,uVolumeSize;
-uniform float uMin,uMax,uStep,uOpacity;
+uniform vec3 uRoiMin,uRoiMax;  // normalized-volume box the ROI window covers
+uniform vec3 uRoiTexScale;     // fraction of the ROI texture actually filled, per axis
+uniform int uRoiOn;
+uniform float uMin,uMax,uStep,uOpacity,uRoiDs;
 uniform int uShowGray,uColorMap,uShowPreview,uShowThresholdPreview,uPlaneCount,uVirtualRuleCount;
 uniform vec2 uThresholdRange;
 uniform vec4 uCutX,uCutY,uCutZ,uPlanes[8],uPreviewColor,uThresholdColor;
@@ -1012,6 +1151,18 @@ bool cut(vec3 p){
 // Offsetting each ray by a per-pixel fraction of ds turns that coherent banding into
 // high-frequency noise, which the eye tolerates far better.
 float ign(vec2 q){return fract(52.9829189*fract(dot(q,vec2(.06711056,.00583715))));}
+
+// Density lookup with out-of-core detail: inside the streamed window the native-resolution
+// texture wins; everywhere else the resident whole-volume LOD answers. The interior margin
+// keeps linear filtering from blending across the window edge into unrelated texels.
+float den(vec3 p){
+    if(uRoiOn!=0){
+        vec3 q=(p-uRoiMin)/(uRoiMax-uRoiMin);
+        if(all(greaterThan(q,vec3(0.01)))&&all(lessThan(q,vec3(0.99))))
+            return texture(uRoi,q*uRoiTexScale).r;
+    }
+    return texture(uVolume,p).r;
+}
 
 vec3 cmap(float x){
     if(uColorMap==0)return vec3(x);
@@ -1057,36 +1208,45 @@ void main(){
     vec4 acc=vec4(0);
     float base=min(uScale.x/uVolumeSize.x,min(uScale.y/uVolumeSize.y,uScale.z/uVolumeSize.z));
     float ds=max(base*uStep,(b-a)/2048.0);
+    // Inside the streamed window the march tightens to that texture's voxel pitch; keeping the
+    // coarse step there would skip right over the detail the window was loaded to show.
+    float dsRoi=uRoiOn!=0?max(uRoiDs,(b-a)/2048.0):ds;
     float end=min(b,tPlane);
     a+=ds*ign(gl_FragCoord.xy);
-    for(int i=0;i<2048&&a<=end&&acc.a<.985;i++,a+=ds){
+    for(int i=0;i<2048&&a<=end&&acc.a<.985;i++){
         vec3 p=(ro+rd*a)/uScale;
-        if(cut(p))continue;
-        float den=texture(uVolume,p).r;
-        float n=window(den);
+        if(cut(p)){a+=ds;continue;}
+        float stp=ds;
+        if(uRoiOn!=0){
+            vec3 q=(p-uRoiMin)/(uRoiMax-uRoiMin);
+            if(all(greaterThan(q,vec3(0.01)))&&all(lessThan(q,vec3(0.99))))stp=dsRoi;
+        }
+        float dsty=den(p);
+        float n=window(dsty);
         float al=uShowGray!=0?smoothstep(0,1,n):0;
         vec3 col=cmap(n);
         if(al>.01){
             vec3 e=1/uVolumeSize;
-            vec3 g=vec3(texture(uVolume,p+vec3(e.x,0,0)).r-texture(uVolume,p-vec3(e.x,0,0)).r,
-                        texture(uVolume,p+vec3(0,e.y,0)).r-texture(uVolume,p-vec3(0,e.y,0)).r,
-                        texture(uVolume,p+vec3(0,0,e.z)).r-texture(uVolume,p-vec3(0,0,e.z)).r);
+            vec3 g=vec3(den(p+vec3(e.x,0,0))-den(p-vec3(e.x,0,0)),
+                        den(p+vec3(0,e.y,0))-den(p-vec3(0,e.y,0)),
+                        den(p+vec3(0,0,e.z))-den(p-vec3(0,0,e.z)));
             if(length(g)>.0001)col*=.3+.7*abs(dot(normalize(g),normalize(vec3(.4,.6,1))));
         }
         int mid=int(texture(uLabels,p).r*255.0+0.5);
         for(int ri=0;ri<uVirtualRuleCount;ri++){
             vec4 rule=uVirtualRules[ri];
             int rid=int(rule.z*255.0+0.5);
-            if(den>=rule.x&&den<=rule.y){if(rule.w>.5)mid=rid;else if(mid==rid)mid=0;}
+            if(dsty>=rule.x&&dsty<=rule.y){if(rule.w>.5)mid=rid;else if(mid==rid)mid=0;}
         }
         if(mid>0){
             vec4 mat=texelFetch(uMaterials,ivec2(mid,0),0);
             if(mat.a>.002){col=mix(col,mat.rgb,mat.a);al=max(al,mat.a);}
         }
         if(uShowPreview!=0&&texture(uPreview,p).r>.5){col=mix(col,uPreviewColor.rgb,uPreviewColor.a);al=max(al,uPreviewColor.a);}
-        if(uShowThresholdPreview!=0&&den>=uThresholdRange.x&&den<=uThresholdRange.y){col=mix(col,uThresholdColor.rgb,.55);al=max(al,.45);}
-        float ca=clamp(al*ds*80*uOpacity,0,1);
+        if(uShowThresholdPreview!=0&&dsty>=uThresholdRange.x&&dsty<=uThresholdRange.y){col=mix(col,uThresholdColor.rgb,.55);al=max(al,.45);}
+        float ca=clamp(al*stp*80*uOpacity,0,1);
         acc+=(1-acc.a)*vec4(col*ca,ca);
+        a+=stp;
     }
 
     if(planeAxis>=0&&acc.a<.985){
@@ -1107,6 +1267,10 @@ void main(){
         acc+=(1-acc.a)*vec4(col,1);
     }
 
-    outColor=acc;
+    // Resolve against the clear color and write full alpha: this texture is later drawn by the
+    // UI with standard blending, and a partially accumulated alpha would let the window
+    // background bleed through, so the volume reads as translucent no matter how high the
+    // opacity control is pushed. GLSL 3.30 sources must stay pure ASCII.
+    outColor=vec4(acc.rgb+vec3(0.015,0.018,0.025)*(1-acc.a),1);
 }";
 }

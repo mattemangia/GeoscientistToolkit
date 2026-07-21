@@ -160,6 +160,9 @@ public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
         {
             var lod = LodInfos[i];
             if (lod.Width > maxAxisSize || lod.Height > maxAxisSize || lod.Depth > maxAxisSize) continue;
+            // Reconstruction produces one flat byte[] per LOD, so anything past the CLR's array
+            // length ceiling can never be materialized whole; it is served by region streaming.
+            if ((long)lod.Width * lod.Height * lod.Depth > MaxMonolithicVoxels) continue;
             var bx = (lod.Width + BrickSize - 1L) / BrickSize;
             var by = (lod.Height + BrickSize - 1L) / BrickSize;
             var bz = (lod.Depth + BrickSize - 1L) / BrickSize;
@@ -183,6 +186,11 @@ public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
         Logger.Log($"[StreamingCtVolumeDataset] Selected render LOD {selected}: " +
                    $"{RenderLod.Width}×{RenderLod.Height}×{RenderLod.Depth} ({selectedBytes / 1048576.0:F1} MiB)");
     }
+
+    /// <summary>Largest voxel count a LOD may have and still be loaded as a single flat array
+    /// (the CLR caps byte[] lengths just below int.MaxValue). Larger LODs are only accessible
+    /// through <see cref="ReadLodRegion"/>.</summary>
+    public const long MaxMonolithicVoxels = 0x7FFFFFC7;
 
     /// <summary>Size of a LOD's bricked payload as stored in the GVT file.</summary>
     public long GetLodByteSize(int index)
@@ -212,6 +220,53 @@ public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
         RenderLod = LodInfos[index];
         RenderLodVolumeData = brickData;
         RenderLodIndex = index;
+    }
+
+    /// <summary>
+    ///     Reads an axis-aligned voxel region of one LOD directly from the bricked file, touching
+    ///     only the bricks the region intersects. This is how detail beyond the VRAM budget is
+    ///     served: any window of an arbitrarily large LOD streams from disk without ever
+    ///     materializing the whole level. <paramref name="dest"/> is filled in x-major order with
+    ///     stride w×h per slice; voxels outside the volume are left zero.
+    /// </summary>
+    public void ReadLodRegion(int lodIndex, int x0, int y0, int z0, int w, int h, int d, byte[] dest)
+    {
+        LoadMetadata();
+        var lod = LodInfos[lodIndex];
+        var bs = BrickSize;
+        var bricksX = (lod.Width + bs - 1) / bs;
+        var bricksY = (lod.Height + bs - 1) / bs;
+        var bricksZ = (lod.Depth + bs - 1) / bs;
+        var brickBytes = (long)bs * bs * bs;
+        Array.Clear(dest, 0, dest.Length);
+
+        var bx0 = Math.Max(0, x0 / bs); var bx1 = Math.Min(bricksX - 1, (x0 + w - 1) / bs);
+        var by0 = Math.Max(0, y0 / bs); var by1 = Math.Min(bricksY - 1, (y0 + h - 1) / bs);
+        var bz0 = Math.Max(0, z0 / bs); var bz1 = Math.Min(bricksZ - 1, (z0 + d - 1) / bs);
+        if (bx1 < bx0 || by1 < by0 || bz1 < bz0) return;
+
+        using var fs = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var brick = new byte[brickBytes];
+        for (var bz = bz0; bz <= bz1; bz++)
+        for (var by = by0; by <= by1; by++)
+        for (var bx = bx0; bx <= bx1; bx++)
+        {
+            var brickIndex = ((long)bz * bricksY + by) * bricksX + bx;
+            fs.Seek(lod.FileOffset + brickIndex * brickBytes, SeekOrigin.Begin);
+            fs.ReadExactly(brick);
+
+            // Intersection of this brick with both the requested region and the volume extent.
+            var vx0 = Math.Max(Math.Max(bx * bs, x0), 0); var vx1 = Math.Min(Math.Min(bx * bs + bs, x0 + w), lod.Width);
+            var vy0 = Math.Max(Math.Max(by * bs, y0), 0); var vy1 = Math.Min(Math.Min(by * bs + bs, y0 + h), lod.Height);
+            var vz0 = Math.Max(Math.Max(bz * bs, z0), 0); var vz1 = Math.Min(Math.Min(bz * bs + bs, z0 + d), lod.Depth);
+            for (var z = vz0; z < vz1; z++)
+            for (var y = vy0; y < vy1; y++)
+            {
+                var src = (z - bz * bs) * bs * bs + (y - by * bs) * bs + (vx0 - bx * bs);
+                var dst = ((long)(z - z0) * h + (y - y0)) * w + (vx0 - x0);
+                Array.Copy(brick, src, dest, dst, vx1 - vx0);
+            }
+        }
     }
 
     public override void Unload()
