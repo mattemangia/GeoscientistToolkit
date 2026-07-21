@@ -8,12 +8,23 @@ namespace GAIA.Data.Loaders;
 
 public class ImageFolderLoader : IDataLoader
 {
+    private readonly AsyncScanCache<FolderInfo> _scan = new();
     public string FolderPath { get; set; } = "";
     public bool RequiresOrganizer { get; } = true;
     public string Name => "Image Folder (Group)";
     public string Description => "Load multiple images from a folder and organize them into groups";
 
-    public bool CanImport => !string.IsNullOrEmpty(FolderPath) && Directory.Exists(FolderPath);
+    /// <summary>True while the folder is being scanned on a background thread.</summary>
+    public bool IsScanning => _scan.IsScanning;
+
+    public bool CanImport
+    {
+        get
+        {
+            var info = _scan.Get(FolderPath, ScanFolder);
+            return !_scan.IsScanning && info.ImageCount > 0;
+        }
+    }
 
     public string ValidationMessage
     {
@@ -21,10 +32,9 @@ public class ImageFolderLoader : IDataLoader
         {
             if (string.IsNullOrEmpty(FolderPath))
                 return "Please select a folder containing images";
-            if (!Directory.Exists(FolderPath))
-                return "Selected folder does not exist";
-
-            var info = GetFolderInfo();
+            var info = _scan.Get(FolderPath, ScanFolder);
+            if (_scan.IsScanning)
+                return "Scanning folder...";
             if (info.ImageCount == 0)
                 return "No supported image files found in this folder";
 
@@ -91,28 +101,24 @@ public class ImageFolderLoader : IDataLoader
         FolderPath = "";
     }
 
-    public FolderInfo GetFolderInfo()
+    /// <summary>Returns the latest completed background scan; never touches disk on this thread.</summary>
+    public FolderInfo GetFolderInfo() => _scan.Get(FolderPath, ScanFolder);
+
+    private FolderInfo ScanFolder()
     {
         if (!Directory.Exists(FolderPath))
             return new FolderInfo { ImageCount = 0, TotalSize = 0 };
 
-        try
-        {
-            var files = Directory.GetFiles(FolderPath)
-                .Where(ImageLoader.IsSupportedImageFile)
-                .ToArray();
+        var files = Directory.GetFiles(FolderPath)
+            .Where(ImageLoader.IsSupportedImageFile)
+            .ToArray();
 
-            return new FolderInfo
-            {
-                ImageCount = files.Length,
-                TotalSize = files.Sum(f => new FileInfo(f).Length),
-                FolderName = Path.GetFileName(FolderPath)
-            };
-        }
-        catch
+        return new FolderInfo
         {
-            return new FolderInfo { ImageCount = 0, TotalSize = 0 };
-        }
+            ImageCount = files.Length,
+            TotalSize = files.Sum(f => new FileInfo(f).Length),
+            FolderName = Path.GetFileName(FolderPath)
+        };
     }
 
     public class FolderInfo

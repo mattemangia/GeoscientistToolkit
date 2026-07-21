@@ -7,6 +7,7 @@ namespace GAIA.Data.Loaders;
 
 public class LabeledVolumeLoaderWrapper : IDataLoader
 {
+    private readonly AsyncScanCache<VolumeInfo> _scan = new();
     public string SourcePath { get; set; } = "";
     public bool IsMultiPageTiff { get; set; }
     public float PixelSize { get; set; } = 1.0f;
@@ -16,16 +17,17 @@ public class LabeledVolumeLoaderWrapper : IDataLoader
     public string Description =>
         "Import a stack of labeled images where each unique color represents a different material";
 
+    private string ScanKey => string.IsNullOrEmpty(SourcePath) ? "" : $"{SourcePath}|{IsMultiPageTiff}";
+
+    /// <summary>True while the selection is being scanned on a background thread.</summary>
+    public bool IsScanning => _scan.IsScanning;
+
     public bool CanImport
     {
         get
         {
-            if (string.IsNullOrEmpty(SourcePath))
-                return false;
-
-            if (IsMultiPageTiff) return File.Exists(SourcePath) && ImageLoader.IsMultiPageTiff(SourcePath);
-
-            return Directory.Exists(SourcePath);
+            var info = _scan.Get(ScanKey, ScanVolume);
+            return !_scan.IsScanning && info.SliceCount > 0;
         }
     }
 
@@ -35,23 +37,13 @@ public class LabeledVolumeLoaderWrapper : IDataLoader
         {
             if (string.IsNullOrEmpty(SourcePath))
                 return "Please select a source for the labeled volume";
-
-            if (IsMultiPageTiff)
-            {
-                if (!File.Exists(SourcePath))
-                    return "Selected file does not exist";
-                if (!ImageLoader.IsMultiPageTiff(SourcePath))
-                    return "Selected TIFF file contains only one page.";
-            }
-            else
-            {
-                if (!Directory.Exists(SourcePath))
-                    return "Selected folder does not exist";
-
-                var info = GetVolumeInfo();
-                if (info.SliceCount == 0)
-                    return "No supported image files found in this folder";
-            }
+            var info = _scan.Get(ScanKey, ScanVolume);
+            if (_scan.IsScanning)
+                return IsMultiPageTiff ? "Scanning TIFF..." : "Scanning folder...";
+            if (info.SliceCount == 0)
+                return IsMultiPageTiff
+                    ? "Selected TIFF is missing or not a multi-page stack."
+                    : "No supported image files found in this folder";
 
             return null;
         }
@@ -126,7 +118,10 @@ public class LabeledVolumeLoaderWrapper : IDataLoader
         Unit = PixelSizeUnit.Micrometers;
     }
 
-    public VolumeInfo GetVolumeInfo()
+    /// <summary>Returns the latest completed background scan; never touches disk on this thread.</summary>
+    public VolumeInfo GetVolumeInfo() => _scan.Get(ScanKey, ScanVolume);
+
+    private VolumeInfo ScanVolume()
     {
         try
         {

@@ -12,20 +12,28 @@ namespace GAIA.Data.Loaders;
 /// </summary>
 public class AcousticVolumeLoader : IDataLoader
 {
-    private AcousticVolumeInfo _volumeInfo;
+    private readonly AsyncScanCache<AcousticVolumeInfo> _scan = new();
     public string DirectoryPath { get; set; }
     public string Name => "Acoustic Volume Loader";
     public string Description => "Loads acoustic simulation results including wave fields and time series data";
 
-    public bool CanImport => !string.IsNullOrEmpty(DirectoryPath) && Directory.Exists(DirectoryPath) &&
-                             GetVolumeInfo().IsValid;
+    /// <summary>True while the directory is being scanned on a background thread.</summary>
+    public bool IsScanning => _scan.IsScanning;
+
+    public bool CanImport
+    {
+        get
+        {
+            var info = _scan.Get(DirectoryPath, ScanDirectory);
+            return !_scan.IsScanning && info.IsValid;
+        }
+    }
 
     public string ValidationMessage => GetValidationMessage();
 
     public void Reset()
     {
         DirectoryPath = "";
-        _volumeInfo = null;
     }
 
     public async Task<Dataset> LoadAsync(IProgress<(float progress, string message)> progress)
@@ -38,10 +46,13 @@ public class AcousticVolumeLoader : IDataLoader
         if (string.IsNullOrEmpty(DirectoryPath))
             return "Please select an acoustic volume directory";
 
+        var info = _scan.Get(DirectoryPath, ScanDirectory);
+        if (_scan.IsScanning)
+            return "Scanning directory...";
+
         if (!Directory.Exists(DirectoryPath))
             return "The specified directory does not exist";
 
-        var info = GetVolumeInfo();
         if (!info.IsValid)
         {
             if (!string.IsNullOrEmpty(info.ErrorMessage))
@@ -56,13 +67,15 @@ public class AcousticVolumeLoader : IDataLoader
         return "Ready to import acoustic volume";
     }
 
-    public AcousticVolumeInfo GetVolumeInfo()
+    /// <summary>Returns the latest completed background scan; never touches disk on this thread.</summary>
+    public AcousticVolumeInfo GetVolumeInfo() => _scan.Get(DirectoryPath, ScanDirectory);
+
+    private AcousticVolumeInfo ScanDirectory()
     {
-        if (_volumeInfo != null) return _volumeInfo;
         if (string.IsNullOrEmpty(DirectoryPath) || !Directory.Exists(DirectoryPath))
             return new AcousticVolumeInfo { IsValid = false };
 
-        _volumeInfo = new AcousticVolumeInfo
+        var volumeInfo = new AcousticVolumeInfo
         {
             DirectoryName = Path.GetFileName(DirectoryPath)
         };
@@ -71,7 +84,7 @@ public class AcousticVolumeLoader : IDataLoader
         {
             // Check for metadata
             var metadataPath = Path.Combine(DirectoryPath, "metadata.json");
-            _volumeInfo.HasMetadata = File.Exists(metadataPath);
+            volumeInfo.HasMetadata = File.Exists(metadataPath);
 
             // Check for wave field files
             var pWavePath = Path.Combine(DirectoryPath, "PWaveField.bin");
@@ -79,43 +92,43 @@ public class AcousticVolumeLoader : IDataLoader
             var combinedPath = Path.Combine(DirectoryPath, "CombinedField.bin");
             var damagePath = Path.Combine(DirectoryPath, "DamageField.bin"); // ADDED
 
-            _volumeInfo.HasPWaveField = File.Exists(pWavePath);
-            _volumeInfo.HasSWaveField = File.Exists(sWavePath);
-            _volumeInfo.HasCombinedField = File.Exists(combinedPath);
-            _volumeInfo.HasDamageField = File.Exists(damagePath); // ADDED
+            volumeInfo.HasPWaveField = File.Exists(pWavePath);
+            volumeInfo.HasSWaveField = File.Exists(sWavePath);
+            volumeInfo.HasCombinedField = File.Exists(combinedPath);
+            volumeInfo.HasDamageField = File.Exists(damagePath); // ADDED
 
             // Check for time series
             var timeSeriesDir = Path.Combine(DirectoryPath, "TimeSeries");
             if (Directory.Exists(timeSeriesDir))
             {
                 var snapshots = Directory.GetFiles(timeSeriesDir, "snapshot_*.bin");
-                _volumeInfo.HasTimeSeries = snapshots.Length > 0;
-                _volumeInfo.TimeSeriesFrameCount = snapshots.Length;
+                volumeInfo.HasTimeSeries = snapshots.Length > 0;
+                volumeInfo.TimeSeriesFrameCount = snapshots.Length;
             }
 
             // Calculate total size
-            _volumeInfo.TotalSize = 0;
+            volumeInfo.TotalSize = 0;
             foreach (var file in Directory.GetFiles(DirectoryPath, "*", SearchOption.AllDirectories))
             {
                 var fileInfo = new FileInfo(file);
-                _volumeInfo.TotalSize += fileInfo.Length;
+                volumeInfo.TotalSize += fileInfo.Length;
             }
 
-            _volumeInfo.IsValid = _volumeInfo.HasMetadata &&
-                                  (_volumeInfo.HasPWaveField || _volumeInfo.HasSWaveField ||
-                                   _volumeInfo.HasCombinedField);
+            volumeInfo.IsValid = volumeInfo.HasMetadata &&
+                                  (volumeInfo.HasPWaveField || volumeInfo.HasSWaveField ||
+                                   volumeInfo.HasCombinedField);
 
-            if (!_volumeInfo.IsValid && !_volumeInfo.HasMetadata)
-                _volumeInfo.ErrorMessage = "Missing metadata.json file";
-            else if (!_volumeInfo.IsValid) _volumeInfo.ErrorMessage = "No wave field data found";
+            if (!volumeInfo.IsValid && !volumeInfo.HasMetadata)
+                volumeInfo.ErrorMessage = "Missing metadata.json file";
+            else if (!volumeInfo.IsValid) volumeInfo.ErrorMessage = "No wave field data found";
         }
         catch (Exception ex)
         {
-            _volumeInfo.IsValid = false;
-            _volumeInfo.ErrorMessage = ex.Message;
+            volumeInfo.IsValid = false;
+            volumeInfo.ErrorMessage = ex.Message;
         }
 
-        return _volumeInfo;
+        return volumeInfo;
     }
 
     private Dataset Load(IProgress<(float progress, string message)> progress)

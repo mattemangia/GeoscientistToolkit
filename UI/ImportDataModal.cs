@@ -1238,7 +1238,15 @@ public class ImportDataModal
         if (ImGui.Button("Browse...##AcousticFolder")) _acousticDialog.Open();
 
         var info = _acousticVolumeLoader.GetVolumeInfo();
-        if (info != null && !string.IsNullOrEmpty(info.DirectoryName))
+        if (_acousticVolumeLoader.IsScanning)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            var sweep = (float)(ImGui.GetTime() * 0.6 % 1.0);
+            ImGui.ProgressBar(sweep, new Vector2(-1, 0), "Scanning directory...");
+        }
+        else if (info != null && !string.IsNullOrEmpty(info.DirectoryName))
         {
             ImGui.Spacing();
             ImGui.Separator();
@@ -1340,16 +1348,27 @@ public class ImportDataModal
         ImGui.TextWrapped(
             "This option allows you to load multiple images from a folder and organize them into groups.");
 
-        var info = CachedInfo($"folder:{_imageFolderLoader.FolderPath}", _imageFolderLoader.GetFolderInfo);
-        if (info.ImageCount > 0)
+        if (_imageFolderLoader.IsScanning)
         {
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
-            ImGui.Text("Folder Information:");
-            ImGui.BulletText($"Image Count: {info.ImageCount}");
-            ImGui.BulletText($"Total Size: {info.TotalSize / (1024 * 1024)} MB");
-            ImGui.BulletText($"Folder: {info.FolderName}");
+            var sweep = (float)(ImGui.GetTime() * 0.6 % 1.0);
+            ImGui.ProgressBar(sweep, new Vector2(-1, 0), "Scanning folder...");
+        }
+        else
+        {
+            var info = _imageFolderLoader.GetFolderInfo();
+            if (info.ImageCount > 0)
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                ImGui.Text("Folder Information:");
+                ImGui.BulletText($"Image Count: {info.ImageCount}");
+                ImGui.BulletText($"Total Size: {info.TotalSize / (1024 * 1024)} MB");
+                ImGui.BulletText($"Folder: {info.FolderName}");
+            }
         }
     }
 
@@ -1551,23 +1570,35 @@ public class ImportDataModal
 
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Physical size of each voxel in the volume.");
 
-        var info = CachedInfo($"labels:{_labeledVolumeLoader.SourcePath}:{_labeledVolumeLoader.IsMultiPageTiff}", _labeledVolumeLoader.GetVolumeInfo);
-        if (info.IsReady)
+        if (_labeledVolumeLoader.IsScanning)
         {
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
-            ImGui.Text("Volume Information:");
-            ImGui.BulletText($"Slices: {info.SliceCount}");
-            if (info.Width > 0)
-                ImGui.BulletText($"Resolution: {info.Width} x {info.Height}");
-            ImGui.BulletText($"Total Size: {info.TotalSize / (1024 * 1024)} MB");
-            if (!string.IsNullOrEmpty(info.FileName))
-                ImGui.BulletText($"File: {info.FileName}");
+            var sweep = (float)(ImGui.GetTime() * 0.6 % 1.0);
+            ImGui.ProgressBar(sweep, new Vector2(-1, 0),
+                _labeledVolumeLoader.IsMultiPageTiff ? "Scanning TIFF..." : "Scanning folder...");
+        }
+        else
+        {
+            var info = _labeledVolumeLoader.GetVolumeInfo();
+            if (info.IsReady)
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                ImGui.Text("Volume Information:");
+                ImGui.BulletText($"Slices: {info.SliceCount}");
+                if (info.Width > 0)
+                    ImGui.BulletText($"Resolution: {info.Width} x {info.Height}");
+                ImGui.BulletText($"Total Size: {info.TotalSize / (1024 * 1024)} MB");
+                if (!string.IsNullOrEmpty(info.FileName))
+                    ImGui.BulletText($"File: {info.FileName}");
 
-            ImGui.Spacing();
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                "Ready to import. Unique colors will be identified as materials.");
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
+                    "Ready to import. Unique colors will be identified as materials.");
+            }
         }
     }
 
