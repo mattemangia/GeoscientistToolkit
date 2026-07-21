@@ -184,6 +184,36 @@ public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
                    $"{RenderLod.Width}×{RenderLod.Height}×{RenderLod.Depth} ({selectedBytes / 1048576.0:F1} MiB)");
     }
 
+    /// <summary>Size of a LOD's bricked payload as stored in the GVT file.</summary>
+    public long GetLodByteSize(int index)
+    {
+        var lod = LodInfos[index];
+        var bx = (lod.Width + BrickSize - 1L) / BrickSize;
+        var by = (lod.Height + BrickSize - 1L) / BrickSize;
+        var bz = (lod.Depth + BrickSize - 1L) / BrickSize;
+        return bx * by * bz * BrickSize * BrickSize * BrickSize;
+    }
+
+    /// <summary>Reads a LOD's bricked payload without changing the current render LOD.</summary>
+    public byte[] ReadLodBricks(int index)
+    {
+        Load();
+        if (index == LodCount - 1) return BaseLodVolumeData;
+        var data = new byte[GetLodByteSize(index)];
+        using var fs = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        fs.Seek(LodInfos[index].FileOffset, SeekOrigin.Begin);
+        fs.ReadExactly(data);
+        return data;
+    }
+
+    /// <summary>Adopts brick data previously read with <see cref="ReadLodBricks"/> as the render LOD.</summary>
+    public void SetRenderLod(int index, byte[] brickData)
+    {
+        RenderLod = LodInfos[index];
+        RenderLodVolumeData = brickData;
+        RenderLodIndex = index;
+    }
+
     public override void Unload()
     {
         BaseLodVolumeData = null;

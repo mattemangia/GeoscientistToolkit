@@ -554,10 +554,11 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             if (_streamingDataset != null)
             {
                 var memoryLimitMb = GAIA.Settings.SettingsManager.Instance.Settings.Hardware.TextureMemoryLimit;
-                // Reserve at most 20% of the configured texture pool for density;
-                // labels and previews use separate, smaller adaptive textures.
-                var densityBudget = Math.Clamp(memoryLimitMb * 1024L * 1024L / 5,
-                    96L * 1024 * 1024, 512L * 1024 * 1024);
+                // Give density half of the configured texture pool; labels and previews use
+                // separate, smaller adaptive textures. The previous 512 MiB ceiling silently
+                // dropped any volume above ~800³ to a coarser LOD regardless of available VRAM.
+                var densityBudget = Math.Clamp(memoryLimitMb * 1024L * 1024L / 2,
+                    96L * 1024 * 1024, 4096L * 1024 * 1024);
                 _streamingDataset.LoadBestRenderLod(densityBudget, 2048);
             }
             _loadingProgress = 0.7f;

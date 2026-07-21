@@ -42,6 +42,9 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private int _volumeTexture, _labelTexture, _previewTexture, _materialTexture;
     private int _labelTextureWidth, _labelTextureHeight, _labelTextureDepth;
     private Task<(int w, int h, int d, byte[] data)> _labelBuildTask;
+    private Task<(int lodIndex, byte[] bricks, byte[] density)> _lodSwapTask;
+    private int _pendingLodIndex = -1;
+    private int _maxTexture3DSize = 2048;
     private Task<List<(int z, byte[] data)>> _labelPatchTask;
     private byte[] _labelCacheData;
     private readonly ConcurrentDictionary<int, byte> _dirtyLabelSlices = new();
@@ -72,7 +75,7 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     public bool CutXEnabled, CutYEnabled, CutZEnabled;
     public bool CutXForward = true, CutYForward = true, CutZForward = true;
     public float CutXPosition = 0.5f, CutYPosition = 0.5f, CutZPosition = 0.5f;
-    public float MinThreshold = 0.05f, MaxThreshold = 1f, StepSize = 2f;
+    public float MinThreshold = 0.05f, MaxThreshold = 1f, StepSize = 2f, VolumeOpacity = 1f;
     public bool ShowGrayscale = true, ShowSlices = true;
     public Vector3 SlicePositions = new(0.5f);
     public bool ShowCutXPlaneVisual { get; set; } = true;
@@ -158,6 +161,8 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     private void CreateResources(Action<float, string> progress)
     {
         progress?.Invoke(0.03f, "Compiling volume shaders...");
+        GL.GetInteger(GetPName.Max3DTextureSize, out _maxTexture3DSize);
+        if (_maxTexture3DSize <= 0) _maxTexture3DSize = 2048;
         _program = CreateProgram(VertexShader, FragmentShader);
         _lineProgram = CreateProgram(LineVertexShader, LineFragmentShader);
         float[] vertices =
@@ -218,19 +223,23 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
 
     private void Render()
     {
+        ProcessPendingLodSwap();
         ProcessPendingLabelRefresh();
         ProcessPreviewRefresh();
         if (_materialsDirty) { UploadMaterials(); _materialsDirty = false; }
         UpdateSlicePlaneTextures();
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
         GL.Viewport(0, 0, _renderWidth, _renderHeight);
-        GL.Enable(EnableCap.DepthTest); GL.Enable(EnableCap.CullFace); GL.CullFace(CullFaceMode.Back);
+        // Rasterize the box's back faces: front faces vanish as soon as the camera dollies inside
+        // the volume, which blanked the whole render at close zoom. The ray marches from
+        // max(entry, 0) toward the exit either way, so the image is identical from outside.
+        GL.Enable(EnableCap.DepthTest); GL.Enable(EnableCap.CullFace); GL.CullFace(CullFaceMode.Front);
         GL.ClearColor(0.015f, 0.018f, 0.025f, 1); GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
         GL.UseProgram(_program);
         SetMatrix("uView", _view); SetMatrix("uProjection", _projection);
         Set3("uScale", VolumeScale); Set3("uCamera", CameraPosition);
         Set3("uVolumeSize", new Vector3(_streamingDataset.RenderLod.Width, _streamingDataset.RenderLod.Height, _streamingDataset.RenderLod.Depth));
-        Set1("uMin", MinThreshold); Set1("uMax", MaxThreshold); Set1("uStep", StepSize);
+        Set1("uMin", MinThreshold); Set1("uMax", MaxThreshold); Set1("uStep", StepSize); Set1("uOpacity", VolumeOpacity);
         Set1("uShowGray", ShowGrayscale ? 1 : 0); Set1("uColorMap", ColorMapIndex);
         Set4("uCutX", new Vector4(CutXEnabled ? 1 : 0, CutXForward ? 1 : -1, CutXPosition, 0));
         Set4("uCutY", new Vector4(CutYEnabled ? 1 : 0, CutYForward ? 1 : -1, CutYPosition, 0));
@@ -612,6 +621,74 @@ public sealed class CtVolume3DViewer : IDatasetViewer, IDisposable
     public void SetAllMaterialsVisibility(bool value) { foreach (var m in _editableDataset.Materials) _materialVisibility[m.ID] = value; _materialsDirty = true; }
     public void ResetAllMaterialOpacities() { foreach (var m in _editableDataset.Materials) _materialOpacity[m.ID] = 1; _materialsDirty = true; }
 
+    public int RenderLodCount => _streamingDataset.LodCount;
+    public int CurrentRenderLodIndex => _pendingLodIndex >= 0 ? _pendingLodIndex : _streamingDataset.RenderLodIndex;
+    public bool IsRenderLodLoading => _lodSwapTask is { IsCompleted: false };
+    public (int Width, int Height, int Depth) GetRenderLodDimensions(int index)
+    {
+        var lod = _streamingDataset.LodInfos[index];
+        return (lod.Width, lod.Height, lod.Depth);
+    }
+    public long GetRenderLodTextureBytes(int index)
+    {
+        var lod = _streamingDataset.LodInfos[index];
+        return (long)lod.Width * lod.Height * lod.Depth;
+    }
+    /// <summary>False when a LOD axis exceeds the driver's 3D texture limit and can never upload.</summary>
+    public bool IsRenderLodSelectable(int index)
+    {
+        var lod = _streamingDataset.LodInfos[index];
+        return Math.Max(lod.Width, Math.Max(lod.Height, lod.Depth)) <= _maxTexture3DSize;
+    }
+
+    /// <summary>Loads and reconstructs the requested LOD off-thread; the texture swap happens on
+    /// the next rendered frame so the current volume stays visible until the data is ready.</summary>
+    public void RequestRenderLod(int index)
+    {
+        if (IsRenderLodLoading || index == _streamingDataset.RenderLodIndex) return;
+        if (index < 0 || index >= _streamingDataset.LodCount || !IsRenderLodSelectable(index)) return;
+        _pendingLodIndex = index;
+        var lod = _streamingDataset.LodInfos[index];
+        var brickSize = _streamingDataset.BrickSize;
+        _lodSwapTask = Task.Run(() =>
+        {
+            var bricks = _streamingDataset.ReadLodBricks(index);
+            var density = ReconstructVolume(lod, bricks, brickSize);
+            return (index, bricks, density);
+        });
+    }
+
+    private void ProcessPendingLodSwap()
+    {
+        if (_lodSwapTask == null || !_lodSwapTask.IsCompleted) return;
+        var task = _lodSwapTask;
+        _lodSwapTask = null;
+        _pendingLodIndex = -1;
+        if (!task.IsCompletedSuccessfully)
+        {
+            Logger.LogError($"[CtVolume3DViewer] Render LOD load failed: {task.Exception?.GetBaseException().Message}");
+            return;
+        }
+        var (index, bricks, density) = task.Result;
+        var lod = _streamingDataset.LodInfos[index];
+        // Allocate the replacement before touching the current texture: a VRAM failure here
+        // must leave the viewer on the LOD it was already showing, not on a black volume.
+        while (GL.GetError() != ErrorCode.NoError) { }
+        var texture = CreateTexture3D(lod.Width, lod.Height, lod.Depth, density);
+        var error = GL.GetError();
+        if (error != ErrorCode.NoError)
+        {
+            GL.DeleteTexture(texture);
+            Logger.LogError($"[CtVolume3DViewer] Could not allocate {lod.Width}×{lod.Height}×{lod.Depth} " +
+                            $"volume texture ({error}); keeping the current detail level.");
+            return;
+        }
+        if (_volumeTexture != 0) GL.DeleteTexture(_volumeTexture);
+        _volumeTexture = texture;
+        _streamingDataset.SetRenderLod(index, bricks);
+        Logger.Log($"[CtVolume3DViewer] Switched render LOD to {index}: {lod.Width}×{lod.Height}×{lod.Depth}");
+    }
+
     public void SaveScreenshot(string path)
     {
         var pixels = new byte[_renderWidth * _renderHeight * 4];
@@ -903,7 +980,7 @@ uniform sampler3D uVolume,uLabels,uPreview;
 uniform sampler2D uMaterials;
 uniform sampler2D uSliceX,uSliceY,uSliceZ;   // full-resolution slice at each plane
 uniform vec3 uScale,uCamera,uVolumeSize;
-uniform float uMin,uMax,uStep;
+uniform float uMin,uMax,uStep,uOpacity;
 uniform int uShowGray,uColorMap,uShowPreview,uShowThresholdPreview,uPlaneCount,uVirtualRuleCount;
 uniform vec2 uThresholdRange;
 uniform vec4 uCutX,uCutY,uCutZ,uPlanes[8],uPreviewColor,uThresholdColor;
@@ -1008,7 +1085,7 @@ void main(){
         }
         if(uShowPreview!=0&&texture(uPreview,p).r>.5){col=mix(col,uPreviewColor.rgb,uPreviewColor.a);al=max(al,uPreviewColor.a);}
         if(uShowThresholdPreview!=0&&den>=uThresholdRange.x&&den<=uThresholdRange.y){col=mix(col,uThresholdColor.rgb,.55);al=max(al,.45);}
-        float ca=clamp(al*ds*80,0,1);
+        float ca=clamp(al*ds*80*uOpacity,0,1);
         acc+=(1-acc.a)*vec4(col*ca,ca);
     }
 

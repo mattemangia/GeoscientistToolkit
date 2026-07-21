@@ -83,6 +83,17 @@ public class CtVolume3DControlPanel : BasePanel
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Lower values = higher quality but slower rendering.");
 
+        DrawDetailLevelSelector();
+
+        ImGui.Spacing();
+
+        ImGui.Text("Volume Opacity");
+        ImGui.SliderFloat("##volumeOpacity", ref _viewer.VolumeOpacity, 0.1f, 8.0f, "%.2fx",
+            ImGuiSliderFlags.Logarithmic);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Scales how quickly the volume accumulates opacity along each ray.\n" +
+                             "Raise it to make the sample read as a solid body, lower it to see through it.");
+
         ImGui.Spacing();
 
         ImGui.Text("Grayscale Threshold");
@@ -108,6 +119,52 @@ public class CtVolume3DControlPanel : BasePanel
         ImGui.Text("Color Map");
         string[] colorMaps = { "Grayscale", "Hot", "Cool", "Rainbow" };
         ImGui.Combo("##ColorMap", ref _viewer.ColorMapIndex, colorMaps, colorMaps.Length);
+    }
+
+    private void DrawDetailLevelSelector()
+    {
+        if (_viewer.RenderLodCount <= 1) return;
+
+        ImGui.Spacing();
+        ImGui.Text("Volume Detail");
+        var current = _viewer.CurrentRenderLodIndex;
+        var loading = _viewer.IsRenderLodLoading;
+
+        ImGui.BeginDisabled(loading);
+        if (ImGui.BeginCombo("##VolumeDetail", DescribeLod(current)))
+        {
+            for (var i = 0; i < _viewer.RenderLodCount; i++)
+            {
+                var selectable = _viewer.IsRenderLodSelectable(i);
+                ImGui.BeginDisabled(!selectable);
+                if (ImGui.Selectable(DescribeLod(i), i == current) && selectable)
+                    _viewer.RequestRenderLod(i);
+                ImGui.EndDisabled();
+                if (!selectable && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                    ImGui.SetTooltip("Exceeds this GPU's maximum 3D texture size.");
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Resolution of the volume sampled by the 3D render. Finer levels reveal\n" +
+                             "small features but use more video memory and render slower.");
+        if (loading)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled("Loading...");
+        }
+    }
+
+    private string DescribeLod(int index)
+    {
+        if (index < 0) return "Default";
+        var (w, h, d) = _viewer.GetRenderLodDimensions(index);
+        var mib = _viewer.GetRenderLodTextureBytes(index) / 1048576.0;
+        var label = index == 0 ? "Full" : $"1/{1 << index}";
+        return $"{label}  {w}×{h}×{d}  ({mib:0.#} MiB)";
     }
 
     private void DrawMaterialsTab()
