@@ -14,8 +14,34 @@ public class CTStackLoaderWrapper : IDataLoader
     }
 
     public LoadMode Mode { get; set; } = LoadMode.OptimizedFor3D;
-    public string SourcePath { get; set; } = "";
-    public bool IsMultiPageTiff { get; set; }
+
+    private string _sourcePath = "";
+    private bool _isMultiPageTiff;
+    private volatile bool _scanning;
+    private volatile StackInfo _cachedInfo = new();
+    private readonly object _scanLock = new();
+
+    /// <summary>
+    ///     Setting the source (or toggling multi-page TIFF) kicks a background folder scan. The
+    ///     scan enumerates every slice and stats its size, which on a slow or network/NTFS drive
+    ///     takes seconds; doing it on the UI thread (as the validation/preview did every frame)
+    ///     froze the whole application. The cached result is served instantly instead.
+    /// </summary>
+    public string SourcePath
+    {
+        get => _sourcePath;
+        set { if (_sourcePath != value) { _sourcePath = value; RequestScan(); } }
+    }
+
+    public bool IsMultiPageTiff
+    {
+        get => _isMultiPageTiff;
+        set { if (_isMultiPageTiff != value) { _isMultiPageTiff = value; RequestScan(); } }
+    }
+
+    /// <summary>True while the background scan of the current selection is still running.</summary>
+    public bool IsScanning => _scanning;
+
     public float PixelSize { get; set; } = 1.0f;
     public PixelSizeUnit Unit { get; set; } = PixelSizeUnit.Micrometers;
     public int BinningFactor { get; set; } = 1;
@@ -36,12 +62,8 @@ public class CTStackLoaderWrapper : IDataLoader
     {
         get
         {
-            if (string.IsNullOrEmpty(SourcePath))
-                return false;
-
-            if (IsMultiPageTiff) return File.Exists(SourcePath) && ImageLoader.IsMultiPageTiff(SourcePath);
-
-            return Directory.Exists(SourcePath);
+            if (string.IsNullOrEmpty(SourcePath) || _scanning) return false;
+            return _cachedInfo.SliceCount > 0;
         }
     }
 
@@ -51,23 +73,14 @@ public class CTStackLoaderWrapper : IDataLoader
         {
             if (string.IsNullOrEmpty(SourcePath))
                 return "Please select a source for the CT stack";
+            if (_scanning)
+                return IsMultiPageTiff ? "Scanning TIFF..." : "Scanning folder...";
 
-            if (IsMultiPageTiff)
-            {
-                if (!File.Exists(SourcePath))
-                    return "Selected file does not exist";
-                if (!ImageLoader.IsMultiPageTiff(SourcePath))
-                    return "Selected TIFF file contains only one page. CT stacks require multiple pages.";
-            }
-            else
-            {
-                if (!Directory.Exists(SourcePath))
-                    return "Selected folder does not exist";
-
-                var info = GetStackInfo();
-                if (info.SliceCount == 0)
-                    return "No supported image files found in this folder";
-            }
+            var info = _cachedInfo;
+            if (info.SliceCount == 0)
+                return IsMultiPageTiff
+                    ? "Selected TIFF is missing or not a multi-page stack. CT stacks require multiple pages."
+                    : "No supported image files found in this folder";
 
             return null;
         }
@@ -86,8 +99,10 @@ public class CTStackLoaderWrapper : IDataLoader
 
     public void Reset()
     {
-        SourcePath = "";
-        IsMultiPageTiff = false;
+        _sourcePath = "";
+        _isMultiPageTiff = false;
+        _scanning = false;
+        _cachedInfo = new StackInfo();
         PixelSize = 1.0f;
         Unit = PixelSizeUnit.Micrometers;
         BinningFactor = 1;
@@ -95,17 +110,47 @@ public class CTStackLoaderWrapper : IDataLoader
         StreamingDataset = null;
     }
 
-    public StackInfo GetStackInfo()
+    /// <summary>Returns the most recent completed scan of the selection; never touches disk.</summary>
+    public StackInfo GetStackInfo() => _cachedInfo;
+
+    /// <summary>Rescans the current selection off the UI thread and publishes the result to the
+    /// cache. Only the newest request wins, so rapid selection changes never show stale counts.</summary>
+    private void RequestScan()
+    {
+        var path = _sourcePath;
+        var tiff = _isMultiPageTiff;
+        if (string.IsNullOrEmpty(path))
+        {
+            _cachedInfo = new StackInfo();
+            _scanning = false;
+            return;
+        }
+
+        _scanning = true;
+        lock (_scanLock)
+        {
+            Task.Run(() =>
+            {
+                var info = ScanStackInfo(path, tiff);
+                if (path == _sourcePath && tiff == _isMultiPageTiff) _cachedInfo = info;
+            }).ContinueWith(_ =>
+            {
+                if (path == _sourcePath && tiff == _isMultiPageTiff) _scanning = false;
+            });
+        }
+    }
+
+    private static StackInfo ScanStackInfo(string path, bool isMultiPageTiff)
     {
         try
         {
-            if (IsMultiPageTiff && File.Exists(SourcePath))
+            if (isMultiPageTiff && File.Exists(path))
             {
-                if (ImageLoader.IsMultiPageTiff(SourcePath))
+                if (ImageLoader.IsMultiPageTiff(path))
                 {
-                    var pageCount = ImageLoader.GetTiffPageCount(SourcePath);
-                    var imageInfo = ImageLoader.LoadImageInfo(SourcePath);
-                    var fileSize = new FileInfo(SourcePath).Length;
+                    var pageCount = ImageLoader.GetTiffPageCount(path);
+                    var imageInfo = ImageLoader.LoadImageInfo(path);
+                    var fileSize = new FileInfo(path).Length;
 
                     return new StackInfo
                     {
@@ -113,13 +158,13 @@ public class CTStackLoaderWrapper : IDataLoader
                         Width = imageInfo.Width,
                         Height = imageInfo.Height,
                         TotalSize = fileSize,
-                        FileName = Path.GetFileName(SourcePath)
+                        FileName = Path.GetFileName(path)
                     };
                 }
             }
-            else if (!IsMultiPageTiff && Directory.Exists(SourcePath))
+            else if (!isMultiPageTiff && Directory.Exists(path))
             {
-                var files = Directory.GetFiles(SourcePath)
+                var files = Directory.GetFiles(path)
                     .Where(ImageLoader.IsSupportedImageFile)
                     .ToArray();
 
@@ -127,7 +172,7 @@ public class CTStackLoaderWrapper : IDataLoader
                 {
                     SliceCount = files.Length,
                     TotalSize = files.Sum(f => new FileInfo(f).Length),
-                    FileName = Path.GetFileName(SourcePath)
+                    FileName = Path.GetFileName(path)
                 };
             }
         }

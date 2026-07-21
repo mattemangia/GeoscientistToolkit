@@ -1420,19 +1420,34 @@ public class ImportDataModal
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Reduces dataset size by averaging voxels. A factor of 2 makes the data 8 times smaller.");
 
-        var info = CachedInfo($"ct:{_ctStackLoader.SourcePath}:{_ctStackLoader.IsMultiPageTiff}", _ctStackLoader.GetStackInfo);
-        if (info.SliceCount > 0)
+        // The wrapper scans the folder on a background thread and caches the result, so read it
+        // directly every frame (never through _optionInfoCache, which would freeze the first,
+        // still-empty value) and show a moving bar while the scan is in flight.
+        if (_ctStackLoader.IsScanning)
         {
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
-            ImGui.Text("Stack Information:");
-            ImGui.BulletText($"Slices: {info.SliceCount}");
-            if (info.Width > 0)
-                ImGui.BulletText($"Resolution: {info.Width} x {info.Height}");
-            ImGui.BulletText($"Total Size: {info.TotalSize / (1024 * 1024)} MB");
-            if (!string.IsNullOrEmpty(info.FileName))
-                ImGui.BulletText($"File: {info.FileName}");
+            var sweep = (float)(ImGui.GetTime() * 0.6 % 1.0);
+            ImGui.ProgressBar(sweep, new Vector2(-1, 0),
+                _ctStackLoader.IsMultiPageTiff ? "Scanning TIFF..." : "Scanning folder...");
+        }
+        else
+        {
+            var info = _ctStackLoader.GetStackInfo();
+            if (info.SliceCount > 0)
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                ImGui.Text("Stack Information:");
+                ImGui.BulletText($"Slices: {info.SliceCount}");
+                if (info.Width > 0)
+                    ImGui.BulletText($"Resolution: {info.Width} x {info.Height}");
+                ImGui.BulletText($"Total Size: {info.TotalSize / (1024 * 1024)} MB");
+                if (!string.IsNullOrEmpty(info.FileName))
+                    ImGui.BulletText($"File: {info.FileName}");
+            }
         }
     }
 
