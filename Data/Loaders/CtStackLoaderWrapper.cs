@@ -5,7 +5,7 @@ using GAIA.Util;
 
 namespace GAIA.Data.Loaders;
 
-public class CTStackLoaderWrapper : IDataLoader
+public class CTStackLoaderWrapper : IDataLoader, IAsyncScanningLoader
 {
     public enum LoadMode
     {

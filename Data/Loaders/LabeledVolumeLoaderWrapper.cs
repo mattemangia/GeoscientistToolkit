@@ -5,7 +5,7 @@ using GAIA.Util;
 
 namespace GAIA.Data.Loaders;
 
-public class LabeledVolumeLoaderWrapper : IDataLoader
+public class LabeledVolumeLoaderWrapper : IDataLoader, IAsyncScanningLoader
 {
     private readonly AsyncScanCache<VolumeInfo> _scan = new();
     public string SourcePath { get; set; } = "";

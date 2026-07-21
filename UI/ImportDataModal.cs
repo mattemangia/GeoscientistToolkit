@@ -115,6 +115,7 @@ public class ImportDataModal
     private int _validatedRevision = -1;
     private int _validatedType = -1;
     private bool _cachedCanImport;
+    private bool _lastScanning;
 
     private int _selectedDatasetTypeIndex;
     private bool _shouldOpenOrganizer;
@@ -1842,12 +1843,19 @@ public class ImportDataModal
 
     private void DrawButtons()
     {
-        if (_validatedRevision != _optionRevision || _validatedType != _selectedDatasetTypeIndex)
+        var loader = GetCurrentLoader();
+        // A loader that scans folders in the background only becomes importable once the scan
+        // finishes, which is not an option change — so keep re-evaluating while it scans (and on
+        // the frame it stops) instead of caching the still-scanning, disabled state.
+        var scanning = loader is IAsyncScanningLoader { IsScanning: true };
+        if (scanning || _lastScanning ||
+            _validatedRevision != _optionRevision || _validatedType != _selectedDatasetTypeIndex)
         {
-            _cachedCanImport = GetCurrentLoader()?.CanImport ?? false;
+            _cachedCanImport = loader?.CanImport ?? false;
             _validatedRevision = _optionRevision;
             _validatedType = _selectedDatasetTypeIndex;
         }
+        _lastScanning = scanning;
         var canImport = _cachedCanImport;
 
         if (ImGui.Button("Cancel", new Vector2(120, 0)))

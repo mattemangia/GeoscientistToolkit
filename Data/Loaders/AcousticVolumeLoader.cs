@@ -10,7 +10,7 @@ namespace GAIA.Data.Loaders;
 /// <summary>
 ///     Loader for acoustic volume datasets with time series data
 /// </summary>
-public class AcousticVolumeLoader : IDataLoader
+public class AcousticVolumeLoader : IDataLoader, IAsyncScanningLoader
 {
     private readonly AsyncScanCache<AcousticVolumeInfo> _scan = new();
     public string DirectoryPath { get; set; }

@@ -6,7 +6,7 @@ using GAIA.Util;
 
 namespace GAIA.Data.Loaders;
 
-public class ImageFolderLoader : IDataLoader
+public class ImageFolderLoader : IDataLoader, IAsyncScanningLoader
 {
     private readonly AsyncScanCache<FolderInfo> _scan = new();
     public string FolderPath { get; set; } = "";
