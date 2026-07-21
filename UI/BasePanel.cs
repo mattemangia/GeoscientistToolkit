@@ -63,8 +63,10 @@ public abstract class BasePanel : IDisposable
     /// </summary>
     public static void ProcessAllPopOutWindows()
     {
-        foreach (var panel in _allPanels)
-            if (panel._isPoppedOut && panel._popOutWindow != null)
+        // Snapshot the list: ProcessFrame() runs DrawContent(), which can create or dispose
+        // panels and therefore mutate _allPanels while we are enumerating it.
+        foreach (var panel in _allPanels.ToArray())
+            if (!panel._disposed && panel._isPoppedOut && panel._popOutWindow != null)
             {
                 panel._popOutWindow.ProcessFrame();
 
