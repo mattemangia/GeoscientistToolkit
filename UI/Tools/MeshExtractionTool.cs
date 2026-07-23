@@ -16,6 +16,9 @@ public class MeshExtractionTool : IDatasetTools, IDisposable
     private readonly int[] _downsamplingOptions = { 1, 2, 4, 8 };
     private CancellationTokenSource _cancellationTokenSource;
     private int _downsamplingFactor = 2;
+    private bool _shellOnly;
+    private int _smoothingIterations = 3;
+    private int _keepPercent = 100;
     private bool _isProcessing;
 
     private Task _meshingTask;
@@ -63,6 +66,28 @@ public class MeshExtractionTool : IDatasetTools, IDisposable
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(
                 "Controls mesh resolution. A factor of 2 processes an 8x smaller volume, creating a lower quality but smaller mesh much faster.");
+
+        ImGui.Spacing();
+
+        // Mesh type: full surface (keeps internal cavities) vs. external shell only (fills them).
+        ImGui.Checkbox("External shell only (3D printing)", ref _shellOnly);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(
+                "Fills internal cavities and keeps only the outer watertight surface.\n" +
+                "Use it when internal parts were also segmented but you want a solid print.");
+
+        ImGui.Text("Surface Smoothing:");
+        ImGui.SetNextItemWidth(-1);
+        ImGui.SliderInt("##Smoothing", ref _smoothingIterations, 0, 10, "%d iterations");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Taubin smoothing removes the voxel staircase without shrinking the model.");
+
+        ImGui.Text("Simplify (keep % of triangles):");
+        ImGui.SetNextItemWidth(-1);
+        ImGui.SliderInt("##Simplify", ref _keepPercent, 5, 100, "%d%%");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Quadric-error (QEM) decimation. Lower = fewer triangles and smaller file,\n" +
+                             "while preserving the overall shape.");
 
         ImGui.Spacing();
 
@@ -129,8 +154,15 @@ public class MeshExtractionTool : IDatasetTools, IDisposable
             try
             {
                 var mesher = new SurfaceNetsMesher();
+                var options = new MeshingOptions
+                {
+                    Downsampling = _downsamplingFactor,
+                    ShellOnly = _shellOnly,
+                    SmoothingIterations = _smoothingIterations,
+                    DecimateKeepRatio = _keepPercent / 100f
+                };
                 var (vertices, faces) = await mesher.GenerateMeshAsync(ctDataset.LabelData, material.ID,
-                    _downsamplingFactor, progressInterface, token);
+                    options, progressInterface, token);
 
                 token.ThrowIfCancellationRequested();
 
