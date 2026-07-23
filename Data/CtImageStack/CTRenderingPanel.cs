@@ -32,8 +32,9 @@ public class CtRenderingPanel : BasePanel
         _dataset = dataset;
         _currentViewMode = (int)_viewer.ViewMode;
 
-        // The controls stay above the CT viewer because the viewer window opts out of rising on
-        // focus (see DatasetViewPanel.ExtraWindowFlags), so no focus-stealing hack is needed here.
+        // The controls stay above the CT viewer because the viewer is docked into the dockspace's
+        // central node (a no-bring-to-front backdrop), so this floating window naturally sits on top
+        // without any focus-stealing hack.
     }
 
     protected override void DrawContent()

@@ -83,6 +83,8 @@ public class MainWindow : IDisposable
     private readonly List<ThumbnailViewerPanel> _thumbnailViewers = new();
     private readonly ShapefileCreationDialog _shapefileCreationDialog = new();
     private bool _layoutBuilt;
+    private uint _dockspaceId;
+    private uint _centralDockId;
     private bool _forceLayoutRebuild;
     private bool _showDatasets = true;
     private bool _showProperties = true;
@@ -251,6 +253,7 @@ public class MainWindow : IDisposable
         SubmitToolbar();
 
         var dockspaceId = ImGui.GetID("RootDockSpace");
+        _dockspaceId = dockspaceId; // captured here (GetID is relative to the current window) for docking viewers
 
         // Probe before DockSpace(), which creates the node on demand and would always report a hit.
         var hasRestoredLayout = _layoutBuilt || ImGuiDockBuilder.HasNode(dockspaceId);
@@ -292,6 +295,11 @@ public class MainWindow : IDisposable
         {
             for (var i = _viewers.Count - 1; i >= 0; --i)
             {
+                // Dock a viewer into the central node when it first appears so it opens centred in the
+                // empty area between the side/bottom panels instead of floating over them.
+                var dockTarget = _centralDockId != 0 ? _centralDockId : _dockspaceId;
+                if (dockTarget != 0) ImGui.SetNextWindowDockID(dockTarget, ImGuiCond.Appearing);
+
                 var open = true;
                 _viewers[i].Submit(ref open);
                 if (!open)
@@ -370,7 +378,7 @@ public class MainWindow : IDisposable
     // ----------------------------------------------------------------------
     // DockBuilder (conditional)
     // ----------------------------------------------------------------------
-    private static void TryBuildDockLayout(uint rootId, Vector2 size)
+    private void TryBuildDockLayout(uint rootId, Vector2 size)
     {
         var io = ImGui.GetIO();
         if ((io.ConfigFlags & ImGuiConfigFlags.DockingEnable) == 0)
@@ -398,6 +406,10 @@ public class MainWindow : IDisposable
         ImGuiDockBuilder.DockWindow("Properties", right);
         ImGuiDockBuilder.DockWindow("Tools", right);
         ImGuiDockBuilder.DockWindow("Log", bottom);
+
+        // Remember the empty central node: dataset viewers dock here so they always open centred
+        // between the Datasets panel (left), Properties/Tools (right) and the Log (bottom).
+        _centralDockId = center;
 
         ImGuiDockBuilder.Finish(rootId);
 

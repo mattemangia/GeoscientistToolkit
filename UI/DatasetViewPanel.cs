@@ -33,12 +33,6 @@ public class DatasetViewPanel : BasePanel
     // The window is titled after the dataset, but the header names the viewer itself.
     protected override string HeaderTitle => DatasetUIFactory.GetViewerDisplayName(_viewer);
 
-    // The CT viewer floats its rendering-controls window on top of itself. Opt the viewer window
-    // out of rising to the front on focus so clicking a slice never buries those controls, which
-    // removes the need for the controls to keep stealing focus back.
-    protected override ImGuiWindowFlags ExtraWindowFlags =>
-        _viewer is CtCombinedViewer ? ImGuiWindowFlags.NoBringToFrontOnFocus : ImGuiWindowFlags.None;
-
     public static void CloseViewFor(Dataset datasetToClose)
     {
         foreach (var panel in AllPanels.ToList())
