@@ -14,6 +14,7 @@ namespace GAIA.UI.Tools;
 public class MeshExtractionTool : IDatasetTools, IDisposable
 {
     private readonly int[] _downsamplingOptions = { 1, 2, 4, 8 };
+    private readonly List<string> _log = new();
     private CancellationTokenSource _cancellationTokenSource;
     private int _downsamplingFactor = 2;
     private bool _shellOnly;
@@ -103,11 +104,24 @@ public class MeshExtractionTool : IDatasetTools, IDisposable
         {
             ImGui.EndDisabled();
             ImGui.Spacing();
-            ImGui.ProgressBar(_progress, new Vector2(-1, 0), $"{_progress * 100:0}%");
-            ImGui.Text(_statusText);
+            ImGui.ProgressBar(_progress, new Vector2(-1, 0), $"{_progress * 100:0}%  {_statusText}");
 
             if (ImGui.Button("Cancel", new Vector2(ImGui.GetContentRegionAvail().X, 0)))
                 _cancellationTokenSource?.Cancel();
+        }
+
+        // Live log of the meshing phases, kept below the button so progress is fully visible.
+        if (_log.Count > 0)
+        {
+            ImGui.Spacing();
+            ImGui.TextDisabled("Log");
+            if (ImGui.BeginChild("##MeshLog", new Vector2(0, 150), ImGuiChildFlags.Border))
+            {
+                foreach (var line in _log) ImGui.TextUnformatted(line);
+                if (_isProcessing) ImGui.SetScrollHereY(1.0f);
+            }
+
+            ImGui.EndChild();
         }
     }
 
@@ -136,13 +150,18 @@ public class MeshExtractionTool : IDatasetTools, IDisposable
         _isProcessing = true;
         _progress = 0f;
         _statusText = "Initializing...";
+        _log.Clear();
         _cancellationTokenSource = new CancellationTokenSource();
         var token = _cancellationTokenSource.Token;
 
+        // Progress<T> marshals callbacks to this (UI) thread, so touching _log/_statusText here is safe.
         var progressReporter = new Progress<(float, string)>(p =>
         {
             _progress = p.Item1;
+            if (p.Item2 == _statusText) return;
             _statusText = p.Item2;
+            _log.Add($"[{p.Item1 * 100,3:0}%] {p.Item2}");
+            if (_log.Count > 300) _log.RemoveAt(0);
         });
 
         // Cast IProgress<T> for reporting

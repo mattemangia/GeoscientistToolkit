@@ -136,6 +136,10 @@ internal sealed class OpenTkApplication : GameWindow
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         _mainWindow.SubmitUI(_closeRequested);
+        // One-shot: SubmitUI has latched the request into its own dialog state, so clear it now.
+        // Otherwise it would re-trigger the close dialog every frame, making Cancel appear dead and
+        // the warning reappear forever.
+        _closeRequested = false;
         _imGui.Render();
         ViewerScreenshotUtility.ProcessDeferredCaptures();
         ScreenshotUtility.ProcessDeferredCaptures();

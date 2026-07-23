@@ -1,5 +1,6 @@
 // GAIA/Data/Mesh3D/SurfaceNetsMesher.cs
 
+using System.Collections.Concurrent;
 using System.Numerics;
 using GAIA.Data.VolumeData;
 using GAIA.Util;
@@ -34,11 +35,11 @@ public struct MeshingOptions
 
 /// <summary>
 ///     Turns a segmented material into a triangle mesh with a dual <b>Surface Nets</b> extractor.
-///     Surface Nets is table-free (no 256-case Marching-Cubes triangle table), always produces a
-///     watertight, manifold surface on binary label data, and places one vertex per boundary cell at
-///     the centroid of its edge crossings. The raw surface is then relaxed with Taubin (λ|μ) smoothing
-///     — which removes voxel staircasing without the volume shrinkage of plain Laplacian smoothing —
-///     and can optionally be simplified with Quadric Error Metric (QEM) decimation.
+///     Surface Nets is table-free (no 256-case Marching-Cubes triangle table), produces a watertight
+///     surface on binary label data, and places one shared vertex per boundary cell at the centroid of
+///     its edge crossings. The raw surface is relaxed with Taubin (λ|μ) smoothing — which removes voxel
+///     staircasing without the volume shrinkage of plain Laplacian smoothing — and can optionally be
+///     simplified with Quadric Error Metric (QEM) decimation.
 ///
 ///     References: Gibson (1998), "Constrained Elastic SurfaceNets"; Taubin (1995), "A signal
 ///     processing approach to fair surface design"; Garland &amp; Heckbert (1997), "Surface
@@ -70,50 +71,41 @@ public class SurfaceNetsMesher
         if (nx < 2 || ny < 2 || nz < 2)
             return (new List<Vector3>(), new List<int[]>());
 
-        progress?.Report((0.02f, "Phase 1/4: Sampling volume..."));
         var solid = await Task.Run(
-            () => BuildOccupancy(labels, materialId, ds, nx, ny, nz, token), token);
+            () => BuildOccupancy(labels, materialId, ds, nx, ny, nz, progress, 0.00f, 0.20f, token), token);
 
         if (options.ShellOnly)
-        {
-            progress?.Report((0.28f, "Filling internal cavities (shell)..."));
-            await Task.Run(() => FillInternalCavities(solid, nx, ny, nz, token), token);
-        }
+            await Task.Run(() => FillInternalCavities(solid, nx, ny, nz, progress, 0.20f, 0.42f, token), token);
 
         token.ThrowIfCancellationRequested();
-        progress?.Report((0.35f, "Phase 2/4: Extracting surface (Surface Nets)..."));
 
         var (vertices, triangles) = await Task.Run(
-            () => ExtractSurfaceNets(solid, nx, ny, nz, ds, token), token);
+            () => ExtractSurfaceNets(solid, nx, ny, nz, ds, progress, 0.42f, 0.68f, token), token);
 
         if (vertices.Count == 0 || triangles.Count == 0)
             return (new List<Vector3>(), new List<int[]>());
 
         if (options.SmoothingIterations > 0)
-        {
-            progress?.Report((0.72f, "Phase 3/4: Taubin smoothing..."));
             await Task.Run(
-                () => TaubinSmooth(vertices, triangles, options.SmoothingIterations, token), token);
-        }
+                () => TaubinSmooth(vertices, triangles, options.SmoothingIterations, progress, 0.68f, 0.80f, token),
+                token);
 
         if (options.DecimateKeepRatio < 0.999f)
-        {
-            progress?.Report((0.80f, "Phase 4/4: Decimating (QEM)..."));
             await Task.Run(() =>
             {
                 var (dv, dt) = QuadricMeshSimplifier.Simplify(
-                    vertices, triangles, options.DecimateKeepRatio, progress, token);
+                    vertices, triangles, options.DecimateKeepRatio, progress, 0.80f, 0.97f, token);
                 vertices = dv;
                 triangles = dt;
             }, token);
-        }
+
+        progress?.Report((0.98f, $"Finalizing mesh ({triangles.Count / 3} triangles)..."));
 
         // Convert the flat triangle index list to the List<int[]> face format the mesh dataset expects.
         var faces = new List<int[]>(triangles.Count / 3);
         for (var i = 0; i + 2 < triangles.Count; i += 3)
             faces.Add(new[] { triangles[i], triangles[i + 1], triangles[i + 2] });
 
-        progress?.Report((0.98f, "Finalizing mesh..."));
         Logger.Log($"[SurfaceNets] Material {materialId}: {vertices.Count} vertices, {faces.Count} triangles " +
                    $"(ds={ds}, shell={options.ShellOnly}, smooth={options.SmoothingIterations}, " +
                    $"keep={options.DecimateKeepRatio:0.##}).");
@@ -122,10 +114,11 @@ public class SurfaceNetsMesher
 
     // ── Occupancy sampling ────────────────────────────────────────────────────
     private static bool[] BuildOccupancy(ChunkedLabelVolume labels, byte materialId, int ds,
-        int nx, int ny, int nz, CancellationToken token)
+        int nx, int ny, int nz, IProgress<(float, string)> progress, float lo, float hi, CancellationToken token)
     {
         int width = labels.Width, height = labels.Height, depth = labels.Depth;
         var solid = new bool[(long)nx * ny * nz];
+        var done = 0;
 
         Parallel.For(0, nz, new ParallelOptions { CancellationToken = token },
             () => new byte[width * height],
@@ -146,6 +139,10 @@ public class SurfaceNetsMesher
                     }
                 }
 
+                var n = Interlocked.Increment(ref done);
+                if ((n & 7) == 0)
+                    progress?.Report((lo + (hi - lo) * n / nz, $"Sampling volume... slice {n}/{nz}"));
+
                 return buffer;
             },
             _ => { });
@@ -153,25 +150,39 @@ public class SurfaceNetsMesher
         return solid;
     }
 
-    // ── Shell mode: flood the exterior empty space, then fill everything not reached ──
-    private static void FillInternalCavities(bool[] solid, int nx, int ny, int nz, CancellationToken token)
+    // ── Shell mode: flood the exterior empty space in parallel, then fill what it never reached ──
+    private static void FillInternalCavities(bool[] solid, int nx, int ny, int nz,
+        IProgress<(float, string)> progress, float lo, float hi, CancellationToken token)
     {
-        var outside = new bool[solid.Length];
-        var stack = new Stack<int>();
+        progress?.Report((lo, "Shell: measuring empty space..."));
+        long emptyCount = 0;
+        Parallel.For(0, nz, new ParallelOptions { CancellationToken = token }, () => 0L,
+            (k, _, local) =>
+            {
+                var baseIdx = (long)nx * ny * k;
+                for (long i = 0; i < (long)nx * ny; i++)
+                    if (!solid[baseIdx + i])
+                        local++;
+                return local;
+            },
+            local => Interlocked.Add(ref emptyCount, local));
+        if (emptyCount == 0) return;
 
-        long Idx(int x, int y, int z) => x + (long)nx * (y + (long)ny * z);
+        // outside[n] = 1 once the exterior flood has claimed empty node n. Non-atomic writes are fine:
+        // the mark is idempotent, so at worst a node is enqueued a couple of extra times.
+        var outside = new byte[solid.Length];
+        var frontier = new List<int>();
 
         void Seed(int x, int y, int z)
         {
-            var id = (int)Idx(x, y, z);
-            if (!solid[id] && !outside[id])
+            var id = x + nx * (y + ny * z);
+            if (!solid[id] && outside[id] == 0)
             {
-                outside[id] = true;
-                stack.Push(id);
+                outside[id] = 1;
+                frontier.Add(id);
             }
         }
 
-        // Seed from every empty node on the six faces of the grid.
         for (var y = 0; y < ny; y++)
         for (var x = 0; x < nx; x++)
         {
@@ -193,32 +204,70 @@ public class SurfaceNetsMesher
             Seed(nx - 1, y, z);
         }
 
-        var counter = 0;
-        while (stack.Count > 0)
-        {
-            if ((++counter & 0xFFFFF) == 0) token.ThrowIfCancellationRequested();
-            var id = stack.Pop();
-            var z = (int)(id / ((long)nx * ny));
-            var rem = id - (long)nx * ny * z;
-            var y = (int)(rem / nx);
-            var x = (int)(rem - (long)nx * y);
+        long visited = frontier.Count;
+        long planeArea = (long)nx * ny;
 
-            if (x > 0) Seed(x - 1, y, z);
-            if (x < nx - 1) Seed(x + 1, y, z);
-            if (y > 0) Seed(x, y - 1, z);
-            if (y < ny - 1) Seed(x, y + 1, z);
-            if (z > 0) Seed(x, y, z - 1);
-            if (z < nz - 1) Seed(x, y, z + 1);
+        // Level-synchronous parallel BFS: expand the whole frontier at once, collect the next one.
+        while (frontier.Count > 0)
+        {
+            token.ThrowIfCancellationRequested();
+            var next = new ConcurrentBag<List<int>>();
+
+            Parallel.ForEach(Partitioner.Create(0, frontier.Count),
+                new ParallelOptions { CancellationToken = token },
+                () => new List<int>(),
+                (range, _, local) =>
+                {
+                    for (var idx = range.Item1; idx < range.Item2; idx++)
+                    {
+                        var id = frontier[idx];
+                        var z = (int)(id / planeArea);
+                        var rem = id - planeArea * z;
+                        var y = (int)(rem / nx);
+                        var x = (int)(rem - (long)nx * y);
+
+                        TryVisit(x - 1, y, z, local);
+                        TryVisit(x + 1, y, z, local);
+                        TryVisit(x, y - 1, z, local);
+                        TryVisit(x, y + 1, z, local);
+                        TryVisit(x, y, z - 1, local);
+                        TryVisit(x, y, z + 1, local);
+                    }
+
+                    return local;
+                },
+                local =>
+                {
+                    if (local.Count > 0) next.Add(local);
+                });
+
+            var merged = new List<int>();
+            foreach (var list in next) merged.AddRange(list);
+            frontier = merged;
+            visited += frontier.Count;
+            progress?.Report((lo + (hi - lo) * Math.Min(1f, visited / (float)emptyCount),
+                $"Shell: flooding exterior... {visited * 100 / emptyCount}%"));
         }
 
-        // Any empty node the exterior flood never reached is an internal cavity -> make it solid.
+        void TryVisit(int x, int y, int z, List<int> local)
+        {
+            if (x < 0 || x >= nx || y < 0 || y >= ny || z < 0 || z >= nz) return;
+            var id = x + nx * (y + ny * z);
+            if (solid[id] || outside[id] != 0) return;
+            outside[id] = 1;
+            local.Add(id);
+        }
+
+        // Any empty node the exterior never reached is an internal cavity -> make it solid.
+        progress?.Report((hi, "Shell: filling cavities..."));
         Parallel.For(0L, solid.LongLength, new ParallelOptions { CancellationToken = token },
-            i => { if (!outside[i]) solid[i] = true; });
+            i => { if (!solid[i] && outside[i] == 0) solid[i] = true; });
     }
 
     // ── Dual Surface Nets extraction (single pass, rolling two-plane vertex buffer) ──
     private static (List<Vector3> vertices, List<int> triangles) ExtractSurfaceNets(
-        bool[] solid, int nx, int ny, int nz, int ds, CancellationToken token)
+        bool[] solid, int nx, int ny, int nz, int ds,
+        IProgress<(float, string)> progress, float lo, float hi, CancellationToken token)
     {
         var vertices = new List<Vector3>();
         var triangles = new List<int>();
@@ -234,7 +283,13 @@ public class SurfaceNetsMesher
 
         for (var k = 0; k < nz - 1; k++)
         {
-            if ((k & 0x1F) == 0) token.ThrowIfCancellationRequested();
+            if ((k & 0x1F) == 0)
+            {
+                token.ThrowIfCancellationRequested();
+                progress?.Report((lo + (hi - lo) * k / (nz - 1),
+                    $"Surface Nets... plane {k}/{nz - 1} ({vertices.Count} verts)"));
+            }
+
             var planeCur = Plane(k);
 
             for (var j = 0; j < ny - 1; j++)
@@ -267,15 +322,19 @@ public class SurfaceNetsMesher
                     var inv = 1f / count;
                     cellVert = vertices.Count;
                     vertices.Add(new Vector3((i + ax * inv) * ds, (j + ay * inv) * ds, (k + az * inv) * ds));
+                }
 
+                // CRITICAL: publish this cell's vertex index into the buffer BEFORE emitting quads, so
+                // EmitQuad reads the correct current-cell vertex (not a stale value from an older plane).
+                buffer[planeCur + i + cnx * j] = cellVert;
+
+                if (cellVert >= 0)
+                {
                     // Emit a quad for each of the three edges at corner 0 that straddle the surface.
-                    // Each such edge is shared by four cells whose dual vertices form the quad.
                     EmitQuad(0, i, j, k, solids[0], solids[1], CellVert, triangles);
                     EmitQuad(1, i, j, k, solids[0], solids[2], CellVert, triangles);
                     EmitQuad(2, i, j, k, solids[0], solids[4], CellVert, triangles);
                 }
-
-                buffer[planeCur + i + cnx * j] = cellVert;
             }
         }
 
@@ -319,8 +378,9 @@ public class SurfaceNetsMesher
 
     // ── Taubin (λ|μ) smoothing ─────────────────────────────────────────────────
     private static void TaubinSmooth(List<Vector3> vertices, List<int> triangles, int iterations,
-        CancellationToken token)
+        IProgress<(float, string)> progress, float lo, float hi, CancellationToken token)
     {
+        progress?.Report((lo, "Smoothing: building adjacency..."));
         var adjacency = BuildAdjacency(vertices.Count, triangles);
         const float lambda = 0.5f;
         const float mu = -0.53f;
@@ -353,6 +413,8 @@ public class SurfaceNetsMesher
             token.ThrowIfCancellationRequested();
             Pass(lambda);
             Pass(mu);
+            progress?.Report((lo + (hi - lo) * (it + 1) / iterations,
+                $"Smoothing... iteration {it + 1}/{iterations}"));
         }
 
         for (var v = 0; v < current.Length; v++) vertices[v] = current[v];

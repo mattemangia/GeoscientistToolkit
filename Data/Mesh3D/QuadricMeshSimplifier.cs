@@ -31,14 +31,14 @@ public static class QuadricMeshSimplifier
 
     public static (List<Vector3> vertices, List<int> triangles) Simplify(
         List<Vector3> verticesIn, List<int> trianglesIn, float keepRatio,
-        IProgress<(float progress, string message)> progress, CancellationToken token)
+        IProgress<(float progress, string message)> progress, float lo, float hi, CancellationToken token)
     {
         keepRatio = Math.Clamp(keepRatio, 0.01f, 1f);
         if (keepRatio >= 0.999f) return (verticesIn, trianglesIn);
 
         try
         {
-            return Run(verticesIn, trianglesIn, keepRatio, progress, token);
+            return Run(verticesIn, trianglesIn, keepRatio, progress, lo, hi, token);
         }
         catch (OperationCanceledException)
         {
@@ -54,7 +54,7 @@ public static class QuadricMeshSimplifier
 
     private static (List<Vector3>, List<int>) Run(
         List<Vector3> verticesIn, List<int> trianglesIn, float keepRatio,
-        IProgress<(float progress, string message)> progress, CancellationToken token)
+        IProgress<(float progress, string message)> progress, float lo, float hi, CancellationToken token)
     {
         var vertexCount = verticesIn.Count;
         var pos = verticesIn.ToArray();
@@ -180,7 +180,7 @@ public static class QuadricMeshSimplifier
             {
                 token.ThrowIfCancellationRequested();
                 var done = (startTriangles - aliveTriangles) / (float)Math.Max(1, startTriangles - targetTriangles);
-                progress?.Report((0.80f + 0.15f * Math.Clamp(done, 0f, 1f),
+                progress?.Report((lo + (hi - lo) * Math.Clamp(done, 0f, 1f),
                     $"Decimating... {aliveTriangles} triangles"));
             }
         }
