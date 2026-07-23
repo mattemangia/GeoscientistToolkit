@@ -1,6 +1,8 @@
 // GAIA/Data/CtImageStack/CtSegmentationIntegration.cs
 
 using System.Numerics;
+using System.Threading.Tasks;
+using GAIA.Business;
 using GAIA.Data.CtImageStack.Segmentation;
 using GAIA.Util;
 using ImGuiNET;
@@ -17,7 +19,13 @@ public class CtSegmentationIntegration : IDisposable
     private readonly MagicWandTool _magicWandTool;
     private readonly SegmentationManager _segmentationManager;
     private readonly CtImageStackDataset _dataset;
+
+    // Growth cap for a single 3D flood so a click on a huge/background region cannot run unbounded.
+    private const int MaxWand3DVoxels = 80_000_000;
+
     private CtOperationHandle _applyOperation;
+    private CtOperationHandle _wand3DOperation;
+    private bool _subtractStroke;
     private byte[] _currentPreviewMask;
     private int _currentPreviewSlice;
     private int _currentPreviewView;
@@ -90,6 +98,9 @@ public class CtSegmentationIntegration : IDisposable
             DrawToolButton(_magicWandTool, "Magic Wand (W)", buttonSize, DrawWandIcon);
             ImGui.SameLine();
             DrawToolButton(null, "Turn Off Tool (Esc)", buttonSize, DrawOffIcon);
+            if (ActiveTool != null)
+                ImGui.TextColored(new Vector4(0.7f, 0.85f, 1f, 1f),
+                    "Left mouse = add to selection · Right mouse = remove");
             ImGui.Separator();
             if (selectedMaterial != null)
             {
@@ -159,8 +170,24 @@ public class CtSegmentationIntegration : IDisposable
         else if (ActiveTool is MagicWandTool wand)
         {
             ImGui.Text("Magic Wand Settings:");
+            ImGui.Text("Mode:");
+            ImGui.SameLine();
+            if (ImGui.RadioButton("2D slice", !wand.Use3D)) wand.Use3D = false;
+            ImGui.SameLine();
+            if (ImGui.RadioButton("3D object", wand.Use3D)) wand.Use3D = true;
+
             int tolerance = wand.Tolerance;
             if (ImGui.SliderInt("Tolerance", ref tolerance, 0, 100)) wand.Tolerance = (byte)tolerance;
+
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), wand.Use3D
+                ? "Left-click an object to select it across every slice; right-click to remove it."
+                : "Left-click a region to select it on this slice; right-click to remove it.");
+
+            if (_wand3DOperation?.IsActive == true)
+            {
+                ImGui.ProgressBar(_wand3DOperation.Progress, new Vector2(-1, 0), _wand3DOperation.Name);
+                if (ImGui.Button("Cancel 3D wand", new Vector2(-1, 0))) _wand3DOperation.Cancel();
+            }
         }
     }
 
@@ -186,13 +213,30 @@ public class CtSegmentationIntegration : IDisposable
         _segmentationManager.CurrentTool = tool;
     }
 
-    public void HandleMouseInput(Vector2 mousePos, int sliceIndex, int viewIndex, bool isDown, bool isDragging,
-        bool isReleased)
+    public void HandleMouseInput(Vector2 mousePos, int sliceIndex, int viewIndex,
+        bool leftDown, bool leftDragging, bool leftReleased,
+        bool rightDown, bool rightDragging, bool rightReleased)
     {
         if (ActiveTool == null || TargetMaterialId == 0) return;
 
+        // The 3D magic wand is a single-click action that spans the whole volume, so it takes its own
+        // path instead of the per-slice start/drag/end cycle. Left click adds the object, right removes.
+        if (ActiveTool is MagicWandTool { Use3D: true })
+        {
+            if (leftDown) StartWand3D(mousePos, sliceIndex, viewIndex, false);
+            else if (rightDown) StartWand3D(mousePos, sliceIndex, viewIndex, true);
+            return;
+        }
+
+        var isDown = leftDown || rightDown;
+        var isDragging = leftDragging || rightDragging;
+        var isReleased = leftReleased || rightReleased;
+
         if (isDown)
         {
+            // Remember which button started the stroke; the right button carves the selection instead
+            // of adding to it. Additive clicks always accumulate — earlier selections are never wiped.
+            _subtractStroke = rightDown;
             _segmentationManager.StartSelection(mousePos, sliceIndex, viewIndex);
         }
         else if (isDragging)
@@ -211,10 +255,49 @@ public class CtSegmentationIntegration : IDisposable
             }
             else
             {
-                // This is the key change: EndSelection now commits the mask to the manager's cache.
-                _segmentationManager.EndSelection();
+                // EndSelection commits the stroke to the manager's cache (add) or carves it out (subtract).
+                _segmentationManager.EndSelection(_subtractStroke);
             }
+
+            _subtractStroke = false;
         }
+    }
+
+    // Converts a click on a slice view into an absolute volume voxel for the 3D flood seed.
+    private (int x, int y, int z) SeedVoxelFromView(Vector2 mousePos, int sliceIndex, int viewIndex)
+    {
+        int px = (int)mousePos.X, py = (int)mousePos.Y;
+        return viewIndex switch
+        {
+            0 => (px, py, sliceIndex), // XY (axial): image is (X, Y), slice is Z
+            1 => (px, sliceIndex, py), // XZ (coronal): image is (X, Z), slice is Y
+            _ => (sliceIndex, px, py)  // YZ (sagittal): image is (Y, Z), slice is X
+        };
+    }
+
+    private void StartWand3D(Vector2 mousePos, int sliceIndex, int viewIndex, bool subtract)
+    {
+        if (ActiveTool is not MagicWandTool wand) return;
+        if (_wand3DOperation?.IsActive == true) return; // one flood at a time
+
+        var (sx, sy, sz) = SeedVoxelFromView(mousePos, sliceIndex, viewIndex);
+        var tolerance = wand.Tolerance;
+        _wand3DOperation = CtOperationCoordinator.For(_dataset).Enqueue(
+            subtract ? "3D magic wand (remove)" : "3D magic wand (add)",
+            (token, progress) => Task.Run(() =>
+            {
+                var masks = _segmentationManager.Run3DMagicWand(sx, sy, sz, tolerance, MaxWand3DVoxels, token,
+                    progress);
+                OpenTkManager.ExecuteOnMainThread(() =>
+                {
+                    if (subtract) _segmentationManager.SubtractMultipleSelectionsFromCache(masks);
+                    else _segmentationManager.CommitMultipleSelectionsToCache(masks);
+                    // Force every slice view to redraw so the flood is visible immediately.
+                    ProjectManager.Instance.NotifyDatasetDataChanged(_dataset);
+                });
+                Logger.Log($"[Segmentation] 3D magic wand touched {masks.Count} slices " +
+                           $"(seed {sx},{sy},{sz}, tol {tolerance}).");
+            }, token));
     }
 
 

@@ -14,6 +14,11 @@ public class MagicWandTool : ISegmentationTool
     public byte Tolerance { get; set; } = 10;
     public bool SelectOnlyFromCurrentMaterial { get; set; } = false;
 
+    // When true, a click floods the whole connected object in 3D across the volume instead of the
+    // current slice only. The 3D flood is handled by the SegmentationManager because it spans many
+    // slices; this flag only tells the integration which path to take.
+    public bool Use3D { get; set; } = false;
+
     public string Name => "Magic Wand";
     public string Icon => "Wand";
     public bool HasActiveSelection { get; private set; }

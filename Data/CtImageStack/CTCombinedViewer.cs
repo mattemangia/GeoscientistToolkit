@@ -943,7 +943,10 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         var canvasSize = availableSize;
         var dl = ImGui.GetWindowDrawList();
 
-        ImGui.InvisibleButton($"canvas{viewIndex}", canvasSize);
+        // React to the right button too so right-drag erasing keeps the canvas active while the cursor
+        // moves, mirroring the left-button paint behaviour.
+        ImGui.InvisibleButton($"canvas{viewIndex}", canvasSize,
+            ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight);
         var isHovered = ImGui.IsItemHovered();
 
         var (width, height) = GetImageDimensionsForView(viewIndex);
@@ -1045,14 +1048,20 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 viewIndex,
                 ImGui.IsItemClicked(ImGuiMouseButton.Left),
                 ImGui.IsMouseDragging(ImGuiMouseButton.Left),
-                ImGui.IsMouseReleased(ImGuiMouseButton.Left)
+                ImGui.IsMouseReleased(ImGuiMouseButton.Left),
+                ImGui.IsItemClicked(ImGuiMouseButton.Right),
+                ImGui.IsMouseDragging(ImGuiMouseButton.Right),
+                ImGui.IsMouseReleased(ImGuiMouseButton.Right)
             );
 
-            if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) || ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+            if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) || ImGui.IsMouseReleased(ImGuiMouseButton.Left) ||
+                ImGui.IsMouseDragging(ImGuiMouseButton.Right) || ImGui.IsMouseReleased(ImGuiMouseButton.Right))
                 _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
         }
 
-        if (ImGui.BeginPopupContextItem($"SliceContext{viewIndex}"))
+        // While a segmentation tool is active the right button erases the selection, so the right-click
+        // context menu is suppressed to avoid both firing on the same click.
+        if (_interactiveSegmentation?.ActiveTool == null && ImGui.BeginPopupContextItem($"SliceContext{viewIndex}"))
         {
             if (ImGui.MenuItem("Open Rendering Panel")) _renderingPanelOpen = true;
             ImGui.Separator();

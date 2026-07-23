@@ -53,8 +53,12 @@ public class CtImageStackTools : IDatasetTools
             Clear3DThresholdPreview();
             Set2DPreviewState(false, null);
             _currentDataset = ctDataset;
-            _interactiveSegmentation = CtSegmentationIntegration.GetInstance(ctDataset);
         }
+
+        // Refetch every frame: the viewer creates the segmentation instance on its render-thread init,
+        // which can land AFTER this panel first draws the dataset. Fetching only on dataset change would
+        // cache a null and leave the interactive tools invisible until the dataset is switched away and back.
+        _interactiveSegmentation = CtSegmentationIntegration.GetInstance(ctDataset);
 
         var materials = ctDataset.Materials.Where(m => m.ID != 0).ToList();
         if (materials.Count == 0)

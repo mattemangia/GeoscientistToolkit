@@ -74,7 +74,7 @@ public class SegmentationManager : IDisposable
         _currentTool?.CancelSelection();
     }
 
-    public void EndSelection()
+    public void EndSelection(bool subtract = false)
     {
         if (_currentTool == null || !_currentTool.HasActiveSelection)
         {
@@ -88,7 +88,13 @@ public class SegmentationManager : IDisposable
         var sliceIndex = _currentTool.SliceIndex;
         var viewIndex = _currentTool.ViewIndex;
 
-        if (selectionMask != null) CommitSelectionToCache(selectionMask, sliceIndex, viewIndex);
+        if (selectionMask != null)
+        {
+            // A left-button stroke adds to the running selection; a right-button stroke carves out of
+            // it. New strokes never wipe earlier ones — successive additive clicks accumulate.
+            if (subtract) SubtractSelectionFromCache(selectionMask, sliceIndex, viewIndex);
+            else CommitSelectionToCache(selectionMask, sliceIndex, viewIndex);
+        }
 
         // After committing, the tool's specific job is done, so we cancel its active state.
         _currentTool.CancelSelection();
@@ -117,6 +123,73 @@ public class SegmentationManager : IDisposable
     public void CommitMultipleSelectionsToCache(Dictionary<(int slice, int view), byte[]> selections)
     {
         foreach (var sel in selections) CommitSelectionToCache(sel.Value, sel.Key.slice, sel.Key.view);
+    }
+
+    // Carves the painted pixels out of the running selection for a slice (right-button stroke). If the
+    // slice has no selection there is nothing to remove.
+    public void SubtractSelectionFromCache(byte[] mask, int sliceIndex, int viewIndex)
+    {
+        if (mask == null) return;
+        var changed = false;
+
+        if (_activeSelections.TryGetValue((sliceIndex, viewIndex), out var existing))
+        {
+            var length = Math.Min(existing.Length, mask.Length);
+            for (var i = 0; i < length; i++)
+                if (mask[i] > 0 && existing[i] != 0)
+                {
+                    existing[i] = 0;
+                    changed = true;
+                }
+        }
+
+        // A 3D selection lives in axial (view 0) masks, so a right-click erase on an XZ/YZ cross-section
+        // has to carve those axial masks too, otherwise it would silently do nothing.
+        if (viewIndex != 0) changed |= SubtractFromAxialMasks(mask, sliceIndex, viewIndex);
+
+        if (changed) SelectionPreviewChanged?.Invoke(GetActiveSelectionMask(sliceIndex, viewIndex),
+            sliceIndex, viewIndex);
+    }
+
+    private bool SubtractFromAxialMasks(byte[] mask, int sliceIndex, int viewIndex)
+    {
+        int width = _dataset.Width, height = _dataset.Height, depth = _dataset.Depth;
+        var changed = false;
+        foreach (var kvp in _activeSelections)
+        {
+            if (kvp.Key.view != 0) continue;
+            var z = kvp.Key.slice;
+            if (z < 0 || z >= depth) continue;
+            var axial = kvp.Value;
+
+            if (viewIndex == 1) // XZ at y = sliceIndex: mask indexed z*width + x
+            {
+                if (sliceIndex < 0 || sliceIndex >= height) continue;
+                for (var x = 0; x < width; x++)
+                    if (mask[z * width + x] > 0 && axial[sliceIndex * width + x] != 0)
+                    {
+                        axial[sliceIndex * width + x] = 0;
+                        changed = true;
+                    }
+            }
+            else // view 2, YZ at x = sliceIndex: mask indexed z*height + y
+            {
+                if (sliceIndex < 0 || sliceIndex >= width) continue;
+                for (var y = 0; y < height; y++)
+                    if (mask[z * height + y] > 0 && axial[y * width + sliceIndex] != 0)
+                    {
+                        axial[y * width + sliceIndex] = 0;
+                        changed = true;
+                    }
+            }
+        }
+
+        return changed;
+    }
+
+    public void SubtractMultipleSelectionsFromCache(Dictionary<(int slice, int view), byte[]> selections)
+    {
+        foreach (var sel in selections) SubtractSelectionFromCache(sel.Value, sel.Key.slice, sel.Key.view);
     }
 
     public Task ApplyActiveSelectionsToVolumeAsync(CancellationToken token = default,
@@ -272,8 +345,127 @@ public class SegmentationManager : IDisposable
 
     public byte[] GetActiveSelectionMask(int slice, int view)
     {
-        _activeSelections.TryGetValue((slice, view), out var m);
-        return m;
+        _activeSelections.TryGetValue((slice, view), out var exact);
+        if (view == 0) return exact;
+
+        // A 3D flood is stored as axial (view 0) masks. So the same selection is visible on the XZ/YZ
+        // views, synthesise the requested cross-section from every stored axial mask and merge in any
+        // direct 2D selection made on this cross-section.
+        var synthesized = _activeSelections.IsEmpty ? null : SynthesizeCrossSectionFromAxial(slice, view);
+        if (exact == null) return synthesized;
+        if (synthesized == null) return exact;
+
+        var length = Math.Min(exact.Length, synthesized.Length);
+        for (var i = 0; i < length; i++)
+            if (exact[i] > 0)
+                synthesized[i] = 255; // synthesized is a fresh buffer, safe to mutate
+        return synthesized;
+    }
+
+    private byte[] SynthesizeCrossSectionFromAxial(int slice, int view)
+    {
+        int width = _dataset.Width, height = _dataset.Height, depth = _dataset.Depth;
+        byte[] result = null;
+        foreach (var kvp in _activeSelections)
+        {
+            if (kvp.Key.view != 0) continue;
+            var z = kvp.Key.slice;
+            if (z < 0 || z >= depth) continue;
+            var axial = kvp.Value; // width*height, indexed y*width + x
+
+            if (view == 1) // XZ at y = slice: output[z*width + x]
+            {
+                if (slice < 0 || slice >= height) return result;
+                result ??= new byte[width * depth];
+                for (var x = 0; x < width; x++)
+                    if (axial[slice * width + x] > 0)
+                        result[z * width + x] = 255;
+            }
+            else // view == 2, YZ at x = slice: output[z*height + y]
+            {
+                if (slice < 0 || slice >= width) return result;
+                result ??= new byte[height * depth];
+                for (var y = 0; y < height; y++)
+                    if (axial[y * width + slice] > 0)
+                        result[z * height + y] = 255;
+            }
+        }
+
+        return result;
+    }
+
+    // Seeded 3D region growing (6-connected) across the whole volume from a single voxel. Returns one
+    // axial (view 0) mask per z-slice the object touches, ready to merge into the selection cache. The
+    // result masks double as the visited set, so no separate volume-sized bitmap is allocated; growth
+    // is capped by maxVoxels to stay bounded if a click lands on a huge/background region.
+    //
+    // References: Adams & Bischof (1994), "Seeded region growing", IEEE TPAMI 16(6), 641-647.
+    public Dictionary<(int slice, int view), byte[]> Run3DMagicWand(int seedX, int seedY, int seedZ,
+        byte tolerance, int maxVoxels, CancellationToken token, IProgress<float> progress = null)
+    {
+        int width = _dataset.Width, height = _dataset.Height, depth = _dataset.Depth;
+        var result = new Dictionary<int, byte[]>();
+        if (seedX < 0 || seedX >= width || seedY < 0 || seedY >= height || seedZ < 0 || seedZ >= depth)
+            return new Dictionary<(int, int), byte[]>();
+
+        var grayCache = new Dictionary<int, byte[]>();
+
+        byte[] Gray(int z)
+        {
+            if (grayCache.TryGetValue(z, out var g)) return g;
+            g = new byte[width * height];
+            _dataset.VolumeData.ReadSliceZ(z, g);
+            grayCache[z] = g;
+            return g;
+        }
+
+        byte[] Mask(int z)
+        {
+            if (result.TryGetValue(z, out var m)) return m;
+            m = new byte[width * height];
+            result[z] = m;
+            return m;
+        }
+
+        var seedValue = Gray(seedZ)[seedY * width + seedX];
+        var lo = Math.Max(0, seedValue - tolerance);
+        var hi = Math.Min(255, seedValue + tolerance);
+
+        var stack = new Stack<(int x, int y, int z)>();
+        Mask(seedZ)[seedY * width + seedX] = 255;
+        stack.Push((seedX, seedY, seedZ));
+        var count = 1;
+
+        Span<(int dx, int dy, int dz)> neighbors = stackalloc (int, int, int)[]
+        {
+            (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)
+        };
+
+        while (stack.Count > 0)
+        {
+            if ((count & 0xFFFF) == 0)
+            {
+                token.ThrowIfCancellationRequested();
+                progress?.Report(Math.Min(0.85f, count / (float)maxVoxels));
+            }
+
+            var (x, y, z) = stack.Pop();
+            foreach (var (dx, dy, dz) in neighbors)
+            {
+                int nx = x + dx, ny = y + dy, nz = z + dz;
+                if (nx < 0 || nx >= width || ny < 0 || ny >= height || nz < 0 || nz >= depth) continue;
+                var mask = Mask(nz);
+                var idx = ny * width + nx;
+                if (mask[idx] != 0) continue; // already visited/selected
+                var value = Gray(nz)[idx];
+                if (value < lo || value > hi) continue;
+                mask[idx] = 255;
+                if (++count > maxVoxels) { stack.Clear(); break; }
+                stack.Push((nx, ny, nz));
+            }
+        }
+
+        return result.ToDictionary(kv => (kv.Key, 0), kv => kv.Value);
     }
 
     public void NotifyPreviewChanged(byte[] mask, int slice, int view)
