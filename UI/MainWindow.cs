@@ -548,6 +548,24 @@ public class MainWindow : IDisposable
         ImGui.MenuItem(label, string.Empty, ref value);
     }
 
+    /// <summary>The CT viewer whose rendering-controls window the View menu should reopen: the one
+    /// for the selected dataset if it is a CT stack, otherwise any open CT viewer. Null when no CT
+    /// dataset viewer is open, which greys out the menu entry.</summary>
+    private CtCombinedViewer? GetCtRenderingControlsViewer()
+    {
+        if (_selectedDataset is CtImageStackDataset)
+        {
+            var selected = _viewers.FirstOrDefault(v => v.Dataset == _selectedDataset);
+            if (selected?.Viewer is CtCombinedViewer selectedCt) return selectedCt;
+        }
+
+        foreach (var viewer in _viewers)
+            if (viewer.Viewer is CtCombinedViewer ct)
+                return ct;
+
+        return null;
+    }
+
     private void SubmitMainMenu()
     {
         if (!ImGui.BeginMenuBar()) return;
@@ -729,6 +747,14 @@ public class MainWindow : IDisposable
             IconMenuToggle(GaiaIcon.PanelProperties, "Properties Panel", ref _showProperties);
             IconMenuToggle(GaiaIcon.PanelLog, "Log Panel", ref _showLog);
             IconMenuToggle(GaiaIcon.PanelTools, "Tools Panel", ref _showTools);
+
+            // Reopen the CT viewer's floating rendering-controls window after it has been closed.
+            // Greyed out unless a CT dataset viewer is currently open.
+            var ctRenderingViewer = GetCtRenderingControlsViewer();
+            if (IconMenuItem(GaiaIcon.RenderingControls, "CT Rendering Controls", string.Empty,
+                    ctRenderingViewer != null))
+                ctRenderingViewer?.OpenRenderingPanel();
+
             ImGui.Separator();
 
             // Full Screen toggle (disabled on macOS)

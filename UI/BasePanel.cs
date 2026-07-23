@@ -27,12 +27,11 @@ public abstract class BasePanel : IDisposable
     private bool _disposed;
     protected string _title;
     private bool _wantsToPopIn;
-    private bool _isFocused;
 
-    /// <summary>When set, the docked window is kept in front of the other panels so it cannot get
-    /// lost behind a larger viewer. Focus is only reclaimed while the UI is idle (no mouse button
-    /// held, no widget active), so it never interrupts a click, a drag-rotate, or text entry.</summary>
-    public bool AlwaysOnTop { get; set; }
+    /// <summary>Extra ImGui window flags applied when the panel is drawn docked in the main UI.
+    /// Panels override this to, for example, keep a large viewer from jumping in front of the
+    /// floating tool windows that live above it (NoBringToFrontOnFocus).</summary>
+    protected virtual ImGuiWindowFlags ExtraWindowFlags => ImGuiWindowFlags.None;
 
     protected BasePanel(string title, Vector2 defaultSize)
     {
@@ -131,17 +130,8 @@ public abstract class BasePanel : IDisposable
 
             ImGui.SetNextWindowSize(_defaultSize, ImGuiCond.FirstUseEver);
 
-            // Reclaim the top of the stack when the panel is behind another window, but only while
-            // the user is not mid-interaction, so a drag-rotate on the viewer or an edit elsewhere
-            // is never stolen. Focusing a window also closes every popup stacked above it, so stand
-            // down while any popup is open: stealing focus there instantly dismissed the main menus
-            // and the close-confirmation dialog, which made the app's X button appear dead.
-            if (AlwaysOnTop && !_isFocused && !ImGui.IsAnyMouseDown() && !ImGui.IsAnyItemActive() &&
-                !ImGui.IsPopupOpen("", ImGuiPopupFlags.AnyPopupId | ImGuiPopupFlags.AnyPopupLevel))
-                ImGui.SetNextWindowFocus();
-
             // Pass our authoritative _isOpen flag to ImGui. It will be set to false if the user closes the window.
-            if (ImGui.Begin(_title, ref _isOpen))
+            if (ImGui.Begin(_title, ref _isOpen, ExtraWindowFlags))
             {
                 _lastMainWindowPos = ImGui.GetWindowPos();
                 _lastMainWindowSize = ImGui.GetWindowSize();
@@ -150,7 +140,6 @@ public abstract class BasePanel : IDisposable
                 DrawContent();
             }
 
-            _isFocused = ImGui.IsWindowFocused();
             ImGui.End();
 
             // After rendering, ensure the caller's flag is in sync with our state.

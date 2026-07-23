@@ -32,9 +32,8 @@ public class CtRenderingPanel : BasePanel
         _dataset = dataset;
         _currentViewMode = (int)_viewer.ViewMode;
 
-        // Keep the rendering controls in front of the CT viewer, which can otherwise fully cover
-        // this floating window and leave no titlebar to click.
-        AlwaysOnTop = true;
+        // The controls stay above the CT viewer because the viewer window opts out of rising on
+        // focus (see DatasetViewPanel.ExtraWindowFlags), so no focus-stealing hack is needed here.
     }
 
     protected override void DrawContent()

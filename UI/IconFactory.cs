@@ -74,6 +74,7 @@ public enum GaiaIcon
     Photogrammetry,
     NodeManager,
     VolumeDebug,
+    RenderingControls,
 
     // Metadata
     Metadata,
@@ -316,7 +317,8 @@ public sealed class IconFactory : IDisposable
         // ── Help ─────────────────────────────────────────────────────────────
         [GaiaIcon.About] = (PaletteProject, DrawAbout),
         [GaiaIcon.SystemInfo] = (PaletteProject, DrawSystemInfo),
-        [GaiaIcon.VolumeDebug] = (PaletteImaging, DrawVolumeDebug)
+        [GaiaIcon.VolumeDebug] = (PaletteImaging, DrawVolumeDebug),
+        [GaiaIcon.RenderingControls] = (PaletteImaging, DrawRenderingControls)
     };
 
     // ── Project / file glyphs ────────────────────────────────────────────────
@@ -585,6 +587,18 @@ public sealed class IconFactory : IDisposable
         // Magnifier over the cube.
         c.DrawCircle(w * 0.66f, h * 0.64f, w * 0.16f, Ink(2.2f));
         c.DrawLine(w * 0.78f, h * 0.76f, w * 0.90f, h * 0.88f, Ink(2.4f));
+    }
+
+    private static void DrawRenderingControls(SKCanvas c, float w, float h)
+    {
+        // Three slider tracks with knobs at different positions - the rendering controls panel.
+        var knobX = new[] { 0.66f, 0.34f, 0.72f };
+        for (var i = 0; i < 3; i++)
+        {
+            var y = h * (0.30f + i * 0.20f);
+            c.DrawLine(w * 0.16f, y, w * 0.84f, y, InkSoft(150, 1.7f));
+            c.DrawCircle(w * knobX[i], y, w * 0.075f, Fill(SKColors.White));
+        }
     }
 
     // ── Geology glyphs ───────────────────────────────────────────────────────

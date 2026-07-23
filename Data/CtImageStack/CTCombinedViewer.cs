@@ -289,6 +289,13 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     {
     }
 
+    /// <summary>Reopens the floating CT rendering-controls window (used by the View menu after the
+    /// user has closed it). Works whether the viewer is docked or popped out.</summary>
+    public void OpenRenderingPanel()
+    {
+        _renderingPanelOpen = true;
+    }
+
     public void DrawContent(ref float zoom, ref Vector2 pan)
     {
         if (!_isPoppedOut && _renderingPanel != null) _renderingPanel.Submit(ref _renderingPanelOpen);
